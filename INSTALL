@@ -1,0 +1,23 @@
+This package depends only on HARP, which provides links to cfitsio and lapack.
+One can find HARP on https://github.com/tskisner/HARP .
+
+In particular, the utility 'harpconfig' should be available in the path.
+
+The compilation uses the "meta build system waf" which documentation can be found here http://code.google.com/p/waf/
+(but you don't need to downlad anything).
+
+
+Configuration :
+./waf configure --prefix=WHERE
+./waf
+./waf install
+
+You can try for more options :
+./waf configure --help
+
+Example :
+./waf configure --prefix=/home/jguy/software --optimize=0 --debug=True
+./waf
+./waf install
+
+
