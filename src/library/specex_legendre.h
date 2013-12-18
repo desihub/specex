@@ -30,6 +30,9 @@ Legendre1DPol composed_pol(const Legendre1DPol& pol1, const Legendre1DPol& pol2)
 
 class Legendre2DPol
 {
+
+  friend class boost::serialization::access;
+
  public :
   harp::vector_double coeff;
   int xdeg,ydeg;
@@ -41,6 +44,23 @@ class Legendre2DPol
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   
+  private :
+
+    template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(coeff);
+      ar & BOOST_SERIALIZATION_NVP(xdeg);
+      ar & BOOST_SERIALIZATION_NVP(ydeg);
+      ar & BOOST_SERIALIZATION_NVP(xmin);
+      ar & BOOST_SERIALIZATION_NVP(xmax);
+      ar & BOOST_SERIALIZATION_NVP(ymin);
+      ar & BOOST_SERIALIZATION_NVP(ymax);
+      
+      //ar & BOOST_SERIALIZATION_NVP(Params);
+      
+        return;
+    }
+
 };
 }
   

@@ -42,7 +42,7 @@ class PSF_Fitter {
   
  public :
   
-  PSF& psf;
+  PSF_p psf;
   const image_data& image;
   const image_data& weight;
   image_data footprint_weight; // weight x psf footprint for global fit
@@ -67,7 +67,7 @@ class PSF_Fitter {
   
 
 
-  PSF_Fitter(PSF& i_psf, const image_data& i_image, const image_data& i_weight) :
+  PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight) :
     
     psf(i_psf),
     image(i_image),
@@ -89,8 +89,8 @@ class PSF_Fitter {
       {
       };
     
-    void SetStampLimitsFromPSF(Stamp& stamp, const PSF& PSF, const double &X, const double &Y);
-    void SetStampLimitsFromPSF(Stamp& stamp, const PSF& psf, const double &xc_min, const double &xc_max, const double &yc_min, const double &yc_max);
+    void SetStampLimitsFromPSF(Stamp& stamp, const PSF_p psf, const double &X, const double &Y);
+    void SetStampLimitsFromPSF(Stamp& stamp, const PSF_p psf, const double &xc_min, const double &xc_max, const double &yc_min, const double &yc_max);
 
     int NPar(int nspots) const;
    //int Index_PSF() const;

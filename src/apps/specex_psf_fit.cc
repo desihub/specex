@@ -1,33 +1,14 @@
-
-// this is a set of spots corresponding to the wave emission line
-// projected on the ccd from fibers from the same bundle
-// the spots are aligned on the ccd, and we assume
-// PSF properties to be a continuous function of x ccd coord
-
-
-
 #include <iostream>
 #include <iomanip>
 #include <fstream>
 #include <string>
 #include <map>
 
-// #include <fitsimage.h>
-// #include <matvect.h>
-// #include <fileutils.h>
-// #include <polokaexception.h>
-// // #include <dicstar.h>
-// #include <dictfile.h>
-// #include <listmatch.h>
-
 #include <boost/program_options.hpp>
 
 #include <harp.hpp>
 
-
-#include <specex_gauss_hermite_analytic_psf.h>
-#include <specex_gaussian_analytic_psf.h>
-
+#include <specex_message.h>
 #include <specex_psf.h>
 #include <specex_trace.h>
 #include <specex_spot.h>
@@ -36,10 +17,13 @@
 #include <specex_lamp_lines_utils.h>
 #include <specex_fits.h>
 #include <specex_boss_io.h>
-
 #include <specex_psf_fitter.h>
 
-#include <specex_message.h>
+#include <specex_psf_io.h>
+#include <specex_gauss_hermite_analytic_psf.h>
+#include <specex_serialization.h>
+
+
 
 using namespace std;
 using namespace specex;
@@ -47,8 +31,13 @@ using namespace specex;
 namespace popts = boost::program_options;
 
 
+
+
 int main ( int argc, char *argv[] ) {
   
+
+  
+
   // default arguments
   // --------------------------------------------
   string psf_model = "GAUSSHERMITE";
@@ -123,11 +112,12 @@ int main ( int argc, char *argv[] ) {
     
     // init PSF
     // --------------------------------------------
-    PSF psf;
+    specex::PSF_p psf;
+
     if(psf_model=="GAUSSHERMITE") {
-      psf.analyticPSF = new GaussHermitePSF(4);
-    } else if(psf_model=="GAUSSIAN") {
-      psf.analyticPSF = new GaussPSF();
+      psf = PSF_p(new specex::GaussHermitePSF(4));
+      //} else if(psf_model=="GAUSSIAN") {
+      //psf = new GaussPSF();
     }else {
       SPECEX_ERROR("don't know this psf model");
     }
@@ -161,12 +151,12 @@ int main ( int argc, char *argv[] ) {
     SPECEX_INFO("number of spots = " << spots.size());
     
     write_spots_list(spots,"initial_spots.list");
-
+    
     // load traces in PSF
     // --------------------------------------------
-    psf.FiberTraces.clear();  
+    psf->FiberTraces.clear();  
     for(int fiber=spectro->number_of_fibers_per_bundle*fiber_bundle; fiber<spectro->number_of_fibers_per_bundle*(fiber_bundle+1); fiber++) {
-      psf.FiberTraces[fiber]=traceset[fiber];
+      psf->FiberTraces[fiber]=traceset[fiber];
     } 
     
     // init PSF fitter
@@ -178,12 +168,21 @@ int main ( int argc, char *argv[] ) {
     fitter.readout_noise = 2.5; // need to modify this image.KeyVal("RDNOISE0"); // WARNING use val from first amp here
     fitter.flatfield_error = 0.02; // 2%
     
+    for(int j=0;j<weight.Ny();j++) {
+      for(int i=0;i<weight.Nx();i++) {
+	if(weight(i,j)>0)
+	  weight(i,j)=1/square(fitter.readout_noise);
+	else
+	  weight(i,j)=0;
+      }
+    }
+
     fitter.mask.Clear();
 
     SPECEX_INFO(
 		"PSF '" << psf_model << "' stamp size = " 
-		<< psf.hSizeX << "x" << psf.hSizeY << " npar(loc) = " 
-		<< psf.FixedCoordNPar() << " npar(glob) = " << psf.VaryingCoordNPar()
+		<< psf->hSizeX << "x" << psf->hSizeY << " npar(loc) = " 
+		<< psf->FixedCoordNPar() << " npar(glob) = " << psf->VaryingCoordNPar()
 		);
     
     
@@ -194,7 +193,9 @@ int main ( int argc, char *argv[] ) {
     std::vector<Spot*> spot_array = array_of_pointer(spots);
     fitter.FitEverything(spot_array,init_psf);
     
-    
+    write_psf_xml(fitter.psf,"psf.xml");
+    write_psf_fits(fitter.psf,"psf.fits",500,2000,4);
+
     if(fit_individual_spots_position) // for debugging
       fitter.FitIndividualSpotPositions(spot_array);
     

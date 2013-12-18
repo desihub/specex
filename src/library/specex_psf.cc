@@ -5,13 +5,99 @@
 #include "harp.hpp"
 
 #include "specex_psf.h"
-#include "specex_base_analytic_psf.h"
+//#include "specex_base_analytic_psf.h"
+#include "specex_message.h"
 
 using namespace std;
 
 
+/* weights and abcissa for gauss integrations (borrowed from DAOPHOT),
+   explained in Numerical recipes */
+
+static double Dx[4][4] ={{0.00000000,  0.0,        0.0       , 0.0       },
+			 {-0.28867513,  0.28867513, 0.0       , 0.0       },
+			 {-0.38729833,  0.00000000, 0.38729833, 0.0       },
+			 {-0.43056816, -0.16999052, 0.16999052, 0.43056816}};
+static double Wt[4][4]= {{1.00000000,  0.0       , 0.0       , 0.0       },
+			 {0.50000000,  0.50000000, 0.0       , 0.0       },
+			 {0.27777778,  0.44444444, 0.27777778, 0.0       },
+			 {0.17392742,  0.32607258, 0.32607258, 0.17392742}};
+ 
+
+// number of points (per coordinate) to integrate over a pixel.
+#define NPT 3
+
+
+double specex::PSF::PixValue(const double &Xc, const double &Yc,
+				     const double &XPix, const double &YPix,
+				     const harp::vector_double &Params,
+				     harp::vector_double *PosDer,
+				     harp::vector_double *ParamDer) const
+{
+  double xPixCenter = floor(XPix+0.5);
+  double yPixCenter = floor(YPix+0.5);
+  
+  double integrated_dPdx=0;
+  double integrated_dPdy=0;
+  
+  double *dPdx=0;
+  double *dPdy=0;
+  if(PosDer) {
+    dPdx=&((*PosDer)[0]);
+    dPdy=&((*PosDer)[1]);
+  }
+  
+  //double *param_der=0;
+  //double *integrated_param_der=0; 
+  int npar=0;
+  harp::vector_double& tmpParamDer = const_cast<specex::PSF*>(this)->TmpParamDer;
+
+  if(ParamDer) {
+    npar=ParamDer->size();
+    tmpParamDer.resize(npar);
+    tmpParamDer *= 0; // is there a zero function?
+  }
+  
+  double val = 0;
+  for (int ix=0; ix<NPT; ++ix)
+    {
+      double x = xPixCenter+Dx[NPT-1][ix];
+      double wx = Wt[NPT-1][ix];
+      for (int iy=0; iy<NPT; ++iy)
+	{
+	  double y = yPixCenter+Dx[NPT-1][iy];
+	  double weight = wx*Wt[NPT-1][iy];
+	  double prof = Profile(x-Xc,y-Yc, Params, PosDer, ParamDer);
+
+	  if(prof ==  PSF_NAN_VALUE) return  PSF_NAN_VALUE;
+	  
+	  val += weight*prof;
+	  
+	  if (PosDer) {
+	    integrated_dPdx += (*dPdx)*weight;
+	    integrated_dPdy += (*dPdy)*weight;
+	  }
+	  if (ParamDer)
+	    for (int ipar = 0; ipar<npar; ++ipar) 
+	      tmpParamDer[ipar] += weight*(*ParamDer)[ipar];
+	}
+    }
+  if (PosDer) {
+    *dPdx=integrated_dPdx;
+    *dPdy=integrated_dPdy;
+  }
+  if (ParamDer) {
+    for (int ipar = 0; ipar<npar; ++ipar) 
+      (*ParamDer)[ipar] = tmpParamDer[ipar];
+  }
+  
+  return val;
+}
+
+
+
 specex::PSF::PSF() {
-  analyticPSF = NULL;
+  name = "unknown";
   hSizeX = hSizeY = 12;
   verbose = false;
   
@@ -24,7 +110,7 @@ specex::PSF::PSF() {
 }
 
 int specex::PSF::FixedCoordNPar() const {
-  return analyticPSF->NPar();
+  return NPar();
 }
 
 int specex::PSF::VaryingCoordNPar() const {
@@ -144,18 +230,18 @@ void specex::PSF::StampLimits(const double &X, const double &Y,
 double specex::PSF::PSFValueWithParams(const double &Xc, const double &Yc, 
 				     const int IPix, const int JPix,
 				     const harp::vector_double &Params,
-				     harp::vector_double *PosDer, harp::vector_double *ParamDer, double *AnalyticValue) const {
+				     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
   
   //if (PosDer)   PosDer->Zero();
   //if (ParamDer) ParamDer->Zero();  
-  return analyticPSF->PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer);
+  return PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer);
 }
 
 //! Access to the current PSF pixels.
 double specex::PSF::PSFValue(const double &Xc, const double &Yc, 
 			   const int IPix, const int JPix,
-			   harp::vector_double *PosDer, harp::vector_double *ParamDer, double *AnalyticValue) const {
-  return PSFValueWithParams(Xc,Yc,IPix,JPix,FixedCoordParams(Xc,Yc), PosDer, ParamDer, AnalyticValue);
+			   harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
+  return PSFValueWithParams(Xc,Yc,IPix,JPix,FixedCoordParams(Xc,Yc), PosDer, ParamDer);
 }
 
 
@@ -183,6 +269,7 @@ harp::vector_double specex::PSF::FixedCoordParams(const double &X, const double 
 }
   
 bool specex::PSF::IsLinear() const {
-  if(analyticPSF->Name() == "GAUSSHERMITE") return true;
+  if(Name() == "GAUSSHERMITE") return true;
   return false;
 }
+

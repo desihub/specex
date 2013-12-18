@@ -9,7 +9,7 @@
 #include "specex_trace.h"
 #include "specex_linalg.h"
 
-#include "specex_base_analytic_psf.h"
+#define PSF_NAN_VALUE 9999999
 
 namespace specex {
 
@@ -40,14 +40,53 @@ namespace specex {
   
   
   class PSF {
-    
+
+    friend class boost::serialization::access;
+
+    // AnalyticPSF* analyticPSF;
+    // BEGIN WAS BEFORE IN ANALYTIC PSF
+    // ==================================================
+ 
   protected :
     
+    std::vector<std::string> paramNames;
+    harp::vector_double TmpParamDer;
+    std::string name;
     
   public :
     
-    //! analytic function of x and y
-    AnalyticPSF* analyticPSF;
+    virtual std::string Name() const {return name;};
+    virtual std::string ParamName(const int Rank) const {return paramNames.at(unsigned(Rank));};
+    virtual int ParamIndex(const std::string& name) const {
+      for(size_t i=0;i<paramNames.size();++i) {
+	if(paramNames[i] == name) return int(i);
+      }
+      return -1;
+    };
+    virtual bool HasParam(const std::string& name) const { return (ParamIndex(name)>=0);}
+    
+    virtual size_t NPar() const {return 0;};
+    
+    //! integrates PSF and requested derivatives over the pixel that contains XPix and YPix (pixel limits are at integer values + 1/2)
+    double PixValue(const double &Xc, const double &Yc,
+		    const double &XPix, const double &YPix,
+		    const harp::vector_double &Params,
+		    harp::vector_double *PosDer = 0,
+		    harp::vector_double *ParamDer = 0) const;
+    
+    virtual double Profile(const double &X, const double &Y,
+			   const harp::vector_double &Params,
+			   harp::vector_double *PosDer = 0,
+			   harp::vector_double *ParamGradient = 0) const {return 0;};
+    
+    virtual void InitParams(const double &sigma, harp::vector_double &Params) {};
+    
+    // check if parameter values are within bounds
+    virtual bool CheckParams(const harp::vector_double &Params) const {return false;};
+    
+    
+    // ==================================================
+    // END WAS BEFORE IN ANALYTIC PSF
     
     //! half size of the PSF in pixels in ccd
     int hSizeX, hSizeY; 
@@ -63,7 +102,7 @@ namespace specex {
       Priors[k]=p;
     }
     void SetPrior(const string& pname,Prior* p) {
-    int k=analyticPSF->ParamIndex(pname);
+    int k=ParamIndex(pname);
     if(k<0) {
       cout << "WARNING no param " << pname << " in PSF" << endl;
       exit(12);
@@ -104,12 +143,12 @@ namespace specex {
     double PSFValueWithParams(const double &Xc, const double &Yc, 
 			      const int IPix, const int JPix,
 			      const harp::vector_double &Params,
-			      harp::vector_double *PosDer, harp::vector_double *ParamDer, double *AnalyticValue = 0) const;
+			      harp::vector_double *PosDer, harp::vector_double *ParamDer) const;
 
     //! Access to the current PSF pixels.
     double PSFValue(const double &Xc, const double &Yc, 
 		    const int IPix, const int JPix,
-		    harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0, double *AnalyticValue = NULL) const;
+		    harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0) const;
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
     harp::vector_double FixedCoordParams(const double &X, const double &Y) const;
@@ -125,12 +164,30 @@ namespace specex {
     void write(const std::string &FileName) const;
     bool read(const std::string &FileName) ;
   */
+    
+  private :
 
+    template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(name);
+      ar & BOOST_SERIALIZATION_NVP(hSizeX);
+      ar & BOOST_SERIALIZATION_NVP(hSizeY);
+      ar & BOOST_SERIALIZATION_NVP(Params);
+      
+        return;
+    }
+    
+    
+    
   };
+  
+  BOOST_SERIALIZATION_ASSUME_ABSTRACT(PSF)
+  
+  BOOST_SERIALIZATION_SHARED_PTR(PSF)  
+    
+  typedef boost::shared_ptr < specex::PSF > PSF_p;
+  typedef boost::weak_ptr < specex::PSF > PSF_wp;
 
 };
-
-
-
 
 #endif

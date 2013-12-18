@@ -1,7 +1,7 @@
 #ifndef SPECEX_GAUSS_HERMITE_ANALYTIC_PSF__H
 #define SPECEX_GAUSS_HERMITE_ANALYTIC_PSF__H
 
-#include "specex_base_analytic_psf.h"
+#include "specex_psf.h"
 
 #include <string>
 #include <vector>
@@ -14,7 +14,9 @@
 
 namespace specex {
 
-  class GaussHermitePSF : public AnalyticPSF {
+  class GaussHermitePSF : public PSF {
+
+    friend class boost::serialization::access;
     
   protected :
     int degree;
@@ -48,10 +50,6 @@ namespace specex {
       return degree;
     }
     
-    std::string Name() const {return "GAUSSHERMITE";}
-    
-    
-    
     double Profile(const double &X, const double &Y,
 		   const harp::vector_double &Params,
 		   harp::vector_double *PosDer = 0,
@@ -62,8 +60,25 @@ namespace specex {
     bool CheckParams(const harp::vector_double &Params) const 
     { return true;}
 	
-    
+  private :
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+        // serialize base class information
+      //ar & BOOST_SERIALIZATION_NVP(boost::serialization::base_object<specex::PSF>(*this));
+      ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(PSF);
+      ar & BOOST_SERIALIZATION_NVP(degree);
+      ar & BOOST_SERIALIZATION_NVP(sigma);
+    }
   };
   
+  BOOST_SERIALIZATION_SHARED_PTR(GaussHermitePSF)
+  
+  
+
+  
 }
+
+
+
 #endif

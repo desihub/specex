@@ -13,7 +13,10 @@
 
 using namespace std;
 
+
+
 specex::GaussHermitePSF::GaussHermitePSF(int ideg) {
+  name = "GaussHermitePSF";
   sigma = 1;
   SetDegree(ideg);
 
