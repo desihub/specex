@@ -146,7 +146,7 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------  
     int ymin = 696+3; // range of usable r CCD coordinates, hard coded for now
     int ymax = 3516-3; // range of usable r CCD coordinates, hard coded for now
-    vector<Spot> spots;
+    vector<Spot_p> spots;
     allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,fiber_bundle,ymin,ymax,min_wavelength,max_wavelength);
     SPECEX_INFO("number of spots = " << spots.size());
     
@@ -190,14 +190,13 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------
     bool init_psf = true;
     fitter.verbose = true;
-    std::vector<Spot*> spot_array = array_of_pointer(spots);
-    fitter.FitEverything(spot_array,init_psf);
+    fitter.FitEverything(spots,init_psf);
     
     write_psf_xml(fitter.psf,"psf.xml");
     write_psf_fits(fitter.psf,"psf.fits",500,2000,4);
 
     if(fit_individual_spots_position) // for debugging
-      fitter.FitIndividualSpotPositions(spot_array);
+      fitter.FitIndividualSpotPositions(spots);
     
     
   // ending

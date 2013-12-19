@@ -97,22 +97,22 @@ class PSF_Fitter {
    //int Index_Flux(int spotid, int nspots) const;
    
 
-   double ComputeChi2AB(std::vector<Spot*>& spots, bool compute_ab) ;
+   double ComputeChi2AB(std::vector<Spot_p>& spots, bool compute_ab) ;
 
   
 
    void SetPSFParams(const harp::vector_double &Params); 
 
-  bool FitOneSpot(Spot& spot, double *chi2_val=0, int *n_iterations=0);
-  bool FitSeveralSpots(std::vector<Spot*>& spots, double *chi2_val=0, int *n_pixels=0, int *n_iterations=0);
+  bool FitOneSpot(Spot_p& spot, double *chi2_val=0, int *n_iterations=0);
+  bool FitSeveralSpots(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_pixels=0, int *n_iterations=0);
   
-  bool InterpolateSpotPSFs(std::vector<Spot*>& spots, double *chi2_val=0, int *n_iterations=0);
-  bool FitTraces(std::vector<Spot*>& spots, int *nok=0);
+  bool InterpolateSpotPSFs(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_iterations=0);
+  bool FitTraces(std::vector<Spot_p>& spots, int *nok=0);
 
   
-  bool FitIndividualSpotFluxes(std::vector<Spot*>& spots);
-  bool FitIndividualSpotPositions(std::vector<Spot*>& spots);
-  bool FitEverything(std::vector<Spot*>& spots, bool init_psf=false);
+  bool FitIndividualSpotFluxes(std::vector<Spot_p>& spots);
+  bool FitIndividualSpotPositions(std::vector<Spot_p>& spots);
+  bool FitEverything(std::vector<Spot_p>& spots, bool init_psf=false);
   
 };
 

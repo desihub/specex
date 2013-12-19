@@ -7,10 +7,11 @@
 #include <string>
 
 #include "specex_legendre.h"
+#include "specex_spot.h"
 
 
 namespace specex {
-  class Spot;
+  
   
 
 #define SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE 6
@@ -39,7 +40,7 @@ namespace specex {
     
     Trace(int i_fiber=-1);
     
-    bool Fit(std::vector<Spot*> spots, bool set_xy_range = true);
+    bool Fit(std::vector<Spot_p> spots, bool set_xy_range = true);
     
     /*
       void write(std::ostream &os) const;

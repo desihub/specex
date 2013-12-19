@@ -7,51 +7,36 @@
 
 using namespace std;
 
-vector<specex::Spot*> specex::array_of_pointer(vector<specex::Spot> &spots) {
-  
-  vector<specex::Spot*> spot_pointers;
-  for(size_t s=0;s<spots.size();s++) {
-    specex::Spot& spot = spots[s];
-    spot_pointers.push_back(&spot);
-  }
-  return spot_pointers;
-}
-
-
-vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot*> &spots, bool check_status) {
+vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot_p> &spots, bool check_status) {
   
   vector<specex::SpotArray> spotarrays;
     
   {
     for(size_t s=0;s<spots.size();s++) {
-      specex::Spot& spot = *(spots[s]);
-      if(check_status && spot.status==0) continue;
+      specex::Spot_p& spot = spots[s];
+      if(check_status && spot->status==0) continue;
       specex::SpotArray* spotarray=0;
       for(size_t a=0;a<spotarrays.size();a++) {
 	specex::SpotArray& testarray=spotarrays[a];
-	if(spot.fiber_bundle == testarray.fiber_bundle &&
-	   fabs(pow(10,spot.log10_wavelength) - pow(10,testarray.log10_wavelength))<1) {
+	if(spot->fiber_bundle == testarray.fiber_bundle &&
+	   fabs(pow(10,spot->log10_wavelength) - pow(10,testarray.log10_wavelength))<1) {
 	  spotarray = &testarray;
 	  break;
 	}
       }
       if(!spotarray) {
 	specex::SpotArray newarray;
-	newarray.fiber_bundle = spot.fiber_bundle;
-	newarray.log10_wavelength = spot.log10_wavelength;
+	newarray.fiber_bundle = spot->fiber_bundle;
+	newarray.log10_wavelength = spot->log10_wavelength;
 	spotarrays.push_back(newarray);
 	spotarray=&(spotarrays[spotarrays.size()-1]);
       }
-      spotarray->push_back(&spot);
+      spotarray->push_back(spot);
     }
   }
   return spotarrays;
 }
 
-vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot> &spots, bool check_status) {
-  vector<specex::Spot*> spot_pointers = specex::array_of_pointer(spots);
-  return find_spot_arrays(spot_pointers,check_status);
-}
 
 vector<specex::SpotArray> specex::isolated_spot_arrays(  vector<specex::SpotArray>& other, const double& delta_lambda) {
   vector<specex::SpotArray> iarray;
@@ -80,9 +65,9 @@ vector<specex::SpotArray> specex::valid_spot_arrays(  vector<specex::SpotArray>&
     int ntot=other.size();
     
     for(size_t s=0;s<other_array.size();s++) {
-      specex::Spot& spot=*(other_array[s]);
-      if(spot.status>=required_status)
-	array.push_back(&spot);
+      specex::Spot_p& spot=other_array[s];
+      if(spot->status>=required_status)
+	array.push_back(spot);
     }
     float frac=float(array.size()/other_array.size());
     if(frac>=min_valid_fraction)
@@ -102,17 +87,12 @@ specex::SpotArray  specex::merge_spot_arrays(  vector<specex::SpotArray>& other)
   return array;
 }
 
-void specex::write_spots_list(vector<Spot*> spots, const string& filename) {
+void specex::write_spots_list(vector<Spot_p> spots, const string& filename) {
   ofstream osl(filename.c_str());  
   for(size_t s=0;s<spots.size();s++) {
-    Spot& spot = *(spots[s]);
-    
-    if(spot.GlobalPSFParams.size()==0) {
-      spot.GlobalPSFParams.resize(spot.PSFParams.size());
-      spot.GlobalPSFParams *= 0;
-    }
-    if(s==0) spot.write_list_header(osl);
-    spot.write_list_entry(osl);
+    Spot_p& spot = spots[s];
+    if(s==0) spot->write_list_header(osl);
+    spot->write_list_entry(osl);
   }
   osl.close();
   
@@ -120,6 +100,3 @@ void specex::write_spots_list(vector<Spot*> spots, const string& filename) {
   
 }
 
-void specex::write_spots_list(std::vector<Spot> spots, const std::string& filename) {
-  write_spots_list(array_of_pointer(spots),filename);
-}

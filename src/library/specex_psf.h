@@ -158,12 +158,7 @@ namespace specex {
 
     bool verbose;
 
-  /*
-    void write(std::ostream &os) const;
-    bool read(std::istream &is);
-    void write(const std::string &FileName) const;
-    bool read(const std::string &FileName) ;
-  */
+  
     
   private :
 

@@ -16,7 +16,7 @@ specex::Trace::Trace(int i_fiber) :
   
 }
 
-bool specex::Trace::Fit(std::vector<specex::Spot*> spots, bool set_xy_range) {
+bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
 
   if(fiber==-1) {
     SPECEX_ERROR("specex::Trace::Fit need to set fiber id first");
