@@ -20,7 +20,7 @@
 #include <specex_psf_fitter.h>
 
 #include <specex_psf_io.h>
-#include <specex_gauss_hermite_analytic_psf.h>
+#include <specex_gauss_hermite_psf.h>
 #include <specex_serialization.h>
 
 
@@ -193,7 +193,7 @@ int main ( int argc, char *argv[] ) {
     fitter.FitEverything(spots,init_psf);
     
     write_psf_xml(fitter.psf,"psf.xml");
-    write_psf_fits(fitter.psf,"psf.fits",500,2000,4);
+    write_psf_fits_image(fitter.psf,"psf.fits",500,2000,4);
 
     if(fit_individual_spots_position) // for debugging
       fitter.FitIndividualSpotPositions(spots);

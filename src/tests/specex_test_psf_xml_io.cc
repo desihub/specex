@@ -6,7 +6,7 @@
 #include "specex_message.h"
 #include "specex_psf.h"
 #include "specex_psf_io.h"
-#include "specex_gauss_hermite_analytic_psf.h"
+#include "specex_gauss_hermite_psf.h"
 #include "specex_serialization.h"
 
 using namespace std;
@@ -44,7 +44,7 @@ int main() {
     specex::read_psf_xml(psf,"psf.xml");
     specex::write_psf_xml(psf,"psf2.xml");
 
-    specex::write_psf_fits(psf,"psf2.fits",500,2000,4);
+    specex::write_psf_fits_image(psf,"psf2.fits",500,2000,4);
     
   }
   return EXIT_SUCCESS;

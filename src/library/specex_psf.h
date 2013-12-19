@@ -154,6 +154,11 @@ namespace specex {
     harp::vector_double FixedCoordParams(const double &X, const double &Y) const;
     harp::vector_double FixedCoordParams(const double &X, const double &Y, const harp::vector_double& ForThesePSFParams) const;
     
+
+    void WriteFits(fitsfile* fp, int first_hu) const {};
+    void ReadFits(fitsfile* fp, int first_hu) {};
+    
+
     ~PSF();
 
     bool verbose;

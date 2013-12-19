@@ -7,7 +7,7 @@
 #include "harp.hpp"
 
 #include "specex_hermite.h"
-#include "specex_gauss_hermite_analytic_psf.h"
+#include "specex_gauss_hermite_psf.h"
 #include "specex_linalg.h"
 #include "specex_message.h"
 

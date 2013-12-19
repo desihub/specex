@@ -164,12 +164,15 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
   if(fit_position) npar_per_spot+=2;
 
   
+  //#define USE_SPARSE_VECTOR
+
+#ifndef USE_SPARSE_VECTOR
   
-  //ublas::coordinate_vector<double> H; // slower with this
   harp::vector_double H;
   if(compute_ab) {
     H.resize(nparTot);
   }
+#endif
   
   double chi2 = 0;
   
@@ -204,8 +207,13 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
       
       double res = double(image(i,j));
       
+#ifdef USE_SPARSE_VECTOR
+      ublas::coordinate_vector<double> H;// slow , why??
+      if(compute_ab) H.resize(nparTot,10); 
+#else
       if(compute_ab)
 	H *= 0;
+#endif
       
       int nspots_in_pix = 0;
       for(int s=0;s<nspots;s++) {
