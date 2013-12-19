@@ -17,6 +17,8 @@ namespace specex {
   
   class Trace {
     
+    friend class boost::serialization::access;
+    
   protected :
     
     
@@ -46,6 +48,23 @@ namespace specex {
       bool read(const std::string &FileName) ;
     */
     
+    private :
+
+    template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(fiber);
+      ar & BOOST_SERIALIZATION_NVP(X_vs_lW);
+      ar & BOOST_SERIALIZATION_NVP(Y_vs_lW);
+      ar & BOOST_SERIALIZATION_NVP(lW_vs_Y);
+      ar & BOOST_SERIALIZATION_NVP(X_vs_Y);
+      ar & BOOST_SERIALIZATION_NVP(yjumplo);
+      ar & BOOST_SERIALIZATION_NVP(yjumphi);
+      ar & BOOST_SERIALIZATION_NVP(yjumpval);
+      
+        return;
+    }
+
+    BOOST_SERIALIZATION_SHARED_PTR(Trace)  
   };
   
   // SDSS IO
@@ -56,7 +75,9 @@ namespace specex {
   enum TraceSetType {WY = 0, XY = 1, YW = 2, XW = 3};
  
   class TraceSet : public std::vector<Trace> {
-    
+
+    friend class boost::serialization::access;
+
   private :
     
     
@@ -65,14 +86,11 @@ namespace specex {
     TraceSet() {};
     ~TraceSet(){};
     
-    /*
-    bool ReadSDSS_SingleSet_Fits(const std::string& filename, int hdu_number, TraceSetType ttype);
-    
-    bool ReadSDSS_FullSet_Fits(
-			       const std::string& wave_vs_y_filename, int wave_vs_y_hdu_number,
-			       const std::string& x_vs_y_filename, int x_vs_y_hdu_number
-			       );
-    */
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+      ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(std::vector<Trace>);
+    }
   };
   
 }

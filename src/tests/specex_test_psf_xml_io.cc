@@ -42,8 +42,10 @@ int main() {
   if(1) {
     specex::PSF_p psf;
     specex::read_psf_xml(psf,"psf.xml");
-    specex::write_psf_fits(psf,"psf2.fits",500,2000,4);
     specex::write_psf_xml(psf,"psf2.xml");
+
+    specex::write_psf_fits(psf,"psf2.fits",500,2000,4);
+    
   }
   return EXIT_SUCCESS;
 }

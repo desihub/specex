@@ -23,7 +23,8 @@ namespace specex {
     
     // buffers to go faster
     harp::vector_double Hx,Hy,dHx,dHy;
-
+    bool need_to_resize_buffer;
+    
     int tail_norm_index; 
 
 #ifndef LORENTZIAN_TAILS
@@ -61,6 +62,9 @@ namespace specex {
     { return true;}
 	
   private :
+
+    void ResizeBuffer();
+
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
@@ -69,6 +73,8 @@ namespace specex {
       ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(PSF);
       ar & BOOST_SERIALIZATION_NVP(degree);
       ar & BOOST_SERIALIZATION_NVP(sigma);
+
+      need_to_resize_buffer = true;
     }
   };
   

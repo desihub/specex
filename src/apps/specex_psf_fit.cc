@@ -79,7 +79,7 @@ int main ( int argc, char *argv[] ) {
     cerr << endl;
     cerr << desc << endl;
     cerr << "example:" << endl;
-    cerr << "./specex_psf_fit --arc sdProc-b1-00108382.fits --xy redux/spFlat-b1-00108381.fits.gz --wy redux/spArc-b1-00108382.fits.gz" << endl;
+    cerr << argv[0] << " --arc sdProc-b1-00108382.fits --xy redux/spFlat-b1-00108381.fits.gz --wy redux/spArc-b1-00108382.fits.gz -v" << endl;
     return EXIT_FAILURE;
   }
   

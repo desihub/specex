@@ -18,18 +18,26 @@ using namespace std;
 specex::GaussHermitePSF::GaussHermitePSF(int ideg) {
   name = "GaussHermitePSF";
   sigma = 1;
+  need_to_resize_buffer = true;
   SetDegree(ideg);
 
+}
+
+void specex::GaussHermitePSF::ResizeBuffer() {
+  if(!need_to_resize_buffer) return;
+  Hx.resize(degree+1);
+  Hy.resize(degree+1);
+  dHx.resize(degree+1);
+  dHy.resize(degree+1);
+  need_to_resize_buffer = false;
 }
 
 void specex::GaussHermitePSF::SetDegree(const int ideg) {
   SPECEX_INFO("Gauss-Hermite PSF set degree " << ideg);
   degree = ideg;
-  Hx.resize(degree+1);
-  Hy.resize(degree+1);
-  dHx.resize(degree+1);
-  dHy.resize(degree+1);
   
+  need_to_resize_buffer = true;
+    
   paramNames.clear();
   char n[10];
   for(int j=0;j<degree+1;j++) {
@@ -100,7 +108,9 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 			  harp::vector_double *PosDer,
 			  harp::vector_double *ParamDer) const
 {
-  
+
+  if(need_to_resize_buffer) const_cast<specex::GaussHermitePSF*>(this)->ResizeBuffer();
+
   // direct pointers to go faster
   //const double* params = Params.Data();
   //double* posder = 0;

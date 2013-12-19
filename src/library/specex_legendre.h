@@ -10,6 +10,9 @@ using namespace std;
 namespace specex {
 class Legendre1DPol
 {
+
+friend class boost::serialization::access;
+ 
  public :
   harp::vector_double coeff;
   int deg;
@@ -23,6 +26,17 @@ class Legendre1DPol
   bool Fit(const harp::vector_double& x, const harp::vector_double& y, const harp::vector_double* ey=0, bool set_range = true);
   Legendre1DPol Invert(int add_degree=1) const;
   
+  private :
+
+    template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(coeff);
+      ar & BOOST_SERIALIZATION_NVP(deg);
+      ar & BOOST_SERIALIZATION_NVP(xmin);
+      ar & BOOST_SERIALIZATION_NVP(xmax);
+      return;
+    }
+
 };
   
 Legendre1DPol composed_pol(const Legendre1DPol& pol1, const Legendre1DPol& pol2);
@@ -55,10 +69,7 @@ class Legendre2DPol
       ar & BOOST_SERIALIZATION_NVP(xmax);
       ar & BOOST_SERIALIZATION_NVP(ymin);
       ar & BOOST_SERIALIZATION_NVP(ymax);
-      
-      //ar & BOOST_SERIALIZATION_NVP(Params);
-      
-        return;
+      return;
     }
 
 };

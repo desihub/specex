@@ -123,7 +123,7 @@ namespace specex {
   
     //! fiber traces, one independent trace per fiber
     std::map<int,Trace> FiberTraces;
-  
+    
     int FixedCoordNPar() const; // set of parameters needed to describe psf at fixed ccd position
     int VaryingCoordNPar() const; // set of parameters needed to describe psf varying with xy ccd coordinates
     int TracesNPar() const;
@@ -173,6 +173,7 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(hSizeX);
       ar & BOOST_SERIALIZATION_NVP(hSizeY);
       ar & BOOST_SERIALIZATION_NVP(Params);
+      ar & BOOST_SERIALIZATION_NVP(FiberTraces);
       
         return;
     }
