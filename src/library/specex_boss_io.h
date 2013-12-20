@@ -2,6 +2,7 @@
 #define SPECEX_BOSS_IO__H
 
 #include <string>
+#include <specex_psf.h>
 
 namespace specex {
 
@@ -16,7 +17,7 @@ namespace specex {
 				  const std::string& x_vs_y_filename, int x_vs_y_hdu_number,
 				  bool verbose=false
 				  );
-  
+  void read_BOSS_keywords(PSF_p psf, const std::string& arc_image_filename);
 };
 
 #endif

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <ctime>
 
 #include "harp.hpp"
 
@@ -13,39 +14,48 @@ using namespace std;
 
 int main() {
   
+  
+
   specex_set_verbose(true);
   
   
-  if(0){
-    specex::PSF_p psf(new specex::GaussHermitePSF());
-    std::ofstream os("toto.xml");
-    boost::archive::xml_oarchive xml_oa ( os );
-    xml_oa << BOOST_SERIALIZATION_NVP(psf);
-    os.close();
+  if(0){ // ok
+    {
+      specex::PSF_p psf(new specex::GaussHermitePSF());
+      std::ofstream os("toto.xml");
+      boost::archive::xml_oarchive xml_oa ( os );
+      xml_oa << BOOST_SERIALIZATION_NVP(psf);
+      os.close();
+    }
+    {
+      std::ifstream is("toto.xml");
+      boost::archive::xml_iarchive xml_ia ( is );
+      specex::PSF_p psf;
+      xml_ia >> BOOST_SERIALIZATION_NVP(psf);
+      is.close();    
+    }
   }
-  
-  if(0){
-    std::ifstream is("toto.xml");
-    boost::archive::xml_iarchive xml_ia ( is );
-    specex::PSF_p psf;
-    xml_ia >> BOOST_SERIALIZATION_NVP(psf);
-    is.close();    
+
+
+  if(0){ // same as above
+
+    {
+      specex::PSF_p psf(new specex::GaussHermitePSF());
+      specex::write_psf_xml(psf,"toto.xml");
+    }
+    {
+      specex::PSF_p psf;
+      specex::read_psf_xml(psf,"toto.xml");
+    }
+    
   }
-  if(0){
-    specex::PSF_p psf(new specex::GaussHermitePSF());
-    specex::write_psf_xml(psf,"toto.xml");
-  }
-  if(0){
-    specex::PSF_p psf;
-    specex::read_psf_xml(psf,"toto.xml");
-  }
-  if(1) {
+
+
+  if(1) { // 
     specex::PSF_p psf;
     specex::read_psf_xml(psf,"psf.xml");
     specex::write_psf_xml(psf,"psf2.xml");
-
-    specex::write_psf_fits_image(psf,"psf_image.fits",500,2000,4);
-    psf->WriteFits("psf-for-specter.fits",1);
   }
+
   return EXIT_SUCCESS;
 }

@@ -1,3 +1,4 @@
+#include <iostream>
 
 #include "harp.hpp"
 
@@ -6,6 +7,7 @@
 #include "specex_fits.h"
 #include "specex_boss_io.h"
 #include "specex_spectrograph.h"
+#include "specex_message.h"
 
 
 using namespace std;
@@ -22,7 +24,7 @@ void specex::read_BOSS_singleset_in_fits(specex::TraceSet& traceset,
   specex::FitsTable table(filename,hdu_number,verbose);
   
   // test formatting
-  if(table.data.empty()) HARP_THROW("BOSS IO error : empty data in table");
+  if(table.data.empty()) SPECEX_ERROR("BOSS IO error : empty data in table");
 
   double yjumplo=-12;
   double yjumphi=-12;
@@ -51,14 +53,12 @@ void specex::read_BOSS_singleset_in_fits(specex::TraceSet& traceset,
       }else if(colname == "XJUMPVAL") {
 	yjumpval = entry.double_vals(0);
       }else{
-	cerr << "ERROR specex::Trace::read_sdss_fits dont' know what to do with column named '" << colname << "'" << endl; 
-	HARP_THROW("BOSS IO error");
+	SPECEX_ERROR(" specex::Trace::read_sdss_fits dont' know what to do with column named '" << colname << "'");
       }
     }
-    if(verbose) cout << "INFO specex::Trace::read_sdss_fits, has y-jump : lo,hi,val = " << yjumplo << "," << yjumphi << "," << yjumpval << endl;
+    SPECEX_INFO(" specex::Trace::read_sdss_fits, has y-jump : lo,hi,val = " << yjumplo << "," << yjumphi << "," << yjumpval);
     if(yjumplo==-12 || yjumphi==-12 || yjumpval==-12) {
-      cerr << "ERROR specex::Trace::read_sdss_fits, missing something" << endl;
-      HARP_THROW("BOSS IO error");
+      SPECEX_ERROR("specex::Trace::read_sdss_fits, missing something");
     }
   }
 
@@ -138,4 +138,15 @@ void specex::read_BOSS_traceset_in_fits(
   if(verbose) cout << "INFO specex::read_BOSS_traceset_in_fits done" << endl;
   
 
+}
+
+void specex::read_BOSS_keywords(PSF_p psf, const std::string& arc_image_filename) {
+  
+  fitsfile * fp= 0;
+  harp::fits::open_read (fp,arc_image_filename);
+  try{ harp::fits::key_read (fp,"EXPOSURE",psf->arc_exposure_id); }catch(...) { SPECEX_WARNING("could not read EXPOSURE key in " << arc_image_filename);}
+  try{ harp::fits::key_read (fp,"PLATEID",psf->plate_id); }catch(...) { SPECEX_WARNING("could not read PLATEID key in " << arc_image_filename);}
+  try{ harp::fits::key_read (fp,"MJD",psf->mjd); }catch(...) { SPECEX_WARNING("could not read MJD key in " << arc_image_filename);}
+  try{ harp::fits::key_read (fp,"CAMERAS",psf->camera_id); }catch(...) { SPECEX_WARNING("could not read CAMERAS key in " << arc_image_filename);}
+  harp::fits::close(fp);
 }

@@ -121,8 +121,10 @@ int main ( int argc, char *argv[] ) {
     }else {
       SPECEX_ERROR("don't know this psf model");
     }
+    psf->ccd_image_n_cols = image.n_cols();
+    psf->ccd_image_n_rows = image.n_rows();
     
-    
+        
     // define spectrograph (this should be improved)
     // --------------------------------------------
     Spectrograph *spectro = 0;
@@ -140,6 +142,7 @@ int main ( int argc, char *argv[] ) {
       int xy_trace_hdu = 1; // in the spFlat file , warning : this HDU numbering starts at 0 (to check)
       int wy_trace_hdu = 2; // int the spArc file , warning : this HDU numbering starts at 0 (to check)
       read_BOSS_traceset_in_fits(traceset,wy_trace_fits_name,wy_trace_hdu,xy_trace_fits_name,xy_trace_hdu);
+      read_BOSS_keywords(psf,arc_image_filename);
     }
     
     // loading arc lamp spots

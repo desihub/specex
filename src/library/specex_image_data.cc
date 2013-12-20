@@ -34,6 +34,7 @@ void specex::image_data::resize(size_t ncols, size_t nrows) {
   rows_ = nrows;
   cols_ = ncols;
   data.resize(rows_*cols_);
+  data *= 0;
 }
 
 

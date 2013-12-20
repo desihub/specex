@@ -52,8 +52,16 @@ namespace specex {
     std::vector<std::string> paramNames;
     harp::vector_double TmpParamDer;
     std::string name;
-    
+
   public :
+
+    long long int arc_exposure_id;
+    long long int mjd;
+    long long int plate_id;
+    size_t ccd_image_n_cols;
+    size_t ccd_image_n_rows;
+    
+    std::string camera_id;
     
     virtual std::string Name() const {return name;};
     virtual std::string ParamName(const int Rank) const {return paramNames.at(unsigned(Rank));};
@@ -175,8 +183,14 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(hSizeY);
       ar & BOOST_SERIALIZATION_NVP(Params);
       ar & BOOST_SERIALIZATION_NVP(FiberTraces);
+      ar & BOOST_SERIALIZATION_NVP(arc_exposure_id);
+      ar & BOOST_SERIALIZATION_NVP(mjd);
+      ar & BOOST_SERIALIZATION_NVP(plate_id);
+      ar & BOOST_SERIALIZATION_NVP(camera_id);
+      ar & BOOST_SERIALIZATION_NVP(ccd_image_n_cols);
+      ar & BOOST_SERIALIZATION_NVP(ccd_image_n_rows);
       
-        return;
+      return;
     }
     
     
