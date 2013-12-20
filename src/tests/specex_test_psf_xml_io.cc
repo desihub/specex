@@ -44,8 +44,8 @@ int main() {
     specex::read_psf_xml(psf,"psf.xml");
     specex::write_psf_xml(psf,"psf2.xml");
 
-    specex::write_psf_fits_image(psf,"psf2.fits",500,2000,4);
-    
+    specex::write_psf_fits_image(psf,"psf_image.fits",500,2000,4);
+    psf->WriteFits("psf-for-specter.fits",1);
   }
   return EXIT_SUCCESS;
 }

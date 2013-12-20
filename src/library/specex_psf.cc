@@ -273,3 +273,12 @@ bool specex::PSF::IsLinear() const {
   return false;
 }
 
+void specex::PSF::WriteFits(const std::string& filename, int first_hdu) const {  
+  fitsfile * fp;  
+  harp::fits::create ( fp, filename );
+  WriteFits(fp,first_hdu);
+  harp::fits::close ( fp );
+  
+  SPECEX_INFO("wrote psf in " << filename);
+}
+    

@@ -60,7 +60,10 @@ namespace specex {
     
     bool CheckParams(const harp::vector_double &Params) const 
     { return true;}
-	
+
+    void WriteFits(fitsfile* fp, int first_hdu=1) const;
+    void ReadFits(fitsfile* fp, int first_hdu=1);
+
   private :
 
     void ResizeBuffer();

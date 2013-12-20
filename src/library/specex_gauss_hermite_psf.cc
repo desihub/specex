@@ -398,4 +398,170 @@ void specex::GaussHermitePSF::InitParams(const double &i_sigma, harp::vector_dou
   
 #endif
 }
+/*
+  Fits format
+  
 
+
+*/
+
+#include <specex_image_data.h>
+
+void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
+  
+  string PSFVER = "2.0";
+  
+  
+  int LDEGX = Params[0].xdeg;
+  int LDEGY = Params[0].ydeg;
+  double LXMIN = Params[0].xmin;
+  double LXMAX = Params[0].xmax;
+  double LYMIN = Params[0].ymin;
+  double LYMAX = Params[0].ymax;
+  
+  
+  
+  for(size_t i=1;i<Params.size();i++) {
+    if(LDEGX != Params[i].xdeg) SPECEX_ERROR("Need same degree for all Legendre2DPol for complying with fits format");
+    if(LDEGY != Params[i].ydeg) SPECEX_ERROR("Need same degree for all Legendre2DPol for complying with fits format");
+    if(LXMIN != Params[i].xmin) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+    if(LXMAX != Params[i].xmax) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+    if(LYMIN != Params[i].ymin) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+    if(LYMAX != Params[i].ymax) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+    
+  }
+  
+  int NPIX_X = LXMAX - LXMIN;
+  int NPIX_Y = LYMAX - LYMIN;
+  
+  
+  
+  
+  int NFLUX = NPIX_Y; // this has to be a parameter
+  int NSPEC = FiberTraces.size(); // this also has to be a parameter
+  double ystep = (LYMAX-LYMIN)/NFLUX; // this has to be a parameter
+  
+  
+  cout << NFLUX << " " << NSPEC << endl;
+  
+  specex::image_data x_data(NFLUX,NSPEC);
+  specex::image_data y_data(NFLUX,NSPEC);
+  specex::image_data wave_data(NFLUX,NSPEC);
+  
+  
+
+  //for(int fiber_index=0;fiber_index<NSPEC;fiber_index++) {
+  int ispec=0;
+  for(std::map<int,Trace>::const_iterator fiber_it = FiberTraces.begin(); fiber_it != FiberTraces.end(); ++fiber_it, ++ispec) {
+    int fiber_id = fiber_it->first;
+    const specex::Trace& trace = fiber_it->second;
+    
+    //cout << "fiber_id " << fiber_id << endl;
+
+    for(int i=0;i<NFLUX;i++) {
+      double y = LYMIN+ystep*i;
+
+      y_data(i,ispec)=y;
+      x_data(i,ispec)=trace.X_vs_Y.Value(y);
+      wave_data(i,ispec)=pow(10.,trace.lW_vs_Y.Value(y));
+      //cout << i << " " << x_data(i,ispec) << " " << y << " " << wave_data(i,ispec) << endl;
+    }
+  }
+  
+  string default_comment = "";
+
+  
+  int status = 0;
+  
+  fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
+  
+  harp::fits::img_append < double > ( fp, NSPEC, NFLUX );
+  harp::fits::img_write (fp, x_data.data);
+ 
+  harp::fits::key_write(fp,"PSFTYPE","GAUSS-HERMITE",default_comment);
+  harp::fits::key_write(fp,"PSFVER",PSFVER,default_comment);
+  
+  harp::fits::key_write(fp,"NPIX_X",(long long int)NPIX_X,default_comment);
+  harp::fits::key_write(fp,"NPIX_Y",(long long int)NPIX_Y,default_comment);
+  harp::fits::key_write(fp,"NFLUX",(long long int)NFLUX,default_comment);
+  harp::fits::key_write(fp,"NSPEC",(long long int)NSPEC,default_comment);
+  
+  harp::fits::key_write(fp,"PSFPARAM","X",default_comment);
+  
+     
+  harp::fits::img_append < double > ( fp, NSPEC, NFLUX );
+  harp::fits::img_write (fp, y_data.data);
+  harp::fits::key_write(fp,"PSFPARAM","Y",default_comment);
+  
+  
+  harp::fits::img_append < double > ( fp, NSPEC, NFLUX );
+  harp::fits::img_write (fp, wave_data.data);
+  harp::fits::key_write(fp,"EXTNAME","WAVELENGTH",default_comment);
+  
+  // now create image of coefficients
+  // first check all polynomials have same degree
+  
+  int GHDEGX  = degree; 
+  int GHDEGY  = degree;
+  double GHSIGX = sigma;
+  double GHSIGY = sigma;
+  
+  int FIBERMIN = FiberTraces.begin()->first;
+  int FIBERMAX = (--FiberTraces.end())->first;
+  
+
+  long ncoefs  = (GHDEGX+1)*(GHDEGY+1)*(LDEGX+1)*(LDEGY+1);
+  
+  // GHX = AXIS1 ?
+  // GHY = AXIS2 ?
+  // LX  = AXIS3 ?
+  // LY  = AXIS4 ?
+  // index = A1 + NAXIS1*(A2 + NAXIS2*(A3 + NAXIS3*(A4))) ?
+
+  
+  double* buffer = new double[ncoefs];
+
+  // loop on gauss-hermite parameters
+  int index=0;
+  for(size_t gh_param_index = 0; gh_param_index < Params.size(); ++ gh_param_index) {
+    const harp::vector_double& legendre_coefficents = Params[ gh_param_index ].coeff;
+    for(size_t i=0;i<legendre_coefficents.size();i++)
+      buffer[index++]=legendre_coefficents[i];
+  }
+  
+  // and now create a 4 dimension fits image
+  long naxes[4];
+  naxes[0] = GHDEGX+1;
+  naxes[1] = GHDEGY+1;
+  naxes[2] = LDEGX+1;
+  naxes[3] = LDEGY+1;
+  
+  long fpixels[4];
+  fpixels[0] = 1;
+  fpixels[1] = 1;
+  fpixels[2] = 1;
+  fpixels[3] = 1;
+  
+  fits_create_img ( fp, harp::fits::ftype< double >::bitpix(), 4, naxes, &status ); harp::fits::check ( status );
+  fits_write_pix ( fp, harp::fits::ftype< double >::datatype(), fpixels, ncoefs, buffer , &status ); harp::fits::check ( status );
+  harp::fits::key_write(fp,"FIBERMIN",(long long int)FIBERMIN,"First fiber for which this PSF is valid");
+  harp::fits::key_write(fp,"FIBERMAX",(long long int)FIBERMAX,"Last fiber for which this PSF is valid");
+  harp::fits::key_write(fp,"GHSIGX",(long long int)GHSIGX,"Gauss-Hermite sigma along x");
+  harp::fits::key_write(fp,"GHSIGY",(long long int)GHSIGY,"Gauss-Hermite sigma along y");
+  harp::fits::key_write(fp,"GHDEGX",(long long int)GHDEGX,"Gauss-Hermite pol. degree along x");
+  harp::fits::key_write(fp,"GHDEGY",(long long int)GHDEGY,"Gauss-Hermite pol. degree along y");
+  harp::fits::key_write(fp,"LDEGX",(long long int)LDEGX,"Legendre pol. degree along x");
+  harp::fits::key_write(fp,"LDEGY",(long long int)LDEGY,"Legendre pol. degree along y");
+  harp::fits::key_write(fp,"LXMIN",(long long int)LXMIN,"Legendre pol. xmin (for x=xmin red.x=-1)");
+  harp::fits::key_write(fp,"LXMAX",(long long int)LXMAX,"Legendre pol. xmax (for x=xmax red.x=+1)");
+  harp::fits::key_write(fp,"LYMIN",(long long int)LYMIN,"Legendre pol. ymin (for y=ymin red.y=-1)");
+  harp::fits::key_write(fp,"LYMAX",(long long int)LYMAX,"Legendre pol. ymax (for y=ymax red.y=+1)");
+  
+  delete [] buffer;
+  
+}
+
+void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hu) {
+
+}
+ 
