@@ -38,7 +38,29 @@ namespace specex {
       double hd2Chi2dx2(const double& x)  const {return 1./square(sigma);}
   };
   
+  class PSF_Params  {
+
+    friend class boost::serialization::access;
+
+  public :
+    
+    std::vector<Legendre2DPol> Polynomials;
+    int bundle_id;
+    int fiber_min; // first fiber this set of params applies to
+    int fiber_max; // last fiber this set of params applies to
+    PSF_Params() : bundle_id(0), fiber_min(0), fiber_max(0) {};
   
+  private :
+
+    template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(Polynomials);
+      ar & BOOST_SERIALIZATION_NVP(bundle_id);
+      ar & BOOST_SERIALIZATION_NVP(fiber_min);
+      ar & BOOST_SERIALIZATION_NVP(fiber_max);
+    }
+  };
+
   class PSF {
 
     friend class boost::serialization::access;
@@ -60,7 +82,6 @@ namespace specex {
     long long int plate_id;
     size_t ccd_image_n_cols;
     size_t ccd_image_n_rows;
-    
     std::string camera_id;
     
     virtual std::string Name() const {return name;};
@@ -100,7 +121,9 @@ namespace specex {
     int hSizeX, hSizeY; 
     
     //! parameters of psf shape varying with xy coordinates
-    std::vector<Legendre2DPol> Params;
+    //std::vector<Legendre2DPol> Params;
+    
+    std::map<int,PSF_Params> ParamsOfBundles;
     
     std::map<int,Prior*> Priors;
     void SetPrior(int k,Prior* p) {
@@ -128,12 +151,13 @@ namespace specex {
       Priors.clear();
     }
   
+    //#warning NEED TO IMPLEMENT JUMPS IN WAVELENGTH SOLUTION, AND NEED TO SAVE IN FITS
   
     //! fiber traces, one independent trace per fiber
     std::map<int,Trace> FiberTraces;
     
     int FixedCoordNPar() const; // set of parameters needed to describe psf at fixed ccd position
-    int VaryingCoordNPar() const; // set of parameters needed to describe psf varying with xy ccd coordinates
+    int VaryingCoordNPar(int bundle_id) const; // set of parameters needed to describe psf varying with xy ccd coordinates
     int TracesNPar() const;
   
     bool IsLinear() const; // true if PSF linear wrt PSF params
@@ -155,24 +179,19 @@ namespace specex {
 
     //! Access to the current PSF pixels.
     double PSFValue(const double &Xc, const double &Yc, 
-		    const int IPix, const int JPix,
+		    const int IPix, const int JPix, int bundle_id,
 		    harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0) const;
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
-    harp::vector_double FixedCoordParams(const double &X, const double &Y) const;
-    harp::vector_double FixedCoordParams(const double &X, const double &Y, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double FixedCoordParams(const double &X, const double &Y, int bundle_id) const;
+    harp::vector_double FixedCoordParams(const double &X, const double &Y, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
     
-
+    //! I/O for interface with specter
     virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};
-    virtual void ReadFits(fitsfile* fp, int first_hdu=1) {};
-    
+    virtual void ReadFits(fitsfile* fp, int first_hdu=1) {};  
     virtual void WriteFits(const std::string& filename, int first_hdu=1) const;
     
     ~PSF();
-
-    bool verbose;
-
-  
     
   private :
 
@@ -181,7 +200,7 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(name);
       ar & BOOST_SERIALIZATION_NVP(hSizeX);
       ar & BOOST_SERIALIZATION_NVP(hSizeY);
-      ar & BOOST_SERIALIZATION_NVP(Params);
+      ar & BOOST_SERIALIZATION_NVP(ParamsOfBundles);
       ar & BOOST_SERIALIZATION_NVP(FiberTraces);
       ar & BOOST_SERIALIZATION_NVP(arc_exposure_id);
       ar & BOOST_SERIALIZATION_NVP(mjd);

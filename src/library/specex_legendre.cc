@@ -37,7 +37,9 @@ specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const doub
 {
   coeff.resize(deg+1);
 }
- 
+
+
+
 harp::vector_double specex::Legendre1DPol::Monomials(const double &x) const {
 
   // range is -1,1 if  xmin<x<xmax

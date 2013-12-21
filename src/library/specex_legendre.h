@@ -54,7 +54,7 @@ class Legendre2DPol
   
  Legendre2DPol(int i_xdeg=0, const double& i_xmin=0, const double& i_xmax=0, 
 	       int i_ydeg=0, const double& i_ymin=0, const double& i_ymax=0);
-  
+ 
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   

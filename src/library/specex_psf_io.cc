@@ -12,9 +12,9 @@
 
 // also need #included <specex_serialisation.h>  before main() 
 
-void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const double& x, const double& y, int oversampling) {
+void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const double& x, const double& y, int bundle, int oversampling) {
   
-  harp::vector_double P=psf->FixedCoordParams(x,y);
+  harp::vector_double P=psf->FixedCoordParams(x,y,bundle);
   
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;

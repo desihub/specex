@@ -42,7 +42,8 @@ int main ( int argc, char *argv[] ) {
   // --------------------------------------------
   string psf_model = "GAUSSHERMITE";
   string spectrograph_name = "BOSS";
-  int    fiber_bundle=1;
+  int    first_fiber_bundle=1;
+  int    last_fiber_bundle=1;
   
   string arc_image_filename="";
   string xy_trace_fits_name="";
@@ -62,7 +63,8 @@ int main ( int argc, char *argv[] ) {
     ( "arc,a", popts::value<string>( &arc_image_filename ), "arc pre-reduced fits image file name (mandatory), ex:  sdProc-b1-00108382.fits" )
     ( "xy", popts::value<string>( &xy_trace_fits_name ), " fits file name where is stored x vs y trace (mandatory), ex: spFlat-b1-00108381.fits.gz" )
     ( "wy", popts::value<string>( &wy_trace_fits_name ), " fits file name where is stored w vs y trace (mandatory), ex: spArc-b1-00108382.fits.gz" )
-    ( "bundle,b", popts::value<int>( &fiber_bundle ), "fiber bundle")
+    ( "first_bundle", popts::value<int>( &first_fiber_bundle ), "first fiber bundle to fit")
+    ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
     ( "psfmodel", popts::value<string>( &psf_model ), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode" )
@@ -90,8 +92,25 @@ int main ( int argc, char *argv[] ) {
   
   SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
 
-  
   try {
+
+    // define spectrograph (this should be improved)
+    // --------------------------------------------
+    Spectrograph *spectro = 0;
+    if(spectrograph_name == "BOSS") {
+      spectro = new BOSS_Spectrograph();
+    }else{
+      SPECEX_ERROR("unknown spectrograph");
+    }
+    
+    if(first_fiber_bundle<0 || first_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
+      SPECEX_ERROR("invalid first fiber bundle");
+    }
+    if(last_fiber_bundle<first_fiber_bundle || last_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
+      SPECEX_ERROR("invalid last fiber bundle");
+    }
+    
+  
     
     // open image
     // --------------------------------------------
@@ -125,14 +144,6 @@ int main ( int argc, char *argv[] ) {
     psf->ccd_image_n_rows = image.n_rows();
     
         
-    // define spectrograph (this should be improved)
-    // --------------------------------------------
-    Spectrograph *spectro = 0;
-    if(spectrograph_name == "BOSS") {
-      spectro = new BOSS_Spectrograph();
-    }else{
-      SPECEX_ERROR("unknown spectrograph");
-    }
     
 
     // read trace set derived in BOSS pipeline (this should be improved)
@@ -145,22 +156,10 @@ int main ( int argc, char *argv[] ) {
       read_BOSS_keywords(psf,arc_image_filename);
     }
     
-    // loading arc lamp spots
-    // --------------------------------------------  
-    int ymin = 696+3; // range of usable r CCD coordinates, hard coded for now
-    int ymax = 3516-3; // range of usable r CCD coordinates, hard coded for now
-    vector<Spot_p> spots;
-    allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,fiber_bundle,ymin,ymax,min_wavelength,max_wavelength);
-    SPECEX_INFO("number of spots = " << spots.size());
     
-    write_spots_list(spots,"initial_spots.list");
     
-    // load traces in PSF
-    // --------------------------------------------
-    psf->FiberTraces.clear();  
-    for(int fiber=spectro->number_of_fibers_per_bundle*fiber_bundle; fiber<spectro->number_of_fibers_per_bundle*(fiber_bundle+1); fiber++) {
-      psf->FiberTraces[fiber]=traceset[fiber];
-    } 
+    psf->FiberTraces.clear();
+    
     
     // init PSF fitter
     // -------------------------------------------- 
@@ -182,24 +181,55 @@ int main ( int argc, char *argv[] ) {
 
     fitter.mask.Clear();
 
+    /*
     SPECEX_INFO(
 		"PSF '" << psf_model << "' stamp size = " 
 		<< psf->hSizeX << "x" << psf->hSizeY << " npar(loc) = " 
-		<< psf->FixedCoordNPar() << " npar(glob) = " << psf->VaryingCoordNPar()
+		<< psf->FixedCoordNPar() << " npar(glob) = " << psf->VaryingCoordNPar(bundle_id)
 		);
+    */
     
     
-    // starting fit
-    // --------------------------------------------
-    bool init_psf = true;
-    fitter.verbose = true;
-    fitter.FitEverything(spots,init_psf);
+    // loop on fiber bundles 
+    // -------------------------------------------- 
+    for(int bundle = first_fiber_bundle; bundle <= last_fiber_bundle ; bundle ++) {
+    
+      // allocate bundle in PSF if necessary
+      if(psf->ParamsOfBundles.find(bundle)==psf->ParamsOfBundles.end()) {
+	psf->ParamsOfBundles[bundle] = specex::PSF_Params();
+	psf->ParamsOfBundles[bundle].fiber_min = spectro->number_of_fibers_per_bundle*bundle;
+	psf->ParamsOfBundles[bundle].fiber_max = psf->ParamsOfBundles[bundle].fiber_min+spectro->number_of_fibers_per_bundle-1; // included
+      }
+      
+      // load traces in PSF 
+      // --------------------------------------------  
+      for(int fiber=psf->ParamsOfBundles[bundle].fiber_min; fiber<=psf->ParamsOfBundles[bundle].fiber_max; fiber++) {
+	psf->FiberTraces[fiber]=traceset[fiber];
+      } 
+      
+      fitter.SelectFiberBundle(bundle);
+      
+      
+      // loading arc lamp spots belonging to this bundle
+      // --------------------------------------------  
+      int ymin = 696+3; // range of usable r CCD coordinates, hard coded for now
+      int ymax = 3516-3; // range of usable r CCD coordinates, hard coded for now
+      vector<Spot_p> spots;
+      allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,ymin,ymax,min_wavelength,max_wavelength);
+      SPECEX_INFO("number of spots = " << spots.size());
+      
+      // starting fit
+      // --------------------------------------------
+      fitter.FitEverything(spots,true);
+      
+      if(fit_individual_spots_position) // for debugging
+	fitter.FitIndividualSpotPositions(spots);
+    }
     
     write_psf_xml(fitter.psf,"psf.xml");
-    write_psf_fits_image(fitter.psf,"psf.fits",500,2000,4);
+    write_psf_fits_image(fitter.psf,"psf.fits",500,2000,1,4);
 
-    if(fit_individual_spots_position) // for debugging
-      fitter.FitIndividualSpotPositions(spots);
+    
     
     
   // ending

@@ -33,6 +33,8 @@ class PSF_Fitter {
   vector<harp::vector_double> TraceYvsW_Monomials_of_spots;
   vector<Stamp> spot_stamps;
   
+  
+
  public :
   // internal set of parameters and matrices
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
@@ -43,6 +45,15 @@ class PSF_Fitter {
  public :
   
   PSF_p psf;
+
+ private :
+
+  int bundle_id;
+  std::vector<Legendre2DPol>* psf_global_params; // this is a pointer set by the fitter to the current psf bundle being fit
+
+ public :
+  void SelectFiberBundle(int bundle); // this sets bundle_id and psf_global_params
+
   const image_data& image;
   const image_data& weight;
   image_data footprint_weight; // weight x psf footprint for global fit

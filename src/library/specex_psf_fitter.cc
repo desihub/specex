@@ -16,6 +16,13 @@
 
 using namespace std;
 
+void specex::PSF_Fitter::SelectFiberBundle(int bundle) {
+  std::map<int,PSF_Params>::iterator it = psf->ParamsOfBundles.find(bundle);
+  if(it==psf->ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
+  bundle_id = bundle;
+  psf_global_params = & (it->second.Polynomials);
+}
+
 void specex::PSF_Fitter::SetStampLimitsFromPSF(specex::Stamp& stamp, const specex::PSF_p psf, const double &X, const double &Y) {
   psf->StampLimits(X,Y,stamp.begin_i,stamp.end_i,stamp.begin_j,stamp.end_j);
   // now check image bounds
@@ -64,7 +71,7 @@ double compute_chi2_for_a_given_step(const double &current_step, BrentBox* bbox)
 
 int specex::PSF_Fitter::NPar(int nspots) const {
   int npar = 0; // fluxes
-  if(fit_psf) npar += psf->VaryingCoordNPar();
+  if(fit_psf) npar += psf->VaryingCoordNPar(bundle_id);
   if(fit_trace) npar += psf->TracesNPar();
   if(fit_flux) npar += nspots;
   if(fit_position) npar += 2*nspots;
@@ -84,6 +91,7 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
 
   vector<harp::vector_double> psf_Params_of_spots;
   vector<harp::vector_double> psf_Monomials_of_spots; // still compute it if pos is varying
+  
   
   {
     int index = 0;
@@ -130,7 +138,7 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
       }
       
       if(fit_psf)
-	psf_Params_of_spots.push_back(psf->FixedCoordParams(xs,ys,Params));
+	psf_Params_of_spots.push_back(psf->FixedCoordParams(xs,ys,bundle_id,Params));
       else
 	psf_Params_of_spots.push_back(spot->PSFParams);
       
@@ -143,7 +151,7 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
 	
 	for(int p=0;p<npar_fixed_coord;p++) {
 
-	  harp::vector_double pM = psf->Params[p].Monomials(xs,ys);
+	  harp::vector_double pM = (*psf_global_params)[p].Monomials(xs,ys);
 	  size_t pM_size = pM.size();
 	  ublas::project(gM,ublas::range(index,index+pM_size))=pM;
 	  index += pM_size;
@@ -256,7 +264,7 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
 	    const harp::vector_double& sM = psf_Monomials_of_spots[s];
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      double flux_times_dpsfdpar = flux_s*gradPar[p]; // this depends on xyij coordinate;
-	      size_t coef_size = psf->Params[p].coeff.size();
+	      size_t coef_size = (*psf_global_params)[p].coeff.size();
 	      ublas::project(H,ublas::range(index,index+coef_size)) += flux_times_dpsfdpar*ublas::project(sM,ublas::range(index,index+coef_size));
 	      index += coef_size;
 	    }
@@ -314,7 +322,7 @@ double specex::PSF_Fitter::ComputeChi2AB(vector<specex::Spot_p>& spots, bool com
 	
 	const double& par = SpotParams(p);
 	
-	int ncoef=psf->Params[p].coeff.size();
+	int ncoef=(*psf_global_params)[p].coeff.size();
 	std::map<int,Prior*>::const_iterator it = psf->Priors.find(p);
 	
 	if(it==psf->Priors.end()) {index += ncoef; continue;} // no prior for this psf parameter
@@ -369,7 +377,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   int *npix = &npixels_memory_slot;
   if(n_pixels) npix = n_pixels;
   
-  
   double xc_min=1e20;
   double xc_max=-1e20;
   double yc_min=1e20;
@@ -398,7 +405,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 
   int npar_psf = 0;
-  if(fit_psf) npar_psf = psf->VaryingCoordNPar();
+  if(fit_psf) npar_psf = psf->VaryingCoordNPar(bundle_id);
   int npar_trace = 0;
   if(fit_trace) npar_trace = psf->TracesNPar();
   
@@ -425,8 +432,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   {
     int index=0;
     if(fit_psf) {
-      for(size_t p=0;p<psf->Params.size();p++) {
-	const harp::vector_double& coeff=psf->Params[p].coeff;
+      for(size_t p=0;p<psf_global_params->size();p++) {
+	const harp::vector_double& coeff=(*psf_global_params)[p].coeff;
 	for (size_t k=0; k < coeff.size(); ++k, ++index) 
 	  Params(index) = coeff(k);
       }
@@ -484,7 +491,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       for(size_t s=0;s<spots.size();s++) {
 	specex::Spot_p& spot= spots[s];
 	if(spot->flux<=0) continue;
-	harp::vector_double psfParams = psf->FixedCoordParams(spot->xc,spot->yc);
+	harp::vector_double psfParams = psf->FixedCoordParams(spot->xc,spot->yc,bundle_id);
 	
 	Stamp spot_stamp(image);
 	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
@@ -548,7 +555,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   // stuff that was in computechi2ab
   nspots = spots.size();
   npar_fixed_coord = psf->FixedCoordNPar();
-  npar_varying_coord = psf->VaryingCoordNPar();
+  npar_varying_coord = psf->VaryingCoordNPar(bundle_id);
   if(fit_psf) gradPar.resize(npar_fixed_coord); // will remain zero if (!fit_psf)
   if(fit_position || fit_trace) gradPos.resize(2);
   
@@ -790,8 +797,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   if (fit_psf) {
     // save params to psf
     
-    for(size_t p=0;p<psf->Params.size();p++) {
-      harp::vector_double& coeff=psf->Params[p].coeff;
+    for(size_t p=0;p<psf_global_params->size();p++) {
+      harp::vector_double& coeff=(*psf_global_params)[p].coeff;
       for(size_t c=0;c<coeff.size();c++,index++)
 	coeff(c)=Params(index);
     }
@@ -837,7 +844,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots saving spots psf params");
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p& spot= spots[s];
-      spot->PSFParams = psf->FixedCoordParams(spot->xc,spot->yc);
+      spot->PSFParams = psf->FixedCoordParams(spot->xc,spot->yc,bundle_id);
     } 
   }
   // also save coordinates of spots
@@ -882,10 +889,10 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
   spots.push_back(spot);
   
   int npar_psf = psf->FixedCoordNPar();
-  psf->Params.clear();
+  psf_global_params->clear();
   for(int p=0;p<npar_psf;p++) {
-    psf->Params.push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
-    psf->Params[p].coeff(0) = spot->PSFParams(p);
+    psf_global_params->push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
+    (*psf_global_params)[p].coeff(0) = spot->PSFParams(p);
   }
   
   
@@ -915,10 +922,10 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
 
 void specex::PSF_Fitter::SetPSFParams(const harp::vector_double &ParamsToSet) {
   // also, define psf polynomes (should be in fitter)
-  psf->Params.clear();
+  psf_global_params->clear();
   for (size_t k =0; k < ParamsToSet.size(); ++k) {
-    psf->Params.push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
-    psf->Params.back().coeff(0)=ParamsToSet(k);
+    psf_global_params->push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
+    psf_global_params->back().coeff(0)=ParamsToSet(k);
   }
 }
 
@@ -943,7 +950,7 @@ bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, doub
 
   SPECEX_INFO("Number of PSF params at fixed coord = " << npar);
 
-  psf->Params.clear();
+  psf_global_params->clear();
 
   int first_index_for_tail = npar;
   if(psf->HasParam("YTailNorm")) first_index_for_tail = min(first_index_for_tail,psf->ParamIndex("YTailNorm"));
@@ -951,17 +958,17 @@ bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, doub
   
   for(int p=0;p<npar;p++) {
     if(p<first_index_for_tail)
-      psf->Params.push_back(specex::Legendre2DPol(polynomial_degree_along_x,0,image.Nx(),polynomial_degree_along_y,0,image.Ny()));
+      psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x,0,image.Nx(),polynomial_degree_along_y,0,image.Ny()));
     else
-      psf->Params.push_back(specex::Legendre2DPol(polynomial_degree_along_x_for_psf_tail,0,image.Nx(),polynomial_degree_along_y_for_psf_tail,0,image.Ny()));
+      psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x_for_psf_tail,0,image.Nx(),polynomial_degree_along_y_for_psf_tail,0,image.Ny()));
   }
 
   
   
-  int nparpsf = psf->Params.size();
+  int nparpsf = psf_global_params->size();
   int npartot = 0;
   for(int p=0;p<nparpsf;p++) {
-    const specex::Legendre2DPol &pol = psf->Params[p];
+    const specex::Legendre2DPol &pol = (*psf_global_params)[p];
     int nparpol = (pol.xdeg+1)*(pol.ydeg+1);
     npartot += nparpol;
   }
@@ -989,7 +996,7 @@ bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, doub
     H *= 0;
     int index=0;
     for(int p=0;p<nparpsf;p++) {
-      const specex::Legendre2DPol &pol = psf->Params[p];
+      const specex::Legendre2DPol &pol = (*psf_global_params)[p];
       harp::vector_double m=pol.Monomials(spot->xc,spot->yc);
       for(size_t k=0;k<m.size();k++,index++)
 	H(p,index)=m[k];
@@ -1016,7 +1023,7 @@ bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, doub
   {
     int index=0;
     for(int p=0;p<nparpsf;p++) {
-      specex::Legendre2DPol &pol = psf->Params[p];
+      specex::Legendre2DPol &pol = (*psf_global_params)[p];
       for(size_t k=0;k<pol.coeff.size();k++,index++)
 	pol.coeff(k)=B(index);
     }
@@ -1025,7 +1032,7 @@ bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, doub
   // add psf parameters to spots
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p& spot = spots[s];
-    spot->PSFParams = psf->FixedCoordParams(spot->xc,spot->yc);
+    spot->PSFParams = psf->FixedCoordParams(spot->xc,spot->yc,bundle_id);
   }
   
   cout << "INFO specex::PSF_Fitter::InterpolateSpotPSFs successful" << endl;
