@@ -417,6 +417,13 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
   int NPIX_X = ccd_image_n_cols;
   int NPIX_Y = ccd_image_n_rows;
   
+  int bundle_min = 1000;
+  int bundle_max = 0;
+  for(std::map<int,PSF_Params>::const_iterator bundle_it = ParamsOfBundles.begin();
+      bundle_it != ParamsOfBundles.end(); ++bundle_it) {
+    if(bundle_it->first > bundle_max) bundle_max = bundle_it->first;
+    if(bundle_it->first < bundle_min) bundle_min = bundle_it->first;
+  }
   
   int NFLUX = NPIX_Y; // this has to be a parameter
   int NSPEC = FiberTraces.size(); // this also has to be a parameter
@@ -477,6 +484,8 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
   harp::fits::key_write(fp,"NPIX_Y",(long long int)NPIX_Y,"number of rows in input CCD image");
   harp::fits::key_write(fp,"NFLUX",(long long int)NFLUX,"number of flux elements");
   harp::fits::key_write(fp,"NSPEC",(long long int)NSPEC,"number of fibers/spectra");
+  harp::fits::key_write(fp,"BUNDLMIN",(long long int)bundle_min,"first bundle of fibers");
+  harp::fits::key_write(fp,"BUNDLMAX",(long long int)bundle_max,"last bundle of fibers");
   
   harp::fits::key_write(fp,"PSFPARAM","X",default_comment);
   
@@ -541,28 +550,44 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
     
     
     double* buffer = new double[ncoefs];
+    for(size_t i=0;i<ncoefs;i++) buffer[i]=0; // set to 0
     
     // loop on gauss-hermite parameters
-    int index=0;
+    buffer[0]=1; // order 0 legendre pol for GH00 is = 1
     
-    // first 3 gauss hermite coefficients are by default GH00=1, GH01=0, GH10=0
-    buffer[index++]=1; // order 0 legendre pol for GH00 is = 1
-    for(;index<3*ncoefs_legendre; index++) {
-      buffer[index] = 0;
-    }
     
-    for(size_t gh_param_index = 0; gh_param_index < params_of_bundle.Polynomials.size(); ++ gh_param_index) {
-      const harp::vector_double& legendre_coefficents = params_of_bundle.Polynomials[ gh_param_index ].coeff;
-      for(size_t i=0;i<legendre_coefficents.size();i++)
-	buffer[index++]=legendre_coefficents[i];
+    // WILL BE first 4 gauss hermite coefficients are by default GH00=1, GH01=0, GH10=0 , GH11=0    
+    // IS first 3 gauss hermite coefficients are by default GH00=1, GH01=0, GH10=0  
+    
+    int gh_index=0;
+    int buffer_index=0;
+    for(int j_gh=0;j_gh<=GHDEGY;j_gh++) { // loop on j=y=rows first
+      for(int i_gh=0;i_gh<=GHDEGX;i_gh++) {
+	// skip some coeffs
+	if(i_gh == 0 && j_gh == 0) {buffer_index += ncoefs_legendre; continue;}
+	if(i_gh == 1 && j_gh == 0) {buffer_index += ncoefs_legendre; continue;}
+	if(i_gh == 0 && j_gh == 1) {buffer_index += ncoefs_legendre; continue;}
+	
+	const harp::vector_double& legendre_coefficents = params_of_bundle.Polynomials[ gh_index ].coeff;
+	gh_index++;
+
+	// now loop on legendre coefficients m(i+j*(xdeg+1))
+	for(size_t i=0;i<legendre_coefficents.size();i++,buffer_index++) {
+	  buffer[buffer_index]=legendre_coefficents[i];
+	  cout << buffer_index << " " << buffer[buffer_index] << endl;
+	    
+	}
+      }
     }
+
+    
     
     // and now create a 4 dimension fits image
     long naxes[4];
-    naxes[0] = GHDEGX+1;
-    naxes[1] = GHDEGY+1;
-    naxes[2] = LDEGX+1;
-    naxes[3] = LDEGY+1;
+    naxes[0] = LDEGX+1;
+    naxes[1] = LDEGY+1;
+    naxes[2] = GHDEGX+1;
+    naxes[3] = GHDEGY+1;
     
     long fpixels[4];
     fpixels[0] = 1;
