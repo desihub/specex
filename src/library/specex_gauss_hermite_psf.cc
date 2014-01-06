@@ -627,7 +627,279 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
   } // end of loop on fiber bundles
 }
 
-void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hu) {
+void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
+
+  SPECEX_INFO("starting reading GaussHermitePSF"); 
+
+  int status = 0;  
+  fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
+  
+  // read 
+  { 
+    string psf_type;
+    harp::fits::key_read (fp,"PSFTYPE", psf_type);
+    if(psf_type != "GAUSS-HERMITE") SPECEX_ERROR("PSF in file is not 'GAUSS-HERMITE' but '" << psf_type << "'");
+  }
+  { 
+    string psf_version;
+    harp::fits::key_read (fp,"PSFVER", psf_version);
+    if(psf_version != "2") SPECEX_ERROR("Cannot read GAUSS-HERMITE PSF format version '" << psf_version << "' only version '2' is implemented so far");
+  }
+  
+  
+  
+  harp::fits::key_read(fp,"MJD",mjd);
+  harp::fits::key_read(fp,"PLATEID",plate_id);
+  harp::fits::key_read(fp,"CAMERA",camera_id); 
+  harp::fits::key_read(fp,"ARCEXP",arc_exposure_id);
+
+  
+  long long int NPIX_X;
+  long long int NPIX_Y;
+  long long int NFLUX;
+  long long int NSPEC;
+  long long int bundle_min;
+  long long int bundle_max;
+  
+  harp::fits::key_read(fp,"NPIX_X",NPIX_X);
+  harp::fits::key_read(fp,"NPIX_Y",NPIX_Y);
+  harp::fits::key_read(fp,"NFLUX",NFLUX);
+  harp::fits::key_read(fp,"NSPEC",NSPEC);
+  harp::fits::key_read(fp,"BUNDLMIN",bundle_min);
+  harp::fits::key_read(fp,"BUNDLMAX",bundle_max);
+
+  // check param
+  {
+    string param_name;
+    harp::fits::key_read(fp,"PSFPARAM",param_name);
+    if(param_name != "X") SPECEX_ERROR("Expect PSFPARAM='X' in first HDU");
+  }
+  
+  // read X image here
+  size_t nrows,ncols; 
+  harp::fits::img_dims ( fp, nrows, ncols );
+  if(ncols != NFLUX || nrows != NSPEC) SPECEX_ERROR("X image does not have correct dimension NFLUXxNSPEC");
+  specex::image_data img_x(ncols,nrows);
+  harp::fits::img_read ( fp, img_x.data );
+  
+  
+  // change HDU
+  {
+    int status = 0;  
+    fits_movrel_hdu ( fp, 1, NULL, &status ); harp::fits::check ( status );
+  }
+  // check param
+  {
+    string param_name;
+    harp::fits::key_read(fp,"PSFPARAM",param_name);
+    if(param_name != "Y") SPECEX_ERROR("Expect PSFPARAM='Y' in this HDU");
+  }
+
+  // read Y image here
+  harp::fits::img_dims ( fp, nrows, ncols );
+  if(ncols != NFLUX || nrows != NSPEC) SPECEX_ERROR("Y image does not have correct dimension NFLUXxNSPEC"); 
+  specex::image_data img_y(ncols,nrows);
+  harp::fits::img_read ( fp, img_y.data );
+  
+  
+  // change HDU
+  {
+    int status = 0;
+    fits_movrel_hdu ( fp, 1, NULL, &status ); harp::fits::check ( status );
+  }
+  // check param
+  {
+    string param_name;
+    harp::fits::key_read(fp,"PSFPARAM",param_name);
+    if(param_name != "WAVELENGTH") SPECEX_ERROR("Expect PSFPARAM='WAVELENGTH' in this HDU");
+  }
+  
+  // read WAVELENGTH image here
+  harp::fits::img_dims ( fp, nrows, ncols );
+  if(ncols != NFLUX || nrows != NSPEC) SPECEX_ERROR("WAVELENGTH image does not have correct dimension NFLUXxNSPEC"); 
+  specex::image_data img_wave(ncols,nrows);
+  harp::fits::img_read ( fp, img_wave.data );
+  
+
+  // clear fiber traces, and psf params
+  FiberTraces.clear();
+  ParamsOfBundles.clear();
+  
+  int first_fiber_in_file = -1;
+
+  // loop on bundles
+  for(int bundle_id = bundle_min; bundle_id <= bundle_max; bundle_id ++) {
+
+    // change HDU
+    {
+      int status = 0;
+      fits_movrel_hdu ( fp, 1, NULL, &status ); harp::fits::check ( status );
+    }
+
+    long long int FIBERMIN;
+    long long int FIBERMAX; 
+    long long int HSIZEX;
+    long long int HSIZEY;
+    long long int GHSIGX;
+    long long int GHSIGY;
+    long long int GHDEGX;
+    long long int GHDEGY;
+    long long int LDEGX;
+    long long int LDEGY;
+    long long int LXMIN;
+    long long int LXMAX;
+    long long int LYMIN;
+    long long int LYMAX;
+    string extname;
+
+    harp::fits::key_read(fp,"FIBERMIN",FIBERMIN);
+    harp::fits::key_read(fp,"FIBERMAX",FIBERMAX);   
+    harp::fits::key_read(fp,"HSIZEX",HSIZEX);
+    harp::fits::key_read(fp,"HSIZEY",HSIZEY);
+    harp::fits::key_read(fp,"GHSIGX",GHSIGX);
+    harp::fits::key_read(fp,"GHSIGY",GHSIGY);
+    harp::fits::key_read(fp,"GHDEGX",GHDEGX);
+    harp::fits::key_read(fp,"GHDEGY",GHDEGY);
+    harp::fits::key_read(fp,"LDEGX",LDEGX);
+    harp::fits::key_read(fp,"LDEGY",LDEGY);
+    harp::fits::key_read(fp,"LXMIN",LXMIN);
+    harp::fits::key_read(fp,"LXMAX",LXMAX);
+    harp::fits::key_read(fp,"LYMIN",LYMIN);
+    harp::fits::key_read(fp,"LYMAX",LYMAX);    
+    harp::fits::key_read(fp,"EXTNAME",extname);
+    
+    if(bundle_id == bundle_min ) {
+      // set global PSF properties
+      hSizeX = HSIZEX;
+      hSizeY = HSIZEY;
+      degree = GHDEGX;
+      if(GHDEGY != GHDEGX) {
+	SPECEX_ERROR("currently only same Gauss-Hermite degree in X and Y is implemented");
+      }
+      sigma = GHSIGX;
+      if(GHSIGY != GHSIGX) {
+	SPECEX_ERROR("currently only same Gauss-Hermite sigma in X and Y is implemented");
+      }
+      
+      first_fiber_in_file = FIBERMIN;    
+      
+    }else{ 
+      // check they are the same or die
+      if(HSIZEX != hSizeX) SPECEX_ERROR("currenlty same PSF size for all bundles described in file");
+      if(HSIZEY != hSizeY) SPECEX_ERROR("currenlty same PSF size for all bundles described in file");
+      if(GHDEGX != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite degree for all bundles described in file");
+      if(GHDEGY != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite degree for all bundles described in file");
+      if(GHSIGX != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite sigma for all bundles described in file");
+      if(GHSIGY != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite sigma for all bundles described in file");
+    }
+    
+    // and now read a 4 dimension fits image
+    long naxes[4];
+    naxes[0] = LDEGX+1;
+    naxes[1] = LDEGY+1;
+    naxes[2] = GHDEGX+1;
+    naxes[3] = GHDEGY+1;
+    
+    long fpixels[4];
+    fpixels[0] = 1;
+    fpixels[1] = 1;
+    fpixels[2] = 1;
+    fpixels[3] = 1;
+    
+    size_t ncoefs_gauss_hermite = (GHDEGX+1)*(GHDEGY+1);
+    size_t ncoefs_legendre = (LDEGX+1)*(LDEGY+1);
+    long ncoefs  = ncoefs_gauss_hermite*ncoefs_legendre;
+    
+    //fits_create_img ( fp, harp::fits::ftype< double >::bitpix(), 4, naxes, &status ); harp::fits::check ( status );
+    //fits_write_pix ( fp, harp::fits::ftype< double >::datatype(), fpixels, ncoefs, buffer , &status ); harp::fits::check ( status );
+    // int ffgpv(fitsfile *fptr, int  datatype, LONGLONG firstelem, LONGLONG nelem,
+    //   void *nulval, void *array, int *anynul, int  *status);
+    double nullval = 0;
+    int anynull;
+    int status;
+    double* buffer = new double[ncoefs];
+    for(size_t i=0;i<ncoefs;i++) buffer[i]=0; // set to 0
+    fits_read_img(fp, harp::fits::ftype< double >::datatype(), 1, ncoefs, &nullval, buffer, &anynull, &status);
+    harp::fits::check ( status );
+
+    // fill psf here
+    
+    // allocate psf parameters
+    ParamsOfBundles[bundle_id] = PSF_Params();
+    PSF_Params& params_of_bundle = ParamsOfBundles[bundle_id];
+    params_of_bundle.bundle_id = bundle_id;
+    params_of_bundle.fiber_min = FIBERMIN;
+    params_of_bundle.fiber_max = FIBERMAX;
+    
+    //  load traces
+    for(int fiber_id = params_of_bundle.fiber_min ; fiber_id <= params_of_bundle.fiber_max ; fiber_id ++ ) {
+      FiberTraces[fiber_id] = specex::Trace();
+      specex::Trace& trace = FiberTraces[fiber_id];
+      trace.fiber=fiber_id;
+      #warning NEED TO IMPLEMENT JUMPS
+      trace.yjumplo = -1; 
+      trace.yjumphi = -1;
+      trace.yjumpval = -1;
+      
+      
+      // load x,y,lw data
+      harp::vector_double x(NFLUX);
+      harp::vector_double y(NFLUX);
+      harp::vector_double lw(NFLUX);
+      for(int i=0;i<NFLUX;i++) {
+	x[i] = img_x(i,fiber_id-first_fiber_in_file);
+	y[i] = img_y(i,fiber_id-first_fiber_in_file);
+	lw[i] = log10(img_wave(i,fiber_id-first_fiber_in_file));
+      }
+      
+      // define lW vs Y legendre polynomial
+      trace.X_vs_lW.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.X_vs_lW.coeff.resize(trace.X_vs_lW.deg+1);
+      trace.Y_vs_lW.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.Y_vs_lW.coeff.resize(trace.Y_vs_lW.deg+1);
+      trace.lW_vs_Y.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.lW_vs_Y.coeff.resize(trace.lW_vs_Y.deg+1);
+      trace.X_vs_Y.deg   = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.X_vs_Y.coeff.resize(trace.X_vs_Y.deg+1);
+      
+      // fit traces using these data
+      trace.X_vs_lW.Fit(lw,x,NULL,true); // auto sets range
+      trace.Y_vs_lW.Fit(lw,y,NULL,true); // auto sets range
+      trace.lW_vs_Y.Fit(y,lw,NULL,true); // auto sets range
+      trace.X_vs_Y.Fit(y,x,NULL,true); // auto sets range
+      
+      // ok
+    }
+
+    // load legendre psf params from buffer
+    int gh_index=0;
+    int buffer_index=0;
+    for(int j_gh=0;j_gh<=GHDEGY;j_gh++) { // loop on j=y=rows first
+      for(int i_gh=0;i_gh<=GHDEGX;i_gh++) {
+	// skip some coeffs
+	if(i_gh == 0 && j_gh == 0) {buffer_index += ncoefs_legendre; continue;}
+	if(i_gh == 1 && j_gh == 0) {buffer_index += ncoefs_legendre; continue;}
+	if(i_gh == 0 && j_gh == 1) {buffer_index += ncoefs_legendre; continue;}
+	
+	Legendre2DPol pol;
+	pol.xdeg = LDEGX;
+	pol.ydeg = LDEGY;
+	pol.xmin = LXMIN;
+	pol.xmax = LXMAX;
+	pol.ymin = LYMIN;
+	pol.ymax = LYMAX;
+	pol.coeff.resize((pol.xdeg+1)*(pol.ydeg+1));
+	
+	// now loop on legendre coefficients m(i+j*(xdeg+1))
+	for(size_t i=0;i<pol.coeff.size();i++,buffer_index++) {
+	  pol.coeff[i] = buffer[buffer_index];
+	}
+	params_of_bundle.Polynomials.push_back(pol);
+      }
+    }
+    
+    
+    delete [] buffer;
+    
+  
+    SPECEX_INFO("read successfully fiber bundle " << bundle_id);
+  }
   
 }
  

@@ -207,3 +207,12 @@ void specex::PSF::WriteFits(const std::string& filename, int first_hdu) const {
   SPECEX_INFO("wrote psf in " << filename);
 }
     
+void specex::PSF::ReadFits(const std::string& filename, int first_hdu)  {  
+  fitsfile * fp;  
+  harp::fits::open_read ( fp, filename );
+  ReadFits(fp,first_hdu);
+  harp::fits::close ( fp );
+  
+  SPECEX_INFO("read psf in " << filename);
+}
+    

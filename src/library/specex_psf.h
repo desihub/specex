@@ -190,6 +190,7 @@ namespace specex {
     virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};
     virtual void ReadFits(fitsfile* fp, int first_hdu=1) {};  
     virtual void WriteFits(const std::string& filename, int first_hdu=1) const;
+    virtual void ReadFits(const std::string& filename, int first_hdu=1);
     
     ~PSF();
     
