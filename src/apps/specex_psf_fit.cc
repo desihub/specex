@@ -134,7 +134,7 @@ int main ( int argc, char *argv[] ) {
     specex::PSF_p psf;
 
     if(psf_model=="GAUSSHERMITE") {
-      psf = PSF_p(new specex::GaussHermitePSF(4));
+      psf = PSF_p(new specex::GaussHermitePSF(3));
       //} else if(psf_model=="GAUSSIAN") {
       //psf = new GaussPSF();
     }else {

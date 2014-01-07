@@ -15,26 +15,40 @@
 
 namespace specex {
 
+  class SpotTmpData  {
+  
+  public :
+    
+    
+    double x,y,flux;
+    
+    harp::vector_double trace_x_monomials;
+    harp::vector_double trace_y_monomials;
+    harp::vector_double psf_monomials;
+    harp::vector_double psf_params;
+    
+    int flux_parameter_index;
+    int x_parameter_index;
+    int y_parameter_index;
+    
+    int trace_x_parameter_index;
+    int trace_y_parameter_index;
+    
+    Stamp stamp;
+    
+  };
+
 class PSF_Fitter {
 
  private :
   
   // internal to fitseveralspots
-  int nspots;
   unsigned npar_fixed_coord;
   unsigned npar_varying_coord;
-  std::map<int,int> XvsW_index_of_fiber;
-  std::map<int,int> YvsW_index_of_fiber;
-  harp::vector_double gradPar,gradPos;
-  harp::vector_double spots_flux,spots_x,spots_y;
   size_t nparTot;
-  int npar_traces;
-  vector<harp::vector_double> TraceXvsW_Monomials_of_spots;
-  vector<harp::vector_double> TraceYvsW_Monomials_of_spots;
-  vector<Stamp> spot_stamps;
   
+  std::vector<SpotTmpData> spot_tmp_data;
   
-
  public :
   // internal set of parameters and matrices
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
@@ -108,9 +122,9 @@ class PSF_Fitter {
    //int Index_Flux(int spotid, int nspots) const;
    
 
-   double ComputeChi2AB(std::vector<Spot_p>& spots, bool compute_ab) ;
+   double ComputeChi2AB(bool compute_ab) ;
 
-  
+   void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
 
    void SetPSFParams(const harp::vector_double &Params); 
 

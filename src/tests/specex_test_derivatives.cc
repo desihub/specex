@@ -67,7 +67,55 @@ int main() {
     cout << "dPdy aD=" << PosDer(1) << " nD=" << numDer
 	 << " diff=" <<  PosDer(1)-numDer << " ratio=" << PosDer(1)/numDer-1 << endl;
   }
+
+  {
+  cout  << "testing global monomials" << endl;
+  specex::PSF_Params &psf_global_params = psf->ParamsOfBundles[bundle];
+  harp::vector_double gP(psf->VaryingCoordNPar(bundle));
+  harp::vector_double gM(psf->VaryingCoordNPar(bundle));
+  int index=0;
+  for(int p=0;p<psf->NPar();p++) {
+    harp::vector_double pM = psf_global_params.Polynomials[p].Monomials(x,y);
+    int p_size = pM.size();
+    ublas::project(gM,ublas::range(index,index+p_size))=pM;
+    ublas::project(gP,ublas::range(index,index+p_size))=psf_global_params.Polynomials[p].coeff;
+    index += p_size;
+  }
+  harp::vector_double spot_params_1 = psf->FixedCoordParams(x,y,bundle,gP);
+  harp::vector_double spot_params_2 = psf->FixedCoordParams(x,y,bundle);
+  cout << "spot_params_1=" << spot_params_1 << endl;
+  cout << "spot_params_2=" << spot_params_2 << endl;
+  cout << "diff=" << spot_params_1-spot_params_2 << endl;
+
+  double val0 = psf->PSFValueWithParams(x,y, i, j, spot_params_1, &PosDer, &ParamDer);
+
+  // compute analytic der
+  harp::vector_double H(gP.size());
+  index=0;
+  for(int p=0;p<psf->NPar();p++) {
+    int p_size = psf_global_params.Polynomials[p].coeff.size();
+    ublas::project(H,ublas::range(index,index+p_size))=ParamDer[p]*ublas::project(gM,ublas::range(index,index+p_size));
+    index += p_size;
+  }
+
+  for(int k=0;k<int(gP.size());k++) {
+    double eps = fabs(gP(k))/1000.;
+
+    harp::vector_double gPp = gP; gPp(k)+=eps/2.;
+    harp::vector_double lPp = psf->FixedCoordParams(x,y,bundle,gPp);
+    double valp = psf->PSFValueWithParams(x,y,i,j,lPp,0,0);
+
+    harp::vector_double gPm = gP; gPm(k)-=eps/2.;
+    harp::vector_double lPm = psf->FixedCoordParams(x,y,bundle,gPm);
+    double valm = psf->PSFValueWithParams(x,y,i,j,lPm,0,0);
+    
+    double numDer = (valp-valm)/eps;
+    
+    cout << k << " P=" << gP(k) << " aD=" << H(k) << " nD=" << numDer 
+	 << " diff=" <<  H(k)-numDer << " ratio=" << (H(k)-numDer)/numDer << endl;
+  }
   
+  }
   
   return 0;
 }

@@ -126,8 +126,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
  
   double psf_val = 0;
   
-  if(x*x+y*y<25) { // sharp cut at 5 sigma
-
+  // if(x*x+y*y<25) { // sharp cut at 5 sigma BAD IDEA BECAUSE DERIVATIVES !!
+  {
     { 
       harp::vector_double& vHx = const_cast<harp::vector_double&>(Hx); 
       for(int i=0;i<=degree;i++) {

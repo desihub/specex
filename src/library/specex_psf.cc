@@ -180,15 +180,13 @@ harp::vector_double specex::PSF::FixedCoordParams(const double &X, const double 
   
   harp::vector_double params(NPar());
   
-  if(VaryingCoordNPar(bundle_id)>ForThesePSFParams.size()) abort();
+  if(VaryingCoordNPar(bundle_id)>ForThesePSFParams.size()) SPECEX_ERROR("VaryingCoordNPar(bundle_id)<=ForThesePSFParams.size()");
   
   int index=0;
   for (size_t k =0; k < P.size(); ++k) {
-    int nc=P[k].coeff.size();
-    harp::vector_double coeff(nc);
-    for(int c=0;c<nc;c++,index++)
-      coeff(c)=ForThesePSFParams(index);
-    params(k)=specex::dot(coeff,P[k].Monomials(X,Y));
+    size_t c_size = P[k].coeff.size();
+    params(k)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),P[k].Monomials(X,Y));
+    index += c_size;
   }
   return params;
 }
