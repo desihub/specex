@@ -46,7 +46,8 @@ int main ( int argc, char *argv[] ) {
   string spots_xml_filename="";
   string input_fits_image_filename="";
   string output_fits_image_filename="";  
-  
+  double psf_error=0;
+  double readout_noise=2;
   
   // reading arguments
   // --------------------------------------------
@@ -57,6 +58,8 @@ int main ( int argc, char *argv[] ) {
     ( "spots", popts::value<string>( &spots_xml_filename ), "spots xml filename" )
     ( "in", popts::value<string>( &input_fits_image_filename ), " input fits image file name" )
     ( "out", popts::value<string>( &output_fits_image_filename ), " output fits image file name")
+    ( "readout-noise", popts::value<double>( &readout_noise ), " readout noise for pull")
+    ( "psf-error", popts::value<double>( &psf_error ), " psf relative error for pull")
     ( "verbose,v", "turn on verbose mode" )
     ( "core", "dump core files when harp exception is thrown" )
     ;
@@ -66,7 +69,7 @@ int main ( int argc, char *argv[] ) {
   popts::notify(vm);
   
   if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "psf" ) )  || ( ! vm.count( "spots" ) ) 
-       || ( ! vm.count( "in" ) ) || ( ! vm.count( "out" ) ) ) {
+       || ( ! vm.count( "in" ) )  ) {
     cerr << endl;
     cerr << desc << endl;
     cerr << "example:" << endl;
@@ -121,8 +124,12 @@ int main ( int argc, char *argv[] ) {
     // create output images
     // --------------------------------------------
     image_data model(image.n_cols(),image.n_rows());
-
+    image_data data_in_stamp(image.n_cols(),image.n_rows());
+    image_data variance(image.n_cols(),image.n_rows());
     
+    model.data *= 0;
+    data_in_stamp.data *= 0;
+    variance.data *= 0;
 
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
@@ -138,21 +145,65 @@ int main ( int argc, char *argv[] ) {
             
       for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  
 	for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+
+	  if(weight(i,j)<=0) continue;
+
 	  double val =  spot->flux*psf->PSFValueWithParams(spot->xc,spot->yc, i, j, params, 0, 0);
 	  model(i,j) += val;
+	  data_in_stamp(i,j) = image(i,j);
+	  variance(i,j) += square(readout_noise) + square(psf_error*val);
+	  if(val>0) variance(i,j) += val;
 	}
       } // end of loop on stamp pixels
     } // end of loop on spots
 
-    
-    image_data residual = image;
+    // compute chi2
+    // ---------------------------
+    image_data residual = image; 
     residual.data -= model.data;
 
-    // write model image
-    // ---------------------------
-    specex::write_new_fits_image(output_fits_image_filename,model);
-    specex::write_new_fits_image("diff.fits",residual);
+    double chi2 = 0;
+    int ndata = 0;
+    for(size_t i=0; i<residual.data.size() ;i++) {
+      if(variance.data(i)>0) {
+	chi2 += square(residual.data(i))/(variance.data(i));
+	ndata ++;
+      }
+    }
+    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeX << " lpar=" << psf->NPar() << " gnpar=" << psf->VaryingCoordNPar(spots[0]->fiber_bundle) << endl;
+    int npar = psf->VaryingCoordNPar(spots[0]->fiber_bundle)+3*spots.size();
+    int ndf  = ndata-npar; 
+    cout << "chi2/ndf = " << chi2/ndf << " ndf=" << ndf << " ndata=" << ndata << endl;
 
+    
+    // write images of model and residuals
+    // ---------------------------
+    if(output_fits_image_filename!="") {
+      fitsfile * fp;  
+      harp::fits::create ( fp, output_fits_image_filename );
+      harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+      harp::fits::img_write ( fp, model.data );
+      
+      harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+      harp::fits::img_write ( fp, residual.data );
+      
+      residual = data_in_stamp; 
+      residual.data -= model.data;
+
+      harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+      harp::fits::img_write ( fp, residual.data );
+      
+      for(size_t i=0; i<residual.data.size() ;i++) {
+	if(variance.data(i)>0) residual.data(i) /= sqrt(variance.data(i));
+      }
+    
+      harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+      harp::fits::img_write ( fp, residual.data );
+      
+      harp::fits::close ( fp );
+    }
+    
+    
 
   // ending
   // --------------------------------------------
