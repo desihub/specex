@@ -121,8 +121,8 @@ int specex::PSF::VaryingCoordNPar(int bundle_id) const {
 int specex::PSF::TracesNPar() const {
   int n=0;
   for(std::map<int,Trace>::const_iterator it=FiberTraces.begin(); it!=FiberTraces.end(); ++it) {
-    n += it->second.X_vs_lW.coeff.size();
-    n += it->second.Y_vs_lW.coeff.size();
+    n += it->second.X_vs_W.coeff.size();
+    n += it->second.Y_vs_W.coeff.size();
   }
   return n;
 }

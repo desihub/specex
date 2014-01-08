@@ -502,7 +502,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	tmp_trace_x_parameter[it->first] = index;
 
 	{
-	  const harp::vector_double& coeff = it->second.X_vs_lW.coeff;
+	  const harp::vector_double& coeff = it->second.X_vs_W.coeff;
 	  size_t c_size = coeff.size();
 	  ublas::project(Params,ublas::range(index,index+c_size)) = coeff;
 	  index += c_size;
@@ -511,7 +511,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	tmp_trace_y_parameter[it->first] = index;
 	
 	{
-	  const harp::vector_double& coeff = it->second.Y_vs_lW.coeff;
+	  const harp::vector_double& coeff = it->second.Y_vs_W.coeff;
 	   size_t c_size = coeff.size();
 	  ublas::project(Params,ublas::range(index,index+c_size)) = coeff;
 	  index += c_size;
@@ -583,8 +583,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       // trace monomials
       if(fit_trace) {
 	const specex::Trace& trace = psf->FiberTraces[spot->fiber];
-	tmp.trace_x_monomials = trace.X_vs_lW.Monomials(spot->log10_wavelength);
-	tmp.trace_y_monomials = trace.Y_vs_lW.Monomials(spot->log10_wavelength);
+	tmp.trace_x_monomials = trace.X_vs_W.Monomials(spot->wavelength);
+	tmp.trace_y_monomials = trace.Y_vs_W.Monomials(spot->wavelength);
 	tmp.trace_x_parameter_index = tmp_trace_x_parameter[spot->fiber];
 	tmp.trace_y_parameter_index = tmp_trace_y_parameter[spot->fiber];
       }
@@ -629,8 +629,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     fitWeight = A; // to extract covariance once at minimum.
     
     bool linear = false;
-    #warning TEST_DE_JULIEN
-    if(0) { 
+    //#warning TEST_DE_JULIEN
+     
     if( (fit_flux) && (!fit_position) && (!fit_trace) && (!fit_psf) ) {
       if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots linear because only fit flux");
       linear = true;
@@ -639,7 +639,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots linear because only fit psf (linear wrt params)");
       linear = true;
     } 
-    }
+    
     bool use_brent = true;
     if(1) {
       if(linear) {
@@ -655,9 +655,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  use_brent = true;
 	  if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots use brent because step 1 increases chi2");
 	}else{
-#warning TEST_DE_JULIEN
-	  //use_brent = false;
-	  //if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots don't brent because chi2 decreases");	  
+	  //#warning TEST_DE_JULIEN
+	  use_brent = false;
+	  if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots don't brent because chi2 decreases");	  
 	}
       }
     }
@@ -705,7 +705,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }
       if(verbose) {
 	double dchi2 = (-best_chi2+*psfChi2);
-	if(dchi2>0) {
+	if(dchi2>0 || fabs(dchi2)<brent_precision) {
 	  if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = " << best_step << " dchi2=" << dchi2
 	       << " chi2pdf = " << best_chi2/(*npix-Params.size())
 	      );
@@ -788,10 +788,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   }
   if (fit_trace) {
     for(std::map<int,specex::Trace>::iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); ++it) {
-      harp::vector_double& PX = it->second.X_vs_lW.coeff;
+      harp::vector_double& PX = it->second.X_vs_W.coeff;
       for(size_t k=0;k<PX.size();k++,index++)
 	PX(k)=Params(index);
-      harp::vector_double& PY = it->second.Y_vs_lW.coeff;
+      harp::vector_double& PY = it->second.Y_vs_W.coeff;
       for(size_t k=0;k<PY.size();k++,index++)
 	PY(k)=Params(index);
     }
@@ -811,8 +811,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       spot->yc = Params(tmp.y_parameter_index);
     }
     if(fit_trace) {
-      spot->xc = psf->FiberTraces[spot->fiber].X_vs_lW.Value(spot->log10_wavelength);
-      spot->yc = psf->FiberTraces[spot->fiber].Y_vs_lW.Value(spot->log10_wavelength);
+      spot->xc = psf->FiberTraces[spot->fiber].X_vs_W.Value(spot->wavelength);
+      spot->yc = psf->FiberTraces[spot->fiber].Y_vs_W.Value(spot->wavelength);
     }
   }
   
@@ -846,12 +846,13 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
   vector<specex::Spot_p> spots; 
   spots.push_back(spot);
   
-  int npar_psf = psf->FixedCoordNPar();
-  psf_global_params->clear();
-  for(int p=0;p<npar_psf;p++) {
-    psf_global_params->push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
-    (*psf_global_params)[p].coeff(0) = spot->PSFParams(p);
-  }
+  
+  // int npar_psf = psf->FixedCoordNPar();
+  // psf_global_params->clear();
+  // for(int p=0;p<npar_psf;p++) {
+  //   psf_global_params->push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
+  //   (*psf_global_params)[p].coeff(0) = spot->PSFParams(p);
+  // }
   
   
   bool ok = FitSeveralSpots(spots,&(spot->chi2),n_iterations);
@@ -887,6 +888,7 @@ void specex::PSF_Fitter::SetPSFParams(const harp::vector_double &ParamsToSet) {
   }
 }
 
+/*
 bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, double *chi2_val, int *n_iterations) {
   
   double chi2_memory_slot;
@@ -997,6 +999,8 @@ bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, doub
   
   return true;
 }
+*/
+
 
 bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_fitted) {
   
@@ -1024,8 +1028,8 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
       
       for(size_t s=0;s<spots_of_fiber.size();s++) {
 	specex::Spot_p& spot = spots_of_fiber[s];
-	spot->xc=trace.X_vs_lW.Value(spot->log10_wavelength);
-	spot->yc=trace.Y_vs_lW.Value(spot->log10_wavelength);
+	spot->xc=trace.X_vs_W.Value(spot->wavelength);
+	spot->yc=trace.Y_vs_W.Value(spot->wavelength);
 
       }
 
@@ -1112,21 +1116,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     SPECEX_ERROR("in fit_several_spots spotarrays is empty");
   }
 
-  if(init_psf) {
-
-    harp::vector_double startParams; 
-    // set default parameters
-    psf->InitParams(1.0,startParams);
-    int nparpsf = psf->NPar();
-    for(size_t s=0;s<input_spots.size();s++) {
-      specex::Spot_p& spot = input_spots[s];
-      spot->PSFParams = startParams;
-      spot->PSFname = psf->Name();
-    }
-  }
   
   
-  //FitIndividualSpotFluxes(input_spots);
   
   
   verbose = true;
@@ -1159,9 +1150,28 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       polynomial_degree_along_y = min(int(spot_arrays.size())-1,3);
       
       SPECEX_INFO("Setting PSF polynomial degrees " << polynomial_degree_along_x << " " << polynomial_degree_along_y);
+      
+      psf_global_params->clear();
+
+      int npar = psf->NPar();
+      for(int p=0;p<npar;p++) {
+	//if(p<first_index_for_tail)
+	psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x,0,image.Nx(),polynomial_degree_along_y,0,image.Ny()));
+	//else
+	//psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x_for_psf_tail,0,image.Nx(),polynomial_degree_along_y_for_psf_tail,0,image.Ny()));
+      }
+      
+      harp::vector_double default_params = psf->DefaultParams();
+      for(int p=0;p<npar;p++) {
+	(*psf_global_params)[p].coeff *= 0;
+	(*psf_global_params)[p].coeff[0] = default_params[0];
+      }
+      
     }
 
     
+
+    /*
     bool ok = InterpolateSpotPSFs(input_spots,&chi2,&niter);
     if(ok) {
       SPECEX_INFO("InterpolateSpotPSFs successful");
@@ -1171,7 +1181,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     else {
       SPECEX_ERROR("InterpolateSpotPSFs failed");
     }
-    
+    */
+
   }
   
   fatal = true;
@@ -1218,7 +1229,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   
 // selecting spots
-  double minimum_signal_to_noise = 5;
+  double minimum_signal_to_noise = 3;
   std::vector<specex::Spot_p> selected_spots;
   for(size_t s=0;s<input_spots.size();s++) {
     specex::Spot_p& spot = input_spots[s];
@@ -1229,7 +1240,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
   }
   SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise);
+
   
+  // SPECEX_INFO("STOP HERE FOR DEBUG"); return ok;
+
   SPECEX_INFO("Starting FitSeveralSpots PSF");
   SPECEX_INFO("=======================================");
   fit_flux       = false;
@@ -1241,7 +1255,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   // write_spots_list(spots,"spots-tmp-psf->list",PSF);
   
-  SPECEX_INFO("STOP HERE FOR DEBUGGING"); return ok;
+  // SPECEX_INFO("STOP HERE FOR DEBUGGING"); return ok;
 
 
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX");
@@ -1253,7 +1267,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
 
-#ifdef LA_SUITE
+
 
   SPECEX_INFO("Starting FitSeveralSpots TRACE");
   SPECEX_INFO("=======================================");
@@ -1287,7 +1301,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
   return ok;
 
-
+#ifdef LA_SUITE
 
   cout << "==== Starting FitSeveralSpots TRACE+FLUX+PSF ==== " << endl;
   fit_flux       = true;

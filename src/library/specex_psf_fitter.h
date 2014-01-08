@@ -131,7 +131,7 @@ class PSF_Fitter {
   bool FitOneSpot(Spot_p& spot, double *chi2_val=0, int *n_iterations=0);
   bool FitSeveralSpots(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_pixels=0, int *n_iterations=0);
   
-  bool InterpolateSpotPSFs(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_iterations=0);
+  //bool InterpolateSpotPSFs(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_iterations=0);
   bool FitTraces(std::vector<Spot_p>& spots, int *nok=0);
 
   

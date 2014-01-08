@@ -78,6 +78,41 @@ void specex::read_fits_images(std::string const & path, image_data& img_in_hdu1,
 // the following should be better written and placed in HARP
 
 
+static vector<string> DecomposeString(const string &Source,vector<string> &Tokens)
+{
+  vector<string> SubStrings;
+
+  string source_copy = Source;
+  
+  string::size_type start = 0;
+
+  string::size_type tokpos = source_copy.npos;
+  for(size_t t=0;t<Tokens.size();t++) {
+    string::size_type pos = source_copy.find_first_of(Tokens[t],start);
+    if(pos<tokpos) tokpos=pos;
+  }
+
+  while (tokpos != (string::size_type) source_copy.npos)
+    {
+      string sub = source_copy.substr(start,tokpos-start);
+      if (sub.length() > 0) SubStrings.push_back(sub);
+      start = tokpos+1;
+      
+      tokpos = source_copy.npos;
+      for(size_t t=0;t<Tokens.size();t++) {
+	string::size_type pos = source_copy.find_first_of(Tokens[t],start);
+	if(pos<tokpos) tokpos=pos;
+      }
+    }
+  
+  // get the last element
+  string sublast = source_copy.substr(start, source_copy.length());
+  if (sublast.length() > 0) SubStrings.push_back(sublast);
+  
+  return SubStrings;
+}
+                                                  
+
 bool specex::FitsColumnDescription::IsString() const {
   if(format.empty()) return false;
   if(format=="UNKNOWN") return false;
@@ -134,9 +169,10 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
     for (int c=0; c<ncols; c++) {
       
       specex::FitsColumnDescription column;
+      column.col = c;
       
       sprintf(key,"TTYPE%d", c+1);
-      column.name = StringKeyValue(key);
+      string name = StringKeyValue(key);
 
       sprintf(key,"TUNIT%d", c+1);
       if(HasKey(key))
@@ -152,39 +188,46 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
       
       sprintf(key,"TDIM%d", c+1);
       if(HasKey(key)) {
-	column.dimension=StringKeyValue(key);
+	string dimension_string = StringKeyValue(key);
+	vector<string> tokens; tokens.push_back(" "); tokens.push_back(","); tokens.push_back("("); tokens.push_back(")"); 
+	vector<string> substrings = DecomposeString(dimension_string,tokens);
+	
+	column.dimension.clear();
+	for(size_t s=0;s<substrings.size();s++) {
+	  // cout << "dim='" << substrings[s] << "'" << endl;
+	  column.dimension.push_back(atoi(substrings[s].c_str()));
+	}
       } else {
-	column.dimension="(1)";
+	column.dimension.clear();
+	column.dimension.push_back(1);
       }
-
-      columns.push_back(column);
+      
+      columns[name]=column;
     }
   }
   
   
-  for(size_t c=0;c<columns.size();c++) {
-    const specex::FitsColumnDescription &column = columns[c];
-    SPECEX_INFO("FitsColumnDescription col=" << c << " " << column.name << " " << column.format << " " << column.dimension);
+  //for(size_t c=0;c<columns.size();c++) {
+  for(ColumnDescriptionConstIterator it=columns.begin(); it != columns.end(); ++it) {
+    SPECEX_INFO("FitsColumnDescription : " << it->first << " " << it->second.format);
   }
   
   
   char** strptr  = new char*[ncols]; 
   strptr[0] = new char[256];
-
+  
   data.resize(nrows);
   
   // loop on rows
   for(int r=0; r<nrows; r++) {
-    //{std::vector<FitsTableEntry> toto; data.push_back(toto);}
+    
     std::vector<specex::FitsTableEntry>& entries = data[r];
     entries.resize(columns.size());
     
-    for(size_t c=0;c<columns.size();c++) {
-      const specex::FitsColumnDescription &col = columns[c];
-      
-      //{FitsTableEntry toto; entries.push_back(toto);}
+    for(ColumnDescriptionConstIterator it=columns.begin(); it != columns.end(); ++it) {
+      const specex::FitsColumnDescription &col = it->second;
+      int c = col.col;
       specex::FitsTableEntry& entry = entries[c];
-      
       
       if(col.IsString()) {
 	//cout << "col " << c << " is a string" << endl;
@@ -197,7 +240,7 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
 	//cout << strptr[0] << endl;
 	entry.string_val = strptr[0]; // can we pass directly the address ?
 	
-	if(r==0) SPECEX_INFO("first FitsTableEntry col=" << c << " : '" << entry.string_val << "'");
+	if(r==0) SPECEX_INFO("first FitsTableEntry col=" << it->first << " : '" << entry.string_val << "'");
 	
       } else if(col.IsDouble()) {
 	int nvals = col.SizeOfVectorOfDouble();
@@ -216,8 +259,7 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
 	delete [] values;
 
 	if(r==0) {
-	  SPECEX_INFO("first FitsTableEntry col=" << c << " : " << entry.double_vals(0));
-	  if(entry.double_vals.size()>1) SPECEX_INFO(entry.double_vals(1) << ",...");
+	  SPECEX_INFO("first FitsTableEntry col=" << it->first << " : " << entry.double_vals(0));
 	}
       } else {
 	SPECEX_ERROR("data type not implemented in FitsTable");

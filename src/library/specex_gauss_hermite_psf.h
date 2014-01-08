@@ -55,8 +55,8 @@ namespace specex {
 		   const harp::vector_double &Params,
 		   harp::vector_double *PosDer = 0,
 		   harp::vector_double *ParamGradient = 0) const;
-    void InitParams(const double &sigma, harp::vector_double &Params);
     
+    harp::vector_double DefaultParams() const;
     
     bool CheckParams(const harp::vector_double &Params) const 
     { return true;}

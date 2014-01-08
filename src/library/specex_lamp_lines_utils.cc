@@ -34,10 +34,11 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
       for(int fiber=spectro.number_of_fibers_per_bundle*fiber_bundle; fiber<spectro.number_of_fibers_per_bundle*(fiber_bundle+1); fiber++) {
 	
 	specex::Spot_p spot(new specex::Spot());
-	spot->log10_wavelength = log10(wave);
+	spot->wavelength = wave;
 	spot->fiber = fiber;
-	spot->xc = traceset[fiber].X_vs_lW.Value(spot->log10_wavelength);
-	spot->yc = traceset[fiber].Y_vs_lW.Value(spot->log10_wavelength);
+	spot->fiber_bundle = fiber_bundle;
+	spot->xc = traceset[fiber].X_vs_W.Value(spot->wavelength);
+	spot->yc = traceset[fiber].Y_vs_W.Value(spot->wavelength);
 	
 	if(spot->yc<ymin) continue;
 	if(spot->yc>ymax) continue;
@@ -52,9 +53,6 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
 	spot->initial_yc = spot->yc;
 	spot->initial_flux = spot->flux;
 	
-	//spot->PSFname
-	//spot->PSFParams
-
 	spots.push_back(spot);
 
       }

@@ -108,7 +108,7 @@ namespace specex {
 			   harp::vector_double *PosDer = 0,
 			   harp::vector_double *ParamGradient = 0) const {return 0;};
     
-    virtual void InitParams(const double &sigma, harp::vector_double &Params) {};
+    virtual harp::vector_double DefaultParams() const = 0;
     
     // check if parameter values are within bounds
     virtual bool CheckParams(const harp::vector_double &Params) const {return false;};

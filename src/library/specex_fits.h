@@ -20,10 +20,11 @@ namespace specex {
   
   class FitsColumnDescription {
   public :
-    std::string name;
+    int col;
+    //std::string name;
     std::string unit;
     std::string format;
-    std::string dimension;
+    std::vector<int> dimension;
     
     bool IsString() const;
     bool IsDouble() const;
@@ -44,9 +45,10 @@ namespace specex {
     
   public :
   
-    std::vector<FitsColumnDescription> columns;
+    std::map<std::string,FitsColumnDescription> columns;
     std::vector< std::vector<FitsTableEntry> > data;
-    
+     
+
     FitsTable();
     FitsTable(const std::string& filename, int hdu_number, bool verbose = false);
     void Read(const std::string& filename, int hdu_number, bool verbose = false);
@@ -60,6 +62,10 @@ namespace specex {
     
   
   };
+
+  typedef std::map<std::string,FitsColumnDescription>::const_iterator ColumnDescriptionConstIterator;
+  typedef std::map<std::string,FitsColumnDescription>::iterator ColumnDescriptionIterator;
+  
 }
 
 #endif

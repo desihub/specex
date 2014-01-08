@@ -5,6 +5,7 @@
 #include <map>
 
 #include <boost/program_options.hpp>
+#include <boost/archive/xml_oarchive.hpp>
 
 #include <harp.hpp>
 
@@ -125,9 +126,6 @@ int main ( int argc, char *argv[] ) {
 	  weight(i,j)=0;
       }
     }
-    int i=406; int j=787;
-    cout << "DEBUG160 w = " << weight(i,j) << " " << i << " " << j << endl;
-    // write_new_fits_image("weight.fits",weight); exit(12);
     
     // init PSF
     // --------------------------------------------
@@ -149,11 +147,16 @@ int main ( int argc, char *argv[] ) {
     // read trace set derived in BOSS pipeline (this should be improved)
     // --------------------------------------------    
     TraceSet traceset;
+    
+    map<string,string> image_infos;
+    
     if(spectrograph_name == "BOSS") {
       int xy_trace_hdu = 1; // in the spFlat file , warning : this HDU numbering starts at 0 (to check)
       int wy_trace_hdu = 2; // int the spArc file , warning : this HDU numbering starts at 0 (to check)
       read_BOSS_traceset_in_fits(traceset,wy_trace_fits_name,wy_trace_hdu,xy_trace_fits_name,xy_trace_hdu);
-      read_BOSS_keywords(psf,arc_image_filename);
+      
+      // SPECEX_INFO("EXIT FOR DEBUG"); return 0;
+      read_BOSS_keywords(psf,arc_image_filename,image_infos);
     }
     
     
@@ -167,7 +170,10 @@ int main ( int argc, char *argv[] ) {
     
     fitter.gain = 1; // images are already in electrons
     // fitter.readout_noise = 2; // b1, evaluated using spatial variance in sdProc-b1-00108382.fits[1:4000,1:600]
-    fitter.readout_noise = 2.5; // need to modify this image.KeyVal("RDNOISE0"); // WARNING use val from first amp here
+
+    // compute mean readout noise
+    fitter.readout_noise = 2;
+    if(image_infos.find("RDNOISE0") != image_infos.end()) fitter.readout_noise = atof(image_infos["RDNOISE0"].c_str());
     fitter.flatfield_error = 0.02; // 2%
     
     for(int j=0;j<weight.Ny();j++) {
@@ -221,14 +227,26 @@ int main ( int argc, char *argv[] ) {
       // starting fit
       // --------------------------------------------
       fitter.FitEverything(spots,true);
-      
+
+      {
+	// writing spots as xml
+	std::ofstream os("spots.xml");
+	boost::archive::xml_oarchive xml_oa ( os );
+	xml_oa << BOOST_SERIALIZATION_NVP(spots);
+	os.close();
+	SPECEX_INFO("wrote spots in " << "spots.xml");
+      }
+
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
-    }
+    } // end of loop on bundles
     
     write_psf_xml(fitter.psf,"psf.xml");
-    write_psf_fits_image(fitter.psf,"psf.fits",500,2000,1,4);
+    //write_psf_fits_image(fitter.psf,"psf.fits",500,2000,1,4);
 
+
+    
+    
     
     
     

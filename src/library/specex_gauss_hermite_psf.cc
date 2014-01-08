@@ -377,12 +377,13 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 
   return psf_val;
 }
+
   
-  
-void specex::GaussHermitePSF::InitParams(const double &i_sigma, harp::vector_double &Params) 
+harp::vector_double specex::GaussHermitePSF::DefaultParams() const 
 {
-  sigma = i_sigma;
-  Params.resize(NPar());
+  
+  harp::vector_double Params(NPar());
+
   // all = zero at beginning = a pure gaussian
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE
   Params[tail_norm_index] = 1;
@@ -398,6 +399,8 @@ void specex::GaussHermitePSF::InitParams(const double &i_sigma, harp::vector_dou
 #endif
   
 #endif
+
+  return Params;
 }
 /*
   Fits format
@@ -446,7 +449,7 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
 
       y_data(i,ispec)=y;
       x_data(i,ispec)=trace.X_vs_Y.Value(y);
-      wave_data(i,ispec)=pow(10.,trace.lW_vs_Y.Value(y));
+      wave_data(i,ispec)=trace.W_vs_Y.Value(y);
       //cout << i << " " << x_data(i,ispec) << " " << y << " " << wave_data(i,ispec) << endl;
     }
   }
@@ -845,23 +848,23 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
       // load x,y,lw data
       harp::vector_double x(NFLUX);
       harp::vector_double y(NFLUX);
-      harp::vector_double lw(NFLUX);
+      harp::vector_double w(NFLUX);
       for(int i=0;i<NFLUX;i++) {
 	x[i] = img_x(i,fiber_id-first_fiber_in_file);
 	y[i] = img_y(i,fiber_id-first_fiber_in_file);
-	lw[i] = log10(img_wave(i,fiber_id-first_fiber_in_file));
+	w[i] = img_wave(i,fiber_id-first_fiber_in_file);
       }
       
-      // define lW vs Y legendre polynomial
-      trace.X_vs_lW.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.X_vs_lW.coeff.resize(trace.X_vs_lW.deg+1);
-      trace.Y_vs_lW.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.Y_vs_lW.coeff.resize(trace.Y_vs_lW.deg+1);
-      trace.lW_vs_Y.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.lW_vs_Y.coeff.resize(trace.lW_vs_Y.deg+1);
+      // define W vs Y legendre polynomial
+      trace.X_vs_W.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.X_vs_W.coeff.resize(trace.X_vs_W.deg+1);
+      trace.Y_vs_W.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.Y_vs_W.coeff.resize(trace.Y_vs_W.deg+1);
+      trace.W_vs_Y.deg  = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.W_vs_Y.coeff.resize(trace.W_vs_Y.deg+1);
       trace.X_vs_Y.deg   = SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE; trace.X_vs_Y.coeff.resize(trace.X_vs_Y.deg+1);
       
       // fit traces using these data
-      trace.X_vs_lW.Fit(lw,x,NULL,true); // auto sets range
-      trace.Y_vs_lW.Fit(lw,y,NULL,true); // auto sets range
-      trace.lW_vs_Y.Fit(y,lw,NULL,true); // auto sets range
+      trace.X_vs_W.Fit(w,x,NULL,true); // auto sets range
+      trace.Y_vs_W.Fit(w,y,NULL,true); // auto sets range
+      trace.W_vs_Y.Fit(y,w,NULL,true); // auto sets range
       trace.X_vs_Y.Fit(y,x,NULL,true); // auto sets range
       
       // ok

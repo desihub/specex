@@ -26,10 +26,10 @@ namespace specex {
   public :
     
     int fiber; // this trace is for this fiber
-    Legendre1DPol X_vs_lW; // maps x ccd coordinate as a function of log10(wavelength)
-    Legendre1DPol Y_vs_lW; // maps y ccd coordinate as a function of log10(wavelength)
+    Legendre1DPol X_vs_W; // maps x ccd coordinate as a function of wavelength
+    Legendre1DPol Y_vs_W; // maps y ccd coordinate as a function of wavelength
     
-    Legendre1DPol lW_vs_Y; // as saved is SDSS fits file
+    Legendre1DPol W_vs_Y; // as saved is SDSS fits file
     Legendre1DPol X_vs_Y; // as saved is SDSS fits file
     
     // example in /clusterfs/riemann/raid006/bosswork/boss/spectro/redux/current/4097/spArc-r1-00121688.fits.gz[2]
@@ -54,9 +54,9 @@ namespace specex {
     template < class Archive >
       void serialize ( Archive & ar, const unsigned int version ) {
       ar & BOOST_SERIALIZATION_NVP(fiber);
-      ar & BOOST_SERIALIZATION_NVP(X_vs_lW);
-      ar & BOOST_SERIALIZATION_NVP(Y_vs_lW);
-      ar & BOOST_SERIALIZATION_NVP(lW_vs_Y);
+      ar & BOOST_SERIALIZATION_NVP(X_vs_W);
+      ar & BOOST_SERIALIZATION_NVP(Y_vs_W);
+      ar & BOOST_SERIALIZATION_NVP(W_vs_Y);
       ar & BOOST_SERIALIZATION_NVP(X_vs_Y);
       ar & BOOST_SERIALIZATION_NVP(yjumplo);
       ar & BOOST_SERIALIZATION_NVP(yjumphi);

@@ -19,7 +19,7 @@ vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot_p> &spot
       for(size_t a=0;a<spotarrays.size();a++) {
 	specex::SpotArray& testarray=spotarrays[a];
 	if(spot->fiber_bundle == testarray.fiber_bundle &&
-	   fabs(pow(10,spot->log10_wavelength) - pow(10,testarray.log10_wavelength))<1) {
+	   fabs(spot->wavelength - testarray.wavelength)<1) {
 	  spotarray = &testarray;
 	  break;
 	}
@@ -27,7 +27,7 @@ vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot_p> &spot
       if(!spotarray) {
 	specex::SpotArray newarray;
 	newarray.fiber_bundle = spot->fiber_bundle;
-	newarray.log10_wavelength = spot->log10_wavelength;
+	newarray.wavelength = spot->wavelength;
 	spotarrays.push_back(newarray);
 	spotarray=&(spotarrays[spotarrays.size()-1]);
       }
@@ -41,11 +41,11 @@ vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot_p> &spot
 vector<specex::SpotArray> specex::isolated_spot_arrays(  vector<specex::SpotArray>& other, const double& delta_lambda) {
   vector<specex::SpotArray> iarray;
   for(size_t a1=0;a1<other.size();a1++) {
-    const double& w1=pow(10,other[a1].log10_wavelength);
+    const double& w1=other[a1].wavelength;
     bool ok=true;
     for(size_t a2=0;a2<other.size();a2++) {
       if(a1!=a2) {
-	const double& w2=pow(10,other[a2].log10_wavelength);
+	const double& w2=other[a2].wavelength;
 	if(fabs(w1-w2)<delta_lambda) {
 	  ok = false;
 	  break;

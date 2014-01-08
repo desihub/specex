@@ -9,10 +9,10 @@
 namespace specex {
   class SpotArray : public std::vector<Spot_p> {
   public :
-    double log10_wavelength;
+    double wavelength;
     int fiber_bundle;
     SpotArray() {
-      log10_wavelength=0;
+      wavelength=0;
       fiber_bundle=-1;
     }
   };

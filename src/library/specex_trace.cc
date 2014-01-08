@@ -34,49 +34,49 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   
    
   if(set_xy_range) {
-    X_vs_lW.xmin = 1e20;
-    X_vs_lW.xmax = -1e20;
-    Y_vs_lW.xmin = 1e20;
-    Y_vs_lW.xmax = -1e20;
+    X_vs_W.xmin = 1e20;
+    X_vs_W.xmax = -1e20;
+    Y_vs_W.xmin = 1e20;
+    Y_vs_W.xmax = -1e20;
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
       if(spot.fiber != fiber) 
 	continue;
-      if(spot.log10_wavelength<X_vs_lW.xmin) X_vs_lW.xmin=spot.log10_wavelength;
-      if(spot.log10_wavelength>X_vs_lW.xmax) X_vs_lW.xmax=spot.log10_wavelength;
-      if(spot.log10_wavelength<Y_vs_lW.xmin) Y_vs_lW.xmin=spot.log10_wavelength;
-      if(spot.log10_wavelength>Y_vs_lW.xmax) Y_vs_lW.xmax=spot.log10_wavelength;
+      if(spot.wavelength<X_vs_W.xmin) X_vs_W.xmin=spot.wavelength;
+      if(spot.wavelength>X_vs_W.xmax) X_vs_W.xmax=spot.wavelength;
+      if(spot.wavelength<Y_vs_W.xmin) Y_vs_W.xmin=spot.wavelength;
+      if(spot.wavelength>Y_vs_W.xmax) Y_vs_W.xmax=spot.wavelength;
     }
   }
-  if(X_vs_lW.xmax == X_vs_lW.xmin) X_vs_lW.xmax = X_vs_lW.xmin + 0.1;
-  if(Y_vs_lW.xmax == Y_vs_lW.xmin) Y_vs_lW.xmax = Y_vs_lW.xmin + 0.1;
+  if(X_vs_W.xmax == X_vs_W.xmin) X_vs_W.xmax = X_vs_W.xmin + 0.1;
+  if(Y_vs_W.xmax == Y_vs_W.xmin) Y_vs_W.xmax = Y_vs_W.xmin + 0.1;
   
 
   SPECEX_INFO("number of spots for fiber " << fiber << " = " << nspots);
   
   if(nspots==0) SPECEX_ERROR("specex::Trace::Fit : no spots");
   
-  X_vs_lW.deg = min(SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE,nspots-1);
-  Y_vs_lW.deg = min(SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE,nspots-1);
+  X_vs_W.deg = min(SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE,nspots-1);
+  Y_vs_W.deg = min(SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE,nspots-1);
 
   //#warning only deg2 trace fit for debug 
-  //Y_vs_lW.deg = min(2,nspots-1);
+  //Y_vs_W.deg = min(2,nspots-1);
    
   
 
-  if(nspots<max(X_vs_lW.deg+1,Y_vs_lW.deg+1)) {
-    SPECEX_ERROR("specex::Trace::Fit only " << nspots << " spots to fit " << X_vs_lW.deg 
-		 << " and " << Y_vs_lW.deg << " degree polynomials");
+  if(nspots<max(X_vs_W.deg+1,Y_vs_W.deg+1)) {
+    SPECEX_ERROR("specex::Trace::Fit only " << nspots << " spots to fit " << X_vs_W.deg 
+		 << " and " << Y_vs_W.deg << " degree polynomials");
   }
   
 
-  X_vs_lW.coeff.resize(X_vs_lW.deg+1);
-  Y_vs_lW.coeff.resize(Y_vs_lW.deg+1);
+  X_vs_W.coeff.resize(X_vs_W.deg+1);
+  Y_vs_W.coeff.resize(Y_vs_W.deg+1);
   
   
   // fit x
   {
-    int npar = X_vs_lW.coeff.size();
+    int npar = X_vs_W.coeff.size();
     
     harp::matrix_double A(npar,npar); A*=0;
     harp::vector_double B(npar); B*=0;
@@ -85,14 +85,9 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
       const specex::Spot &spot = *(spots[s]);
       if(spot.fiber != fiber) 
 	continue;
-      double xvar=1; // equivalent to 1 pix error
-      if(0 && spot.fxy_CovMat.size1()==3) {
-	xvar = spot.fxy_CovMat(1,1);
-	if(xvar<1.e-2) xvar=1.e-2;
-      }
-      double w=1./xvar;
+      double w=1;
       double res=spot.xc;
-      harp::vector_double h=X_vs_lW.Monomials(spot.log10_wavelength);
+      harp::vector_double h=X_vs_W.Monomials(spot.wavelength);
       
       
       specex::syr(w,h,A);  // A += w*Mat(h)*h.transposed();
@@ -100,37 +95,32 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
     }
     int status = cholesky_solve(A,B);
     if(status != 0) {
-      SPECEX_ERROR("failed to fit X vs log10_wavelength");
+      SPECEX_ERROR("failed to fit X vs wavelength");
     }
-    X_vs_lW.coeff=B;
+    X_vs_W.coeff=B;
   }
 
   // fit y
   {
-    int npar = Y_vs_lW.coeff.size();
+    int npar = Y_vs_W.coeff.size();
     harp::matrix_double A(npar,npar); A*=0;
     harp::vector_double B(npar); B*= 0;
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
       if(spot.fiber != fiber) 
 	continue;
-      double yvar=1; // equivalent to 1 pix error
-      if(0 && spot.fxy_CovMat.size1()==3) {
-	yvar = spot.fxy_CovMat(2,2);
-	if(yvar<1.e-2) yvar=1.e-2;
-      }
-      double w=1./yvar;
+      double w=1;
       double res=spot.yc;
-      harp::vector_double h=Y_vs_lW.Monomials(spot.log10_wavelength);
+      harp::vector_double h=Y_vs_W.Monomials(spot.wavelength);
       
       specex::syr(w,h,A);  // A += w*Mat(h)*h.transposed();
       specex::axpy(w*res,h,B); // B += (w*res)*h;
     }
     int status = cholesky_solve(A,B);
     if(status != 0) {
-      SPECEX_ERROR("failed to fit Y vs log10_wavelength");
+      SPECEX_ERROR("failed to fit Y vs wavelength");
     }
-    Y_vs_lW.coeff=B;
+    Y_vs_W.coeff=B;
   }
 
   // monitoring results
@@ -146,19 +136,11 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
     const specex::Spot &spot = *(spots[s]);
     if(spot.fiber != fiber) 
       continue;
-    double xvar=1; // equivalent to 1 pix error
-    double yvar=1; // equivalent to 1 pix error
-    if(spot.fxy_CovMat.size1()==3) {
-      xvar = spot.fxy_CovMat(1,1);
-      if(xvar<1.e-2) xvar=1.e-2;
-      yvar = spot.fxy_CovMat(2,2);
-      if(yvar<1.e-2) yvar=1.e-2;
-    }
-    double xw=1./xvar;
-    double yw=1./xvar;
+    double xw=1;
+    double yw=1;
 
-    double xres=spot.xc-X_vs_lW.Value(spot.log10_wavelength);
-    double yres=spot.yc-Y_vs_lW.Value(spot.log10_wavelength);
+    double xres=spot.xc-X_vs_W.Value(spot.wavelength);
+    double yres=spot.yc-Y_vs_W.Value(spot.wavelength);
     
     
     x_sumw += xw;
@@ -175,7 +157,7 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   
   SPECEX_INFO(
     "specex::Trace::Fit fiber trace #" << fiber
-    << " nspots=" << nspots << " xdeg=" << X_vs_lW.deg << " ydeg=" << Y_vs_lW.deg
+    << " nspots=" << nspots << " xdeg=" << X_vs_W.deg << " ydeg=" << Y_vs_W.deg
     << " dx=" << x_mean << " xrms=" << x_rms
     << " dy=" << y_mean << " yrms=" << y_rms
     );
@@ -186,8 +168,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
       specex::Spot& spot = *(spots[s]);
       if(spot.fiber != fiber) 
 	continue;
-      spot.xc=X_vs_lW.Value(spot.log10_wavelength);
-      spot.yc=Y_vs_lW.Value(spot.log10_wavelength);
+      spot.xc=X_vs_W.Value(spot.wavelength);
+      spot.yc=Y_vs_W.Value(spot.wavelength);
       
     }
     
@@ -202,8 +184,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
 void specex::Trace::write(ostream &os) const {
   os << "Beginspecex::Trace" << endl;
   os << fiber << endl;
-  X_vs_lW.write(os);
-  Y_vs_lW.write(os);
+  X_vs_W.write(os);
+  Y_vs_W.write(os);
   os << "Endspecex::Trace" << endl;
 }
 
@@ -217,8 +199,8 @@ bool specex::Trace::read(istream& is) {
   if(! (label=="Beginspecex::Trace")) ERROR_MESSAGE;
 
   if(! (is >> fiber)) ERROR_MESSAGE;
-  if(! X_vs_lW.read(is)) ERROR_MESSAGE;
-  if(! Y_vs_lW.read(is)) ERROR_MESSAGE;
+  if(! X_vs_W.read(is)) ERROR_MESSAGE;
+  if(! Y_vs_W.read(is)) ERROR_MESSAGE;
   
   if(! (is >> label)) ERROR_MESSAGE;
   if(! (label=="Endspecex::Trace")) ERROR_MESSAGE;
@@ -314,10 +296,10 @@ bool specex::TraceSet::ReadSDSS_SingleSet_Fits(const string& filename, int hdu_n
     
     Legendre1DPol* pol = 0;
     switch(ttype) {
-    case WY : pol = &trace.lW_vs_Y; break;
+    case WY : pol = &trace.W_vs_Y; break;
     case XY : pol = &trace.X_vs_Y; break;
-    case YW : pol = &trace.Y_vs_lW; break;
-    case XW : pol = &trace.X_vs_lW; break;
+    case YW : pol = &trace.Y_vs_W; break;
+    case XW : pol = &trace.X_vs_W; break;
     default : {cout << "unknown TraceSetType " << ttype << endl; return false;};
     }
     
@@ -354,11 +336,11 @@ bool specex::TraceSet::ReadSDSS_FullSet_Fits(const string& wave_vs_y_filename, i
   for(int fiber=0;fiber<size();fiber++) {
     
     specex::Trace& trace = (*this)[fiber];
-    // first need to invert lW_vs_Y
-    trace.Y_vs_lW = trace.lW_vs_Y.Invert(2); 
+    // first need to invert W_vs_Y
+    trace.Y_vs_W = trace.W_vs_Y.Invert(2); 
     
     // now compose
-    trace.X_vs_lW = composed_pol(trace.X_vs_Y,trace.Y_vs_lW);   
+    trace.X_vs_W = composed_pol(trace.X_vs_Y,trace.Y_vs_W);   
   }
   cout << "INFO specex::TraceSet::ReadSDSS_FullSet_Fits done" << endl;
   return true;
