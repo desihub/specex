@@ -141,14 +141,14 @@ int main ( int argc, char *argv[] ) {
       stamp.begin_j = max(0,stamp.begin_j);
       stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
 
-      harp::vector_double params = psf->FixedCoordParams(spot->xc,spot->yc,spot->fiber_bundle);
+      harp::vector_double params = psf->FixedCoordParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
             
       for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  
 	for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
 
 	  if(weight(i,j)<=0) continue;
 
-	  double val =  spot->flux*psf->PSFValueWithParams(spot->xc,spot->yc, i, j, params, 0, 0);
+	  double val =  spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
 	  model(i,j) += val;
 	  data_in_stamp(i,j) = image(i,j);
 	  variance(i,j) += square(readout_noise) + square(psf_error*val);

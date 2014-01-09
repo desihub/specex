@@ -44,7 +44,11 @@ namespace specex {
 
   public :
     
+    // those are polynomials of x_cdd and lambda to allow continuous variation in CCD and at the same time
+    // and easy projection per fiber for subsequent use
+    
     std::vector<Legendre2DPol> Polynomials;
+    
     int bundle_id;
     int fiber_min; // first fiber this set of params applies to
     int fiber_max; // last fiber this set of params applies to
@@ -75,7 +79,21 @@ namespace specex {
     harp::vector_double TmpParamDer;
     std::string name;
 
+    std::map<int,Legendre1DPol*> XPol; // Legendre1DPol X_vs_W of fibers, data are in FiberTraces
+    std::map<int,Legendre1DPol*> YPol; // Legendre1DPol X_vs_W of fibers, data are in FiberTraces
+    
+    
   public :
+
+    std::map<int,Trace> FiberTraces; // fiber traces, one independent trace per fiber
+
+    const Trace& GetTrace(int fiber) const;
+    Trace& GetTrace(int fiber);
+    void AddTrace(int fiber);
+    void LoadXYPol();
+    double Xccd(int fiber, const double& wave) const;
+    double Yccd(int fiber, const double& wave) const;
+    
 
     long long int arc_exposure_id;
     long long int mjd;
@@ -97,7 +115,7 @@ namespace specex {
     virtual size_t NPar() const {return 0;};
     
     //! integrates PSF and requested derivatives over the pixel that contains XPix and YPix (pixel limits are at integer values + 1/2)
-    double PixValue(const double &Xc, const double &Yc,
+    virtual double PixValue(const double &Xc, const double &Yc,
 		    const double &XPix, const double &YPix,
 		    const harp::vector_double &Params,
 		    harp::vector_double *PosDer = 0,
@@ -153,8 +171,7 @@ namespace specex {
   
     //#warning NEED TO IMPLEMENT JUMPS IN WAVELENGTH SOLUTION, AND NEED TO SAVE IN FITS
   
-    //! fiber traces, one independent trace per fiber
-    std::map<int,Trace> FiberTraces;
+    
     
     int FixedCoordNPar() const; // set of parameters needed to describe psf at fixed ccd position
     int VaryingCoordNPar(int bundle_id) const; // set of parameters needed to describe psf varying with xy ccd coordinates
@@ -172,19 +189,33 @@ namespace specex {
 		     int &BeginJ, int &EndJ) const;
     
     //! Access to the current PSF, with user provided Params.
-    double PSFValueWithParams(const double &Xc, const double &Yc, 
-			      const int IPix, const int JPix,
-			      const harp::vector_double &Params,
-			      harp::vector_double *PosDer, harp::vector_double *ParamDer) const;
+    
+    // this is the fastest (no conversion fiber,wave -> x,y)
+    double PSFValueWithParamsXY(const double& X, const double &Y, 
+				const int IPix, const int JPix,
+				const harp::vector_double &Params,
+				harp::vector_double *PosDer, harp::vector_double *ParamDer) const;
+    
+    double PSFValueWithParamsFW(const int fiber, const double &wave, 
+				const int IPix, const int JPix,
+				const harp::vector_double &Params,
+				harp::vector_double *PosDer, harp::vector_double *ParamDer) const;
+    
+    
 
     //! Access to the current PSF pixels.
-    double PSFValue(const double &Xc, const double &Yc, 
+    double PSFValueFW(const int fiber, const double &wave, 
 		    const int IPix, const int JPix, int bundle_id,
 		    harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0) const;
     
+    
+
+    
     //! Access to current analytical PSF params (which may depend on position in the frame).
-    harp::vector_double FixedCoordParams(const double &X, const double &Y, int bundle_id) const;
-    harp::vector_double FixedCoordParams(const double &X, const double &Y, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double FixedCoordParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    harp::vector_double FixedCoordParamsXW(const double& x, const double &wave, int bundle_id) const;
+    harp::vector_double FixedCoordParamsFW(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double FixedCoordParamsXW(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
     
     //! I/O for interface with specter
     virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};

@@ -14,7 +14,7 @@ namespace specex {
   void read_psf_xml(specex::PSF_p& psf, const std::string& filename);
 
   void write_psf_xml(const specex::PSF_p psf, const std::string& filename);
-  void write_psf_fits_image(const specex::PSF_p psf, const string& filename, const double& x_coord_ccd, const double& y_coord_ccd, int bundle, int oversampling=1);
+  void write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int bundle, int oversampling=1);
   
   
   

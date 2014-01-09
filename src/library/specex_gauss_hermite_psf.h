@@ -63,8 +63,14 @@ namespace specex {
 
     void WriteFits(fitsfile* fp, int first_hdu=1) const;
     void ReadFits(fitsfile* fp, int first_hdu=1);
+    
+
 
   private :
+
+    void WriteFits_v0(fitsfile* fp, int first_hdu=1) const;
+    void ReadFits_v0(fitsfile* fp, int first_hdu=1);
+    
 
     void ResizeBuffer();
 

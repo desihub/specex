@@ -20,7 +20,7 @@ namespace specex {
   public :
     
     
-    double x,y,flux;
+    double x,y,wavelength,flux;
     
     harp::vector_double trace_x_monomials;
     harp::vector_double trace_y_monomials;

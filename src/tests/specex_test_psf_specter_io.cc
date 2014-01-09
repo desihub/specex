@@ -16,7 +16,6 @@ using namespace std;
 
 int main() {
   
-  
 
   specex_set_verbose(true);
   
@@ -131,12 +130,12 @@ int main() {
 	
 	// to go faster, pre-compute PSF parameters
 	
-	harp::vector_double psf_params = psf->FixedCoordParams(x_ccd,y_ccd,bundle_id);
+	harp::vector_double psf_params = psf->FixedCoordParamsXW(x_ccd,wave,bundle_id);
 	
 	// loop on pixels of PSF footprint
 	for(int j=y_begin;j<y_end;++j)
 	  for(int i=x_begin;i<x_end;++i)
-	    img(i,j) += psf->PSFValueWithParams(x_ccd,y_ccd,i,j,psf_params,0,0);
+	    img(i,j) += psf->PSFValueWithParamsXY(x_ccd,y_ccd,i,j,psf_params,0,0);
 	
       } // end of loop on wavelength
     } // end of loop on fibers

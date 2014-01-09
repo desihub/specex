@@ -57,50 +57,6 @@ double specex::Legendre1DPol::Value(const double &x) const {
   return specex::dot(coeff,Monomials(x));
 }
 
-/*
-void specex::Legendre1DPol::write(std::ostream &os) const {
-  os << "BeginLegendre1DPol" << endl;
-  os << deg << " " << xmin << " " << xmax << endl;
-  coeff.writeASCII(os);
-  os << "EndLegendre1DPol" << endl;
-  
-}
-#define ERROR_MESSAGE {cout << "ERROR Legendre1DPol::read failed" << endl; abort();}
-
-bool specex::Legendre1DPol::read(std::istream &is) {
-  string label;
-  if(! (is >> label)) ERROR_MESSAGE;
-  if(! (label=="BeginLegendre1DPol")) ERROR_MESSAGE;
-
-  if(! (is >> deg >> xmin >> xmax)) ERROR_MESSAGE;
-  if(coeff.readASCII(is)!=0) ERROR_MESSAGE;
-  
-  if(int(coeff.size()) != (deg+1)) {
-    cout << "ERROR Legendre1DPol::read, coef size doesn't match degree" << endl;
-    ERROR_MESSAGE;
-  }
-  
-  if(! (is >> label)) ERROR_MESSAGE;
-  if(! (label=="EndLegendre1DPol")) ERROR_MESSAGE;
-  
-  return true;
-}
-#undef ERROR_MESSAGE
-
-void specex::Legendre1DPol::write(const std::string &FileName) const {
-  ofstream os(FileName.c_str());
-  write(os);
-  os.close();
-}
-
-bool specex::Legendre1DPol::read(const std::string &FileName) {
-  ifstream is(FileName.c_str());
-  bool ok = read(is);
-  is.close();
-  return ok;
-}
-*/
-
 bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector_double& Y, const harp::vector_double* Yerr, bool set_range) {
    // fit x
   
@@ -134,11 +90,21 @@ bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector
   int status = cholesky_solve(A,B);
   if(status != 0) {
     //write_new_fits_image("A.fits",As);
-    SPECEX_ERROR("Legendre1DPol::Fit cholesky_solve failed with status " << status);
+    
+    if(0) {
+      for(int i=0;i<ndata;i++) {
+	double w=1;
+	if(Yerr) {
+	  w=1./square((*Yerr)[i]);
+	}
+	cout << i << " " << X[i] << " " << Y[i] << " " << w << endl;
+      }
+    }
+    SPECEX_ERROR("Legendre1DPol::Fit cholesky_solve failed with status " << status << " deg= " << deg << " xmin=" << xmin << " xmax=" << xmax);
   }  
   coeff=B;
   
-  //SPECEX_INFO("successful Legendre1DPol::Fit");
+  SPECEX_INFO("successful Legendre1DPol::Fit");
 
   return true;
 }

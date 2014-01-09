@@ -38,6 +38,8 @@ friend class boost::serialization::access;
     }
 
 };
+BOOST_SERIALIZATION_SHARED_PTR(Legendre1DPol)
+typedef boost::shared_ptr < specex::Legendre1DPol > Legendre1DPol_p;
   
 Legendre1DPol composed_pol(const Legendre1DPol& pol1, const Legendre1DPol& pol2);
  
@@ -73,6 +75,9 @@ class Legendre2DPol
     }
 
 };
+BOOST_SERIALIZATION_SHARED_PTR(Legendre2DPol)
+typedef boost::shared_ptr < specex::Legendre2DPol > Legendre2DPol_p;
+
 }
   
 #endif /* SPECEX_LEGENDRE__H */

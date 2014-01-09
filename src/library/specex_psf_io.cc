@@ -12,9 +12,12 @@
 
 // also need #included <specex_serialisation.h>  before main() 
 
-void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const double& x, const double& y, int bundle, int oversampling) {
+void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int bundle, int oversampling) {
   
-  harp::vector_double P=psf->FixedCoordParams(x,y,bundle);
+  double x=psf->Xccd(fiber,wavelength);
+  double y=psf->Yccd(fiber,wavelength);
+  
+  harp::vector_double P=psf->FixedCoordParamsFW(fiber,wavelength,bundle);
   
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;
@@ -30,7 +33,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       double dx = (i-nx/2)/double(oversampling)-ib;
       double dy = (j-ny/2)/double(oversampling)-jb;
       
-      img(i,j)=psf->PSFValueWithParams(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
+      img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
     }
   }
   specex::write_new_fits_image(filename,img);

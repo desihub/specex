@@ -402,19 +402,54 @@ harp::vector_double specex::GaussHermitePSF::DefaultParams() const
 
   return Params;
 }
-/*
-  Fits format
-  
 
 
-*/
+
+/////////////////////////////////////////////
+//////////////  Fits format IO //////////////
+/////////////////////////////////////////////
+
+
+
 
 #include <specex_image_data.h>
 
 void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
+  WriteFits_v0(fp,first_hdu);
+}
+
+void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
+  
+  int status = 0;  
+  fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
+  
+  {
+    string psf_type;
+    harp::fits::key_read (fp,"PSFTYPE", psf_type);
+    if(psf_type != "GAUSS-HERMITE") SPECEX_ERROR("PSF in file is not 'GAUSS-HERMITE' but '" << psf_type << "'");
+  }
+  
+  string psf_version;
+  harp::fits::key_read (fp,"PSFVER", psf_version);
+  
+  if(psf_version=="0")
+    ReadFits_v0(fp,first_hdu);
+  else 
+    SPECEX_ERROR("Cannot read GAUSS-HERMITE PSF format version '" << psf_version << "' only version '0' is implemented so far");
+  
+}
+
+
+
+/////////////////////////////////////////////
+///////////// IO VERSION 0 //////////////////
+/////////////////////////////////////////////
+
+
+void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
   
   ////////////////////////////
-  string PSFVER = "2";
+  string PSFVER = "0";
   ////////////////////////////
   
   int NPIX_X = ccd_image_n_cols;
@@ -592,14 +627,14 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
     naxes[2] = GHDEGX+1;
     naxes[3] = GHDEGY+1;
     
-    long fpixels[4];
-    fpixels[0] = 1;
-    fpixels[1] = 1;
-    fpixels[2] = 1;
-    fpixels[3] = 1;
+    long fpixel[4];
+    fpixel[0] = 1;
+    fpixel[1] = 1;
+    fpixel[2] = 1;
+    fpixel[3] = 1;
     
     fits_create_img ( fp, harp::fits::ftype< double >::bitpix(), 4, naxes, &status ); harp::fits::check ( status );
-    fits_write_pix ( fp, harp::fits::ftype< double >::datatype(), fpixels, ncoefs, buffer , &status ); harp::fits::check ( status );
+    fits_write_pix ( fp, harp::fits::ftype< double >::datatype(), fpixel, ncoefs, buffer , &status ); harp::fits::check ( status );
     harp::fits::key_write(fp,"FIBERMIN",(long long int)FIBERMIN,"First fiber for which this PSF is valid");
     harp::fits::key_write(fp,"FIBERMAX",(long long int)FIBERMAX,"Last fiber for which this PSF is valid");
     
@@ -630,32 +665,15 @@ void specex::GaussHermitePSF::WriteFits(fitsfile* fp, int first_hdu) const {
   } // end of loop on fiber bundles
 }
 
-void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
+void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
 
-  SPECEX_INFO("starting reading GaussHermitePSF"); 
-
-  int status = 0;  
-  fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
-  
-  // read 
-  { 
-    string psf_type;
-    harp::fits::key_read (fp,"PSFTYPE", psf_type);
-    if(psf_type != "GAUSS-HERMITE") SPECEX_ERROR("PSF in file is not 'GAUSS-HERMITE' but '" << psf_type << "'");
-  }
-  { 
-    string psf_version;
-    harp::fits::key_read (fp,"PSFVER", psf_version);
-    if(psf_version != "2") SPECEX_ERROR("Cannot read GAUSS-HERMITE PSF format version '" << psf_version << "' only version '2' is implemented so far");
-  }
-  
-  
-  
+  SPECEX_INFO("starting reading GaussHermitePSF v0"); 
+  SPECEX_WARNING("this routine specex::GaussHermitePSF::ReadFits_v0 has a bug somewhere"); 
+    
   harp::fits::key_read(fp,"MJD",mjd);
   harp::fits::key_read(fp,"PLATEID",plate_id);
   harp::fits::key_read(fp,"CAMERA",camera_id); 
   harp::fits::key_read(fp,"ARCEXP",arc_exposure_id);
-
   
   long long int NPIX_X;
   long long int NPIX_Y;
@@ -732,13 +750,24 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
 
   // loop on bundles
   for(int bundle_id = bundle_min; bundle_id <= bundle_max; bundle_id ++) {
+    
+    SPECEX_INFO("Reading bundle " << bundle_id);
 
     // change HDU
     {
       int status = 0;
       fits_movrel_hdu ( fp, 1, NULL, &status ); harp::fits::check ( status );
     }
-
+    
+    {
+      int naxis; 
+      int status;
+      fits_get_img_dim ( fp, &naxis, &status ); 
+      cout << "fits status = " << status << endl; 
+      harp::fits::check ( status ); 
+      cout << "naxis = " << naxis << endl;
+    }
+    
     long long int FIBERMIN;
     long long int FIBERMAX; 
     long long int HSIZEX;
@@ -753,7 +782,7 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
     long long int LXMAX;
     long long int LYMIN;
     long long int LYMAX;
-    string extname;
+    //string extname;
 
     harp::fits::key_read(fp,"FIBERMIN",FIBERMIN);
     harp::fits::key_read(fp,"FIBERMAX",FIBERMAX);   
@@ -769,8 +798,10 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
     harp::fits::key_read(fp,"LXMAX",LXMAX);
     harp::fits::key_read(fp,"LYMIN",LYMIN);
     harp::fits::key_read(fp,"LYMAX",LYMAX);    
-    harp::fits::key_read(fp,"EXTNAME",extname);
+    //harp::fits::key_read(fp,"EXTNAME",extname);
     
+    
+
     if(bundle_id == bundle_min ) {
       // set global PSF properties
       hSizeX = HSIZEX;
@@ -797,24 +828,26 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
     }
     
     // and now read a 4 dimension fits image
+    /*
     long naxes[4];
     naxes[0] = LDEGX+1;
     naxes[1] = LDEGY+1;
     naxes[2] = GHDEGX+1;
     naxes[3] = GHDEGY+1;
+    */
+    long fpixel[4];
+    fpixel[0] = 1;
+    fpixel[1] = 1;
+    fpixel[2] = 1;
+    fpixel[3] = 1;
     
-    long fpixels[4];
-    fpixels[0] = 1;
-    fpixels[1] = 1;
-    fpixels[2] = 1;
-    fpixels[3] = 1;
     
     size_t ncoefs_gauss_hermite = (GHDEGX+1)*(GHDEGY+1);
     size_t ncoefs_legendre = (LDEGX+1)*(LDEGY+1);
     long ncoefs  = ncoefs_gauss_hermite*ncoefs_legendre;
     
     //fits_create_img ( fp, harp::fits::ftype< double >::bitpix(), 4, naxes, &status ); harp::fits::check ( status );
-    //fits_write_pix ( fp, harp::fits::ftype< double >::datatype(), fpixels, ncoefs, buffer , &status ); harp::fits::check ( status );
+    //fits_write_pix ( fp, harp::fits::ftype< double >::datatype(), fpixel, ncoefs, buffer , &status ); harp::fits::check ( status );
     // int ffgpv(fitsfile *fptr, int  datatype, LONGLONG firstelem, LONGLONG nelem,
     //   void *nulval, void *array, int *anynul, int  *status);
     double nullval = 0;
@@ -822,7 +855,15 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
     int status;
     double* buffer = new double[ncoefs];
     for(size_t i=0;i<ncoefs;i++) buffer[i]=0; // set to 0
-    fits_read_img(fp, harp::fits::ftype< double >::datatype(), 1, ncoefs, &nullval, buffer, &anynull, &status);
+    
+    cout << "here ncoefs = " << ncoefs << endl;
+    //if(naxis !=4 ) SPECEX_ERROR("Expect a 4D image and get naxis=" << naxis);
+    
+    
+    
+    
+     //fits_read_img(fp, harp::fits::ftype< double >::datatype(), 1, ncoefs, &nullval, buffer, &anynull, &status);
+    fits_read_pix(fp, harp::fits::ftype< double >::datatype(), fpixel, ncoefs, &nullval, buffer, &anynull, &status);
     harp::fits::check ( status );
 
     // fill psf here
@@ -836,6 +877,9 @@ void specex::GaussHermitePSF::ReadFits(fitsfile* fp, int first_hdu) {
     
     //  load traces
     for(int fiber_id = params_of_bundle.fiber_min ; fiber_id <= params_of_bundle.fiber_max ; fiber_id ++ ) {
+      
+      SPECEX_INFO("loading trace for fiber " << fiber_id);
+
       FiberTraces[fiber_id] = specex::Trace();
       specex::Trace& trace = FiberTraces[fiber_id];
       trace.fiber=fiber_id;

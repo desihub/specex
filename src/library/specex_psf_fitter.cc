@@ -95,15 +95,15 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
     }
     if(fit_position) {
       tmp.x = Params(tmp.x_parameter_index);
-      tmp.y = Params(tmp.x_parameter_index);
+      tmp.y = Params(tmp.y_parameter_index);
     }
     if(fit_psf) {
-      tmp.psf_params = psf->FixedCoordParams(tmp.x,tmp.y,bundle_id,Params);
+      tmp.psf_params = psf->FixedCoordParamsXW(tmp.x,tmp.wavelength,bundle_id,Params);
     }
     if(fit_psf && ( fit_trace || fit_position ) && compute_ab) { // need to update at each step monomials
       int index=0;
       for(int p=0;p<npar_fixed_coord;p++) {
-	harp::vector_double legendre_monomials_for_this_psf_parameter = (*psf_global_params)[p].Monomials(tmp.x,tmp.y);
+	harp::vector_double legendre_monomials_for_this_psf_parameter = (*psf_global_params)[p].Monomials(tmp.x,tmp.wavelength);
 	size_t m_size = legendre_monomials_for_this_psf_parameter.size();
 	ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size))=legendre_monomials_for_this_psf_parameter;
 	index += m_size;
@@ -168,7 +168,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
 	
 	nspots_in_pix++;
 	
-	double psfVal =  psf->PSFValueWithParams(tmp.x,tmp.y, i, j, tmp.psf_params, gradPos_pointer, gradPar_pointer);
+	double psfVal =  psf->PSFValueWithParamsXY(tmp.x,tmp.y, i, j, tmp.psf_params, gradPos_pointer, gradPar_pointer);
 	
 	if(psfVal==PSF_NAN_VALUE) SPECEX_ERROR("PSF value returns NAN");
 
@@ -339,14 +339,14 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       for(size_t s=0;s<spots.size();s++) {
 	specex::Spot_p& spot= spots[s];
 	if(spot->flux<=0) continue;
-	harp::vector_double psfParams = psf->FixedCoordParams(spot->xc,spot->yc,bundle_id);
+	harp::vector_double psfParams = psf->FixedCoordParamsXW(spot->xc,spot->wavelength,bundle_id);
 	
 	Stamp spot_stamp(image);
 	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
 	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
 	  for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
 	    if(weight(i,j)==0) continue; // no need to compute anything
-	    footprint_weight(i,j) += spot->flux*psf->PSFValueWithParams(spot->xc,spot->yc,i,j,psfParams,0,0);
+	    footprint_weight(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc,i,j,psfParams,0,0);
 	  }
 	}
       }
@@ -543,6 +543,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       tmp.flux = spot->flux;
       tmp.x    = spot->xc;
       tmp.y    = spot->yc;
+      tmp.wavelength    = spot->wavelength;
 
       // set parameters concerning spots
       if(fit_flux) {
@@ -563,9 +564,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       
       // psf parameters
       if(fit_psf) {
-	tmp.psf_params = psf->FixedCoordParams(tmp.x,tmp.y,bundle_id,Params);
+	tmp.psf_params = psf->FixedCoordParamsXW(tmp.x,tmp.wavelength,bundle_id,Params);
       }else{
-	tmp.psf_params = psf->FixedCoordParams(tmp.x,tmp.y,bundle_id);
+	tmp.psf_params = psf->FixedCoordParamsXW(tmp.x,tmp.wavelength,bundle_id);
       }
       
       // psf parameters legendre monomials
@@ -573,7 +574,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	tmp.psf_monomials.resize(npar_varying_coord);
 	int index=0;
 	for(int p=0;p<npar_fixed_coord;p++) {
-	  harp::vector_double legendre_monomials_for_this_psf_parameter = (*psf_global_params)[p].Monomials(tmp.x,tmp.y);
+	  harp::vector_double legendre_monomials_for_this_psf_parameter = (*psf_global_params)[p].Monomials(tmp.x,tmp.wavelength);
 	  size_t m_size = legendre_monomials_for_this_psf_parameter.size();
 	  ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size))=legendre_monomials_for_this_psf_parameter;
 	  index += m_size;
@@ -888,118 +889,6 @@ void specex::PSF_Fitter::SetPSFParams(const harp::vector_double &ParamsToSet) {
   }
 }
 
-/*
-bool specex::PSF_Fitter::InterpolateSpotPSFs(vector<specex::Spot_p>& spots, double *chi2_val, int *n_iterations) {
-  
-  double chi2_memory_slot;
-  double *chi2 = &chi2_memory_slot;
-  if(chi2_val) chi2 = chi2_val;
-  
-  int niter_memory_slot;
-  int *niter = &niter_memory_slot;
-  if(n_iterations) niter = n_iterations;
-  
-  int number_of_wavelength =  find_spot_arrays(spots).size();
-  int polynomial_degree_along_x_for_psf_tail = 0;
-  int polynomial_degree_along_y_for_psf_tail = min(polynomial_degree_along_y,2);
-  
-
-
-  // allocate psf polynomials
-  int npar = psf->FixedCoordNPar();
-
-  SPECEX_INFO("Number of PSF params at fixed coord = " << npar);
-
-  psf_global_params->clear();
-
-  int first_index_for_tail = npar;
-  if(psf->HasParam("YTailNorm")) first_index_for_tail = min(first_index_for_tail,psf->ParamIndex("YTailNorm"));
-  if(psf->HasParam("TailNorm")) first_index_for_tail = min(first_index_for_tail,psf->ParamIndex("TailNorm"));
-  
-  for(int p=0;p<npar;p++) {
-    if(p<first_index_for_tail)
-      psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x,0,image.Nx(),polynomial_degree_along_y,0,image.Ny()));
-    else
-      psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x_for_psf_tail,0,image.Nx(),polynomial_degree_along_y_for_psf_tail,0,image.Ny()));
-  }
-
-  
-  
-  int nparpsf = psf_global_params->size();
-  int npartot = 0;
-  for(int p=0;p<nparpsf;p++) {
-    const specex::Legendre2DPol &pol = (*psf_global_params)[p];
-    int nparpol = (pol.xdeg+1)*(pol.ydeg+1);
-    npartot += nparpol;
-  }
-
-  if( int(spots.size())<npartot/nparpsf ) {
-    cout << "WARNING specex::PSF_Fitter::InterpolateSpotPSFs cannot fit because not enough spots" << endl;
-    return false;
-  }
-
-  harp::matrix_double A(npartot,npartot); A*=0;
-  harp::vector_double B(npartot); B*=0;
-  
-  // dpsfdcoef = dpsf/dpar * dpar/dcoef
-
-  //harp::matrix_double W(nparpsf,nparpsf); W*= 0;
-  //for(int i=0;i<nparpsf;i++)
-  //W(i,i)=1;
-  
-  harp::matrix_double H(nparpsf,npartot);
-  
-  for(size_t s=0;s<spots.size();s++) {
-    const specex::Spot_p& spot = spots[s];
-    
-    // filling the matrix of derivatives
-    H *= 0;
-    int index=0;
-    for(int p=0;p<nparpsf;p++) {
-      const specex::Legendre2DPol &pol = (*psf_global_params)[p];
-      harp::vector_double m=pol.Monomials(spot->xc,spot->yc);
-      for(size_t k=0;k<m.size();k++,index++)
-	H(p,index)=m[k];
-    }
-    
-
-    specex::syrk(1,ublas::trans(H),1,A); // faster than  specex::gemm(1,ublas::trans(H),H,1,A); // = A += HHt
-    specex::gemv(1,ublas::trans(H),spot->PSFParams,1,B);    
-    
-    
-    //if(int(s)%100==0 && s>0) cout << "processed " << s << " spots" << endl;
-  }
-
-  
-  
-  // actually solve
-  //harp::matrix_double As=A;
-  int status = cholesky_solve(A,B);
-  if(status) {
-    //write_new_fits_image("A.fits",As);
-    SPECEX_ERROR("cholesky_solve failed in specex::PSF_Fitter::InterpolateSpotPSFs with status = " << status);
-  }
-  // push result into PSF
-  {
-    int index=0;
-    for(int p=0;p<nparpsf;p++) {
-      specex::Legendre2DPol &pol = (*psf_global_params)[p];
-      for(size_t k=0;k<pol.coeff.size();k++,index++)
-	pol.coeff(k)=B(index);
-    }
-  }
-  
-  // add psf parameters to spots
-  for(size_t s=0;s<spots.size();s++) {
-    specex::Spot_p& spot = spots[s];
-    spot->PSFParams = psf->FixedCoordParams(spot->xc,spot->yc,bundle_id);
-  }
-  
-  cout << "INFO specex::PSF_Fitter::InterpolateSpotPSFs successful" << endl;
-  
-  return true;
-}
-*/
 
 
 bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_fitted) {

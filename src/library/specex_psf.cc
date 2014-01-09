@@ -141,26 +141,91 @@ void specex::PSF::StampLimits(const double &X, const double &Y,
   EndJ = jPix+hSizeY+1; 
 }
 
+const specex::Trace& specex::PSF::GetTrace(int fiber) const {
+  std::map<int,specex::Trace>::const_iterator it = FiberTraces.find(fiber);
+  if(it == FiberTraces.end()) SPECEX_ERROR("No trace for fiber " << fiber);
+  return it->second;
+}
+
+specex::Trace& specex::PSF::GetTrace(int fiber)  {
+  std::map<int,specex::Trace>::iterator it = FiberTraces.find(fiber);
+  if(it == FiberTraces.end()) SPECEX_ERROR("No trace for fiber " << fiber);
+  return it->second;
+}
+
+void specex::PSF::AddTrace(int fiber) {
+  std::map<int,specex::Trace>::iterator it = FiberTraces.find(fiber);
+  if(it != FiberTraces.end()) {
+    SPECEX_WARNING("Trace for fiber " << fiber << " already exists");
+  }else{
+    FiberTraces[fiber]=specex::Trace();
+    LoadXYPol();
+  }
+}
+
+void specex::PSF::LoadXYPol() {
+  XPol.clear();
+  YPol.clear();
+  for(std::map<int,specex::Trace>::iterator it = FiberTraces.begin(); it != FiberTraces.end(); ++it) {
+    XPol[it->first] = &(it->second.X_vs_W);
+    YPol[it->first] = &(it->second.Y_vs_W);
+  }
+}
+
+double specex::PSF::Xccd(int fiber, const double& wave) const {
+  std::map<int,specex::Legendre1DPol*>::const_iterator it = XPol.find(fiber);
+  if(it==XPol.end()) {
+    const_cast<specex::PSF*>(this)->LoadXYPol();
+    it = XPol.find(fiber);
+    if(it == XPol.end()) SPECEX_ERROR("No trace for fiber " << fiber);
+  }
+  return it->second->Value(wave);
+}
+
+double specex::PSF::Yccd(int fiber, const double& wave) const {
+  std::map<int,specex::Legendre1DPol*>::const_iterator it = YPol.find(fiber);
+  if(it==YPol.end()) {
+    const_cast<specex::PSF*>(this)->LoadXYPol();
+    it = YPol.find(fiber);
+    if(it == YPol.end()) SPECEX_ERROR("No trace for fiber " << fiber);
+  }
+  return it->second->Value(wave);
+}  
+
+
 //! Access to the current PSF, with user provided Params.
-double specex::PSF::PSFValueWithParams(const double &Xc, const double &Yc, 
+double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc, 
 				     const int IPix, const int JPix,
 				     const harp::vector_double &Params,
 				     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
   
-  //if (PosDer)   PosDer->Zero();
-  //if (ParamDer) ParamDer->Zero();  
   return PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer);
 }
 
-//! Access to the current PSF pixels.
-double specex::PSF::PSFValue(const double &Xc, const double &Yc, 
-			     const int IPix, const int JPix, int bundle_id,
-			     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
-  return PSFValueWithParams(Xc,Yc,IPix,JPix,FixedCoordParams(Xc,Yc,bundle_id), PosDer, ParamDer);
+//! Access to the current PSF, with user provided Params.
+double specex::PSF::PSFValueWithParamsFW(const int fiber, const double &wave,
+				     const int IPix, const int JPix,
+				     const harp::vector_double &Params,
+				     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
+  
+  double X=Xccd(fiber,wave);
+  double Y=Yccd(fiber,wave);
+  return PixValue(X,Y,IPix, JPix, Params, PosDer, ParamDer);
+}
+
+//! Access to the current PSF 
+double specex::PSF::PSFValueFW(const int fiber, const double &wave,
+			       const int IPix, const int JPix, int bundle_id,
+			       harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
+  double X=Xccd(fiber,wave);
+  double Y=Yccd(fiber,wave);
+  return PSFValueWithParamsXY(X,Y,IPix,JPix,FixedCoordParamsXW(X,wave,bundle_id), PosDer, ParamDer);
 }
 
 
-harp::vector_double specex::PSF::FixedCoordParams(const double &X, const double &Y, int bundle_id) const {
+
+
+harp::vector_double specex::PSF::FixedCoordParamsXW(const double &X, const double &wave, int bundle_id) const {
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
@@ -168,11 +233,15 @@ harp::vector_double specex::PSF::FixedCoordParams(const double &X, const double 
   
   harp::vector_double params(P.size());
   for (size_t k =0; k < P.size(); ++k)
-    params(k) = P[k].Value(X,Y);
+    params(k) = P[k].Value(X,wave);
   return params;
 }
 
-harp::vector_double specex::PSF::FixedCoordParams(const double &X, const double &Y, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
+harp::vector_double specex::PSF::FixedCoordParamsFW(const int fiber, const double &wave, int bundle_id) const {
+  double X=Xccd(fiber,wave); 
+  return FixedCoordParamsXW(X,wave,bundle_id);
+}
+harp::vector_double specex::PSF::FixedCoordParamsXW(const double &X, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
@@ -185,12 +254,17 @@ harp::vector_double specex::PSF::FixedCoordParams(const double &X, const double 
   int index=0;
   for (size_t k =0; k < P.size(); ++k) {
     size_t c_size = P[k].coeff.size();
-    params(k)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),P[k].Monomials(X,Y));
+    params(k)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),P[k].Monomials(X,wave));
     index += c_size;
   }
   return params;
 }
   
+harp::vector_double specex::PSF::FixedCoordParamsFW(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
+  double X=Xccd(fiber,wave); 
+  return FixedCoordParamsXW(fiber,wave,bundle_id,ForThesePSFParams);
+}
+
 bool specex::PSF::IsLinear() const {
   if(Name() == "GAUSSHERMITE") return true;
   return false;
