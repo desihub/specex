@@ -152,7 +152,7 @@ int main ( int argc, char *argv[] ) {
       stamp.begin_j = max(0,stamp.begin_j);
       stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
 
-      harp::vector_double params = psf->FixedCoordParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+      harp::vector_double params = psf->LocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
             
       for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  
 	for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
@@ -181,8 +181,8 @@ int main ( int argc, char *argv[] ) {
 	ndata ++;
       }
     }
-    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeX << " lpar=" << psf->NPar() << " gnpar=" << psf->VaryingCoordNPar(spots[0]->fiber_bundle) << endl;
-    int npar = psf->VaryingCoordNPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
+    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeX << " lpar=" << psf->LocalNPar() << " gnpar=" << psf->BundleNPar(spots[0]->fiber_bundle) << endl;
+    int npar = psf->BundleNPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
     int ndf  = ndata-npar; 
     cout << "chi2/ndf = " << chi2/ndf << " ndf=" << ndf << " ndata=" << ndata << endl;
 

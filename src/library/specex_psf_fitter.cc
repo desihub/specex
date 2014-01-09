@@ -71,7 +71,7 @@ double compute_chi2_for_a_given_step(const double &current_step, BrentBox* bbox)
 
 int specex::PSF_Fitter::NPar(int nspots) const {
   int npar = 0; // fluxes
-  if(fit_psf) npar += psf->VaryingCoordNPar(bundle_id);
+  if(fit_psf) npar += psf->BundleNPar(bundle_id);
   if(fit_trace) npar += psf->TracesNPar();
   if(fit_flux) npar += nspots;
   if(fit_position) npar += 2*nspots;
@@ -98,7 +98,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
       tmp.y = Params(tmp.y_parameter_index);
     }
     if(fit_psf) {
-      tmp.psf_params = psf->FixedCoordParamsXW(tmp.x,tmp.wavelength,bundle_id,Params);
+      tmp.psf_params = psf->LocalParamsXW(tmp.x,tmp.wavelength,bundle_id,Params);
     }
     if(fit_psf && ( fit_trace || fit_position ) && compute_ab) { // need to update at each step monomials
       int index=0;
@@ -342,7 +342,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       for(size_t s=0;s<spots.size();s++) {
 	specex::Spot_p& spot= spots[s];
 	if(spot->flux<=0) continue;
-	harp::vector_double psfParams = psf->FixedCoordParamsXW(spot->xc,spot->wavelength,bundle_id);
+	harp::vector_double psfParams = psf->LocalParamsXW(spot->xc,spot->wavelength,bundle_id);
 	
 	Stamp spot_stamp(image);
 	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
@@ -455,12 +455,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   // ----------------------------------------------------
   
   int npar_psf = 0;
-  if(fit_psf) npar_psf = psf->VaryingCoordNPar(bundle_id);
+  if(fit_psf) npar_psf = psf->BundleNPar(bundle_id);
   int npar_trace = 0;
   if(fit_trace) npar_trace = psf->TracesNPar();
   
-  npar_fixed_coord = psf->FixedCoordNPar();
-  npar_varying_coord = psf->VaryingCoordNPar(bundle_id);
+  npar_fixed_coord = psf->LocalNPar();
+  npar_varying_coord = psf->BundleNPar(bundle_id);
   nparTot  = NPar(spots.size());
   
   SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots npar_fixed_coord   = " << npar_fixed_coord);
@@ -569,9 +569,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       
       // psf parameters
       if(fit_psf) {
-	tmp.psf_params = psf->FixedCoordParamsXW(tmp.x,tmp.wavelength,bundle_id,Params);
+	tmp.psf_params = psf->LocalParamsXW(tmp.x,tmp.wavelength,bundle_id,Params);
       }else{
-	tmp.psf_params = psf->FixedCoordParamsXW(tmp.x,tmp.wavelength,bundle_id);
+	tmp.psf_params = psf->LocalParamsXW(tmp.x,tmp.wavelength,bundle_id);
       }
       
       // psf parameters legendre monomials
@@ -853,7 +853,7 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
   spots.push_back(spot);
   
   
-  // int npar_psf = psf->FixedCoordNPar();
+  // int npar_psf = psf->LocalNPar();
   // psf_global_params->clear();
   // for(int p=0;p<npar_psf;p++) {
   //   psf_global_params->push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
@@ -1065,7 +1065,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       
       psf_global_params->clear();
 
-      int npar = psf->NPar();
+      int npar = psf->LocalNPar();
       for(int p=0;p<npar;p++) {
 	//if(p<first_index_for_tail)
 	psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x,min_x,max_x,polynomial_degree_along_wave,min_wave,max_wave));
@@ -1114,7 +1114,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     cout << "DEBUG TailXposScale : " << psf->ParamIndex("TailXposScale") << endl;
     cout << "DEBUG TailXnegScale : " << psf->ParamIndex("TailXnegScale") << endl;
     cout << "DEBUG TailYnegScale : " << psf->ParamIndex("TailYnegScale") << endl;
-    cout << "DEBUG Npar : " << psf->NPar() << endl;
+    cout << "DEBUG Npar : " << psf->LocalNPar() << endl;
     
     double epsilon = 1.e-12;
     if(psf->HasParam("YTailNorm")) psf->SetPrior("YTailNorm",new GaussianPrior(0,epsilon)); // 

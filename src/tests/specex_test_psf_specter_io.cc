@@ -26,7 +26,7 @@ int main() {
     // testing coordinate system  
     double xc = 400;
     double yc = 2000;
-    harp::vector_double P(psf->NPar());
+    harp::vector_double P(psf->LocalNPar());
     P *= 0;
     int i=floor(xc);
     int j = floor(yc);
@@ -130,7 +130,7 @@ int main() {
 	
 	// to go faster, pre-compute PSF parameters
 	
-	harp::vector_double psf_params = psf->FixedCoordParamsXW(x_ccd,wave,bundle_id);
+	harp::vector_double psf_params = psf->LocalParamsXW(x_ccd,wave,bundle_id);
 	
 	// loop on pixels of PSF footprint
 	for(int j=y_begin;j<y_end;++j)

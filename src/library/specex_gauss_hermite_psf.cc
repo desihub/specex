@@ -21,7 +21,7 @@ specex::GaussHermitePSF::GaussHermitePSF(int ideg) {
   sigma = 1;
   need_to_resize_buffer = true;
   SetDegree(ideg);
-
+  
 }
 
 void specex::GaussHermitePSF::ResizeBuffer() {
@@ -46,6 +46,8 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
       if(i==0 && j==0) continue;
       if(i==1 && j==0) continue;
       if(i==0 && j==1) continue;
+      //if(i==1 && j==1) continue;
+      
       sprintf(n,"P%d.%d",i,j);
       paramNames.push_back(n);
     }
@@ -82,11 +84,12 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
     
     /*
       for(int i=0;i<int(paramNames.size());i++) cout << i << " " <<  paramNames[i] << endl;
-      cout << "Npar = " << NPar() << endl;
+      cout << "Npar = " << LocalNPar() << endl;
       exit(12);
     */
   }
-size_t specex::GaussHermitePSF::NPar() const {
+
+int specex::GaussHermitePSF::LocalNPar() const {
     
     int npar = (degree+1)*(degree+1)-3;// -1 because normalized, -2 because centered 
     
@@ -119,7 +122,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   //double* paramder = 0;
   //if(ParamDer) {paramder = ParamDer->NonConstData(); ParamDer->Zero();}
 
-  assert(NPar()<=Params.size());
+  assert(LocalNPar()<=Params.size());
 
   double x = input_X/sigma;
   double y = input_Y/sigma;
@@ -382,7 +385,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 harp::vector_double specex::GaussHermitePSF::DefaultParams() const 
 {
   
-  harp::vector_double Params(NPar());
+  harp::vector_double Params(LocalNPar());
 
   // all = zero at beginning = a pure gaussian
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE

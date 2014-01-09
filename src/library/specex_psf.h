@@ -112,7 +112,6 @@ namespace specex {
     };
     virtual bool HasParam(const std::string& name) const { return (ParamIndex(name)>=0);}
     
-    virtual size_t NPar() const {return 0;};
     
     //! integrates PSF and requested derivatives over the pixel that contains XPix and YPix (pixel limits are at integer values + 1/2)
     virtual double PixValue(const double &Xc, const double &Yc,
@@ -168,13 +167,13 @@ namespace specex {
       }
       Priors.clear();
     }
-  
+    
     //#warning NEED TO IMPLEMENT JUMPS IN WAVELENGTH SOLUTION, AND NEED TO SAVE IN FITS
   
     
     
-    int FixedCoordNPar() const; // set of parameters needed to describe psf at fixed ccd position
-    int VaryingCoordNPar(int bundle_id) const; // set of parameters needed to describe psf varying with xy ccd coordinates
+    virtual int LocalNPar() const = 0; // set of parameters needed to describe psf at fixed ccd position
+    int BundleNPar(int bundle_id) const; // set of parameters needed to describe psf varying with xy ccd coordinates
     int TracesNPar() const;
   
     bool IsLinear() const; // true if PSF linear wrt PSF params
@@ -212,10 +211,10 @@ namespace specex {
 
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
-    harp::vector_double FixedCoordParamsFW(const int fiber, const double &wave, int bundle_id) const;
-    harp::vector_double FixedCoordParamsXW(const double& x, const double &wave, int bundle_id) const;
-    harp::vector_double FixedCoordParamsFW(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
-    harp::vector_double FixedCoordParamsXW(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double LocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    harp::vector_double LocalParamsXW(const double& x, const double &wave, int bundle_id) const;
+    harp::vector_double LocalParamsFW(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double LocalParamsXW(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
     
     //! I/O for interface with specter
     virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};

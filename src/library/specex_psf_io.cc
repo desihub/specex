@@ -17,7 +17,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   double x=psf->Xccd(fiber,wavelength);
   double y=psf->Yccd(fiber,wavelength);
   
-  harp::vector_double P=psf->FixedCoordParamsFW(fiber,wavelength,bundle);
+  harp::vector_double P=psf->LocalParamsFW(fiber,wavelength,bundle);
   
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;

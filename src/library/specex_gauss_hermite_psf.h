@@ -39,13 +39,13 @@ namespace specex {
   public :
   
     double sigma; 
-    
+
     GaussHermitePSF(int ideg=3);
     virtual ~GaussHermitePSF(){}; 
     
     void SetDegree(const int ideg);
   
-    size_t NPar() const;
+    int LocalNPar() const;
     
     double Degree() const {
       return degree;
