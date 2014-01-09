@@ -82,11 +82,10 @@ class PSF_Fitter {
   bool fatal;
   double gain; // for Poisson noise, with gain in e/ADU
   double readout_noise; // rms value
-  double flatfield_error; // fraction, like 0.01, accounts for flat and psf relative error
-  // model parameters 
-  int polynomial_degree_along_x;
-  int polynomial_degree_along_y;
+  double psf_error; // fraction, like 0.01, accounts for flat and psf relative error
   
+  double polynomial_degree_along_x;
+  double polynomial_degree_along_wave;
   
   Mask mask;
   
@@ -108,9 +107,9 @@ class PSF_Fitter {
     verbose(true),
     gain(1),
     readout_noise(0),
-    flatfield_error(0),
-    polynomial_degree_along_x(4),
-    polynomial_degree_along_y(4)
+      psf_error(0.01),
+      polynomial_degree_along_x(1),
+      polynomial_degree_along_wave(4)
       {
       };
     

@@ -104,7 +104,7 @@ bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector
   }  
   coeff=B;
   
-  SPECEX_INFO("successful Legendre1DPol::Fit");
+  // SPECEX_INFO("successful Legendre1DPol::Fit");
 
   return true;
 }

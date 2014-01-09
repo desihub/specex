@@ -63,24 +63,35 @@ int main ( int argc, char *argv[] ) {
     ( "verbose,v", "turn on verbose mode" )
     ( "core", "dump core files when harp exception is thrown" )
     ;
-
+  
   popts::variables_map vm;
-  popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
-  popts::notify(vm);
-  
-  if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "psf" ) )  || ( ! vm.count( "spots" ) ) 
-       || ( ! vm.count( "in" ) )  ) {
-    cerr << endl;
-    cerr << desc << endl;
-    cerr << "example:" << endl;
-    cerr << argv[0] << " --psf psf.xml  --spots spots.xml --in sdProc-b1-00108382.fits --out res.fits" << endl;
-    return EXIT_FAILURE;
-  }
-  
-  specex_set_verbose(vm.count("verbose")>0);
-  specex_set_dump_core(vm.count("core")>0);
   
   try {
+  
+    
+    popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
+    popts::notify(vm);
+    
+    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "psf" ) )  || ( ! vm.count( "spots" ) ) 
+	 || ( ! vm.count( "in" ) )  ) {
+      cerr << endl;
+      cerr << desc << endl;
+      cerr << "example:" << endl;
+      cerr << argv[0] << " --psf psf.xml  --spots spots.xml --in sdProc-b1-00108382.fits --out res.fits" << endl;
+      return EXIT_FAILURE;
+    }
+  }catch(std::exception e) {
+    cerr << "error in arguments" << endl;
+    cerr << endl;
+    cerr << desc << endl;
+    return EXIT_FAILURE;
+  }
+  try {
+
+    specex_set_verbose(vm.count("verbose")>0);
+    specex_set_dump_core(vm.count("core")>0);
+    
+  
 
     
     
@@ -171,7 +182,7 @@ int main ( int argc, char *argv[] ) {
       }
     }
     cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeX << " lpar=" << psf->NPar() << " gnpar=" << psf->VaryingCoordNPar(spots[0]->fiber_bundle) << endl;
-    int npar = psf->VaryingCoordNPar(spots[0]->fiber_bundle)+3*spots.size();
+    int npar = psf->VaryingCoordNPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
     int ndf  = ndata-npar; 
     cout << "chi2/ndf = " << chi2/ndf << " ndf=" << ndf << " ndata=" << ndata << endl;
 
@@ -209,6 +220,9 @@ int main ( int argc, char *argv[] ) {
   // --------------------------------------------
   }catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;
+    return EXIT_FAILURE;
+  }catch(std::exception e) {
+    cerr << "FATAL ERROR " << e.what() << endl;
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

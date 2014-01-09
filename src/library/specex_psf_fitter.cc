@@ -211,6 +211,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
       chi2 += w*res*res;
 
       /////////////////////////////////////////////////////
+      // this is for debugging when developping the code
       //#define TESTING_H_VECTOR
 #ifdef TESTING_H_VECTOR
 
@@ -249,7 +250,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
 	  if(chi2_der_numeric) {
 	    double chi2_der_analytic = -2*w*res*H(p); 
 	  
-	    cout << "DEBUGGING chi2 derivative p=" << p << " numeric=" <<  chi2_der_numeric << " analytic=" << chi2_der_analytic << " diff=" << chi2_der_numeric-chi2_der_analytic << endl;
+	    cout << "DEBUGGING chi2 derivative p=" << p << " numeric=" <<  chi2_der_numeric << " analytic=" << chi2_der_analytic << " diff=" << chi2_der_numeric-chi2_der_analytic;
+	    if(chi2_der_analytic!=0) cout << " ratio " << chi2_der_numeric/chi2_der_analytic -1; 
+	    cout << endl;
 	  }
 	}
 	exit(12);
@@ -357,10 +360,10 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	for(int i=0;i<footprint_weight.Nx();i++) {
 	  double model_flux=footprint_weight(i,j);
 	  if(model_flux!=0) { // has been computed, pixel participates to footprint
-	    double var = readout_noise*readout_noise;
+	    double var = square(readout_noise);
 	    if(model_flux>0) { // else negative fluctuation
 	      var += model_flux/gain;
-	      var += square(flatfield_error*model_flux);
+	      var += square(psf_error*model_flux);
 	    }
 	    footprint_weight(i,j) = 1/var;
 	    (*npix)++;
@@ -541,8 +544,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       
       SpotTmpData tmp;
       tmp.flux = spot->flux;
-      tmp.x    = spot->xc;
-      tmp.y    = spot->yc;
+      //tmp.x    = spot->xc;
+      //tmp.y    = spot->yc;
+      tmp.x    = psf->Xccd(spot->fiber,spot->wavelength);
+      tmp.y    = psf->Yccd(spot->fiber,spot->wavelength);
       tmp.wavelength    = spot->wavelength;
 
       // set parameters concerning spots
@@ -940,9 +945,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   fit_trace                = false;
   verbose                  = false; // debug
   fatal                    = false; // debug
-  psf->hSizeX = 4; // 
-  psf->hSizeY = 4; //
-  
+    
   int nok=0;
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p& spot = spots[s];    
@@ -974,8 +977,7 @@ bool specex::PSF_Fitter::FitIndividualSpotPositions(std::vector<specex::Spot_p>&
   fit_trace                = false;
   verbose                  = false;
   fatal                    = false;
-  psf->hSizeX = 4; // 
-  psf->hSizeY = 4; //
+  
   int nok=0;
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p& spot = spots[s];    
@@ -1023,29 +1025,50 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     FitTraces(input_spots);
 
-    psf->hSizeX = 4; //
-    psf->hSizeY = 4; // 
     
     // here we need to count number of wavelength and spots per wavelength
     {
       std::vector<SpotArray> spot_arrays = find_spot_arrays(input_spots);
       int nspots_per_wave=0;
+      
+      double min_wave = 1e12;
+      double max_wave = -1e12;
+      double min_x = 1e12;
+      double max_x = -1e12;
+      
+      for(size_t s=0;s<input_spots.size(); ++s) {
+	const specex::Spot_p spot = input_spots[s];
+	if(spot->xc < min_x ) min_x = spot->xc;
+	if(spot->xc > max_x ) max_x = spot->xc;
+	if(spot->wavelength < min_wave ) min_wave = spot->wavelength;
+	if(spot->wavelength > max_wave ) max_wave = spot->wavelength;
+	
+      }
+
+      
       for(size_t a=0;a<spot_arrays.size();a++) {
 	int asize = spot_arrays[a].size();
 	if(asize>nspots_per_wave) 
 	  nspots_per_wave=asize;
       }
-      polynomial_degree_along_x = min(nspots_per_wave-1,1);
-      polynomial_degree_along_y = min(int(spot_arrays.size())-1,3);
+      if(polynomial_degree_along_x>nspots_per_wave-1) {
+	polynomial_degree_along_x=nspots_per_wave-1;
+	SPECEX_WARNING("Reducing polynomial degree along x to " << polynomial_degree_along_x << " because of number of fibers");
+      }
+      if(polynomial_degree_along_wave>int(spot_arrays.size())-1) {
+	polynomial_degree_along_wave=int(spot_arrays.size())-1;
+	SPECEX_WARNING("Reducing polynomial degree along wavelength to " << polynomial_degree_along_wave << " because of number of spots");
+      }
       
-      SPECEX_INFO("Setting PSF polynomial degrees " << polynomial_degree_along_x << " " << polynomial_degree_along_y);
+      
+      SPECEX_INFO("Setting PSF polynomial degrees " << polynomial_degree_along_x << " " << polynomial_degree_along_wave);
       
       psf_global_params->clear();
 
       int npar = psf->NPar();
       for(int p=0;p<npar;p++) {
 	//if(p<first_index_for_tail)
-	psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x,0,image.Nx(),polynomial_degree_along_y,0,image.Ny()));
+	psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x,min_x,max_x,polynomial_degree_along_wave,min_wave,max_wave));
 	//else
 	//psf_global_params->push_back(specex::Legendre2DPol(polynomial_degree_along_x_for_psf_tail,0,image.Nx(),polynomial_degree_along_y_for_psf_tail,0,image.Ny()));
       }
@@ -1081,8 +1104,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
 
   if(psf->Name()=="NONE") {
-    psf->hSizeX = 4; // no fit of tails to start
-    psf->hSizeY = 4; // no fit of tails to start
+    
     psf->ClearPriors();
     // from a not yet perfect fit of laser data in r1 CCD at lambda=8702 , expnum=00120726
     cout << "INFO Setting priors to PSF tails" << endl;
@@ -1156,8 +1178,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
 
-
-
   SPECEX_INFO("Starting FitSeveralSpots TRACE");
   SPECEX_INFO("=======================================");
   fit_flux       = false;
@@ -1182,12 +1202,25 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_psf        = true;
   fit_trace      = false;
+  chi2_precision = 0.1;
+  include_signal_in_weight = true;
+
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
   // write_spots_list(spots,"spots-tmp-PSF+FLUX.list",PSF);
   // psf->write("psf-tmp-PSF+FLUX.dat");
-
+  
+  
+  SPECEX_INFO("Starting FitSeveralSpots FLUX (all spots)");
+  SPECEX_INFO("=======================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = false;
+  fit_trace      = false;
+  ok = FitSeveralSpots(input_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX");
+  
   return ok;
 
 #ifdef LA_SUITE
@@ -1211,8 +1244,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   if(fit_psf_tails) {
     if(psf->Name()=="GAUSSHERMITE") {
       cout << "==== Starting FitSeveralSpots PSF TAILS ==== " << endl;
-      psf->hSizeX = 50; //  fit  tails !
-      psf->hSizeY = 500; //  fit  tails !
       psf->ClearPriors();
       
       

@@ -80,7 +80,7 @@ int main() {
   harp::vector_double gM(psf->VaryingCoordNPar(bundle));
   int index=0;
   for(int p=0;p<psf->NPar();p++) {
-    harp::vector_double pM = psf_global_params.Polynomials[p].Monomials(x,y);
+    harp::vector_double pM = psf_global_params.Polynomials[p].Monomials(x,wave);
     int p_size = pM.size();
     ublas::project(gM,ublas::range(index,index+p_size))=pM;
     ublas::project(gP,ublas::range(index,index+p_size))=psf_global_params.Polynomials[p].coeff;

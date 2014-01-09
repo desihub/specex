@@ -12,7 +12,7 @@ using namespace std;
 
 
 void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const specex::Spectrograph & spectro, const string& lamp_lines_filename, const specex::TraceSet& traceset, 
-				     int fiber_bundle, int ymin, int ymax, 
+				     int fiber_bundle, int fiber_min, int fiber_max, int ymin, int ymax, 
 				      const double& min_wavelength, const double& max_wavelength) {
   
   if(fiber_bundle<0 || fiber_bundle >= spectro.number_of_fiber_bundles_per_ccd) {
@@ -31,7 +31,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
       // for test to go faster
       if(wave<min_wavelength || wave>max_wavelength) continue;
       
-      for(int fiber=spectro.number_of_fibers_per_bundle*fiber_bundle; fiber<spectro.number_of_fibers_per_bundle*(fiber_bundle+1); fiber++) {
+      for(int fiber=max(spectro.number_of_fibers_per_bundle*fiber_bundle,fiber_min); fiber<min(spectro.number_of_fibers_per_bundle*(fiber_bundle+1),fiber_max+1); fiber++) {
 	
 	specex::Spot_p spot(new specex::Spot());
 	spot->wavelength = wave;
