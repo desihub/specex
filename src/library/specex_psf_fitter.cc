@@ -832,6 +832,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	}else{
 	  //#warning TEST_DE_JULIEN
 	  use_brent = false;
+	  
 	  if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots don't brent because chi2 decreases");	  
 	}
       }
