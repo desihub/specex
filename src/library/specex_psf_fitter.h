@@ -18,9 +18,10 @@ namespace specex {
   class SpotTmpData  {
   
   public :
-    
+
     
     double x,y,wavelength,flux;
+    double frozen_x,frozen_y,frozen_flux; // for tails, keep fixed during minimization to avoid fitting flux with tails
     
     harp::vector_double trace_x_monomials;
     harp::vector_double trace_y_monomials;
@@ -48,7 +49,11 @@ class PSF_Fitter {
   size_t nparTot;
   
   std::vector<SpotTmpData> spot_tmp_data;
-  
+#ifdef EXTERNAL_TAIL
+  size_t psf_r_tail_amplitude_index;
+  size_t psf_y_tail_amplitude_index;
+#endif
+
  public :
   // internal set of parameters and matrices
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
@@ -77,6 +82,10 @@ class PSF_Fitter {
   bool fit_flux;
   bool fit_position;
   bool scheduled_fit_of_traces;
+#ifdef EXTERNAL_TAIL
+  bool fit_psf_tail;
+  bool scheduled_fit_of_psf_tail;
+#endif
   double chi2_precision;
   bool include_signal_in_weight;
   bool verbose;
@@ -105,6 +114,10 @@ class PSF_Fitter {
     chi2_precision(0.1),
     include_signal_in_weight(false),
     scheduled_fit_of_traces(true),
+#ifdef EXTERNAL_TAIL
+    fit_psf_tail(false),
+    scheduled_fit_of_psf_tail(false),
+#endif
     fatal(true),
     verbose(true),
     gain(1),

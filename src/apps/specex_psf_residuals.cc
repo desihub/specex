@@ -122,26 +122,50 @@ int main ( int argc, char *argv[] ) {
     
     // read spots
     // --------------------------------------------
-    vector<specex::Spot_p> spots;
+    vector<specex::Spot_p> input_spots;
     {
       std::ifstream is(spots_xml_filename.c_str());
       boost::archive::xml_iarchive xml_ia ( is );
-      xml_ia >> BOOST_SERIALIZATION_NVP(spots);
+      xml_ia >> BOOST_SERIALIZATION_NVP(input_spots);
       is.close();
     } 
     
-    SPECEX_INFO("number of spots = " << spots.size());
+    SPECEX_INFO("number of input spots = " << input_spots.size());
+
+    vector<specex::Spot_p> spots;
+    for(size_t s=0;s<input_spots.size();s++) {
+      specex::Spot_p& spot = input_spots[s];
+      if(spot->status == 0) continue;
+      spots.push_back(spot);
+    }
+    
+    SPECEX_INFO("number of selected spots = " << spots.size());
     
     // create output images
     // --------------------------------------------
-    image_data model(image.n_cols(),image.n_rows());
-    image_data data_in_stamp(image.n_cols(),image.n_rows());
-    image_data variance(image.n_cols(),image.n_rows());
+    // definition of fitted region of image
+    // ----------------------------------------------------
+    double xc_min=1e20;
+    double xc_max=-1e20;
+    double yc_min=1e20;
+    double yc_max=-1e20;
+    for(size_t s=0;s<spots.size();++s) {
+      const specex::Spot_p& spot = spots[s];
+      if(spot->xc<xc_min) xc_min=spot->xc;
+      if(spot->xc>xc_max) xc_max=spot->xc;
+      if(spot->yc<yc_min) yc_min=spot->yc;
+      if(spot->yc>yc_max) yc_max=spot->yc;
+    }
+    Stamp global_stamp(image);
+    global_stamp.begin_i = max(global_stamp.begin_i,int(xc_min+0.5)-psf->hSizeX);
+    global_stamp.end_i   = min(global_stamp.end_i,int(xc_max+0.5)+psf->hSizeX+1); 
+    global_stamp.begin_j = max(global_stamp.begin_j,int(yc_min+0.5)-psf->hSizeY);
+    global_stamp.end_j   = min(global_stamp.end_j,int(yc_max+0.5)+psf->hSizeY+1); 
+    // ----------------------------------------------------
     
-    model.data *= 0;
-    data_in_stamp.data *= 0;
-    variance.data *= 0;
-
+    
+    // create a list of stamps
+    vector<specex::Stamp> spot_stamps;
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
       
@@ -151,26 +175,54 @@ int main ( int argc, char *argv[] ) {
       stamp.end_i   = min(stamp.Parent_n_cols(),stamp.end_i);
       stamp.begin_j = max(0,stamp.begin_j);
       stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
+      spot_stamps.push_back(stamp);
+    }
 
+    // fill model image
+    image_data model(image.n_cols(),image.n_rows());
+    model.data *= 0;
+    
+    for(size_t s=0;s<spots.size();s++) {
+      specex::Spot_p spot = spots[s];
+      
       harp::vector_double params = psf->LocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
-            
-      for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  
-	for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
-
-	  if(weight(i,j)<=0) continue;
-
-	  double val =  spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
-
+      
 #ifdef EXTERNAL_TAIL
-	  val += spot->flux*psf->TailValue(i-spot->xc,j-spot->yc);
+      // first fill tails on stamp
+      for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+	for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
+	  if(weight(i,j)<=0) continue;
+	  model(i,j) += spot->flux*psf->TailValue(i-spot->xc,j-spot->yc);
+	}
+      } // end of loop on stamp pixels
+      
 #endif
-	  model(i,j) += val;
-	  data_in_stamp(i,j) = image(i,j);
-	  variance(i,j) += square(readout_noise) + square(psf_error*val);
-	  if(val>0) variance(i,j) += val;
+      // then the core of the psf for this spot's stamp only
+      const Stamp& spot_stamp = spot_stamps[s];
+      for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
+	for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
+	  
+	  if(weight(i,j)<=0) continue;
+	  model(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
 	}
       } // end of loop on stamp pixels
     } // end of loop on spots
+
+    // now compute variance 
+    image_data variance(image.n_cols(),image.n_rows());
+    variance.data *= 0;
+    image_data data_in_stamp(image.n_cols(),image.n_rows());
+    data_in_stamp.data *= 0;
+    
+    
+
+    for(size_t i=0; i<model.data.size() ;i++) {
+      const double& flux = model.data(i);
+      if(flux==0) continue; // never been on this pixel
+      variance.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
+      if(flux>0) variance.data(i) += flux; // Poisson noise
+    } // end of loop on all pixels
+    
 
     // compute chi2
     // ---------------------------

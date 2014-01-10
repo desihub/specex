@@ -101,18 +101,28 @@ specex::PSF::PSF() {
   hSizeX = hSizeY = 12;
 
 #ifdef EXTERNAL_TAIL
-  tail_amplitude = 0;
-  tail_core_size = 1;
-  tail_x_scale   = 1;
-  tail_y_scale   = 1;	
+  r_tail_amplitude = 0;
+  r_tail_core_size = 1;
+  r_tail_x_scale   = 1;
+  r_tail_y_scale   = 1;
+  y_tail_amplitude = 0;
+  y_tail_core_size = 1;
+  y_tail_power_law_index = 1;
+  y_tail_sigma_x =1.1;
 #endif
 }
 
 #ifdef EXTERNAL_TAIL
-double specex::PSF::TailValue(const double& dx, const double &dy) const {
-  if(tail_amplitude==0) return 0;
-  double rs2p1 =  square(tail_core_size)+square(dx*tail_x_scale)+square(dy*tail_y_scale);
-  return tail_amplitude/rs2p1;
+double specex::PSF::TailValue(const double& dx, const double &dy,double* derivative_r_tail_amplitude,double* derivative_y_tail_amplitude) const {
+  if(r_tail_amplitude==0 && y_tail_amplitude==0 && derivative_r_tail_amplitude==0) return 0;
+  
+  double r_prof = 1./(square(r_tail_core_size)+square(dx*r_tail_x_scale)+square(dy*r_tail_y_scale));
+  if(derivative_r_tail_amplitude) *derivative_r_tail_amplitude = r_prof;
+
+  double y_prof = pow(square(y_tail_core_size)+square(dy),-y_tail_power_law_index/2.)*exp(-0.5*square(dx/y_tail_sigma_x));
+  if(derivative_y_tail_amplitude) *derivative_y_tail_amplitude = y_prof;
+ 
+  return r_tail_amplitude*r_prof + y_tail_amplitude*y_prof;
 }
 
 #endif

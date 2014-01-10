@@ -67,9 +67,7 @@ int main ( int argc, char *argv[] ) {
   double gauss_hermite_sigma = 1.1;
   int legendre_deg_wave = 4;
   int legendre_deg_x = 1;
-  double tail_amplitude = 0;
   
-
   double psf_error = 0.01;
   
   if(getenv("IDLSPEC2D_DIR")) 
@@ -99,7 +97,9 @@ int main ( int argc, char *argv[] ) {
     ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave ), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
     ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x ), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
     ( "psf_error",  popts::value<double>( &psf_error ), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
-    ( "tail",  popts::value<double>( &tail_amplitude ), "devel psf tail")
+#ifdef EXTERNAL_TAIL
+    ( "fit_psf_tails", "unable fit of psf tails")
+#endif
     ( "no_trace_fit", "do not fit traces")
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
@@ -129,8 +129,8 @@ int main ( int argc, char *argv[] ) {
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
+    bool fit_psf_tails = (vm.count("fit_psf_tails")>0);
     
-
     bool fit_individual_spots_position = vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
@@ -210,10 +210,6 @@ int main ( int argc, char *argv[] ) {
     psf->FiberTraces.clear();
     
     
-#ifdef EXTERNAL_TAIL
-    psf->tail_amplitude = tail_amplitude;
-#endif
-
     // init PSF fitter
     // -------------------------------------------- 
     PSF_Fitter fitter(psf,image,weight);
@@ -221,9 +217,12 @@ int main ( int argc, char *argv[] ) {
     fitter.polynomial_degree_along_x    = legendre_deg_x;
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
     fitter.psf_error                    = psf_error;
+#ifdef EXTERNAL_TAIL
+    psf->r_tail_amplitude                 = 0;
+    psf->y_tail_amplitude                 = 0;
     fitter.scheduled_fit_of_traces      = fit_traces;
-
-
+    fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
+#endif
 
 
     fitter.gain = 1; // images are already in electrons
@@ -320,7 +319,7 @@ int main ( int argc, char *argv[] ) {
     
   // ending
   // --------------------------------------------
-  }catch(harp::exception e) {
+  } catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;
     return EXIT_FAILURE;
   }

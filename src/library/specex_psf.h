@@ -80,11 +80,17 @@ namespace specex {
 
 #ifdef EXTERNAL_TAIL
   public :
-    double tail_amplitude;
-    double tail_core_size;
-    double tail_x_scale;
-    double tail_y_scale;
-    double TailValue(const double& dx, const double &dy) const;
+    double r_tail_amplitude;
+    double r_tail_core_size;
+    double r_tail_x_scale;
+    double r_tail_y_scale;
+    
+    double y_tail_amplitude;
+    double y_tail_core_size;
+    double y_tail_power_law_index;
+    double y_tail_sigma_x;
+    
+    double TailValue(const double& dx, const double &dy, double* derivative_r_tail_amplitude = 0, double* derivative_y_tail_amplitude = 0) const;
 #endif
 
 
@@ -259,10 +265,14 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_cols);
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_rows);
 #ifdef EXTERNAL_TAIL
-      ar & BOOST_SERIALIZATION_NVP(tail_amplitude);
-      ar & BOOST_SERIALIZATION_NVP(tail_core_size);
-      ar & BOOST_SERIALIZATION_NVP(tail_x_scale);
-      ar & BOOST_SERIALIZATION_NVP(tail_y_scale);	
+      ar & BOOST_SERIALIZATION_NVP(r_tail_amplitude);
+      ar & BOOST_SERIALIZATION_NVP(r_tail_core_size);
+      ar & BOOST_SERIALIZATION_NVP(r_tail_x_scale);
+      ar & BOOST_SERIALIZATION_NVP(r_tail_y_scale);
+      ar & BOOST_SERIALIZATION_NVP(y_tail_amplitude);
+      ar & BOOST_SERIALIZATION_NVP(y_tail_core_size);
+      ar & BOOST_SERIALIZATION_NVP(y_tail_power_law_index);
+      ar & BOOST_SERIALIZATION_NVP(y_tail_sigma_x);
 #endif
       
       return;

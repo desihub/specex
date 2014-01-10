@@ -75,6 +75,9 @@ int specex::PSF_Fitter::NPar(int nspots) const {
   if(fit_trace) npar += psf->TracesNPar();
   if(fit_flux) npar += nspots;
   if(fit_position) npar += 2*nspots;
+#ifdef EXTERNAL_TAIL
+  if(fit_psf_tail) npar += 2; // the tail amplitudes radial and along y 
+#endif
   return npar;
 }
 
@@ -110,7 +113,12 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
       }
     }
   }
-  
+#ifdef EXTERNAL_TAIL
+  if(fit_psf_tail) {
+    psf->r_tail_amplitude =  Params(psf_r_tail_amplitude_index); // update tail amplitude
+    psf->y_tail_amplitude =  Params(psf_y_tail_amplitude_index); // update tail amplitude
+  }
+#endif
   
   //#define USE_SPARSE_VECTOR
 #ifndef USE_SPARSE_VECTOR 
@@ -164,12 +172,29 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
 	
 	
 #ifdef EXTERNAL_TAIL
-
-	double tail_val = psf->TailValue(i-tmp.x,j-tmp.y); //tail_amplitude/rs2p1;
-	res -= tmp.flux*tail_val;
-	if (compute_ab) {
-	  if(fit_flux) H(tmp.flux_parameter_index) += tail_val;
+	
+	double derivative_r_tail_amplitude,derivative_y_tail_amplitude;
+	
+	/*
+	if(fit_psf_tail && fabs(i-tmp.frozen_x)<2 && fabs(j-tmp.frozen_y)<2) {
+	    cout << "PROBLEM HERE SHOULD NOT HAPPEN" << endl; abort();
+	  }
 	}
+	*/
+	
+	double tail_val = psf->TailValue(i-tmp.frozen_x,j-tmp.frozen_y,&derivative_r_tail_amplitude,&derivative_y_tail_amplitude); //tail_amplitude/rs2p1;
+	res -= tmp.frozen_flux*tail_val;
+	
+	if (compute_ab) {
+	  // if(fit_flux) H(tmp.flux_parameter_index) += tail_val;
+	  if(fit_psf_tail) {
+	    
+	    H(psf_r_tail_amplitude_index) += tmp.frozen_flux*derivative_r_tail_amplitude;
+	    H(psf_y_tail_amplitude_index) += tmp.frozen_flux*derivative_y_tail_amplitude;
+	    
+	  }
+	}
+	
 	
 #endif
 
@@ -348,42 +373,147 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
     *npix = 0;
     if(include_signal_in_weight) {
       
-      SPECEX_INFO(" specex::PSF_Fitter::FitSeveralSpots, computing image model for weights");
-      
+      SPECEX_INFO("WEIGHTS: Computing weights");
+      SPECEX_INFO("WEIGHTS: readout noise = " << readout_noise);
+     
+      // create a list of stamps
+      vector<specex::Stamp> spot_stamps;
       for(size_t s=0;s<spots.size();s++) {
-	specex::Spot_p& spot= spots[s];
-	if(spot->flux<=0) continue;
-	harp::vector_double psfParams = psf->LocalParamsXW(spot->xc,spot->wavelength,bundle_id);
+	specex::Spot_p spot = spots[s];
 	
-	Stamp spot_stamp(image);
-	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
-	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
-	  for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
-	    if(weight(i,j)==0) continue; // no need to compute anything
-	    footprint_weight(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc,i,j,psfParams,0,0);
+	Stamp stamp(image);
+	psf->StampLimits(spot->xc,spot->yc,stamp.begin_i,stamp.end_i,stamp.begin_j,stamp.end_j);
+	stamp.begin_i = max(0,stamp.begin_i);
+	stamp.end_i   = min(stamp.Parent_n_cols(),stamp.end_i);
+	stamp.begin_j = max(0,stamp.begin_j);
+	stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
+	spot_stamps.push_back(stamp);
+      }
+      
+      bool add_spots_core_signal = true;
+
+#ifdef EXTERNAL_TAIL
+      if(psf->r_tail_amplitude>0 && !fit_psf_tail) {
+	
+	SPECEX_INFO("WEIGHTS: Fill spots stamps model with PSF tails");
+	
+	for(size_t s=0;s<spots.size();s++) {
+	  specex::Spot_p spot= spots[s];
+	  if(spot->flux<=0) continue;
+	  
+	  for(size_t s2=0;s2<spots.size();s2++) {
+	    
+	    const Stamp& spot_stamp = spot_stamps[s2];
+	    for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
+	      for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
+		if(weight(i,j)<=0) continue;
+		footprint_weight(i,j) += spot->flux*psf->TailValue(i-spot->xc,j-spot->yc);
+	      }
+	    } // end of loop on stamp pixels
 	  }
 	}
       }
+      if(fit_psf_tail) add_spots_core_signal = false;
+#endif
       
-      //cout << "for debugging, write image" << endl;
-      //specex::write_new_fits_image("debugging-model-for-weights.fits",footprint_weight);
-      
-      for(int j=0;j<footprint_weight.Ny();j++) {
-	for(int i=0;i<footprint_weight.Nx();i++) {
-	  double model_flux=footprint_weight(i,j);
-	  if(model_flux!=0) { // has been computed, pixel participates to footprint
+      if(add_spots_core_signal) {
+
+	SPECEX_INFO("WEIGHTS: Fill spots stamps model with PSF core");
+	
+	for(size_t s=0;s<spots.size();s++) {
+	  specex::Spot_p spot= spots[s];
+	  
+	  
+	  if(spot->flux<=0) continue;
+	  
+	  harp::vector_double psfParams = psf->LocalParamsXW(spot->xc,spot->wavelength,bundle_id);
+	  
+	  Stamp& spot_stamp = spot_stamps[s];
+	  
+	  
+	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
+	    for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
+	      if(weight(i,j)==0) continue; // no need to compute anything
+	      footprint_weight(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc,i,j,psfParams,0,0);
+	      
+	    }
+	  }
+	}
+
+	// compute variance and weight
+	
+	for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
+	  for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+	    
+	    double model_flux=footprint_weight(i,j);
+	    
+	    if(model_flux==0) continue;
+	  
 	    double var = square(readout_noise);
 	    if(model_flux>0) { // else negative fluctuation
 	      var += model_flux/gain;
-	      var += square(psf_error*model_flux);
 	    }
-	    footprint_weight(i,j) = 1/var;
+	    var += square(psf_error*model_flux);
+	    
+	    footprint_weight(i,j) = 1./var;
 	    (*npix)++;
 	  }
 	}
+
+      }
+
+#ifdef EXTERNAL_TAIL
+      
+      if(fit_psf_tail) {
+	
+	if(psf->r_tail_amplitude>0 || psf->y_tail_amplitude>0) {
+	  
+	  SPECEX_INFO("WEIGHTS: Fill all pixels between spots with PSF tail value (to fit tails)");
+	  
+	  for(size_t s=0;s<spots.size();s++) {
+	    specex::Spot_p spot= spots[s];
+	    if(spot->flux<0) continue;
+	    
+	    for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
+	      for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+		if(weight(i,j)==0) continue; // no need to compute anything
+		
+		footprint_weight(i,j) += spot->flux*psf->TailValue(i-spot->xc,j-spot->yc);
+	      }
+	    } 
+	  }
+	}
+	
+	SPECEX_INFO("WEIGHTS: Assign positive weight to all pixels between spots (to fit tails)");
+	
+	for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
+	  for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+	    if(weight(i,j)==0) continue; // no need to compute anything
+	    double var = square(readout_noise) + footprint_weight(i,j) + square(psf_error*footprint_weight(i,j)); 
+	    footprint_weight(i,j) = 1./var;
+	  }
+	} 
+	
+	
+	SPECEX_INFO("WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails)");
+	
+	for(size_t s=0;s<spots.size();s++) {
+	  Stamp& spot_stamp = spot_stamps[s];
+	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
+	    for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
+	      footprint_weight(i,j) = 0; 
+	    }
+	  }
+	}
+
+	
+	
+	SPECEX_INFO("WEIGHTS: writing weight image for debug");
+	write_new_fits_image("weights.fits",footprint_weight);
       }
       
-      
+
+#endif
 
 
       
@@ -398,19 +528,21 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++)
 	  for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
 	    footprint_weight(i,j)=weight(i,j);
-	    (*npix)++;
 	  }
       }
     }
+    
     // mask out some regions with mis-understood lines
     mask.ApplyMaskToImage(footprint_weight,*psf,0);
     
-    
-    if(0 && include_signal_in_weight) 
-    {
-      cout << "for debugging, write image" << endl;
-      write_new_fits_image("debugging-weights.fits",footprint_weight);
+    (*npix)=0;
+    for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
+      for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+	if(footprint_weight(i,j)>0) (*npix)++;
+      }
     }
+    
+    SPECEX_INFO("WEIGHTS: number of pixels in fit = " << *npix);
     
   } // end of test on spot size
 
@@ -485,6 +617,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     if(fit_psf) ss << "+psf";
     if(fit_trace) ss << "+trace";
     if(fit_position) ss << "+position";
+#ifdef EXTERNAL_TAIL
+    if(fit_psf_tail) ss << "+tail";
+#endif
     if(fit_psf) ss << " npar_psf=" << npar_psf;
     if(fit_trace) ss << " npar_trace=" << npar_trace;
     specex_info(ss.str());
@@ -532,7 +667,16 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	}
       }
     }
-
+#ifdef EXTERNAL_TAIL
+    if(fit_psf_tail) {
+      psf_r_tail_amplitude_index = index;
+      Params(psf_r_tail_amplitude_index) = psf->r_tail_amplitude;
+      index++;
+      psf_y_tail_amplitude_index = index;
+      Params(psf_y_tail_amplitude_index) = psf->y_tail_amplitude;
+      index++;
+    }
+#endif
     index_of_spot_parameters = index;
   }
   // ----------------------------------------------------
@@ -560,6 +704,16 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       tmp.x    = psf->Xccd(spot->fiber,spot->wavelength);
       tmp.y    = psf->Yccd(spot->fiber,spot->wavelength);
       tmp.wavelength    = spot->wavelength;
+
+#ifdef EXTERNAL_TAIL
+      tmp.frozen_x = tmp.x;
+      tmp.frozen_y = tmp.y;
+      tmp.frozen_flux = tmp.flux; // that is the only place where we modify frozen_flux
+      if(tmp.frozen_flux<0) {
+	// SPECEX_WARNING("Setting flux to zero for spot at flux =" << tmp.frozen_flux << " for tail fit")
+	tmp.frozen_flux = 0; // for robustness
+      }
+#endif
 
       // set parameters concerning spots
       if(fit_flux) {
@@ -623,9 +777,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     oldChi2 = *psfChi2;
     if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots iter=" << *niter << " old chi2=" << oldChi2);
     
-    if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots filling matrix ...");
+    if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots filling matrix (n="<< nparTot << ")...");
     *psfChi2 = ComputeChi2AB(true);
-    
+
+    oldChi2 = *psfChi2;
+
     if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots solving ...");
     
     harp::matrix_double As=A;
@@ -649,8 +805,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     fitWeight = A; // to extract covariance once at minimum.
     
     bool linear = false;
-    //#warning TEST_DE_JULIEN
-     
+    
     if( (fit_flux) && (!fit_position) && (!fit_trace) && (!fit_psf) ) {
       if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots linear because only fit flux");
       linear = true;
@@ -661,17 +816,17 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     } 
     
     bool use_brent = true;
+    
     if(1) {
       if(linear) {
 	if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots no brent because linear");
 	use_brent = false;
       }else{
 	// check whether step indeed decreases chi2
-	double chi2_0 = ComputeChi2AB(false);
 	Params += B;
 	double chi2_1 = ComputeChi2AB(false);
 	Params -= B;
-	if(chi2_1>chi2_0) {
+	if(chi2_1>oldChi2) {
 	  use_brent = true;
 	  if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots use brent because step 1 increases chi2");
 	}else{
@@ -791,7 +946,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   // fitWeight is now a covariance matrix
   // just to avoid confusion :
   harp::matrix_double& fitCovmat = fitWeight;
-
+  
+  if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots saving fitted params");
+  
   int index=0;
 
   // copy fitted parameters in the right places:
@@ -816,7 +973,21 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	PY(k)=Params(index);
     }
   }
-  
+#ifdef EXTERNAL_TAIL
+    if(fit_psf_tail) {
+      psf->r_tail_amplitude = Params(psf_r_tail_amplitude_index);
+      psf->y_tail_amplitude = Params(psf_y_tail_amplitude_index);
+
+      if(psf->r_tail_amplitude<0) {
+	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative r tail amplitude " << psf->r_tail_amplitude << "set to 0 ");
+	psf->r_tail_amplitude = 0;
+      }
+      if(psf->y_tail_amplitude<0) {
+	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative y tail amplitude " << psf->y_tail_amplitude << "set to 0 ");
+	psf->y_tail_amplitude = 0;
+      }
+    }
+#endif
   // save results for spots
   if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots saving spots fluxes");
   for(size_t s=0;s<spots.size();s++) {
@@ -847,9 +1018,16 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	if(fit_flux) cout << "+flux";
 	if(fit_position) cout << "+pos";
 	if(fit_psf) cout << "+psf";
+#ifdef EXTERNAL_TAIL
+	if(fit_psf_tail) cout << "+tail";
+#endif
 	cout << " chi2= " << *psfChi2;
 	cout << " niter=" << *niter;
 	cout << endl;
+#ifdef EXTERNAL_TAIL
+	if(fit_psf_tail) 
+	  SPECEX_INFO("psf tail amplitudes, r: " << Params(psf_r_tail_amplitude_index) << " , y: " << Params(psf_y_tail_amplitude_index));
+#endif
       }
     }else{
       SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots failed because reached max number of iterations");
@@ -1110,33 +1288,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   chi2_precision = 10;
   bool ok = true;
   
-
-  if(psf->Name()=="GaussHermitePSF") {
-    
-    psf->ClearPriors();
-    // from a not yet perfect fit of laser data in r1 CCD at lambda=8702 , expnum=00120726
-    cout << "INFO Setting priors to PSF tails" << endl;
-    cout << "DEBUG tail indices :" << endl;
-    cout << "DEBUG TailNorm : " << psf->ParamIndex("TailNorm") << endl;
-    cout << "DEBUG TailPower : " << psf->ParamIndex("TailPower") << endl;
-    cout << "DEBUG TailXposScale : " << psf->ParamIndex("TailXposScale") << endl;
-    cout << "DEBUG TailXnegScale : " << psf->ParamIndex("TailXnegScale") << endl;
-    cout << "DEBUG TailYnegScale : " << psf->ParamIndex("TailYnegScale") << endl;
-    cout << "DEBUG Npar : " << psf->LocalNPar() << endl;
-    
-    double epsilon = 1.e-12;
-    if(psf->HasParam("YTailNorm")) psf->SetPrior("YTailNorm",new GaussianPrior(0,epsilon)); // 
-    if(psf->HasParam("TailNorm")) psf->SetPrior("TailNorm",new GaussianPrior(0,epsilon)); // 
-    if(psf->HasParam("TailPower")) psf->SetPrior("TailPower",new GaussianPrior(2.,epsilon)); // 
-    if(psf->HasParam("TailXposScale")) psf->SetPrior("TailXposScale",new GaussianPrior(1,epsilon));
-    if(psf->HasParam("TailXnegScale")) psf->SetPrior("TailXnegScale",new GaussianPrior(1,epsilon));
-    if(psf->HasParam("TailYnegScale")) psf->SetPrior("TailYnegScale",new GaussianPrior(1,epsilon));
-    
-    //exit(12);
-  }
-
-  
-  
   SPECEX_INFO("Starting FitSeveralSpots FLUX");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1153,8 +1304,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   for(size_t s=0;s<input_spots.size();s++) {
     specex::Spot_p& spot = input_spots[s];
     if(spot->flux>0  && spot->eflux>0 && spot->flux/spot->eflux>minimum_signal_to_noise) {
-      spot->status++;
+      spot->status=1;
       selected_spots.push_back(spot);
+    }else{
+      spot->status=0;
     }
     
   }
@@ -1202,10 +1355,37 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_psf        = true;
   fit_trace      = false;
-  if(!scheduled_fit_of_traces) chi2_precision = 0.1;
-  
+  if(!scheduled_fit_of_traces && !scheduled_fit_of_psf_tail) {
+    chi2_precision = 0.1;
+    //include_signal_in_weight = true;
+  }
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+
+  if(scheduled_fit_of_psf_tail) {
+    
+    SPECEX_INFO("Starting FitSeveralSpots TAIL");
+    SPECEX_INFO("=======================================");
+    fit_flux       = false;
+    fit_position   = false;
+    fit_psf        = false;
+    fit_trace      = false;
+    fit_psf_tail   = true;
+    
+    include_signal_in_weight = true; 
+    
+    double saved_psf_error = psf_error;
+    psf_error = 1; // to deweight the core of the psf
+    
+    for(int i=0; i<4; i++) { 
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    }
+    fit_psf_tail   = false; // don't fit this anymore
+    include_signal_in_weight = false; // restore previous state
+    psf_error = saved_psf_error; // restore previous state
+  }
+  
+  
 
   if(scheduled_fit_of_traces) {
     SPECEX_INFO("Starting FitSeveralSpots TRACE");
@@ -1225,6 +1405,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_trace      = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE+FLUX");
+  }
+  
+  if(scheduled_fit_of_traces || scheduled_fit_of_psf_tail) {
   
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis)");
     SPECEX_INFO("=======================================");
@@ -1233,7 +1416,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_psf        = true;
     fit_trace      = false;
     chi2_precision = 0.1;
-    include_signal_in_weight = true;
+    //include_signal_in_weight = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }
@@ -1246,92 +1429,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_trace      = false;
   ok = FitSeveralSpots(input_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX");
-  
-  return ok;
-
-#ifdef LA_SUITE
-
-  cout << "==== Starting FitSeveralSpots TRACE+FLUX+PSF ==== " << endl;
-  fit_flux       = true;
-  fit_position   = false;
-  fit_psf        = true;
-  fit_trace      = true;
-  chi2_precision = 10;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) {
-    cout << "FitSeveralSpots failed for TRACE" << endl;
-    return false;
-  }
-  
-  write_spots_list(selected_spots,"spots-TRACE+FLUX+psf->list",PSF);
-  write_spots_data(selected_spots,"spots-TRACE+FLUX+psf->dat");
-  psf->write("psf-TRACE+FLUX+psf->dat");
-  
-  if(fit_psf_tails) {
-    if(psf->Name()=="GAUSSHERMITE") {
-      cout << "==== Starting FitSeveralSpots PSF TAILS ==== " << endl;
-      psf->ClearPriors();
-      
-      
-      // from a not yet perfect fit of laser data in r1 CCD at lambda=8702 , expnum=00120726
-      double epsilon=1.e-12;
-      //if(psf->HasParam("TailNorm")) psf->SetPrior("TailNorm",new GaussianPrior(1.8,epsilon)); // slope
-      if(psf->HasParam("TailPower")) psf->SetPrior("TailPower",new GaussianPrior(2.,epsilon)); // slope
-      if(psf->HasParam("TailXposScale")) psf->SetPrior("TailXposScale",new GaussianPrior(1.2,epsilon));
-      if(psf->HasParam("TailXnegScale")) psf->SetPrior("TailXnegScale",new GaussianPrior(1.2,epsilon));
-      if(psf->HasParam("TailYnegScale")) psf->SetPrior("TailYnegScale",new GaussianPrior(0.9,epsilon));
-      
-      include_signal_in_weight = false; // to deweight the core for the determination of tails
-      fit_flux       = false;
-      fit_position   = false;
-      fit_psf        = true;
-      fit_trace      = false;
-      chi2_precision = 10;
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-      if(!ok) {
-	cout << "FitSeveralSpots failed for PSF+FLUX" << endl;
-	return false;
-      }
-      write_spots_data(selected_spots,"spots-PSF+TAILS.dat");
-      write_spots_list(selected_spots,"spots-PSF+TAILS.list",PSF);
-      psf->write("psf-PSF+TAILS.dat");
-      
-      /*
-	include_signal_in_weight = true;
-	cout << "==== Starting FitSeveralSpots PSF TAILS with signal in weights ==== " << endl;
-	ok = FitSeveralSpots(spots,&chi2,&npix,&niter);
-	if(!ok) {
-	cout << "FitSeveralSpots failed for PSF+FLUX" << endl;
-	return false;
-	}
-    */
-      
-    }
-    
-    
-  
-    
-    //include_signal_in_weight = true;
-    fit_flux       = true;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    chi2_precision = 1;
-    
-    for(int loop=0; loop<1; loop++) { // because change of weights
-      cout << "==== Starting FitSeveralSpots PSF+TAILS+FLUX+TRACE"<<endl;
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-      if(!ok) {
-	cout << "FitSeveralSpots failed for PSF+TAILS+FLUX+TRACE" << endl;
-	return false;
-      }
-    }
-    write_spots_data(selected_spots,"spots-PSF+TAILS+FLUX+TRACE.dat");
-    write_spots_list(selected_spots,"spots-PSF+TAILS+FLUX+TRACE.list",PSF);
-    psf->write("psf-PSF+TAILS+FLUX+TRACE.dat");
-  }// end of test fit_psf_tails
-
-#endif
   
   return ok;
 }
