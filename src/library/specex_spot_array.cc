@@ -10,7 +10,7 @@ using namespace std;
 vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot_p> &spots, bool check_status) {
   
   vector<specex::SpotArray> spotarrays;
-    
+  
   {
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p& spot = spots[s];
@@ -19,7 +19,7 @@ vector<specex::SpotArray> specex::find_spot_arrays( vector<specex::Spot_p> &spot
       for(size_t a=0;a<spotarrays.size();a++) {
 	specex::SpotArray& testarray=spotarrays[a];
 	if(spot->fiber_bundle == testarray.fiber_bundle &&
-	   fabs(spot->wavelength - testarray.wavelength)<1) {
+	   fabs(spot->wavelength - testarray.wavelength)<1.e-6) {
 	  spotarray = &testarray;
 	  break;
 	}

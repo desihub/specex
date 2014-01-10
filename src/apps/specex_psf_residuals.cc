@@ -160,6 +160,10 @@ int main ( int argc, char *argv[] ) {
 	  if(weight(i,j)<=0) continue;
 
 	  double val =  spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
+
+#ifdef EXTERNAL_TAIL
+	  val += spot->flux*psf->TailValue(i-spot->xc,j-spot->yc);
+#endif
 	  model(i,j) += val;
 	  data_in_stamp(i,j) = image(i,j);
 	  variance(i,j) += square(readout_noise) + square(psf_error*val);
@@ -181,7 +185,7 @@ int main ( int argc, char *argv[] ) {
 	ndata ++;
       }
     }
-    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeX << " lpar=" << psf->LocalNPar() << " gnpar=" << psf->BundleNPar(spots[0]->fiber_bundle) << endl;
+    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNPar() << " gnpar=" << psf->BundleNPar(spots[0]->fiber_bundle) << endl;
     int npar = psf->BundleNPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
     int ndf  = ndata-npar; 
     cout << "chi2/ndf = " << chi2/ndf << " ndf=" << ndf << " ndata=" << ndata << endl;
@@ -194,23 +198,27 @@ int main ( int argc, char *argv[] ) {
       harp::fits::create ( fp, output_fits_image_filename );
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
       harp::fits::img_write ( fp, model.data );
-      
+      harp::fits::key_write(fp,"WHAT","MODEL","");
+  
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
       harp::fits::img_write ( fp, residual.data );
-      
+      harp::fits::key_write(fp,"EXTNAME","RESALL","");
+  
       residual = data_in_stamp; 
       residual.data -= model.data;
 
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
       harp::fits::img_write ( fp, residual.data );
-      
+      harp::fits::key_write(fp,"EXTNAME","RES","");
+  
       for(size_t i=0; i<residual.data.size() ;i++) {
 	if(variance.data(i)>0) residual.data(i) /= sqrt(variance.data(i));
       }
     
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
       harp::fits::img_write ( fp, residual.data );
-      
+      harp::fits::key_write(fp,"EXTNAME","PULL","");
+  
       harp::fits::close ( fp );
     }
     

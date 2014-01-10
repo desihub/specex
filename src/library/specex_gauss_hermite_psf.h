@@ -8,7 +8,6 @@
 
 //#define ADD_Y_TAILS_TO_GAUSS_HERMITE
 //#define ADD_2D_TAILS_TO_GAUSS_HERMITE
-
 // to go faster, less parameters
 //#define LORENTZIAN_TAILS
 

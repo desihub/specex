@@ -16,14 +16,15 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   
   double x=psf->Xccd(fiber,wavelength);
   double y=psf->Yccd(fiber,wavelength);
-  
+
+  x = int(x);
+  y = int(y);
+
   harp::vector_double P=psf->LocalParamsFW(fiber,wavelength,bundle);
   
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;
   
-  
-
   specex::image_data img(nx,ny);
   for(int j=0;j<ny;j++) {
     for(int i=0;i<nx;i++) {
@@ -34,8 +35,29 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       double dy = (j-ny/2)/double(oversampling)-jb;
       
       img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
+
+#ifdef EXTERNAL_TAIL
+      img(i,j)+=psf->TailValue(ib+int(x)-(x-dx),jb+int(y)-(y-dy));
+#endif
+
     }
   }
+
+  // get maximum of psf profile numerically
+  {
+    double maxval=0;
+    int imax=0;
+    int jmax=0;
+   
+    for(int j=int(y)-3;j<=int(y+3);j++)
+      for(int i=int(x)-3;i<=int(x+3);i++)
+	{
+	  double val=psf->PSFValueWithParamsXY(x,y,i,j,P,0,0);
+	  if(val>maxval) {maxval=val; imax=i; jmax=j;}
+	}
+    cout << "for x,y=" << x << "," << y << " max at i,j=" << imax << "," << jmax << endl;
+  }
+  
   specex::write_new_fits_image(filename,img);
 }
 

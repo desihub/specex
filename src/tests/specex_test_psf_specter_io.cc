@@ -32,7 +32,8 @@ int main() {
     int j = floor(yc);
     //for(i=floor(xc)-3;i<=floor(xc)+3;i++)
     for(int j=floor(yc)-3;j<=floor(yc)+3;j++) 
-	cout << i << " " << j << " " << psf->PixValue(400,2000,i,j,P,NULL,NULL) << endl;
+      cout << i << " " << j << " " << psf->PSFValueWithParamsXY(400,2000,i,j,P,NULL,NULL) << endl;
+    
     return 0;
   }
   

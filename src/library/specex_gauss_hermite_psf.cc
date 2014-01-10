@@ -46,7 +46,7 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
       if(i==0 && j==0) continue;
       if(i==1 && j==0) continue;
       if(i==0 && j==1) continue;
-      //if(i==1 && j==1) continue;
+      if(i==1 && j==1) continue;
       
       sprintf(n,"P%d.%d",i,j);
       paramNames.push_back(n);
@@ -91,7 +91,7 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
 
 int specex::GaussHermitePSF::LocalNPar() const {
     
-    int npar = (degree+1)*(degree+1)-3;// -1 because normalized, -2 because centered 
+    int npar = (degree+1)*(degree+1)-4;// -1 because normalized, -3 because centered 
     
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE
     npar += 1; // normalization
@@ -134,11 +134,11 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     { 
       harp::vector_double& vHx = const_cast<harp::vector_double&>(Hx); 
       for(int i=0;i<=degree;i++) {
-	vHx[i]=HermitePol(i,x);
+	vHx(i)=HermitePol(i,x);
     }
       harp::vector_double& vHy = const_cast<harp::vector_double&>(Hy); 
       for(int i=0;i<=degree;i++) {
-	vHy[i]=HermitePol(i,y);
+	vHy(i)=HermitePol(i,y);
       }
     }
     
@@ -146,6 +146,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     double expfact=1./(2*M_PI*sigma*sigma)*exp(-0.5*(x*x+y*y));
     
     double prefactor = 1; // first constant term is not a free parameter, it is = 1 because PSF integral = 1, all higher order gauss hermite terms have integral = 0 
+    /*
     // we skip constant monomial (0,0), but also (1,0) and (0,1) because degenerate with position
     {
       int param_index=0;
@@ -155,13 +156,25 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 	else if(j==1) {imin=1;} // skip  first (0,1)
 	
 	for(int i=imin;i<=degree;i++,param_index++) {
-	  prefactor+=Params[param_index]*Hx[i]*Hy[j];
+	  prefactor+=Params(param_index)*Hx(i)*Hy(j);
 	} 
       }
     }
+    */
+    // we skip constant monomial (0,0)(1,0)(0,1)(1,1) because degenerate with position
+    {
+      int param_index=0;
+      for(int j=0;j<=degree;j++) {
+	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+	for(int i=imin;i<=degree;i++,param_index++) {
+	  prefactor+=Params(param_index)*Hx(i)*Hy(j);
+	} 
+      }
+     
+    }
     psf_val = prefactor*expfact;
     
-    
+    /*
     if(ParamDer) {
       int param_index=0;
       for(int j=0;j<=degree;j++) {
@@ -170,13 +183,26 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 	else if(j==1) {imin=1;} // skip  first (0,1)
 	
 	for(int i=imin;i<=degree;i++,param_index++) {
-	  (*ParamDer)[param_index] = expfact*Hx[i]*Hy[j];
+	  (*ParamDer)(param_index) = expfact*Hx(i)*Hy(j);
 	} 
       }
     }
+    */
+    
+    if(ParamDer) {
+      int param_index=0;
+      for(int j=0;j<=degree;j++) {
+	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+	for(int i=imin;i<=degree;i++,param_index++) {
+	  (*ParamDer)(param_index) = expfact*Hx(i)*Hy(j);
+	} 
+      }
+      
+    }
+    
     if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
-      double& dvdx=(*PosDer)[0];
-      double& dvdy=(*PosDer)[1];
+      double& dvdx=(*PosDer)(0);
+      double& dvdy=(*PosDer)(1);
       
       dvdx=x/sigma*psf_val;
       dvdy=y/sigma*psf_val;
@@ -185,11 +211,11 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       { 
 	harp::vector_double& vdHx = const_cast<harp::vector_double&>(dHx); 
 	for(int i=0;i<=degree;i++) {
-	  vdHx[i]=HermitePolDerivative(i,x);
+	  vdHx(i)=HermitePolDerivative(i,x);
 	}
 	harp::vector_double& vdHy = const_cast<harp::vector_double&>(dHy); 
 	for(int i=0;i<=degree;i++) {
-	  vdHy[i]=HermitePolDerivative(i,y);
+	  vdHy(i)=HermitePolDerivative(i,y);
 	}
       }
       
@@ -215,16 +241,30 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       }
       */
       
+      
       int param_index=0;
+      /*
       for(int j=0;j<=degree;j++) {
 	int imin=0; 
 	if(j==0) {imin=2;} // skip two first (0,0) and (1,0)
 	else if(j==1) {imin=1;} // skip  first (0,1)
 	for(int i=imin;i<=degree;i++,param_index++) {
-	  d_poly_dx += Params[param_index]*dHx[i]*Hy[j];
-	  d_poly_dy += Params[param_index]*Hx[i]*dHy[j];
+	  d_poly_dx += Params(param_index)*dHx(i)*Hy(j);
+	  d_poly_dy += Params(param_index)*Hx(i)*dHy(j);
 	} 
       }
+      */
+
+      for(int j=0;j<=degree;j++) {
+	
+	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+	
+	for(int i=imin;i<=degree;i++,param_index++) {
+	  d_poly_dx += Params(param_index)*dHx(i)*Hy(j);
+	  d_poly_dy += Params(param_index)*Hx(i)*dHy(j);
+	} 
+      }
+      
       
       dvdx -= d_poly_dx*expfact/sigma; // minus sign cause derivative wrt -x
       dvdy -= d_poly_dy*expfact/sigma;
@@ -259,8 +299,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     
     
     if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
-      double& dvdx=(*PosDer)[0];
-      double& dvdy=(*PosDer)[1];
+      double& dvdx=(*PosDer)(0);
+      double& dvdy=(*PosDer)(1);
       dvdx += x/sigma*tail_val;
       int signe=1;
       if(input_Y<0) signe = -1;
@@ -270,7 +310,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     }
     
     if(ParamDer) {
-      (*ParamDer)[y_tail_norm_index]=tail_prof;
+      (*ParamDer)(y_tail_norm_index)=tail_prof;
     }
     
     psf_val += tail_val;
@@ -288,12 +328,12 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   double y_scale_plus   = 1; // by construction , so that y_core_size = core_size
 
 
-  double tail_norm_param = Params[tail_norm_index];
+  double tail_norm_param = Params(tail_norm_index);
 #ifndef LORENTZIAN_TAILS
-  double y_scale_minus   = Params[tail_y_scale_minus_index]; // 0.8; // the other allows to change amplitude of tail lower scale means higher tail flux by scale**-power
-  double x_scale_minus   = Params[tail_x_scale_minus_index]; //1
-  double x_scale_plus    = Params[tail_x_scale_plus_index]; //0.6
-  double tail_power      = Params[tail_power_index];
+  double y_scale_minus   = Params(tail_y_scale_minus_index); // 0.8; // the other allows to change amplitude of tail lower scale means higher tail flux by scale**-power
+  double x_scale_minus   = Params(tail_x_scale_minus_index); //1
+  double x_scale_plus    = Params(tail_x_scale_plus_index); //0.6
+  double tail_power      = Params(tail_power_index);
 #endif
   
 
@@ -334,8 +374,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   
   if(PosDer) {
 
-    double& dvdx=(*PosDer)[0];
-    double& dvdy=(*PosDer)[1];
+    double& dvdx=(*PosDer)(0);
+    double& dvdy=(*PosDer)(1);
     
     
 #ifdef LORENTZIAN_TAILS 
@@ -350,22 +390,22 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   
   if(ParamDer) {
     
-    (*ParamDer)[tail_norm_index]=tail_val_ref; // norm of tail
+    (*ParamDer)(tail_norm_index)=tail_val_ref; // norm of tail
     
 #ifndef LORENTZIAN_TAILS     
-    (*ParamDer)[tail_power_index]=-1./core_power*log(rs2p1)*tail_val; // slope of tail
+    (*ParamDer)(tail_power_index)=-1./core_power*log(rs2p1)*tail_val; // slope of tail
     
     if(input_Y<0) {
-      (*ParamDer)[tail_y_scale_minus_index] = tail_power/rs2p1*(ref_dist_inv*input_Y)*pow(input_Y*y_scale,core_power-1)*tail_val;
+      (*ParamDer)(tail_y_scale_minus_index) = tail_power/rs2p1*(ref_dist_inv*input_Y)*pow(input_Y*y_scale,core_power-1)*tail_val;
     }else{
-      (*ParamDer)[tail_y_scale_minus_index] = 0;
+      (*ParamDer)(tail_y_scale_minus_index) = 0;
     }
     if(input_X<0) { 
-      (*ParamDer)[tail_x_scale_minus_index] = tail_power/rs2p1*(ref_dist_inv*input_X)*pow(input_X*x_scale,core_power-1)*tail_val;
-      (*ParamDer)[tail_x_scale_plus_index] = 0;
+      (*ParamDer)(tail_x_scale_minus_index) = tail_power/rs2p1*(ref_dist_inv*input_X)*pow(input_X*x_scale,core_power-1)*tail_val;
+      (*ParamDer)(tail_x_scale_plus_index) = 0;
     }else{
-      (*ParamDer)[tail_x_scale_plus_index] = -tail_power/rs2p1*(ref_dist_inv*input_X)*pow(input_X*x_scale,core_power-1)*tail_val;
-      (*ParamDer)[tail_x_scale_minus_index] = 0;
+      (*ParamDer)(tail_x_scale_plus_index) = -tail_power/rs2p1*(ref_dist_inv*input_X)*pow(input_X*x_scale,core_power-1)*tail_val;
+      (*ParamDer)(tail_x_scale_minus_index) = 0;
     }
 #endif
 
@@ -389,16 +429,16 @@ harp::vector_double specex::GaussHermitePSF::DefaultParams() const
 
   // all = zero at beginning = a pure gaussian
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE
-  Params[tail_norm_index] = 1;
+  Params(tail_norm_index) = 1;
 #endif
 #ifdef ADD_2D_TAILS_TO_GAUSS_HERMITE
-  Params[tail_norm_index]  = 0; // norm
+  Params(tail_norm_index)  = 0; // norm
 
 #ifndef LORENTZIAN_TAILS
-  Params[tail_power_index] = 2; // slope
-  Params[tail_x_scale_minus_index] = 1;
-  Params[tail_x_scale_plus_index] = 1;
-  Params[tail_y_scale_minus_index] = 1;
+  Params(tail_power_index) = 2; // slope
+  Params(tail_x_scale_minus_index) = 1;
+  Params(tail_x_scale_plus_index) = 1;
+  Params(tail_y_scale_minus_index) = 1;
 #endif
   
 #endif
@@ -614,7 +654,7 @@ void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
 
 	// now loop on legendre coefficients m(i+j*(xdeg+1))
 	for(size_t i=0;i<legendre_coefficents.size();i++,buffer_index++) {
-	  buffer[buffer_index]=legendre_coefficents[i];
+	  buffer[buffer_index]=legendre_coefficents(i);
 	  cout << buffer_index << " " << buffer[buffer_index] << endl;
 	    
 	}
@@ -897,9 +937,9 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
       harp::vector_double y(NFLUX);
       harp::vector_double w(NFLUX);
       for(int i=0;i<NFLUX;i++) {
-	x[i] = img_x(i,fiber_id-first_fiber_in_file);
-	y[i] = img_y(i,fiber_id-first_fiber_in_file);
-	w[i] = img_wave(i,fiber_id-first_fiber_in_file);
+	x(i) = img_x(i,fiber_id-first_fiber_in_file);
+	y(i) = img_y(i,fiber_id-first_fiber_in_file);
+	w(i) = img_wave(i,fiber_id-first_fiber_in_file);
       }
       
       // define W vs Y legendre polynomial
@@ -938,7 +978,7 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
 	
 	// now loop on legendre coefficients m(i+j*(xdeg+1))
 	for(size_t i=0;i<pol.coeff.size();i++,buffer_index++) {
-	  pol.coeff[i] = buffer[buffer_index];
+	  pol.coeff(i) = buffer[buffer_index];
 	}
 	params_of_bundle.Polynomials.push_back(pol);
       }

@@ -1,6 +1,8 @@
 #ifndef SPECEX_IMAGE_DATA__H
 #define SPECEX_IMAGE_DATA__H
 
+#define CHECK_BOUNDS
+
 #include <harp.hpp>
 
 namespace specex {

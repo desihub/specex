@@ -31,12 +31,18 @@ using namespace specex;
 
 namespace popts = boost::program_options;
 
+#define _GNU_SOURCE 1
+#ifndef __USE_GNU
+#define __USE_GNU
+#endif
+#include <fenv.h>
 
 
 
 int main ( int argc, char *argv[] ) {
   
-
+  // to crash when NaN
+  feenableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
   
 
   // default arguments
@@ -47,7 +53,8 @@ int main ( int argc, char *argv[] ) {
   int    last_fiber_bundle=1;
   int    first_fiber=0;
   int    last_fiber=100000;
-  int    half_size=4;
+  int    half_size_x=4;
+  int    half_size_y=4;
   
   string arc_image_filename="";
   string xy_trace_fits_name="";
@@ -60,7 +67,9 @@ int main ( int argc, char *argv[] ) {
   double gauss_hermite_sigma = 1.1;
   int legendre_deg_wave = 4;
   int legendre_deg_x = 1;
+  double tail_amplitude = 0;
   
+
   double psf_error = 0.01;
   
   if(getenv("IDLSPEC2D_DIR")) 
@@ -78,7 +87,8 @@ int main ( int argc, char *argv[] ) {
     ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
     ( "first_fiber", popts::value<int>( &first_fiber ), "first fiber (must be in bundle)")
     ( "last_fiber", popts::value<int>( &last_fiber ), "last fiber (must be in bundle)")
-    ( "half_size", popts::value<int>( &half_size ), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "half_size_x", popts::value<int>( &half_size_x ), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "half_size_y", popts::value<int>( &half_size_y ), "half size of PSF stamp (full size is 2*half_size+1)")
     ( "psfmodel", popts::value<string>( &psf_model ), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode" )
@@ -89,6 +99,8 @@ int main ( int argc, char *argv[] ) {
     ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave ), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
     ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x ), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
     ( "psf_error",  popts::value<double>( &psf_error ), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
+    ( "tail",  popts::value<double>( &tail_amplitude ), "devel psf tail")
+    ( "no_trace_fit", "do not fit traces")
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
 
@@ -116,7 +128,9 @@ int main ( int argc, char *argv[] ) {
   try {
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
+    bool fit_traces = (vm.count("no_trace_fit")==0);
     
+
     bool fit_individual_spots_position = vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
@@ -170,8 +184,8 @@ int main ( int argc, char *argv[] ) {
     }
     psf->ccd_image_n_cols = image.n_cols();
     psf->ccd_image_n_rows = image.n_rows();
-    psf->hSizeX = half_size;
-    psf->hSizeY = half_size;
+    psf->hSizeX = half_size_x;
+    psf->hSizeY = half_size_y;
     
         
     
@@ -196,6 +210,10 @@ int main ( int argc, char *argv[] ) {
     psf->FiberTraces.clear();
     
     
+#ifdef EXTERNAL_TAIL
+    psf->tail_amplitude = tail_amplitude;
+#endif
+
     // init PSF fitter
     // -------------------------------------------- 
     PSF_Fitter fitter(psf,image,weight);
@@ -203,6 +221,10 @@ int main ( int argc, char *argv[] ) {
     fitter.polynomial_degree_along_x    = legendre_deg_x;
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
     fitter.psf_error                    = psf_error;
+    fitter.scheduled_fit_of_traces      = fit_traces;
+
+
+
 
     fitter.gain = 1; // images are already in electrons
     // fitter.readout_noise = 2; // b1, evaluated using spatial variance in sdProc-b1-00108382.fits[1:4000,1:600]

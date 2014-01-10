@@ -76,6 +76,7 @@ class PSF_Fitter {
   bool fit_trace;
   bool fit_flux;
   bool fit_position;
+  bool scheduled_fit_of_traces;
   double chi2_precision;
   bool include_signal_in_weight;
   bool verbose;
@@ -91,18 +92,19 @@ class PSF_Fitter {
   
 
 
-  PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight) :
+ PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight) :
     
-    psf(i_psf),
+  psf(i_psf),
     image(i_image),
     weight(i_weight),
     stamp(i_image), 
-    fit_psf(true),
+    fit_psf(false),
     fit_trace(false),
-    fit_flux(true),
-    fit_position(true), 
+    fit_flux(false),
+    fit_position(false), 
     chi2_precision(0.1),
     include_signal_in_weight(false),
+    scheduled_fit_of_traces(true),
     fatal(true),
     verbose(true),
     gain(1),
@@ -111,6 +113,9 @@ class PSF_Fitter {
       polynomial_degree_along_x(1),
       polynomial_degree_along_wave(4)
       {
+	
+
+
       };
     
     void SetStampLimitsFromPSF(Stamp& stamp, const PSF_p psf, const double &X, const double &Y);

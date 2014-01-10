@@ -43,8 +43,8 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   double *dPdx=0;
   double *dPdy=0;
   if(PosDer) {
-    dPdx=&((*PosDer)[0]);
-    dPdy=&((*PosDer)[1]);
+    dPdx=&((*PosDer)(0));
+    dPdy=&((*PosDer)(1));
   }
   
   //double *param_der=0;
@@ -79,7 +79,7 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
 	  }
 	  if (ParamDer)
 	    for (int ipar = 0; ipar<npar; ++ipar) 
-	      tmpParamDer[ipar] += weight*(*ParamDer)[ipar];
+	      tmpParamDer(ipar) += weight*(*ParamDer)(ipar);
 	}
     }
   if (PosDer) {
@@ -88,7 +88,7 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   }
   if (ParamDer) {
     for (int ipar = 0; ipar<npar; ++ipar) 
-      (*ParamDer)[ipar] = tmpParamDer[ipar];
+      (*ParamDer)(ipar) = tmpParamDer(ipar);
   }
   
   return val;
@@ -99,8 +99,23 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
 specex::PSF::PSF() {
   name = "unknown";
   hSizeX = hSizeY = 12;
-  
+
+#ifdef EXTERNAL_TAIL
+  tail_amplitude = 0;
+  tail_core_size = 1;
+  tail_x_scale   = 1;
+  tail_y_scale   = 1;	
+#endif
 }
+
+#ifdef EXTERNAL_TAIL
+double specex::PSF::TailValue(const double& dx, const double &dy) const {
+  if(tail_amplitude==0) return 0;
+  double rs2p1 =  square(tail_core_size)+square(dx*tail_x_scale)+square(dy*tail_y_scale);
+  return tail_amplitude/rs2p1;
+}
+
+#endif
 
 int specex::PSF::BundleNPar(int bundle_id) const {
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);

@@ -72,7 +72,22 @@ namespace specex {
     // AnalyticPSF* analyticPSF;
     // BEGIN WAS BEFORE IN ANALYTIC PSF
     // ==================================================
+
+  
  
+#define EXTERNAL_TAIL
+
+
+#ifdef EXTERNAL_TAIL
+  public :
+    double tail_amplitude;
+    double tail_core_size;
+    double tail_x_scale;
+    double tail_y_scale;
+    double TailValue(const double& dx, const double &dy) const;
+#endif
+
+
   protected :
     
     std::vector<std::string> paramNames;
@@ -112,14 +127,18 @@ namespace specex {
     };
     virtual bool HasParam(const std::string& name) const { return (ParamIndex(name)>=0);}
     
-    
+  protected :
     //! integrates PSF and requested derivatives over the pixel that contains XPix and YPix (pixel limits are at integer values + 1/2)
+    //! called by public functions PSFValue... that can recast parameters
+    
     virtual double PixValue(const double &Xc, const double &Yc,
 		    const double &XPix, const double &YPix,
 		    const harp::vector_double &Params,
 		    harp::vector_double *PosDer = 0,
 		    harp::vector_double *ParamDer = 0) const;
-    
+
+  public :
+
     virtual double Profile(const double &X, const double &Y,
 			   const harp::vector_double &Params,
 			   harp::vector_double *PosDer = 0,
@@ -239,6 +258,12 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(camera_id);
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_cols);
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_rows);
+#ifdef EXTERNAL_TAIL
+      ar & BOOST_SERIALIZATION_NVP(tail_amplitude);
+      ar & BOOST_SERIALIZATION_NVP(tail_core_size);
+      ar & BOOST_SERIALIZATION_NVP(tail_x_scale);
+      ar & BOOST_SERIALIZATION_NVP(tail_y_scale);	
+#endif
       
       return;
     }
