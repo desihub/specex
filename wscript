@@ -74,7 +74,7 @@ def options(opt):
                    action='store', 
                    default=True, 
                    dest='debug', 
-                   help='True or False, turn on/off the -g option, (True by default)')
+                   help='True or False, turn on/off the -g / -DNDEBUG option, (True by default)')
     opt.add_option('--optimize', 
                    action='store', 
                    default=optimize, 
@@ -121,7 +121,9 @@ def configure(conf):
     if conf.options.debug == "True" :
         conf.env['CFLAGS'].append('-g')
         conf.env['CXXFLAGS'].append('-g')
-    
+    else :
+        conf.env['CFLAGS'].append('-DNDEBUG')
+        conf.env['CXXFLAGS'].append('-DNDEBUG')
     if conf.options.harp_pkgconfig_dir :
         harp_pkgconfig(conf.options.harp_pkgconfig_dir)
     

@@ -85,7 +85,6 @@ int specex::PSF_Fitter::NPar(int nspots) const {
 double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab) 
 {
   
-  
   // update spot_tmp_data (spots are called several times because we loop on pixels)
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     
@@ -787,6 +786,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     harp::matrix_double As=A;
     //harp::vector_double Bs=B;
     int status = cholesky_solve(A,B);
+
+    if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots solving done");
+
     if (status != 0) {
       *psfChi2 = 1e30; 
       for(size_t i=0;i<As.size1();i++)
@@ -824,15 +826,16 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }else{
 	// check whether step indeed decreases chi2
 	Params += B;
+	if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots computing chi2 for step=1 ...");
 	double chi2_1 = ComputeChi2AB(false);
 	Params -= B;
 	if(chi2_1>oldChi2) {
 	  use_brent = true;
 	  if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots use brent because step 1 increases chi2");
 	}else{
-	  //#warning TEST_DE_JULIEN
-	  use_brent = false;
 	  
+	  use_brent = false;
+	  *psfChi2 = chi2_1;
 	  if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots don't brent because chi2 decreases");	  
 	}
       }
@@ -897,7 +900,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	
     } else { // didn't use brent
       Params += B;
-      *psfChi2 = ComputeChi2AB(false);
+      // *psfChi2 = ComputeChi2AB(false); // already computed above
       if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots dchi2=" << oldChi2-*psfChi2);
       
     }
@@ -980,11 +983,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       psf->y_tail_amplitude = Params(psf_y_tail_amplitude_index);
 
       if(psf->r_tail_amplitude<0) {
-	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative r tail amplitude " << psf->r_tail_amplitude << "set to 0 ");
+	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative r tail amplitude " << psf->r_tail_amplitude << " set to 0 ");
 	psf->r_tail_amplitude = 0;
       }
       if(psf->y_tail_amplitude<0) {
-	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative y tail amplitude " << psf->y_tail_amplitude << "set to 0 ");
+	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative y tail amplitude " << psf->y_tail_amplitude << " set to 0 ");
 	psf->y_tail_amplitude = 0;
       }
     }
