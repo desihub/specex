@@ -8,6 +8,7 @@
 #include "specex_legendre.h"
 #include "specex_trace.h"
 #include "specex_linalg.h"
+#include "specex_image_data.h"
 
 #define PSF_NAN_VALUE 9999999
 
@@ -89,6 +90,9 @@ namespace specex {
     double y_tail_core_size;
     double y_tail_power_law_index;
     double y_tail_sigma_x;
+    
+    specex::image_data r_tail_profile; // to go much faster
+    specex::image_data y_tail_profile; // to go much faster
     
     double TailValue(const double& dx, const double &dy, double* derivative_r_tail_amplitude = 0, double* derivative_y_tail_amplitude = 0) const;
 #endif
