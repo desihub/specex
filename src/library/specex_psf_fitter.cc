@@ -75,8 +75,11 @@ int specex::PSF_Fitter::NPar(int nspots) const {
   if(fit_trace) npar += psf->TracesNPar();
   if(fit_flux) npar += nspots;
   if(fit_position) npar += 2*nspots;
-#ifdef EXTERNAL_TAIL
-  if(fit_psf_tail) npar += 2; // the tail amplitudes radial and along y 
+#ifdef EXTERNAL_TAIL  
+  if(fit_psf_tail) npar += 1; // the tail amplitudes radial 
+#ifdef EXTERNAL_Y_TAIL  
+  if(fit_psf_tail) npar += 1; // the tail amplitudes along y 
+#endif
 #endif
   return npar;
 }
@@ -115,9 +118,12 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
 #ifdef EXTERNAL_TAIL
   if(fit_psf_tail) {
     psf->r_tail_amplitude =  Params(psf_r_tail_amplitude_index); // update tail amplitude
+#ifdef EXTERNAL_Y_TAIL  
     psf->y_tail_amplitude =  Params(psf_y_tail_amplitude_index); // update tail amplitude
+#endif
   }
 #endif
+
   
   //#define USE_SPARSE_VECTOR
 #ifndef USE_SPARSE_VECTOR 
@@ -172,16 +178,14 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
 	
 #ifdef EXTERNAL_TAIL
 	
-	double derivative_r_tail_amplitude,derivative_y_tail_amplitude;
+	double derivative_r_tail_amplitude;
+#ifdef EXTERNAL_Y_TAIL  
+	double derivative_y_tail_amplitude;
+	double tail_val = psf->TailValue(i-tmp.frozen_x,j-tmp.frozen_y,&derivative_r_tail_amplitude,&derivative_y_tail_amplitude);
+#else
+	double tail_val = psf->TailValue(i-tmp.frozen_x,j-tmp.frozen_y,&derivative_r_tail_amplitude);
+#endif
 	
-	/*
-	if(fit_psf_tail && fabs(i-tmp.frozen_x)<2 && fabs(j-tmp.frozen_y)<2) {
-	    cout << "PROBLEM HERE SHOULD NOT HAPPEN" << endl; abort();
-	  }
-	}
-	*/
-	
-	double tail_val = psf->TailValue(i-tmp.frozen_x,j-tmp.frozen_y,&derivative_r_tail_amplitude,&derivative_y_tail_amplitude); //tail_amplitude/rs2p1;
 	res -= tmp.frozen_flux*tail_val;
 	
 	if (compute_ab) {
@@ -189,8 +193,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab)
 	  if(fit_psf_tail) {
 	    
 	    H(psf_r_tail_amplitude_index) += tmp.frozen_flux*derivative_r_tail_amplitude;
+#ifdef EXTERNAL_Y_TAIL
 	    H(psf_y_tail_amplitude_index) += tmp.frozen_flux*derivative_y_tail_amplitude;
-	    
+#endif
 	  }
 	}
 	
@@ -412,7 +417,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  }
 	}
       }
-      if(fit_psf_tail) add_spots_core_signal = false;
+      // if(fit_psf_tail) add_spots_core_signal = false;
 #endif
       
       if(add_spots_core_signal) {
@@ -465,7 +470,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       
       if(fit_psf_tail) {
 	
-	if(psf->r_tail_amplitude>0 || psf->y_tail_amplitude>0) {
+	if(psf->r_tail_amplitude>0) {
 	  
 	  SPECEX_INFO("WEIGHTS: Fill all pixels between spots with PSF tail value (to fit tails)");
 	  
@@ -493,7 +498,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  }
 	} 
 	
-	
+	if(0) {
 	SPECEX_INFO("WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails)");
 	
 	for(size_t s=0;s<spots.size();s++) {
@@ -504,7 +509,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	    }
 	  }
 	}
-
+	}
 	
 	
 	SPECEX_INFO("WEIGHTS: writing weight image for debug");
@@ -671,9 +676,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       psf_r_tail_amplitude_index = index;
       Params(psf_r_tail_amplitude_index) = psf->r_tail_amplitude;
       index++;
+#ifdef EXTERNAL_Y_TAIL
       psf_y_tail_amplitude_index = index;
       Params(psf_y_tail_amplitude_index) = psf->y_tail_amplitude;
       index++;
+#endif
     }
 #endif
     index_of_spot_parameters = index;
@@ -980,16 +987,21 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #ifdef EXTERNAL_TAIL
     if(fit_psf_tail) {
       psf->r_tail_amplitude = Params(psf_r_tail_amplitude_index);
-      psf->y_tail_amplitude = Params(psf_y_tail_amplitude_index);
-
       if(psf->r_tail_amplitude<0) {
 	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative r tail amplitude " << psf->r_tail_amplitude << " set to 0 ");
 	psf->r_tail_amplitude = 0;
       }
+
+#ifdef EXTERNAL_Y_TAIL
+      
+      psf->y_tail_amplitude = Params(psf_y_tail_amplitude_index);
       if(psf->y_tail_amplitude<0) {
 	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative y tail amplitude " << psf->y_tail_amplitude << " set to 0 ");
 	psf->y_tail_amplitude = 0;
       }
+
+#endif
+
     }
 #endif
   // save results for spots
@@ -1029,8 +1041,13 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	cout << " niter=" << *niter;
 	cout << endl;
 #ifdef EXTERNAL_TAIL
+#ifdef EXTERNAL_Y_TAIL
 	if(fit_psf_tail) 
 	  SPECEX_INFO("psf tail amplitudes, r: " << Params(psf_r_tail_amplitude_index) << " , y: " << Params(psf_y_tail_amplitude_index));
+#else
+if(fit_psf_tail) 
+	  SPECEX_INFO("psf tail amplitudes, r: " << Params(psf_r_tail_amplitude_index) );
+#endif
 #endif
       }
     }else{
@@ -1381,7 +1398,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     double saved_psf_error = psf_error;
     psf_error = 1; // to deweight the core of the psf
     
-    for(int i=0; i<4; i++) { 
+    for(int i=0; i<2; i++) { 
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     }
     fit_psf_tail   = false; // don't fit this anymore
@@ -1412,7 +1429,19 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
   
   if(scheduled_fit_of_traces || scheduled_fit_of_psf_tail) {
-  
+    
+    SPECEX_INFO("Starting FitSeveralSpots PSF (bis)");
+    SPECEX_INFO("=======================================");
+    fit_flux       = false;
+    fit_position   = false;
+    fit_psf        = true;
+    fit_trace      = false;
+    chi2_precision = 0.1;
+    //include_signal_in_weight = true;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+
+
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis)");
     SPECEX_INFO("=======================================");
     fit_flux       = true;

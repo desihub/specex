@@ -51,7 +51,9 @@ class PSF_Fitter {
   std::vector<SpotTmpData> spot_tmp_data;
 #ifdef EXTERNAL_TAIL
   size_t psf_r_tail_amplitude_index;
+#ifdef EXTERNAL_Y_TAIL
   size_t psf_y_tail_amplitude_index;
+#endif
 #endif
 
  public :

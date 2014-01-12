@@ -224,24 +224,40 @@ int main ( int argc, char *argv[] ) {
     } // end of loop on all pixels
     
 
-    // compute chi2
+    // compute chi2 (image and core)
     // ---------------------------
     image_data residual = image; 
     residual.data -= model.data;
 
-    double chi2 = 0;
-    int ndata = 0;
+    double chi2_image = 0;
+    int ndata_image = 0;
     for(size_t i=0; i<residual.data.size() ;i++) {
       if(variance.data(i)>0) {
-	chi2 += square(residual.data(i))/(variance.data(i));
-	ndata ++;
+	chi2_image += square(residual.data(i))/(variance.data(i));
+	ndata_image ++;
       }
+    }
+    double chi2_core = 0;
+    int ndata_core = 0;
+    for(size_t s=0;s<spots.size();s++) {
+      const Stamp& spot_stamp = spot_stamps[s];
+      for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
+	for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
+	  if(variance(i,j)>0) {
+	    chi2_core += square(residual(i,j))/(variance(i,j));
+	    ndata_core ++;
+	  }
+	  
+	}
+      } // end of loop on stamp pixels
     }
     cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNPar() << " gnpar=" << psf->BundleNPar(spots[0]->fiber_bundle) << endl;
     int npar = psf->BundleNPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
-    int ndf  = ndata-npar; 
-    cout << "chi2/ndf = " << chi2/ndf << " ndf=" << ndf << " ndata=" << ndata << endl;
-
+    int ndf_image  = ndata_image-npar; 
+    int ndf_core   = ndata_core-npar; 
+    cout << "image chi2/ndf     = " << chi2_image/ndf_image << " ndf=" << ndf_image << " ndata=" << ndata_image << endl;
+    cout << "spot core chi2/ndf = " << chi2_core/ndf_core << " ndf=" << ndf_core << " ndata=" << ndata_core << endl;
+    
     
     // write images of model and residuals
     // ---------------------------

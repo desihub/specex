@@ -219,7 +219,13 @@ int main ( int argc, char *argv[] ) {
     fitter.psf_error                    = psf_error;
 #ifdef EXTERNAL_TAIL
     psf->r_tail_amplitude                 = 0;
+    psf->r_tail_core_size = 2.;
+    
+#ifdef EXTERNAL_Y_TAIL
     psf->y_tail_amplitude                 = 0;
+    psf->y_tail_core_size = 2.;    
+#endif
+    
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
 #endif

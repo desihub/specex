@@ -105,10 +105,12 @@ specex::PSF::PSF() {
   r_tail_core_size = 1;
   r_tail_x_scale   = 1;
   r_tail_y_scale   = 1;
+#ifdef EXTERNAL_Y_TAIL
   y_tail_amplitude = 0;
   y_tail_core_size = 1;
   y_tail_power_law_index = 1;
   y_tail_sigma_x =1.1;
+#endif
 #endif
 }
 
@@ -118,7 +120,8 @@ specex::PSF::PSF() {
 #define TAIL_OVERSAMPLING 2.
 
 double specex::PSF::TailValue(const double& dx, const double &dy,double* derivative_r_tail_amplitude,double* derivative_y_tail_amplitude) const {
-  if(r_tail_amplitude==0 && y_tail_amplitude==0 && derivative_r_tail_amplitude==0) return 0;
+  
+  //if(r_tail_amplitude==0 && y_tail_amplitude==0 && derivative_r_tail_amplitude==0) return 0;
   
   
   if(r_tail_profile.n_rows()==0) {
@@ -127,35 +130,65 @@ double specex::PSF::TailValue(const double& dx, const double &dy,double* derivat
     specex::PSF* psf = const_cast<specex::PSF*>(this);
     
     psf->r_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
-    psf->y_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
-
+    
     
 
+    double rc2 = square(r_tail_core_size);
+
     for(int j=0;j<NY_TAIL_PROFILE;j++) {
       for(int i=0;i<NX_TAIL_PROFILE;i++) {
-	psf->r_tail_profile(i,j) = 1./(square(r_tail_core_size)+square(i/TAIL_OVERSAMPLING*r_tail_x_scale)+square(j/TAIL_OVERSAMPLING*r_tail_y_scale));
+	double r2 = square(i/TAIL_OVERSAMPLING*r_tail_x_scale)+square(j/TAIL_OVERSAMPLING*r_tail_y_scale);
+
+	psf->r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-1.5/2.);
+
       }
     }
+    
+#ifdef EXTERNAL_Y_TAIL
+    psf->y_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
+    
+    double yc2 = square(y_tail_core_size);
+    
     for(int j=0;j<NY_TAIL_PROFILE;j++) {
+      
+      
+      double y2 = square(j/TAIL_OVERSAMPLING);
+      
+      double yprof = y2/(yc2+y2)*pow(yc2+y2,-y_tail_power_law_index/2.);
+      
       for(int i=0;i<NX_TAIL_PROFILE;i++) {
-	psf->y_tail_profile(i,j) = pow(square(y_tail_core_size)+square(j/TAIL_OVERSAMPLING),-y_tail_power_law_index/2.)*exp(-0.5*square(i/TAIL_OVERSAMPLING/y_tail_sigma_x));
+	
+	psf->y_tail_profile(i,j) = yprof*exp(-0.5*square(i/TAIL_OVERSAMPLING/y_tail_sigma_x));
       }
     }
+
+#endif
+
     SPECEX_INFO("specex::PSF::TailValue computing profile images done");
+
   }
 
+
+  
   int di = int(fabs(dx*TAIL_OVERSAMPLING)+0.5);
   int dj = int(fabs(dy*TAIL_OVERSAMPLING)+0.5);
   if(di>NX_TAIL_PROFILE || dj>NY_TAIL_PROFILE) return 0.;
-  
+
   double r_prof = r_tail_profile(di,dj);
   if(derivative_r_tail_amplitude) *derivative_r_tail_amplitude = r_prof;
+  
+  double res =  r_tail_amplitude*r_prof;
 
+#ifdef EXTERNAL_Y_TAIL
   double y_prof = y_tail_profile(di,dj);
   if(derivative_y_tail_amplitude) *derivative_y_tail_amplitude = y_prof;
- 
-  return r_tail_amplitude*r_prof + y_tail_amplitude*y_prof;
+  res += y_tail_amplitude*y_prof;
+#endif
+
+  return res;
+
 }
+
 
 #endif
 

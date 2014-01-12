@@ -85,14 +85,17 @@ namespace specex {
     double r_tail_core_size;
     double r_tail_x_scale;
     double r_tail_y_scale;
+    specex::image_data r_tail_profile; // to go much faster    
     
+
+#ifdef EXTERNAL_Y_TAIL
     double y_tail_amplitude;
     double y_tail_core_size;
     double y_tail_power_law_index;
     double y_tail_sigma_x;
-    
-    specex::image_data r_tail_profile; // to go much faster
     specex::image_data y_tail_profile; // to go much faster
+#endif
+    
     
     double TailValue(const double& dx, const double &dy, double* derivative_r_tail_amplitude = 0, double* derivative_y_tail_amplitude = 0) const;
 #endif
@@ -273,10 +276,12 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(r_tail_core_size);
       ar & BOOST_SERIALIZATION_NVP(r_tail_x_scale);
       ar & BOOST_SERIALIZATION_NVP(r_tail_y_scale);
+#ifdef EXTERNAL_Y_TAIL
       ar & BOOST_SERIALIZATION_NVP(y_tail_amplitude);
       ar & BOOST_SERIALIZATION_NVP(y_tail_core_size);
       ar & BOOST_SERIALIZATION_NVP(y_tail_power_law_index);
       ar & BOOST_SERIALIZATION_NVP(y_tail_sigma_x);
+#endif
 #endif
       
       return;
