@@ -134,7 +134,7 @@ int main ( int argc, char *argv[] ) {
     vector<specex::Spot_p> spots;
     for(size_t s=0;s<input_spots.size();s++) {
       specex::Spot_p& spot = input_spots[s];
-      if(spot->fiber != fiber) continue;
+      // if(spot->fiber != fiber) continue; // keep all spots of course !!
       if(spot->status == 0) continue;
       spots.push_back(spot);
     }
@@ -166,8 +166,15 @@ int main ( int argc, char *argv[] ) {
     vector<harp::vector_double> psf_params;
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p& spot = spots[s];
-      psf_params.push_back(psf->LocalParamsFW(fiber,spot->wavelength,bundle));
+      psf_params.push_back(psf->LocalParamsFW(spot->fiber,spot->wavelength,bundle));
     }
+
+    
+#ifdef CONTINUUM
+    double expfact_for_continuum=1./(2*M_PI*square(psf->continuum_sigma_x));
+#endif
+
+
     for(int j=int(ymin) ; j<=int(ymax)+1 ; j++) {
       
       if((j%100)==0) cout << "done " << j << endl;
@@ -178,7 +185,7 @@ int main ( int argc, char *argv[] ) {
       double x_center = trace.X_vs_W.Value(wave);
       int i_begin = int(x_center+0.5)-hx;
       int i_end   = i_begin + (2*hx+1);
-      
+    
       double data_j = 0;
       double val_j   = 0;
       for(int i=i_begin ; i<i_end; i++) {
@@ -187,13 +194,23 @@ int main ( int argc, char *argv[] ) {
 	data_j += image(i,j);
 	
 	double val_ij = 0;
+	
+#ifdef CONTINUUM
+	double continuum_value = psf->ContinuumPol.Value(wave)*expfact_for_continuum*exp(-0.5*square((i-x_center)/psf->continuum_sigma_x));
+	val_ij += continuum_value;
+#endif
+
+
 	for(size_t s=0;s<spots.size();s++) {
 	  specex::Spot_p& spot = spots[s];
+#ifdef EXTERNAL_TAIL
+	  double r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+#endif
 	  if(fabs(i-spot->xc)<2*psf->hSizeX && fabs(j-spot->yc)<2*psf->hSizeY)
 	    val_ij += spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
 							   psf_params[s], 0, 0);
 #ifdef EXTERNAL_TAIL
-	  val_ij += spot->flux*psf->TailValue(i-spot->xc,j-spot->yc);
+	  val_ij += spot->flux*psf->TailValueA(r_tail_amplitude,i-spot->xc,j-spot->yc);
 #endif
 	}
 	val_j += val_ij;

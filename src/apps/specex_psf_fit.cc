@@ -100,6 +100,9 @@ int main ( int argc, char *argv[] ) {
 #ifdef EXTERNAL_TAIL
     ( "fit_psf_tails", "unable fit of psf tails")
 #endif
+#ifdef CONTINUUM
+    ( "fit_continuum", "unable fit of continuum")
+#endif
     ( "no_trace_fit", "do not fit traces")
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
@@ -130,7 +133,7 @@ int main ( int argc, char *argv[] ) {
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
     bool fit_psf_tails = (vm.count("fit_psf_tails")>0);
-    
+    bool fit_continuum = (vm.count("fit_continuum")>0);
     bool fit_individual_spots_position = vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
@@ -218,7 +221,15 @@ int main ( int argc, char *argv[] ) {
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
     fitter.psf_error                    = psf_error;
 #ifdef EXTERNAL_TAIL
-    psf->r_tail_amplitude                 = 0;
+    psf->RTailAmplitudePol.deg = 1;
+    psf->RTailAmplitudePol.coeff.resize(psf->RTailAmplitudePol.deg+1);
+    psf->RTailAmplitudePol.coeff *= 0; 
+#ifdef EXPONENTIAL_TAIL_AMPLITUDE
+    psf->RTailAmplitudePol.coeff(0) = -7;
+#endif
+    psf->RTailAmplitudePol.xmin = 1000; // need to change this
+    psf->RTailAmplitudePol.xmax = 10000; // need to change this
+    
     psf->r_tail_core_size = 2.;
     
 #ifdef EXTERNAL_Y_TAIL
@@ -226,10 +237,19 @@ int main ( int argc, char *argv[] ) {
     psf->y_tail_core_size = 2.;    
 #endif
     
-    fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
 #endif
 
+#ifdef CONTINUUM
+    psf->ContinuumPol.deg = 1;
+    psf->ContinuumPol.coeff.resize(psf->ContinuumPol.deg+1);
+    psf->ContinuumPol.coeff *= 0;
+    psf->ContinuumPol.xmin = 1000; // need to change this
+    psf->ContinuumPol.xmax = 10000; // need to change this  
+    fitter.scheduled_fit_of_continuum   = fit_continuum;
+#endif
+    
+    fitter.scheduled_fit_of_traces      = fit_traces;
 
     fitter.gain = 1; // images are already in electrons
     // fitter.readout_noise = 2; // b1, evaluated using spatial variance in sdProc-b1-00108382.fits[1:4000,1:600]

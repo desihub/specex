@@ -55,6 +55,9 @@ class PSF_Fitter {
   size_t psf_y_tail_amplitude_index;
 #endif
 #endif
+#ifdef CONTINUUM
+  size_t continuum_index;
+#endif
 
  public :
   // internal set of parameters and matrices
@@ -70,6 +73,8 @@ class PSF_Fitter {
  private :
 
   int bundle_id;
+  int first_fiber_id;
+  int last_fiber_id;
   std::vector<Legendre2DPol>* psf_global_params; // this is a pointer set by the fitter to the current psf bundle being fit
 
  public :
@@ -88,6 +93,12 @@ class PSF_Fitter {
   bool fit_psf_tail;
   bool scheduled_fit_of_psf_tail;
 #endif
+#ifdef CONTINUUM
+  bool fit_continuum;
+  bool scheduled_fit_of_continuum;
+#endif
+
+
   double chi2_precision;
   bool include_signal_in_weight;
   bool verbose;
@@ -119,6 +130,10 @@ class PSF_Fitter {
 #ifdef EXTERNAL_TAIL
     fit_psf_tail(false),
     scheduled_fit_of_psf_tail(false),
+#endif
+#ifdef CONTINUUM
+    fit_continuum(false),
+    scheduled_fit_of_continuum(false),
 #endif
     fatal(true),
     verbose(true),

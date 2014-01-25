@@ -77,11 +77,15 @@ namespace specex {
   
  
 #define EXTERNAL_TAIL
+//#define EXPONENTIAL_TAIL_AMPLITUDE
+//#define EXTERNAL_Y_TAIL
 
 
 #ifdef EXTERNAL_TAIL
   public :
-    double r_tail_amplitude;
+    //double r_tail_amplitude;
+    double r_tail_amplitude(const double& wavelength) const { return RTailAmplitudePol.Value(wavelength);}
+    Legendre1DPol RTailAmplitudePol;
     double r_tail_core_size;
     double r_tail_x_scale;
     double r_tail_y_scale;
@@ -96,10 +100,25 @@ namespace specex {
     specex::image_data y_tail_profile; // to go much faster
 #endif
     
+    void ComputeTailProfile();
     
-    double TailValue(const double& dx, const double &dy, double* derivative_r_tail_amplitude = 0, double* derivative_y_tail_amplitude = 0) const;
+    double TailValueW(const double& wavelength, 
+		     const double& dx, const double &dy, 
+		     harp::vector_double* derivative_r_tail_amplitude = 0,
+		     double* derivative_y_tail_amplitude = 0) const;
+#ifndef EXTERNAL_Y_TAIL
+    double TailValueA(const double& r_tail_amplitude, 
+		      const double& dx, const double &dy) const;
 #endif
 
+#endif
+
+#define CONTINUUM
+
+#ifdef CONTINUUM
+    Legendre1DPol ContinuumPol;
+    double continuum_sigma_x;
+#endif
 
   protected :
     
@@ -272,7 +291,8 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_cols);
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_rows);
 #ifdef EXTERNAL_TAIL
-      ar & BOOST_SERIALIZATION_NVP(r_tail_amplitude);
+      //ar & BOOST_SERIALIZATION_NVP(r_tail_amplitude);
+      ar & BOOST_SERIALIZATION_NVP(RTailAmplitudePol);
       ar & BOOST_SERIALIZATION_NVP(r_tail_core_size);
       ar & BOOST_SERIALIZATION_NVP(r_tail_x_scale);
       ar & BOOST_SERIALIZATION_NVP(r_tail_y_scale);
@@ -283,7 +303,10 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(y_tail_sigma_x);
 #endif
 #endif
-      
+#ifdef CONTINUUM
+      ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
+      ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
+#endif     
       return;
     }
     

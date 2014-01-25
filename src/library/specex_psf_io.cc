@@ -25,6 +25,10 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;
   
+#ifdef EXTERNAL_TAIL
+  double r_tail_amplitude = psf->RTailAmplitudePol.Value(wavelength);
+#endif
+
   specex::image_data img(nx,ny);
   for(int j=0;j<ny;j++) {
     for(int i=0;i<nx;i++) {
@@ -37,7 +41,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
 
 #ifdef EXTERNAL_TAIL
-      img(i,j)+=psf->TailValue(ib+int(x)-(x-dx),jb+int(y)-(y-dy));
+      img(i,j)+=psf->TailValueA(r_tail_amplitude,ib+int(x)-(x-dx),jb+int(y)-(y-dy));
 #endif
 
     }
