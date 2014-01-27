@@ -44,7 +44,7 @@ namespace specex {
     
     void SetDegree(const int ideg);
   
-    int LocalNPar() const;
+    int LocalNAllPar() const;
     
     double Degree() const {
       return degree;

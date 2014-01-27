@@ -26,7 +26,7 @@ int main() {
     // testing coordinate system  
     double xc = 400;
     double yc = 2000;
-    harp::vector_double P(psf->LocalNPar());
+    harp::vector_double P(psf->LocalNAllPar());
     P *= 0;
     int i=floor(xc);
     int j = floor(yc);
@@ -78,10 +78,10 @@ int main() {
     double x_ccd = trace.X_vs_W.Value(wave);
     double y_ccd = trace.Y_vs_W.Value(wave);
     
-    specex::Legendre2DPol& pol = psf->ParamsOfBundles[bundle].Polynomials[0];
+    specex::Legendre2DPol_p pol = psf->ParamsOfBundles[bundle].AllParPolXW[0];
     
-    double rx = 2*(x_ccd-pol.xmin)/(pol.xmax-pol.xmin)-1;
-    double ry = 2*(y_ccd-pol.ymin)/(pol.ymax-pol.ymin)-1;
+    double rx = 2*(x_ccd-pol->xmin)/(pol->xmax-pol->xmin)-1;
+    double ry = 2*(y_ccd-pol->ymin)/(pol->ymax-pol->ymin)-1;
     
     cout << "wave x_ccd y_ccd " << wave << " " << x_ccd << " " << y_ccd << endl;
     cout << "reduced x and y " << rx << " " << ry << endl;
@@ -131,7 +131,7 @@ int main() {
 	
 	// to go faster, pre-compute PSF parameters
 	
-	harp::vector_double psf_params = psf->LocalParamsXW(x_ccd,wave,bundle_id);
+	harp::vector_double psf_params = psf->AllLocalParamsXW(x_ccd,wave,bundle_id);
 	
 	// loop on pixels of PSF footprint
 	for(int j=y_begin;j<y_end;++j)

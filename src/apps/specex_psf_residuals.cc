@@ -185,7 +185,7 @@ int main ( int argc, char *argv[] ) {
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
       
-      harp::vector_double params = psf->LocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+      harp::vector_double params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
       
 #ifdef EXTERNAL_TAIL
       
@@ -254,8 +254,8 @@ int main ( int argc, char *argv[] ) {
 	}
       } // end of loop on stamp pixels
     }
-    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNPar() << " gnpar=" << psf->BundleNPar(spots[0]->fiber_bundle) << endl;
-    int npar = psf->BundleNPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
+    cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNAllPar() << " gnpar=" << psf->BundleNAllPar(spots[0]->fiber_bundle) << endl;
+    int npar = psf->BundleNAllPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
     int ndf_image  = ndata_image-npar; 
     int ndf_core   = ndata_core-npar; 
     cout << "image chi2/ndf     = " << chi2_image/ndf_image << " ndf=" << ndf_image << " ndata=" << ndata_image << endl;

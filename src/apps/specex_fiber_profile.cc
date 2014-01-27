@@ -166,7 +166,7 @@ int main ( int argc, char *argv[] ) {
     vector<harp::vector_double> psf_params;
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p& spot = spots[s];
-      psf_params.push_back(psf->LocalParamsFW(spot->fiber,spot->wavelength,bundle));
+      psf_params.push_back(psf->AllLocalParamsFW(spot->fiber,spot->wavelength,bundle));
     }
 
     

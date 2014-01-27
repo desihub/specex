@@ -48,18 +48,23 @@ namespace specex {
     // those are polynomials of x_cdd and lambda to allow continuous variation in CCD and at the same time
     // and easy projection per fiber for subsequent use
     
-    std::vector<Legendre2DPol> Polynomials;
+    std::vector<Legendre2DPol_p> AllParPolXW; // all the parameters of the PSF , varying with x_ccd and lambda
+    std::vector<Legendre2DPol_p> FitParPolXW; // subsamples of parameters that are fit
     
     int bundle_id;
     int fiber_min; // first fiber this set of params applies to
     int fiber_max; // last fiber this set of params applies to
+
+    
+    
+
     PSF_Params() : bundle_id(0), fiber_min(0), fiber_max(0) {};
   
   private :
 
     template < class Archive >
       void serialize ( Archive & ar, const unsigned int version ) {
-      ar & BOOST_SERIALIZATION_NVP(Polynomials);
+      ar & BOOST_SERIALIZATION_NVP(AllParPolXW);
       ar & BOOST_SERIALIZATION_NVP(bundle_id);
       ar & BOOST_SERIALIZATION_NVP(fiber_min);
       ar & BOOST_SERIALIZATION_NVP(fiber_max);
@@ -188,11 +193,9 @@ namespace specex {
     //! half size of the PSF in pixels in ccd
     int hSizeX, hSizeY; 
     
-    //! parameters of psf shape varying with xy coordinates
-    //std::vector<Legendre2DPol> Params;
-    
     std::map<int,PSF_Params> ParamsOfBundles;
     
+
     std::map<int,Prior*> Priors;
     void SetPrior(int k,Prior* p) {
       if(Priors.find(k) != Priors.end()) {
@@ -222,11 +225,13 @@ namespace specex {
     //#warning NEED TO IMPLEMENT JUMPS IN WAVELENGTH SOLUTION, AND NEED TO SAVE IN FITS
   
     
-    
-    virtual int LocalNPar() const = 0; // set of parameters needed to describe psf at fixed ccd position
-    int BundleNPar(int bundle_id) const; // set of parameters needed to describe psf varying with xy ccd coordinates
-    int TracesNPar() const;
   
+    
+    virtual int LocalNAllPar() const = 0; // number of all the parameters parameters needed to describe psf at fixed ccd position
+    int BundleNFitPar(int bundle_id) const; // number of parameters to be fitted  needed to describe psf varying with xy ccd coordinates
+    int BundleNAllPar(int bundle_id) const; // number of all the parameters needed to describe psf varying with xy ccd coordinates
+    int TracesNPar() const;
+    
     bool IsLinear() const; // true if PSF linear wrt PSF params
 
 
@@ -262,10 +267,18 @@ namespace specex {
 
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
-    harp::vector_double LocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
-    harp::vector_double LocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    harp::vector_double LocalParamsFW(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
-    harp::vector_double LocalParamsXW(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    harp::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
+    harp::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double AllLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+
+    harp::vector_double FitLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    harp::vector_double FitLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
+    harp::vector_double FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    harp::vector_double FitLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    
     
     //! I/O for interface with specter
     virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};

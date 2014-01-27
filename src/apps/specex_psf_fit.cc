@@ -286,6 +286,7 @@ int main ( int argc, char *argv[] ) {
       // allocate bundle in PSF if necessary
       if(psf->ParamsOfBundles.find(bundle)==psf->ParamsOfBundles.end()) {
 	psf->ParamsOfBundles[bundle] = specex::PSF_Params();
+	psf->ParamsOfBundles[bundle].bundle_id = bundle;
 	psf->ParamsOfBundles[bundle].fiber_min = spectro->number_of_fibers_per_bundle*bundle;
 	psf->ParamsOfBundles[bundle].fiber_max = psf->ParamsOfBundles[bundle].fiber_min+spectro->number_of_fibers_per_bundle-1; // included
 	

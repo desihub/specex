@@ -89,7 +89,7 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
     */
   }
 
-int specex::GaussHermitePSF::LocalNPar() const {
+int specex::GaussHermitePSF::LocalNAllPar() const {
     
     int npar = (degree+1)*(degree+1)-4;// -1 because normalized, -3 because centered 
     
@@ -122,7 +122,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   //double* paramder = 0;
   //if(ParamDer) {paramder = ParamDer->NonConstData(); ParamDer->Zero();}
 
-  assert(LocalNPar()<=Params.size());
+  assert(LocalNAllPar()<=Params.size());
 
   double x = input_X/sigma;
   double y = input_Y/sigma;
@@ -425,7 +425,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 harp::vector_double specex::GaussHermitePSF::DefaultParams() const 
 {
   
-  harp::vector_double Params(LocalNPar());
+  harp::vector_double Params(LocalNAllPar());
 
   // all = zero at beginning = a pure gaussian
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE
@@ -595,21 +595,21 @@ void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
     int BUNDLEID = bundle_it->first;
     int FIBERMIN = params_of_bundle.fiber_min;
     int FIBERMAX = params_of_bundle.fiber_max;
-    int LDEGX = params_of_bundle.Polynomials[0].xdeg;
-    int LDEGY = params_of_bundle.Polynomials[0].ydeg;
-    double LXMIN = params_of_bundle.Polynomials[0].xmin;
-    double LXMAX = params_of_bundle.Polynomials[0].xmax;
-    double LYMIN = params_of_bundle.Polynomials[0].ymin;
-    double LYMAX = params_of_bundle.Polynomials[0].ymax;
+    int LDEGX = params_of_bundle.AllParPolXW[0]->xdeg;
+    int LDEGY = params_of_bundle.AllParPolXW[0]->ydeg;
+    double LXMIN = params_of_bundle.AllParPolXW[0]->xmin;
+    double LXMAX = params_of_bundle.AllParPolXW[0]->xmax;
+    double LYMIN = params_of_bundle.AllParPolXW[0]->ymin;
+    double LYMAX = params_of_bundle.AllParPolXW[0]->ymax;
     
     // check all params_of_bundle have same degree !!
-    for(size_t i=1;i<params_of_bundle.Polynomials.size();i++) {
-      if(LDEGX != params_of_bundle.Polynomials[i].xdeg) SPECEX_ERROR("Need same degree for all Legendre2DPol for complying with fits format");
-      if(LDEGY != params_of_bundle.Polynomials[i].ydeg) SPECEX_ERROR("Need same degree for all Legendre2DPol for complying with fits format");
-      if(LXMIN != params_of_bundle.Polynomials[i].xmin) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
-      if(LXMAX != params_of_bundle.Polynomials[i].xmax) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
-      if(LYMIN != params_of_bundle.Polynomials[i].ymin) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
-      if(LYMAX != params_of_bundle.Polynomials[i].ymax) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format"); 
+    for(size_t i=1;i<params_of_bundle.AllParPolXW.size();i++) {
+      if(LDEGX != params_of_bundle.AllParPolXW[i]->xdeg) SPECEX_ERROR("Need same degree for all Legendre2DPol for complying with fits format");
+      if(LDEGY != params_of_bundle.AllParPolXW[i]->ydeg) SPECEX_ERROR("Need same degree for all Legendre2DPol for complying with fits format");
+      if(LXMIN != params_of_bundle.AllParPolXW[i]->xmin) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+      if(LXMAX != params_of_bundle.AllParPolXW[i]->xmax) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+      if(LYMIN != params_of_bundle.AllParPolXW[i]->ymin) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format");
+      if(LYMAX != params_of_bundle.AllParPolXW[i]->ymax) SPECEX_ERROR("Need same xy range for all Legendre2DPol for complying with fits format"); 
     }
     
     int GHDEGX  = degree; 
@@ -649,7 +649,7 @@ void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
 	if(i_gh == 1 && j_gh == 0) {buffer_index += ncoefs_legendre; continue;}
 	if(i_gh == 0 && j_gh == 1) {buffer_index += ncoefs_legendre; continue;}
 	
-	const harp::vector_double& legendre_coefficents = params_of_bundle.Polynomials[ gh_index ].coeff;
+	const harp::vector_double& legendre_coefficents = params_of_bundle.AllParPolXW[ gh_index ]->coeff;
 	gh_index++;
 
 	// now loop on legendre coefficients m(i+j*(xdeg+1))
@@ -967,20 +967,20 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
 	if(i_gh == 1 && j_gh == 0) {buffer_index += ncoefs_legendre; continue;}
 	if(i_gh == 0 && j_gh == 1) {buffer_index += ncoefs_legendre; continue;}
 	
-	Legendre2DPol pol;
-	pol.xdeg = LDEGX;
-	pol.ydeg = LDEGY;
-	pol.xmin = LXMIN;
-	pol.xmax = LXMAX;
-	pol.ymin = LYMIN;
-	pol.ymax = LYMAX;
-	pol.coeff.resize((pol.xdeg+1)*(pol.ydeg+1));
+	Legendre2DPol_p pol(new Legendre2DPol());
+	pol->xdeg = LDEGX;
+	pol->ydeg = LDEGY;
+	pol->xmin = LXMIN;
+	pol->xmax = LXMAX;
+	pol->ymin = LYMIN;
+	pol->ymax = LYMAX;
+	pol->coeff.resize((pol->xdeg+1)*(pol->ydeg+1));
 	
 	// now loop on legendre coefficients m(i+j*(xdeg+1))
-	for(size_t i=0;i<pol.coeff.size();i++,buffer_index++) {
-	  pol.coeff(i) = buffer[buffer_index];
+	for(size_t i=0;i<pol->coeff.size();i++,buffer_index++) {
+	  pol->coeff(i) = buffer[buffer_index];
 	}
-	params_of_bundle.Polynomials.push_back(pol);
+	params_of_bundle.AllParPolXW.push_back(pol);
       }
     }
     

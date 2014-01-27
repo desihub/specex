@@ -26,7 +26,8 @@ namespace specex {
     harp::vector_double trace_x_monomials;
     harp::vector_double trace_y_monomials;
     harp::vector_double psf_monomials;
-    harp::vector_double psf_params;
+    harp::vector_double psf_fit_params;
+    harp::vector_double psf_all_params;
     
     int flux_parameter_index;
     int x_parameter_index;
@@ -72,11 +73,8 @@ class PSF_Fitter {
 
  private :
 
-  int bundle_id;
-  int first_fiber_id;
-  int last_fiber_id;
-  std::vector<Legendre2DPol>* psf_global_params; // this is a pointer set by the fitter to the current psf bundle being fit
-
+  PSF_Params* psf_params; // this is a pointer set by the fitter to the current psf bundle being fit
+  
  public :
   void SelectFiberBundle(int bundle); // this sets bundle_id and psf_global_params
 
@@ -160,7 +158,7 @@ class PSF_Fitter {
 
    void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
 
-   void SetPSFParams(const harp::vector_double &Params); 
+   // void SetAllPSFParams(const harp::vector_double &Params); 
 
   bool FitOneSpot(Spot_p& spot, double *chi2_val=0, int *n_iterations=0);
   bool FitSeveralSpots(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_pixels=0, int *n_iterations=0);

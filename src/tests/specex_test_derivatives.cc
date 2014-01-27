@@ -34,7 +34,7 @@ int main() {
   int i=int(x)+1;
   int j=int(y)+1;
 
-  harp::vector_double P = psf->LocalParamsFW(fiber,wave,bundle);
+  harp::vector_double P = psf->AllLocalParamsFW(fiber,wave,bundle);
   cout << P << endl;
 
   harp::vector_double ParamDer(P.size());
@@ -76,18 +76,18 @@ int main() {
   {
   cout  << "testing global monomials" << endl;
   specex::PSF_Params &psf_global_params = psf->ParamsOfBundles[bundle];
-  harp::vector_double gP(psf->BundleNPar(bundle));
-  harp::vector_double gM(psf->BundleNPar(bundle));
+  harp::vector_double gP(psf->BundleNAllPar(bundle));
+  harp::vector_double gM(psf->BundleNAllPar(bundle));
   int index=0;
-  for(int p=0;p<psf->LocalNPar();p++) {
-    harp::vector_double pM = psf_global_params.Polynomials[p].Monomials(x,wave);
+  for(int p=0;p<psf->LocalNAllPar();p++) {
+    harp::vector_double pM = psf_global_params.AllParPolXW[p]->Monomials(x,wave);
     int p_size = pM.size();
     ublas::project(gM,ublas::range(index,index+p_size))=pM;
-    ublas::project(gP,ublas::range(index,index+p_size))=psf_global_params.Polynomials[p].coeff;
+    ublas::project(gP,ublas::range(index,index+p_size))=psf_global_params.AllParPolXW[p]->coeff;
     index += p_size;
   }
-  harp::vector_double spot_params_1 = psf->LocalParamsXW(x,wave,bundle,gP);
-  harp::vector_double spot_params_2 = psf->LocalParamsXW(x,wave,bundle);
+  harp::vector_double spot_params_1 = psf->AllLocalParamsXW_with_AllBundleParams(x,wave,bundle,gP);
+  harp::vector_double spot_params_2 = psf->AllLocalParamsXW(x,wave,bundle);
   cout << "spot_params_1=" << spot_params_1 << endl;
   cout << "spot_params_2=" << spot_params_2 << endl;
   cout << "diff=" << spot_params_1-spot_params_2 << endl;
@@ -97,8 +97,8 @@ int main() {
   // compute analytic der
   harp::vector_double H(gP.size());
   index=0;
-  for(int p=0;p<psf->LocalNPar();p++) {
-    int p_size = psf_global_params.Polynomials[p].coeff.size();
+  for(int p=0;p<psf->LocalNAllPar();p++) {
+    int p_size = psf_global_params.AllParPolXW[p]->coeff.size();
     ublas::project(H,ublas::range(index,index+p_size))=ParamDer[p]*ublas::project(gM,ublas::range(index,index+p_size));
     index += p_size;
   }
@@ -107,11 +107,11 @@ int main() {
     double eps = fabs(gP(k))/1000.;
 
     harp::vector_double gPp = gP; gPp(k)+=eps/2.;
-    harp::vector_double lPp = psf->LocalParamsXW(x,wave,bundle,gPp);
+    harp::vector_double lPp = psf->AllLocalParamsXW_with_AllBundleParams(x,wave,bundle,gPp);
     double valp = psf->PSFValueWithParamsXY(x,y,i,j,lPp,0,0);
 
     harp::vector_double gPm = gP; gPm(k)-=eps/2.;
-    harp::vector_double lPm = psf->LocalParamsXW(x,wave,bundle,gPm);
+    harp::vector_double lPm = psf->AllLocalParamsXW_with_AllBundleParams(x,wave,bundle,gPm);
     double valm = psf->PSFValueWithParamsXY(x,y,i,j,lPm,0,0);
     
     double numDer = (valp-valm)/eps;
