@@ -26,7 +26,6 @@ namespace specex {
     harp::vector_double trace_x_monomials;
     harp::vector_double trace_y_monomials;
     harp::vector_double psf_monomials;
-    harp::vector_double psf_fit_params;
     harp::vector_double psf_all_params;
     
     int flux_parameter_index;

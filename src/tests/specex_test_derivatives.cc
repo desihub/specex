@@ -35,6 +35,10 @@ int main() {
   int j=int(y)+1;
 
   harp::vector_double P = psf->AllLocalParamsFW(fiber,wave,bundle);
+
+  // test for derivatives of sigma
+  // for(size_t i=2;i<P.size();i++) P(i)=0;
+
   cout << P << endl;
 
   harp::vector_double ParamDer(P.size());

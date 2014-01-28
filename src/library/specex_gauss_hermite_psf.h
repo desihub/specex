@@ -37,8 +37,8 @@ namespace specex {
     
   public :
   
-    double sigma; 
-
+    // double sigma;  // it is a parameter
+    
     GaussHermitePSF(int ideg=3);
     virtual ~GaussHermitePSF(){}; 
     
@@ -80,8 +80,7 @@ namespace specex {
       //ar & BOOST_SERIALIZATION_NVP(boost::serialization::base_object<specex::PSF>(*this));
       ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(PSF);
       ar & BOOST_SERIALIZATION_NVP(degree);
-      ar & BOOST_SERIALIZATION_NVP(sigma);
-
+      
       need_to_resize_buffer = true;
     }
   };

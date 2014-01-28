@@ -78,8 +78,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   {
     int npar = X_vs_W.coeff.size();
     
-    harp::matrix_double A(npar,npar); A*=0;
-    harp::vector_double B(npar); B*=0;
+    harp::matrix_double A(npar,npar); specex::zero(A);
+    harp::vector_double B(npar); specex::zero(B);
     
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
@@ -103,8 +103,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   // fit y
   {
     int npar = Y_vs_W.coeff.size();
-    harp::matrix_double A(npar,npar); A*=0;
-    harp::vector_double B(npar); B*= 0;
+    harp::matrix_double A(npar,npar); specex::zero(A);
+    harp::vector_double B(npar); specex::zero(B);
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
       if(spot.fiber != fiber) 

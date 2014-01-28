@@ -18,6 +18,9 @@ namespace specex {
   
   //typedef boost::numeric::ublas::symmetric_matrix<double, boost::numeric::ublas::upper, boost::numeric::ublas::column_major> symmetric_matrix_double;
    
+  void zero(harp::vector_double& v);
+  void zero(harp::matrix_double& m);
+
   // ! scalar product
   double dot(const harp::vector_double& v1, const harp::vector_double& v2);
   

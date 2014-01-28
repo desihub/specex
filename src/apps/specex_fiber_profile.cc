@@ -161,6 +161,10 @@ int main ( int argc, char *argv[] ) {
     os << "# w :" << endl;
     os << "# data :" << endl;
     os << "# model :" << endl;
+    
+    for(size_t p=0;p<psf->paramNames.size();p++) {
+      os << "# " << psf->paramNames[p] << " :" << endl;
+    }
     os << "#end" << endl;
     
     vector<harp::vector_double> psf_params;
@@ -216,7 +220,12 @@ int main ( int argc, char *argv[] ) {
 	val_j += val_ij;
       }
       
-      os << " " << data_j << " " << val_j << endl;
+      os << " " << data_j << " " << val_j;
+      
+      harp::vector_double params = psf->AllLocalParamsFW(fiber,wave,bundle);
+      for(size_t p=0;p<params.size();p++)
+	os << " " << params(p);
+      os << endl;
 
     }
     os.close();

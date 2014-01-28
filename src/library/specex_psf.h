@@ -125,9 +125,12 @@ namespace specex {
     double continuum_sigma_x;
 #endif
 
+    std::vector<std::string> paramNames;
+
   protected :
     
-    std::vector<std::string> paramNames;
+    
+    
     harp::vector_double TmpParamDer;
     std::string name;
 

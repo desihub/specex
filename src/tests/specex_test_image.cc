@@ -8,6 +8,7 @@
 #include <specex_fits.h>
 #include <specex_image_data.h>
 #include <specex_message.h>
+#include <specex_linalg.h>
 
 
 using namespace std;
@@ -72,7 +73,7 @@ int main ( int argc, char *argv[] ) {
   // now write image
   specex::write_new_fits_image(outfile,nr,nc,vals);
   
-  specex::image_data img2(12,20); img2.data *= 0;
+  specex::image_data img2(12,20); specex::zero(img2.data);
   for(int i=0;i<img2.Nx();i++) {
     img2(i,3)=1;
   }

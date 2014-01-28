@@ -18,7 +18,6 @@ using namespace std;
 
 specex::GaussHermitePSF::GaussHermitePSF(int ideg) {
   name = "GaussHermitePSF";
-  sigma = 1;
   need_to_resize_buffer = true;
   SetDegree(ideg);
   
@@ -40,6 +39,8 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
   need_to_resize_buffer = true;
     
   paramNames.clear();
+  paramNames.push_back("GHSIGX");
+  paramNames.push_back("GHSIGY");
   char n[10];
   for(int j=0;j<degree+1;j++) {
     for(int i=0;i<degree+1;i++) {
@@ -48,7 +49,7 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
       if(i==0 && j==1) continue;
       if(i==1 && j==1) continue;
       
-      sprintf(n,"P%d.%d",i,j);
+      sprintf(n,"GH%d.%d",i,j);
       paramNames.push_back(n);
     }
   }
@@ -91,7 +92,9 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
 
 int specex::GaussHermitePSF::LocalNAllPar() const {
     
-    int npar = (degree+1)*(degree+1)-4;// -1 because normalized, -3 because centered 
+  int npar = 2; // sigma_x and sigma_y
+
+  npar += (degree+1)*(degree+1)-4;// -1 because normalized, -3 because centered 
     
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE
     npar += 1; // normalization
@@ -115,17 +118,22 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 
   if(need_to_resize_buffer) const_cast<specex::GaussHermitePSF*>(this)->ResizeBuffer();
 
-  // direct pointers to go faster
-  //const double* params = Params.Data();
-  //double* posder = 0;
-  //if(PosDer) {posder = PosDer->NonConstData(); PosDer->Zero();}
-  //double* paramder = 0;
-  //if(ParamDer) {paramder = ParamDer->NonConstData(); ParamDer->Zero();}
+  //cout << "DEBUG PSF PARAMS = " << Params(0) << " " << Params(1) << " " << Params(2) << endl; 
+  //assert(LocalNAllPar()<=Params.size());
 
-  assert(LocalNAllPar()<=Params.size());
+  double sigma_x = Params(0);
+  double sigma_y = Params(1);
+  
+  /*
+    if(sigma_x<0.5) sigma_x=0.5;
+    if(sigma_y<0.5) sigma_y=0.5;
+    if(sigma_x>10) sigma_x=10;
+    if(sigma_y>10) sigma_y=10;
+  */
 
-  double x = input_X/sigma;
-  double y = input_Y/sigma;
+
+  double x = input_X/sigma_x;
+  double y = input_Y/sigma_y;
  
   double psf_val = 0;
   
@@ -143,27 +151,15 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     }
     
     
-    double expfact=1./(2*M_PI*sigma*sigma)*exp(-0.5*(x*x+y*y));
+    double expfact=1./(2*M_PI*sigma_x*sigma_y)*exp(-0.5*(x*x+y*y));
     
     double prefactor = 1; // first constant term is not a free parameter, it is = 1 because PSF integral = 1, all higher order gauss hermite terms have integral = 0 
-    /*
-    // we skip constant monomial (0,0), but also (1,0) and (0,1) because degenerate with position
-    {
-      int param_index=0;
-      for(int j=0;j<=degree;j++) {
-	int imin=0; 
-	if(j==0) {imin=2;} // skip two first (0,0) and (1,0)
-	else if(j==1) {imin=1;} // skip  first (0,1)
-	
-	for(int i=imin;i<=degree;i++,param_index++) {
-	  prefactor+=Params(param_index)*Hx(i)*Hy(j);
-	} 
-      }
-    }
-    */
+    
+    int first_hermite_param_index = 2; // first 2 params are sigmas, 
+
     // we skip constant monomial (0,0)(1,0)(0,1)(1,1) because degenerate with position
     {
-      int param_index=0;
+      int param_index=first_hermite_param_index; 
       for(int j=0;j<=degree;j++) {
 	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
 	for(int i=imin;i<=degree;i++,param_index++) {
@@ -174,23 +170,17 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     }
     psf_val = prefactor*expfact;
     
-    /*
-    if(ParamDer) {
-      int param_index=0;
-      for(int j=0;j<=degree;j++) {
-	int imin=0; 
-	if(j==0) {imin=2;} // skip two first (0,0) and (1,0)
-	else if(j==1) {imin=1;} // skip  first (0,1)
-	
-	for(int i=imin;i<=degree;i++,param_index++) {
-	  (*ParamDer)(param_index) = expfact*Hx(i)*Hy(j);
-	} 
-      }
-    }
-    */
+   
     
     if(ParamDer) {
-      int param_index=0;
+      
+      (*ParamDer)(0) = (x*x-1)/sigma_x*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
+      (*ParamDer)(1) = (y*y-1)/sigma_y*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
+      
+      
+      int param_index=first_hermite_param_index;
+      
+      
       for(int j=0;j<=degree;j++) {
 	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
 	for(int i=imin;i<=degree;i++,param_index++) {
@@ -204,8 +194,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       double& dvdx=(*PosDer)(0);
       double& dvdy=(*PosDer)(1);
       
-      dvdx=x/sigma*psf_val;
-      dvdy=y/sigma*psf_val;
+      dvdx=x/sigma_x*psf_val;
+      dvdy=y/sigma_y*psf_val;
       
       // should take care of other terms here
       { 
@@ -222,39 +212,9 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       double d_poly_dx = 0;
       double d_poly_dy = 0;
       
-      /*
-      const double* p=params;  
-      const double *hy=Hy.Data();
-      const double *dhy=dHy.Data();
-      for(int j=0;j<=degree;j++,hy++,dhy++) {
-	const double *hx=Hx.Data();
-	const double *dhx=dHx.Data();
-	
-	int imin=0; 
-	if(j==0) {imin=2; hx+=2; dhx +=2;} // skip two first (0,0) and (1,0)
-	else if(j==1) {imin=1; hx+=1; dhx +=1;} // skip  first (0,1)
-	
-	for(int i=imin;i<=degree;i++,p++,hx++,dhx++) {
-	  d_poly_dx+=(*p)*(*dhx)*(*hy);
-	  d_poly_dy+=(*p)*(*hx)*(*dhy);
-	} 
-      }
-      */
       
+      int param_index=first_hermite_param_index; // 
       
-      int param_index=0;
-      /*
-      for(int j=0;j<=degree;j++) {
-	int imin=0; 
-	if(j==0) {imin=2;} // skip two first (0,0) and (1,0)
-	else if(j==1) {imin=1;} // skip  first (0,1)
-	for(int i=imin;i<=degree;i++,param_index++) {
-	  d_poly_dx += Params(param_index)*dHx(i)*Hy(j);
-	  d_poly_dy += Params(param_index)*Hx(i)*dHy(j);
-	} 
-      }
-      */
-
       for(int j=0;j<=degree;j++) {
 	
 	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
@@ -266,8 +226,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       }
       
       
-      dvdx -= d_poly_dx*expfact/sigma; // minus sign cause derivative wrt -x
-      dvdy -= d_poly_dy*expfact/sigma;
+      dvdx -= d_poly_dx*expfact/sigma_x; // minus sign cause derivative wrt -x
+      dvdy -= d_poly_dy*expfact/sigma_y;
       
     }
 
@@ -280,7 +240,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   if(x*x<25) { // sharp cut at 5 sigma
     
     
-    double cross_dispersion_profile = 1./sqrt(2*M_PI)/sigma*exp(-0.5*x*x);
+    double cross_dispersion_profile = 1./sqrt(2*M_PI)/sigma_x*exp(-0.5*x*x);
     
     double tail_scale = 0.8; 
     double core_power = 2;
@@ -301,7 +261,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
       double& dvdx=(*PosDer)(0);
       double& dvdy=(*PosDer)(1);
-      dvdx += x/sigma*tail_val;
+      dvdx += x/sigma_x*tail_val;
       int signe=1;
       if(input_Y<0) signe = -1;
       
@@ -427,7 +387,11 @@ harp::vector_double specex::GaussHermitePSF::DefaultParams() const
   
   harp::vector_double Params(LocalNAllPar());
 
-  // all = zero at beginning = a pure gaussian
+  specex::zero(Params); // all = zero at beginning = a pure gaussian
+
+  Params(0) = 1.1; // this is sigma_x !!
+  Params(1) = 1.2; // this is sigma_y !!
+  
 #ifdef ADD_Y_TAILS_TO_GAUSS_HERMITE
   Params(tail_norm_index) = 1;
 #endif
@@ -614,9 +578,7 @@ void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
     
     int GHDEGX  = degree; 
     int GHDEGY  = degree;
-    double GHSIGX = sigma;
-    double GHSIGY = sigma;
-    
+   
     size_t ncoefs_gauss_hermite = (GHDEGX+1)*(GHDEGY+1);
     size_t ncoefs_legendre = (LDEGX+1)*(LDEGY+1);
     
@@ -684,8 +646,6 @@ void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
     harp::fits::key_write(fp,"HSIZEX",(long long int)hSizeX,"Half size of PSF in fit, NX=2*HSIZEX+1");
     harp::fits::key_write(fp,"HSIZEY",(long long int)hSizeY,"Half size of PSF in fit, NY=2*HSIZEY+1");
     
-    harp::fits::key_write(fp,"GHSIGX",(long long int)GHSIGX,"Gauss-Hermite sigma along x");
-    harp::fits::key_write(fp,"GHSIGY",(long long int)GHSIGY,"Gauss-Hermite sigma along y");
     
     harp::fits::key_write(fp,"GHDEGX",(long long int)GHDEGX,"Gauss-Hermite pol. degree along x");
     harp::fits::key_write(fp,"GHDEGY",(long long int)GHDEGY,"Gauss-Hermite pol. degree along y");
@@ -815,8 +775,6 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
     long long int FIBERMAX; 
     long long int HSIZEX;
     long long int HSIZEY;
-    long long int GHSIGX;
-    long long int GHSIGY;
     long long int GHDEGX;
     long long int GHDEGY;
     long long int LDEGX;
@@ -831,8 +789,6 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
     harp::fits::key_read(fp,"FIBERMAX",FIBERMAX);   
     harp::fits::key_read(fp,"HSIZEX",HSIZEX);
     harp::fits::key_read(fp,"HSIZEY",HSIZEY);
-    harp::fits::key_read(fp,"GHSIGX",GHSIGX);
-    harp::fits::key_read(fp,"GHSIGY",GHSIGY);
     harp::fits::key_read(fp,"GHDEGX",GHDEGX);
     harp::fits::key_read(fp,"GHDEGY",GHDEGY);
     harp::fits::key_read(fp,"LDEGX",LDEGX);
@@ -849,15 +805,8 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
       // set global PSF properties
       hSizeX = HSIZEX;
       hSizeY = HSIZEY;
-      degree = GHDEGX;
-      if(GHDEGY != GHDEGX) {
-	SPECEX_ERROR("currently only same Gauss-Hermite degree in X and Y is implemented");
-      }
-      sigma = GHSIGX;
-      if(GHSIGY != GHSIGX) {
-	SPECEX_ERROR("currently only same Gauss-Hermite sigma in X and Y is implemented");
-      }
       
+
       first_fiber_in_file = FIBERMIN;    
       
     }else{ 
@@ -866,8 +815,7 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
       if(HSIZEY != hSizeY) SPECEX_ERROR("currenlty same PSF size for all bundles described in file");
       if(GHDEGX != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite degree for all bundles described in file");
       if(GHDEGY != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite degree for all bundles described in file");
-      if(GHSIGX != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite sigma for all bundles described in file");
-      if(GHSIGY != degree) SPECEX_ERROR("currenlty same PSF Gauss-Hermite sigma for all bundles described in file");
+     
     }
     
     // and now read a 4 dimension fits image

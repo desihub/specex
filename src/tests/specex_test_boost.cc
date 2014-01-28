@@ -54,8 +54,8 @@ int main() {
   
   harp::matrix_double A(nparams,nparams);
   harp::vector_double B(nparams);
-  A *= 0;
-  B *= 0;
+  specex::zero(A);
+  specex::zero(B);
   
   harp::vector_double data(ndata);
   for( int i=0; i<ndata; i++) {
@@ -87,7 +87,7 @@ int main() {
   
   harp::vector_double one(16);
   harp::vector_double zero(16);
-  zero *= 0;
+  specex::zero(zero);
   for(size_t i=0;i<one.size();i++) one[i]=i+1;
   for(int j=0;j<4;j++)
     ublas::project(zero,ublas::range(4*j,4*(j+1))) += pow(10,j)* ublas::project(one,ublas::range(4*j,4*(j+1)));
@@ -106,7 +106,7 @@ int main() {
     cout << specex::dot(x,ublas::project(y,ublas::range(7,7+x.size()))) << endl;
 
 
-    y *= 0;
+    specex::zero(y);
     size_t x_size = x.size();
     for(size_t k=0;(k+1)*x_size<=y.size();k++) {
       ublas::project(y,ublas::range(k*x_size,(k+1)*x_size)) = (k+1)*x;

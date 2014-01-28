@@ -3,6 +3,17 @@
 
 #define CHECK_BOUNDS
 
+
+
+void specex::zero(harp::vector_double& v) {
+  v = boost::numeric::ublas::zero_vector<double>(v.size());
+}
+
+void specex::zero(harp::matrix_double& m) {
+  m = boost::numeric::ublas::zero_matrix<double>(m.size1(),m.size2());
+}
+  
+
 double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2) {
 #ifdef CHECK_BOUNDS
   if(v1.size() != v2.size())
@@ -11,6 +22,8 @@ double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2)
   return blas::dot(v1,v2);
 }
   
+
+
 
 // !  A += w*h*h.transposed(), where A is a symmetric matrx (only lower half is filled!)
 // see http://svn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_2_blas/syr.html

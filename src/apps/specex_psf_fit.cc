@@ -64,7 +64,7 @@ int main ( int argc, char *argv[] ) {
   double max_wavelength = 1e6;
   
   int gauss_hermite_deg = 3;
-  double gauss_hermite_sigma = 1.1;
+  //double gauss_hermite_sigma = 1.1;
   int legendre_deg_wave = 4;
   int legendre_deg_x = 1;
   
@@ -93,7 +93,7 @@ int main ( int argc, char *argv[] ) {
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $IDLSPEC2D_DIR/opfiles/lamplines.par)" )
     ( "core", "dump core files when harp exception is thrown" )
     ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
-    ( "gauss_hermite_sigma",  popts::value<double>( &gauss_hermite_sigma ), "sigma of Gauss-Hermite PSF (same for x and y, only if GAUSSHERMITE psf)")
+    //( "gauss_hermite_sigma",  popts::value<double>( &gauss_hermite_sigma ), "sigma of Gauss-Hermite PSF (same for x and y, only if GAUSSHERMITE psf)")
     ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave ), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
     ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x ), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
     ( "psf_error",  popts::value<double>( &psf_error ), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
@@ -178,8 +178,12 @@ int main ( int argc, char *argv[] ) {
 
     if(psf_model=="GAUSSHERMITE") {
       psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
-      boost::static_pointer_cast<specex::GaussHermitePSF>(psf)->sigma = gauss_hermite_sigma;
+      //boost::static_pointer_cast<specex::GaussHermitePSF>(psf)->sigma = gauss_hermite_sigma;
       
+      //psf->SetPrior("GHSIGX",new GaussianPrior(1.1,0.1));
+      //psf->SetPrior("GHSIGY",new GaussianPrior(1.2,0.1));
+      
+
       //} else if(psf_model=="GAUSSIAN") {
       //psf = new GaussPSF();
     }else {
@@ -223,7 +227,7 @@ int main ( int argc, char *argv[] ) {
 #ifdef EXTERNAL_TAIL
     psf->RTailAmplitudePol.deg = 1;
     psf->RTailAmplitudePol.coeff.resize(psf->RTailAmplitudePol.deg+1);
-    psf->RTailAmplitudePol.coeff *= 0; 
+    specex::zero(psf->RTailAmplitudePol.coeff);
 #ifdef EXPONENTIAL_TAIL_AMPLITUDE
     psf->RTailAmplitudePol.coeff(0) = -7;
 #endif
@@ -243,7 +247,7 @@ int main ( int argc, char *argv[] ) {
 #ifdef CONTINUUM
     psf->ContinuumPol.deg = 1;
     psf->ContinuumPol.coeff.resize(psf->ContinuumPol.deg+1);
-    psf->ContinuumPol.coeff *= 0;
+    specex::zero(psf->ContinuumPol.coeff);
     psf->ContinuumPol.xmin = 1000; // need to change this
     psf->ContinuumPol.xmax = 10000; // need to change this  
     fitter.scheduled_fit_of_continuum   = fit_continuum;

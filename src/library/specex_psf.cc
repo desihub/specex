@@ -55,7 +55,7 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   if(ParamDer) {
     npar=ParamDer->size();
     tmpParamDer.resize(npar);
-    tmpParamDer *= 0; // is there a zero function?
+    specex::zero(tmpParamDer);
   }
   
   double val = 0;
@@ -326,7 +326,7 @@ double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc,
 				     const harp::vector_double &Params,
 				     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
   
-  return PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer);
+  return PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
 }
 
 //! Access to the current PSF, with user provided Params.
@@ -361,6 +361,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW(const double &X, const double 
   harp::vector_double params(P.size());
   for (size_t k =0; k < P.size(); ++k)
     params(k) = P[k]->Value(X,wave);
+  
   return params;
 }
 
@@ -416,7 +417,7 @@ harp::vector_double specex::PSF::AllLocalParamsFW_with_AllBundleParams(const int
 harp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
   
   
-  harp::vector_double params(BundleNAllPar(bundle_id));
+  harp::vector_double params(LocalNAllPar());
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
@@ -427,20 +428,19 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const dou
   size_t fk=0;
   int index=0;
   for (size_t ak =0; ak < AP.size(); ++ak) { // loop on all params
-    const Legendre2DPol_p FPk = FP[fk];
     const Legendre2DPol_p APk = AP[ak];
     size_t c_size = APk->coeff.size();
-    if(APk==FPk) { // this is a fit param because the addresses are the same
-
-      //SPECEX_INFO("DEBUG all param " << ak << " and fit = " << fk << " are the same");
-
+    if(fk<FP.size() && APk==FP[fk]) { // this is a fit param because the addresses are the same
       params(ak)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),APk->Monomials(X,wave));
+      
+      //SPECEX_INFO("DEBUG all param " << ak << " and fit = " << fk << " are the same, param val =  " << params(ak));
+
       index += c_size;
       // change free param index for next iteration
       fk++;
     }else{ // this not a free param
-      SPECEX_INFO("DEBUG all param " << ak << " is not it fit");
       params(ak)=APk->Value(X,wave);
+      //SPECEX_INFO("DEBUG all param " << ak << " is not it fit, param val = " << params(ak));
     }
   }
   return params;

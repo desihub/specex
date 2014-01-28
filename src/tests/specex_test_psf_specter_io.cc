@@ -27,7 +27,7 @@ int main() {
     double xc = 400;
     double yc = 2000;
     harp::vector_double P(psf->LocalNAllPar());
-    P *= 0;
+    specex::zero(P);
     int i=floor(xc);
     int j = floor(yc);
     //for(i=floor(xc)-3;i<=floor(xc)+3;i++)

@@ -70,8 +70,8 @@ bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector
     specex::minmax(X,xmin,xmax);
   }
   
-  harp::matrix_double A(npar,npar); A *= 0;
-  harp::vector_double B(npar); B *= 0;
+  harp::matrix_double A(npar,npar); specex::zero(A);
+  harp::vector_double B(npar); specex::zero(B);
   
   
   
@@ -159,7 +159,7 @@ specex::Legendre2DPol::Legendre2DPol(int i_xdeg, const double& i_xmin, const dou
   ymax(i_ymax)
 {
   coeff.resize((xdeg+1)*(ydeg+1));
-  coeff *= 0;
+  specex::zero(coeff);
 }
  
 harp::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {

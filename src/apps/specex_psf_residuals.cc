@@ -180,7 +180,7 @@ int main ( int argc, char *argv[] ) {
 
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
-    model.data *= 0;
+    specex::zero(model.data);
     
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
@@ -213,9 +213,9 @@ int main ( int argc, char *argv[] ) {
 
     // now compute variance 
     image_data variance(image.n_cols(),image.n_rows());
-    variance.data *= 0;
+    specex::zero(variance.data);
     image_data data_in_stamp(image.n_cols(),image.n_rows());
-    data_in_stamp.data *= 0;
+    specex::zero(data_in_stamp.data);
     
     
 
