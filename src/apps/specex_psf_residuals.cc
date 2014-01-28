@@ -178,9 +178,32 @@ int main ( int argc, char *argv[] ) {
       spot_stamps.push_back(stamp);
     }
 
+    
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
     specex::zero(model.data);
+
+#ifdef CONTINUUM
+
+    const PSF_Params * psf_params = &(psf->ParamsOfBundles.find(spots[0]->fiber_bundle)->second);
+    
+    for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+      
+      for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
+	double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
+	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
+	double continuum_flux = psf->ContinuumPol.Value(w);
+	double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
+	for (int i=global_stamp.begin_i ; i <global_stamp.end_i; ++i) {
+	  
+	  if(weight(i,j)<=0) continue;
+	  model(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
+	} // end of loop on i
+      } // end of loop on fiber
+    } // end of loop on j
+
+#endif  
+
     
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
@@ -200,6 +223,9 @@ int main ( int argc, char *argv[] ) {
       } // end of loop on stamp pixels
       
 #endif
+
+
+
       // then the core of the psf for this spot's stamp only
       const Stamp& spot_stamp = spot_stamps[s];
       for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
@@ -220,8 +246,12 @@ int main ( int argc, char *argv[] ) {
     
 
     for(size_t i=0; i<model.data.size() ;i++) {
-      const double& flux = model.data(i);
+      double flux = model.data(i);
       if(flux==0) continue; // never been on this pixel
+
+      // use data here for the variance : 
+      flux = max(0.,image.data(i));
+      
       variance.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
       if(flux>0) variance.data(i) += flux; // Poisson noise
     } // end of loop on all pixels

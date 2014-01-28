@@ -134,7 +134,8 @@ void specex::PSF::ComputeTailProfile() {
     for(int i=0;i<NX_TAIL_PROFILE;i++) {
       double r2 = square(i/TAIL_OVERSAMPLING*r_tail_x_scale)+square(j/TAIL_OVERSAMPLING*r_tail_y_scale);
 	
-      r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-1.5/2.);
+      //r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-1.5/2.);
+      r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-2./2.);
       
     }
   }
