@@ -93,7 +93,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
  
   
-  SPECEX_INFO("Begin parallelized ComputeChi2AB j range " << stamp.begin_j << " " << stamp.end_j);
+  //SPECEX_INFO("Begin parallelized ComputeChi2AB j range " << stamp.begin_j << " " << stamp.end_j);
   
   UpdateTmpData(compute_ab);
 
@@ -116,13 +116,13 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     chi2_of_chunk(0) += chi2_of_chunk(chunk);
   }
   if(compute_ab) {
-    SPECEX_INFO("Add parallized matrices ...");
+    //SPECEX_INFO("Add parallized matrices ...");
     for(int chunk=1; chunk<number_of_image_chuncks; chunk++) {
       A_of_chunk[0] += A_of_chunk[chunk];
       B_of_chunk[0] += B_of_chunk[chunk];
     }  
   }
-  SPECEX_INFO("End of parallelized ComputeChi2AB chi2 = " << chi2_of_chunk(0));
+  //SPECEX_INFO("End of parallelized ComputeChi2AB chi2 = " << chi2_of_chunk(0));
   return chi2_of_chunk(0);
 }
 
@@ -521,7 +521,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
   }
 
-  SPECEX_INFO("ComputeChi2AB j range= " << input_begin_j << " " << input_end_j << " chi2= " << chi2);
+  //SPECEX_INFO("ComputeChi2AB j range= " << input_begin_j << " " << input_end_j << " chi2= " << chi2);
   return chi2;
 }
 
@@ -1593,7 +1593,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   
 // selecting spots
-  double minimum_signal_to_noise = 100;
+  double minimum_signal_to_noise = 30;
   std::vector<specex::Spot_p> selected_spots;
   for(size_t s=0;s<input_spots.size();s++) {
     specex::Spot_p& spot = input_spots[s];
@@ -1648,10 +1648,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_psf        = true;
   fit_trace      = false;
-  if(!scheduled_fit_of_traces && !scheduled_fit_of_psf_tail) {
-    chi2_precision = 0.1;
-    //include_signal_in_weight = true;
-  }
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
@@ -1708,10 +1704,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_psf        = true;
   fit_trace      = false;
-  if(!scheduled_fit_of_traces && !scheduled_fit_of_psf_tail) {
-    chi2_precision = 0.1;
-    //include_signal_in_weight = true;
-  }
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
@@ -1792,25 +1784,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   if(scheduled_fit_of_traces || scheduled_fit_of_psf_tail || scheduled_fit_of_continuum) {
     
-    SPECEX_INFO("Starting FitSeveralSpots PSF (bis)");
-    SPECEX_INFO("=======================================");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    chi2_precision = 0.1;
-    //include_signal_in_weight = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-
-
+    
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis)");
     SPECEX_INFO("=======================================");
     fit_flux       = true;
     fit_position   = false;
     fit_psf        = true;
     fit_trace      = false;
-    chi2_precision = 0.1;
     //include_signal_in_weight = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
@@ -1844,7 +1824,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_psf        = true;
     fit_trace      = false;
     chi2_precision = 0.1;
-    //include_signal_in_weight = true;
+    include_signal_in_weight = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }
