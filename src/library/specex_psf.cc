@@ -49,13 +49,13 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   
   //double *param_der=0;
   //double *integrated_param_der=0; 
+  //int npar=0;
+  //harp::vector_double& tmpParamDer = const_cast<specex::PSF*>(this)->TmpParamDer;
+  harp::vector_double tmpParamDer;
   int npar=0;
-  harp::vector_double& tmpParamDer = const_cast<specex::PSF*>(this)->TmpParamDer;
-
   if(ParamDer) {
-    npar=ParamDer->size();
-    tmpParamDer.resize(npar);
-    specex::zero(tmpParamDer);
+    npar = ParamDer->size();
+    tmpParamDer = boost::numeric::ublas::zero_vector<double>(npar);
   }
   
   double val = 0;
@@ -124,6 +124,8 @@ specex::PSF::PSF() {
 
 void specex::PSF::ComputeTailProfile() {
   
+#pragma omp critical 
+  {
   SPECEX_INFO("specex::PSF::ComputeTailProfile ...");
   
   r_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
@@ -161,6 +163,7 @@ void specex::PSF::ComputeTailProfile() {
   
   SPECEX_INFO("specex::PSF::ComputeTailProfile done");
    
+  }
   
 }
 
@@ -292,11 +295,14 @@ void specex::PSF::AddTrace(int fiber) {
 }
 
 void specex::PSF::LoadXYPol() {
+#pragma omp critical
+  {
   XPol.clear();
   YPol.clear();
   for(std::map<int,specex::Trace>::iterator it = FiberTraces.begin(); it != FiberTraces.end(); ++it) {
     XPol[it->first] = &(it->second.X_vs_W);
     YPol[it->first] = &(it->second.Y_vs_W);
+  }
   }
 }
 

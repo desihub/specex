@@ -60,7 +60,7 @@ class Stamp {
    return parent_stamp->n_rows();
  }
 
- bool Contains(int i,int j) {
+ bool Contains(int i,int j) const {
    return(i>=begin_i && i<end_i && j>=begin_j && j<end_j);
  }
  

@@ -62,8 +62,9 @@ class PSF_Fitter {
  public :
   // internal set of parameters and matrices
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
-  harp::matrix_double A; // for Gauss-Newton solving
-  harp::vector_double B; // for Gauss-Newton solving
+  std::vector<harp::matrix_double> A_of_chunk; // for Gauss-Newton solving
+  std::vector<harp::vector_double> B_of_chunk; // for Gauss-Newton solving
+  std::vector<double> chi2_of_chunk; // for Gauss-Newton solving
   harp::matrix_double fitWeight; // saved weight matrix of fitter parameters
   
  public :
@@ -76,6 +77,9 @@ class PSF_Fitter {
   
  public :
   void SelectFiberBundle(int bundle); // this sets bundle_id and psf_global_params
+
+
+  int number_of_image_chuncks; // for parallel processing (automatically set = to the variable OMP_NUM_THREADS of openmp)
 
   const image_data& image;
   const image_data& weight;
@@ -151,9 +155,10 @@ class PSF_Fitter {
     int NPar(int nspots) const;
    //int Index_PSF() const;
    //int Index_Flux(int spotid, int nspots) const;
-   
-
-   double ComputeChi2AB(bool compute_ab) ;
+    
+    void UpdateTmpData(bool compute_ab);
+    double ParallelizedComputeChi2AB(bool compute_ab);
+    double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, harp::matrix_double* Ap=0, harp::vector_double* Bp=0, bool update_tmp_data=true) const;
 
    void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
 

@@ -18,11 +18,12 @@ using namespace std;
 
 specex::GaussHermitePSF::GaussHermitePSF(int ideg) {
   name = "GaussHermitePSF";
-  need_to_resize_buffer = true;
+  //need_to_resize_buffer = true;
   SetDegree(ideg);
   
 }
 
+/*
 void specex::GaussHermitePSF::ResizeBuffer() {
   if(!need_to_resize_buffer) return;
   Hx.resize(degree+1);
@@ -31,12 +32,13 @@ void specex::GaussHermitePSF::ResizeBuffer() {
   dHy.resize(degree+1);
   need_to_resize_buffer = false;
 }
+*/
 
 void specex::GaussHermitePSF::SetDegree(const int ideg) {
   SPECEX_INFO("Gauss-Hermite PSF set degree " << ideg);
   degree = ideg;
   
-  need_to_resize_buffer = true;
+  //need_to_resize_buffer = true;
     
   paramNames.clear();
   paramNames.push_back("GHSIGX");
@@ -116,7 +118,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 			  harp::vector_double *ParamDer) const
 {
 
-  if(need_to_resize_buffer) const_cast<specex::GaussHermitePSF*>(this)->ResizeBuffer();
+  //if(need_to_resize_buffer) const_cast<specex::GaussHermitePSF*>(this)->ResizeBuffer();
 
   //cout << "DEBUG PSF PARAMS = " << Params(0) << " " << Params(1) << " " << Params(2) << endl; 
   //assert(LocalNAllPar()<=Params.size());
@@ -139,16 +141,15 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   
   // if(x*x+y*y<25) { // sharp cut at 5 sigma BAD IDEA BECAUSE DERIVATIVES !!
   {
-    { 
-      harp::vector_double& vHx = const_cast<harp::vector_double&>(Hx); 
-      for(int i=0;i<=degree;i++) {
-	vHx(i)=HermitePol(i,x);
+    harp::vector_double Hx(degree+1);
+    for(int i=0;i<=degree;i++) {
+      Hx(i)=HermitePol(i,x);
     }
-      harp::vector_double& vHy = const_cast<harp::vector_double&>(Hy); 
-      for(int i=0;i<=degree;i++) {
-	vHy(i)=HermitePol(i,y);
-      }
+    harp::vector_double Hy(degree+1);
+    for(int i=0;i<=degree;i++) {
+      Hy(i)=HermitePol(i,y);
     }
+    
     
     
     double expfact=1./(2*M_PI*sigma_x*sigma_y)*exp(-0.5*(x*x+y*y));
@@ -198,16 +199,16 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       dvdy=y/sigma_y*psf_val;
       
       // should take care of other terms here
-      { 
-	harp::vector_double& vdHx = const_cast<harp::vector_double&>(dHx); 
-	for(int i=0;i<=degree;i++) {
-	  vdHx(i)=HermitePolDerivative(i,x);
-	}
-	harp::vector_double& vdHy = const_cast<harp::vector_double&>(dHy); 
-	for(int i=0;i<=degree;i++) {
-	  vdHy(i)=HermitePolDerivative(i,y);
-	}
+      
+      harp::vector_double dHx(degree+1); 
+      for(int i=0;i<=degree;i++) {
+	dHx(i)=HermitePolDerivative(i,x);
       }
+      harp::vector_double dHy(degree+1); 
+      for(int i=0;i<=degree;i++) {
+	dHy(i)=HermitePolDerivative(i,y);
+      }
+      
       
       double d_poly_dx = 0;
       double d_poly_dy = 0;

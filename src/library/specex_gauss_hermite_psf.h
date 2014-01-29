@@ -21,8 +21,8 @@ namespace specex {
     int degree;
     
     // buffers to go faster
-    harp::vector_double Hx,Hy,dHx,dHy;
-    bool need_to_resize_buffer;
+    //harp::vector_double Hx,Hy,dHx,dHy;
+    //bool need_to_resize_buffer;
     
     int tail_norm_index; 
 
@@ -71,7 +71,7 @@ namespace specex {
     void ReadFits_v0(fitsfile* fp, int first_hdu=1);
     
 
-    void ResizeBuffer();
+    //void ResizeBuffer();
 
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
@@ -80,8 +80,6 @@ namespace specex {
       //ar & BOOST_SERIALIZATION_NVP(boost::serialization::base_object<specex::PSF>(*this));
       ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(PSF);
       ar & BOOST_SERIALIZATION_NVP(degree);
-      
-      need_to_resize_buffer = true;
     }
   };
   

@@ -20,6 +20,7 @@ DESCRIPTION = "spectral extraction"
 requirements = [("harp","0.0",True)]
 debug = True
 optimize = 2
+openmp = False
 
 def harp_pkgconfig(pkgpath):
 
@@ -80,6 +81,12 @@ def options(opt):
                    default=optimize, 
                    dest='optimize', 
                    help='0, 1, 2 or 3, default is %d, i.e. -O%d'%(optimize,optimize)) 
+    opt.add_option('--enable-openmp', 
+                   action='store', 
+                   default=openmp, 
+                   dest='openmp', 
+                   help='enable OpenMP support [default=%s]'%str(openmp)) 
+
     opt.add_option('--autogen-harp-pkgconfig',
                    action='store', 
                    default=False, 
@@ -116,6 +123,12 @@ def configure(conf):
     if opti > 0 :
         conf.env['CFLAGS'].append('-O%d' % opti )
         conf.env['CXXFLAGS'].append('-O%d' % opti )
+
+    if conf.options.openmp :
+        conf.env['CCFLAGS'].append('-fopenmp')
+        conf.env['CXXFLAGS'].append('-fopenmp')
+        conf.env['LINKFLAGS'].append('-fopenmp')
+        conf.env['LINKFLAGS_HARP'].append('-fopenmp')
         
     print "debug=",conf.options.debug
     if conf.options.debug == "True" :
@@ -131,6 +144,11 @@ def configure(conf):
 
     #conf.check_cc(lib='z', msg='Checking for zlib')    
     conf.check_packages(requirements)
+
+    if conf.options.openmp :
+        conf.env['LINKFLAGS_HARP'].append('-fopenmp')
+    
+
     conf.write_config_header("config.h")
 
     print conf.env
