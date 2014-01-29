@@ -332,18 +332,22 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 #else
 	double tail_val = psf->TailValueW(tmp.wavelength,i-tmp.frozen_x,j-tmp.frozen_y,r_tail_amplitude_derivative_pointer);
 #endif
+	//const double& flux_for_tail = tmp.frozen_flux;
+	const double& flux_for_tail = tmp.flux;
 	
-	res -= tmp.frozen_flux*tail_val;
+	res -= flux_for_tail*tail_val;
 	
 	if (compute_ab) {
-	  // if(fit_flux) H(tmp.flux_parameter_index) += tail_val;
+
+	  if(fit_flux) H(tmp.flux_parameter_index) += tail_val;
+
 	  if(fit_psf_tail) {
 
-	    ublas::project(H,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())) += tmp.frozen_flux*r_tail_amplitude_derivative;
-	    //H(psf_r_tail_amplitude_index) += tmp.frozen_flux*derivative_r_tail_amplitude;
+	    ublas::project(H,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())) += flux_for_tail*r_tail_amplitude_derivative;
+	    //H(psf_r_tail_amplitude_index) += flux_for_tail*derivative_r_tail_amplitude;
 
 #ifdef EXTERNAL_Y_TAIL
-	    H(psf_y_tail_amplitude_index) += tmp.frozen_flux*derivative_y_tail_amplitude;
+	    H(psf_y_tail_amplitude_index) += flux_for_tail*derivative_y_tail_amplitude;
 #endif
 	  }
 	}
@@ -1806,17 +1810,17 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
     
-    SPECEX_INFO("Starting FitSeveralSpots TRACE+FLUX");
+    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX+TRACE (bis bis)");
     SPECEX_INFO("=======================================");
     fit_flux       = true;
     fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = true;
+    fit_psf        = true;
+    fit_trace      = false;
+    chi2_precision = 0.1;
+    include_signal_in_weight = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE+FLUX");
-  }
-  
-  if(scheduled_fit_of_traces){
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX+TRACE");
+  }else{
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis)");
     SPECEX_INFO("=======================================");
     fit_flux       = true;

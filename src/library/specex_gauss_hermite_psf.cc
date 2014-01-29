@@ -175,6 +175,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     
     if(ParamDer) {
       
+      specex::zero(*ParamDer);
+
       (*ParamDer)(0) = (x*x-1)/sigma_x*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
       (*ParamDer)(1) = (y*y-1)/sigma_y*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
       

@@ -248,6 +248,8 @@ int main ( int argc, char *argv[] ) {
     for(size_t i=0; i<model.data.size() ;i++) {
       double flux = model.data(i);
       if(flux==0) continue; // never been on this pixel
+      
+      data_in_stamp.data(i) = image.data(i);
 
       // use data here for the variance : 
       flux = max(0.,image.data(i));
