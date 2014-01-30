@@ -6,8 +6,7 @@
 
 #include <boost/program_options.hpp>
 
-// for debug
-// #include <boost/archive/xml_oarchive.hpp>
+#include <boost/archive/xml_oarchive.hpp>
 
 #include <harp.hpp>
 
@@ -332,8 +331,7 @@ int main ( int argc, char *argv[] ) {
       // --------------------------------------------
       fitter.FitEverything(spots,true);
 
-      // FOR DEBUG
-      /*
+      
       {
 	// writing spots as xml
 	std::ofstream os("spots.xml");
@@ -342,14 +340,14 @@ int main ( int argc, char *argv[] ) {
 	os.close();
 	SPECEX_INFO("wrote spots in " << "spots.xml");
       }
-      */
+      
 
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
     } // end of loop on bundles
     
-    // FOR DEBUG
-    //write_psf_xml(fitter.psf,"psf.xml");
+    
+    write_psf_xml(fitter.psf,"psf.xml");
     
 
 
