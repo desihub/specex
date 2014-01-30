@@ -101,7 +101,8 @@ def configure(conf):
     
     # c++ compiler 
     conf.load( 'compiler_cxx' )
-    conf.env['CXXFLAGS'] = ['-fPIC', '-DPIC','-Wuninitialized','-Wmaybe-uninitialized','-Wunused-value','-Wunused-variable']
+    conf.env['CXXFLAGS'] = ['-fPIC', '-DPIC','-Wuninitialized','-Wunused-value','-Wunused-variable']
+# option -Wmaybe-uninitialized not recognized by all compilers, I don't want Wall because very many unused typdef in boost
 
     conf.env['PKG_INCDIR'] = op.join('include', '%s-%s' % (APPNAME,VERSION))
 
