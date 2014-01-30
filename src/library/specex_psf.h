@@ -81,13 +81,15 @@ namespace specex {
 
   
  
-#define EXTERNAL_TAIL
+    //#define EXTERNAL_TAIL
+
 //#define EXPONENTIAL_TAIL_AMPLITUDE
 //#define EXTERNAL_Y_TAIL
 
+public :
 
 #ifdef EXTERNAL_TAIL
-  public :
+  
     //double r_tail_amplitude;
     double r_tail_amplitude(const double& wavelength) const { return RTailAmplitudePol.Value(wavelength);}
     Legendre1DPol RTailAmplitudePol;
@@ -118,7 +120,7 @@ namespace specex {
 
 #endif
 
-#define CONTINUUM
+    //#define CONTINUUM
 
 #ifdef CONTINUUM
     Legendre1DPol ContinuumPol;

@@ -132,8 +132,12 @@ int main ( int argc, char *argv[] ) {
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
+#ifdef EXTERNAL_TAIL
     bool fit_psf_tails = (vm.count("fit_psf_tails")>0);
+#endif
+#ifdef CONTINUUM
     bool fit_continuum = (vm.count("fit_continuum")>0);
+#endif
     bool fit_individual_spots_position = vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 

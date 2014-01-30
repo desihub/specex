@@ -226,7 +226,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     specex::zero(*Bp);
     
     if(fit_psf) {
-      gradFitPar.resize(npar_fixed_coord); 
+      //gradFitPar.resize(npar_fixed_coord); 
       gradAllPar.resize(psf->LocalNAllPar()); 
       gradAllPar_pointer = &gradAllPar;
 
@@ -234,6 +234,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
       const std::vector<Legendre2DPol_p>& AP=psf_params->AllParPolXW;
       const std::vector<Legendre2DPol_p>& FP=psf_params->FitParPolXW;
+
+      // assert(npar_fixed_coord == FP.size()); // ok
+      
       size_t fk=0;
       for (size_t ak =0; ak < AP.size(); ++ak) {
 	const Legendre2DPol_p FPk = FP[fk];
@@ -372,10 +375,10 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	double psfVal =  psf->PSFValueWithParamsXY(tmp.x,tmp.y, i, j, tmp.psf_all_params, gradPos_pointer, gradAllPar_pointer);
 	
-	if(gradAllPar_pointer) {
-	  for(int  k=0;k<npar_fixed_coord;k++)
-	    gradFitPar(k) = gradAllPar(indices_of_fitpar_in_allpar[k]);
-	}
+	//if(gradAllPar_pointer) {
+	//for(int  k=0;k<npar_fixed_coord;k++)
+	//  gradFitPar(k) = gradAllPar(indices_of_fitpar_in_allpar[k]);
+	//}
 	if(psfVal==PSF_NAN_VALUE && isnan(psfVal)) SPECEX_ERROR("PSF value returns NAN");
 	
 
@@ -389,11 +392,11 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	if (compute_ab) {
 	  
 	  if(fit_psf) {
-	    int index = 0;
+	    size_t index = 0;
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      size_t m_size = psf_params->FitParPolXW[p]->coeff.size();
 	      //blas::axpy(tmp.flux*gradPar[p],ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size)),ublas::project(H,ublas::range(index,index+m_size))); // doesnt compile
-	      ublas::project(H,ublas::range(index,index+m_size)) += (tmp.flux*gradFitPar(p))*ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size));
+	      ublas::project(H,ublas::range(index,index+m_size)) += (tmp.flux*gradAllPar(indices_of_fitpar_in_allpar[p]))*ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size));
 	      index += m_size;
 	    }
 	  }
@@ -1732,7 +1735,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
-  
+#ifdef CONTINUUM
+#ifdef EXTERNAL_TAIL  
+
   if(scheduled_fit_of_psf_tail && !scheduled_fit_of_continuum) {
     
     SPECEX_INFO("Starting FitSeveralSpots TAIL");
@@ -1820,6 +1825,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }
+
+#endif
+#endif
+
   
   if(scheduled_fit_of_traces) {
     SPECEX_INFO("Starting FitSeveralSpots TRACE");

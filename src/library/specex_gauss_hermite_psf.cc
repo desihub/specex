@@ -163,8 +163,9 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       int param_index=first_hermite_param_index; 
       for(int j=0;j<=degree;j++) {
 	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+	const double& Hyj = Hy(j);
 	for(int i=imin;i<=degree;i++,param_index++) {
-	  prefactor+=Params(param_index)*Hx(i)*Hy(j);
+	  prefactor+=Params(param_index)*Hx(i)*Hyj;
 	} 
       }
      
@@ -186,8 +187,9 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       
       for(int j=0;j<=degree;j++) {
 	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+	double eHyj = expfact*Hy(j);
 	for(int i=imin;i<=degree;i++,param_index++) {
-	  (*ParamDer)(param_index) = expfact*Hx(i)*Hy(j);
+	  (*ParamDer)(param_index) = eHyj*Hx(i);
 	} 
       }
       
@@ -206,11 +208,12 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       for(int i=0;i<=degree;i++) {
 	dHx(i)=HermitePolDerivative(i,x);
       }
-      harp::vector_double dHy(degree+1); 
-      for(int i=0;i<=degree;i++) {
+      /*
+	harp::vector_double dHy(degree+1); 
+	for(int i=0;i<=degree;i++) {
 	dHy(i)=HermitePolDerivative(i,y);
-      }
-      
+	}
+      */
       
       double d_poly_dx = 0;
       double d_poly_dy = 0;
@@ -220,11 +223,13 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       
       for(int j=0;j<=degree;j++) {
 	
-	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+	int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)	
+	const double& Hyj = Hy(j);
+	double dHyj = HermitePolDerivative(j,y);
 	
 	for(int i=imin;i<=degree;i++,param_index++) {
-	  d_poly_dx += Params(param_index)*dHx(i)*Hy(j);
-	  d_poly_dy += Params(param_index)*Hx(i)*dHy(j);
+	  d_poly_dx += Params(param_index)*dHx(i)*Hyj;
+	  d_poly_dy += Params(param_index)*Hx(i)*dHyj;
 	} 
       }
       
