@@ -29,7 +29,6 @@ int main() {
     harp::vector_double P(psf->LocalNAllPar());
     specex::zero(P);
     int i=floor(xc);
-    int j = floor(yc);
     //for(i=floor(xc)-3;i<=floor(xc)+3;i++)
     for(int j=floor(yc)-3;j<=floor(yc)+3;j++) 
       cout << i << " " << j << " " << psf->PSFValueWithParamsXY(400,2000,i,j,P,NULL,NULL) << endl;

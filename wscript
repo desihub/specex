@@ -101,21 +101,8 @@ def configure(conf):
     
     # c++ compiler 
     conf.load( 'compiler_cxx' )
-    conf.env['CXXFLAGS'] = ['-fPIC', '-DPIC']
+    conf.env['CXXFLAGS'] = ['-fPIC', '-DPIC','-Wuninitialized','-Wmaybe-uninitialized','-Wunused-value','-Wunused-variable']
 
-    """
-    for opt in os.popen("harpconfig  --cppflags").read().split(" ") :
-        conf.env['CXXFLAGS'].append(opt.strip())
-
-    # not good :    
-    for opt in os.popen("harpconfig  --link").read().split(" ") :
-        conf.env['LINKFLAGS_cxxshlib'].append(opt.strip())
-        #conf.env['ALL_LIBS'].append(opt.strip())
-        conf.env.append_value('ALL_LIBS',opt.strip())
-        conf.env['LDFLAGS'].append(opt.strip())
-        conf.env['LINKFLAGS'].append(opt.strip())
-    """
-        
     conf.env['PKG_INCDIR'] = op.join('include', '%s-%s' % (APPNAME,VERSION))
 
     print "optimize=",conf.options.optimize

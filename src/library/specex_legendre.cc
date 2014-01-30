@@ -36,6 +36,7 @@ specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const doub
   xmax(i_xmax)
 {
   coeff.resize(deg+1);
+  specex::zero(coeff);
 }
 
 
@@ -114,6 +115,7 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   specex::Legendre1DPol inverse;
   inverse.deg = deg+add_degree;
   inverse.coeff.resize(inverse.deg+1);
+  specex::zero(inverse.coeff);
   int npar = inverse.deg + 1;
   int ndata = npar*4;  // 
   double dx = (xmax-xmin)/ndata;
@@ -132,6 +134,7 @@ specex::Legendre1DPol specex::composed_pol(const specex::Legendre1DPol& pol1, co
   specex::Legendre1DPol composed;
   composed.deg = max(pol1.deg,pol2.deg);
   composed.coeff.resize(composed.deg+1);
+  specex::zero(composed.coeff);
   int npar = composed.deg + 1;
   int ndata = npar*4;  // 
   double dx = (pol2.xmax-pol2.xmin)/ndata;

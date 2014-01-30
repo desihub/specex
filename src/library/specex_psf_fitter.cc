@@ -220,11 +220,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   harp::vector_double r_tail_amplitude_derivative;
   harp::vector_double *r_tail_amplitude_derivative_pointer = 0;
 #endif
-#ifdef CONTINUUM
-  harp::vector_double continuum_derivative;
-  harp::vector_double *continuum_derivative_pointer = 0;
-#endif
-
+  
   if(compute_ab) {
     specex::zero(*Ap);
     specex::zero(*Bp);
@@ -976,6 +972,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       // psf parameters legendre monomials
       if(fit_psf) {
 	tmp.psf_monomials.resize(npar_varying_coord);
+	// specex::zero(tmp.psf_monomials);
 	int index=0;
 	for(int p=0;p<npar_fixed_coord;p++) {
 	  harp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);

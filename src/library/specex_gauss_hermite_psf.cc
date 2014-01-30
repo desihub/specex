@@ -195,7 +195,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     
     if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
       double& dvdx=(*PosDer)(0);
-      double& dvdy=(*PosDer)(1);
+      double& dvdy=(*PosDer)(1);  
       
       dvdx=x/sigma_x*psf_val;
       dvdy=y/sigma_y*psf_val;
@@ -486,7 +486,7 @@ void specex::GaussHermitePSF::WriteFits_v0(fitsfile* fp, int first_hdu) const {
   
   int ispec=0;
   for(std::map<int,Trace>::const_iterator fiber_it = FiberTraces.begin(); fiber_it != FiberTraces.end(); ++fiber_it, ++ispec) {
-    int fiber_id = fiber_it->first;
+    
     const specex::Trace& trace = fiber_it->second;
     
     for(int i=0;i<NFLUX;i++) {
@@ -909,7 +909,6 @@ void specex::GaussHermitePSF::ReadFits_v0(fitsfile* fp, int first_hdu) {
     }
 
     // load legendre psf params from buffer
-    int gh_index=0;
     int buffer_index=0;
     for(int j_gh=0;j_gh<=GHDEGY;j_gh++) { // loop on j=y=rows first
       for(int i_gh=0;i_gh<=GHDEGX;i_gh++) {

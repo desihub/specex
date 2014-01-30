@@ -417,7 +417,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_AllBundleParams(const dou
   
 harp::vector_double specex::PSF::AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
   double X=Xccd(fiber,wave); 
-  return AllLocalParamsXW_with_AllBundleParams(fiber,wave,bundle_id,ForThesePSFParams);
+  return AllLocalParamsXW_with_AllBundleParams(X,wave,bundle_id,ForThesePSFParams);
 }
 
 
@@ -454,7 +454,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const dou
 }
 harp::vector_double specex::PSF::AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
   double X=Xccd(fiber,wave); 
-  return AllLocalParamsXW_with_FitBundleParams(fiber,wave,bundle_id,ForThesePSFParams);
+  return AllLocalParamsXW_with_FitBundleParams(X,wave,bundle_id,ForThesePSFParams);
 }
 
 harp::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
@@ -479,7 +479,7 @@ harp::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const dou
   
 harp::vector_double specex::PSF::FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const {
   double X=Xccd(fiber,wave); 
-  return FitLocalParamsXW_with_FitBundleParams(fiber,wave,bundle_id,ForThesePSFParams);
+  return FitLocalParamsXW_with_FitBundleParams(X,wave,bundle_id,ForThesePSFParams);
 }
 
 

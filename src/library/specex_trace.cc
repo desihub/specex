@@ -124,11 +124,9 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   }
 
   // monitoring results
-  double x_chi2 = 0;
   double x_sumw = 0;
   double x_sumwx  = 0;
   double x_sumwx2 = 0;
-  double y_chi2 = 0;
   double y_sumw = 0;
   double y_sumwy  = 0;
   double y_sumwy2 = 0;

@@ -44,8 +44,8 @@ int main() {
   harp::vector_double ParamDer(P.size());
   harp::vector_double PosDer(2);
   
-  double val0 = psf->PSFValueWithParamsXY(x,y,i,j,P,&PosDer,&ParamDer);
-  
+  psf->PSFValueWithParamsXY(x,y,i,j,P,&PosDer,&ParamDer);
+
   for(int k=0;k<int(P.size());k++) {
     double eps = fabs(P(k))/1000.;
     harp::vector_double Pp = P; Pp(k)+=eps/2.;
@@ -96,7 +96,7 @@ int main() {
   cout << "spot_params_2=" << spot_params_2 << endl;
   cout << "diff=" << spot_params_1-spot_params_2 << endl;
 
-  double val0 = psf->PSFValueWithParamsXY(x,y, i, j, spot_params_1, &PosDer, &ParamDer);
+  psf->PSFValueWithParamsXY(x,y, i, j, spot_params_1, &PosDer, &ParamDer);
 
   // compute analytic der
   harp::vector_double H(gP.size());

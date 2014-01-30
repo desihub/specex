@@ -60,9 +60,8 @@ vector<specex::SpotArray> specex::isolated_spot_arrays(  vector<specex::SpotArra
 vector<specex::SpotArray> specex::valid_spot_arrays(  vector<specex::SpotArray>& other, int required_status, const double& min_valid_fraction) {
   vector<specex::SpotArray> varrays;
   for(size_t a=0;a<other.size();a++) {
-     specex::SpotArray& other_array = other[a];
+    specex::SpotArray& other_array = other[a];
     specex::SpotArray array;
-    int ntot=other.size();
     
     for(size_t s=0;s<other_array.size();s++) {
       specex::Spot_p& spot=other_array[s];

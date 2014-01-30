@@ -20,9 +20,7 @@ int main ( int argc, char *argv[] ) {
 
   specex_set_verbose(true);
 
-  double tstart;
-  double tstop;
-
+  
   cout.precision ( 12 );
   cerr.precision ( 12 );
 
