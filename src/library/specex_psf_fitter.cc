@@ -14,6 +14,7 @@
 #include "specex_fits.h"
 #include "specex_message.h"
 
+#include <boost/archive/xml_oarchive.hpp>
 
 using namespace std;
 
@@ -100,6 +101,8 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
   
   harp::vector_double chi2_of_chunk(number_of_image_chuncks);
+  specex::zero(chi2_of_chunk);
+  
   int chunk;
   
 #pragma omp parallel for 
@@ -109,8 +112,14 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     int end_j   = stamp.begin_j + (chunk+1)*step_j;
     if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
     
-    if(end_j>begin_j) chi2_of_chunk(chunk) = ComputeChi2AB(compute_ab,begin_j,end_j,& A_of_chunk[chunk], & B_of_chunk[chunk],false);
+     if(end_j>begin_j) {
+      chi2_of_chunk(chunk) = ComputeChi2AB(compute_ab,begin_j,end_j,& A_of_chunk[chunk], & B_of_chunk[chunk],false);
+     }else if(compute_ab) {
+       specex::zero(A_of_chunk[chunk]);
+       specex::zero(B_of_chunk[chunk]);
+     }
   }
+  
   
   for(int chunk=1; chunk<number_of_image_chuncks; chunk++) {
     chi2_of_chunk(0) += chi2_of_chunk(chunk);
@@ -298,6 +307,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 #ifdef USE_SPARSE_VECTOR
       ublas::coordinate_vector<double> H;// slow , why??
       if(compute_ab) H.resize(nparTot,10); 
+      SPECEX_ERROR("DEPRECATED");
 #else
       if(compute_ab)
 	specex::zero(H);
@@ -1026,7 +1036,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     *psfChi2 = ParallelizedComputeChi2AB(true);
 
     oldChi2 = *psfChi2;
-
+    if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots chi2 = " << *psfChi2);
     if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots solving ...");
     
     harp::matrix_double& A = A_of_chunk[0];
@@ -1035,7 +1045,21 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
     harp::matrix_double As=A;
     //harp::vector_double Bs=B;
-    
+    if(0 && fit_psf && npar_fixed_coord>2) {
+      {
+	ofstream os("A.xml");
+	boost::archive::xml_oarchive xml_oa ( os );
+	xml_oa << BOOST_SERIALIZATION_NVP(A);
+	os.close();
+      }
+      {
+	ofstream os("B.xml");
+	boost::archive::xml_oarchive xml_oa ( os );
+	xml_oa << BOOST_SERIALIZATION_NVP(B);
+	os.close();
+      }
+      exit(12);
+    }
 
     int status = cholesky_solve(A,B);
 

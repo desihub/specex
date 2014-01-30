@@ -7,6 +7,8 @@
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/random.hpp>
 
+#include <boost/archive/xml_oarchive.hpp>
+
 using namespace std;
 
 int main() {
