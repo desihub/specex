@@ -37,20 +37,10 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   double xPixCenter = floor(XPix+0.5);
   double yPixCenter = floor(YPix+0.5);
   
-  double integrated_dPdx=0;
-  double integrated_dPdy=0;
-  
-  double *dPdx=0;
-  double *dPdy=0;
+  harp::vector_double tmpPosDer;
   if(PosDer) {
-    dPdx=&((*PosDer)(0));
-    dPdy=&((*PosDer)(1));
+    tmpPosDer = boost::numeric::ublas::zero_vector<double>(2);
   }
-  
-  //double *param_der=0;
-  //double *integrated_param_der=0; 
-  //int npar=0;
-  //harp::vector_double& tmpParamDer = const_cast<specex::PSF*>(this)->TmpParamDer;
   harp::vector_double tmpParamDer;
   int npar=0;
   if(ParamDer) {
@@ -61,35 +51,33 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   double val = 0;
   for (int ix=0; ix<NPT; ++ix)
     {
-      double x = xPixCenter+Dx[NPT-1][ix];
+      double x = xPixCenter+Dx[NPT-1][ix] - Xc;
       double wx = Wt[NPT-1][ix];
       for (int iy=0; iy<NPT; ++iy)
 	{
-	  double y = yPixCenter+Dx[NPT-1][iy];
+	  double y = yPixCenter+Dx[NPT-1][iy] -Yc;
 	  double weight = wx*Wt[NPT-1][iy];
-	  double prof = Profile(x-Xc,y-Yc, Params, PosDer, ParamDer);
+	  double prof = Profile(x,y,Params,PosDer,ParamDer);
 
 	  if(prof ==  PSF_NAN_VALUE) return  PSF_NAN_VALUE;
 	  
 	  val += weight*prof;
 	  
-	  if (PosDer) {
-	    integrated_dPdx += (*dPdx)*weight;
-	    integrated_dPdy += (*dPdy)*weight;
-	  }
+	  if (PosDer) 
+	    tmpPosDer += weight*(*PosDer);
+	  
 	  if (ParamDer)
-	    for (int ipar = 0; ipar<npar; ++ipar) 
-	      tmpParamDer(ipar) += weight*(*ParamDer)(ipar);
+	    tmpParamDer += weight*(*ParamDer);
+	  
 	}
     }
-  if (PosDer) {
-    *dPdx=integrated_dPdx;
-    *dPdy=integrated_dPdy;
-  }
-  if (ParamDer) {
-    for (int ipar = 0; ipar<npar; ++ipar) 
-      (*ParamDer)(ipar) = tmpParamDer(ipar);
-  }
+  
+  if (PosDer)
+    *PosDer = tmpPosDer;
+  
+  if (ParamDer)
+    *ParamDer = tmpParamDer; 
+  
   
   return val;
 }

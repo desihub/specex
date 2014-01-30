@@ -6,10 +6,6 @@
 #include <string>
 #include <vector>
 
-//#define ADD_Y_TAILS_TO_GAUSS_HERMITE
-//#define ADD_2D_TAILS_TO_GAUSS_HERMITE
-// to go faster, less parameters
-//#define LORENTZIAN_TAILS
 
 namespace specex {
 
@@ -20,24 +16,7 @@ namespace specex {
   protected :
     int degree;
     
-    // buffers to go faster
-    //harp::vector_double Hx,Hy,dHx,dHy;
-    //bool need_to_resize_buffer;
-    
-    int tail_norm_index; 
-
-#ifndef LORENTZIAN_TAILS
-    int tail_power_index;
-    int tail_x_scale_plus_index;
-    int tail_x_scale_minus_index;
-    int tail_y_scale_minus_index;
-#endif  
-    
-    int y_tail_norm_index; 
-    
   public :
-  
-    // double sigma;  // it is a parameter
     
     GaussHermitePSF(int ideg=3);
     virtual ~GaussHermitePSF(){}; 
@@ -63,31 +42,22 @@ namespace specex {
     void WriteFits(fitsfile* fp, int first_hdu=1) const;
     void ReadFits(fitsfile* fp, int first_hdu=1);
     
-
-
   private :
 
     void WriteFits_v0(fitsfile* fp, int first_hdu=1) const;
     void ReadFits_v0(fitsfile* fp, int first_hdu=1);
     
-
-    //void ResizeBuffer();
-
+    
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
-        // serialize base class information
-      //ar & BOOST_SERIALIZATION_NVP(boost::serialization::base_object<specex::PSF>(*this));
       ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(PSF);
       ar & BOOST_SERIALIZATION_NVP(degree);
     }
   };
   
   BOOST_SERIALIZATION_SHARED_PTR(GaussHermitePSF)
-  
-  
-
-  
+    
 }
 
 
