@@ -36,7 +36,7 @@ specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const doub
   xmax(i_xmax)
 {
   coeff.resize(deg+1);
-  specex::zero(coeff);
+  coeff.clear();
 }
 
 
@@ -45,10 +45,9 @@ harp::vector_double specex::Legendre1DPol::Monomials(const double &x) const {
 
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
-  
   harp::vector_double m(deg+1);
   for(int i=0;i<=deg;i++) {
-    m(i)=LegendrePol(i,rx);
+    m[i]=LegendrePol(i,rx);
   }
   return m;
 }
@@ -71,8 +70,8 @@ bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector
     specex::minmax(X,xmin,xmax);
   }
   
-  harp::matrix_double A(npar,npar); specex::zero(A);
-  harp::vector_double B(npar); specex::zero(B);
+  harp::matrix_double A(npar,npar); A.clear();
+  harp::vector_double B(npar); B.clear();
   
   
   
@@ -115,7 +114,7 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   specex::Legendre1DPol inverse;
   inverse.deg = deg+add_degree;
   inverse.coeff.resize(inverse.deg+1);
-  specex::zero(inverse.coeff);
+  inverse.coeff.clear();
   int npar = inverse.deg + 1;
   int ndata = npar*4;  // 
   double dx = (xmax-xmin)/ndata;
@@ -134,7 +133,7 @@ specex::Legendre1DPol specex::composed_pol(const specex::Legendre1DPol& pol1, co
   specex::Legendre1DPol composed;
   composed.deg = max(pol1.deg,pol2.deg);
   composed.coeff.resize(composed.deg+1);
-  specex::zero(composed.coeff);
+  composed.coeff.clear();
   int npar = composed.deg + 1;
   int ndata = npar*4;  // 
   double dx = (pol2.xmax-pol2.xmin)/ndata;
@@ -162,7 +161,7 @@ specex::Legendre2DPol::Legendre2DPol(int i_xdeg, const double& i_xmin, const dou
   ymax(i_ymax)
 {
   coeff.resize((xdeg+1)*(ydeg+1));
-  specex::zero(coeff);
+  coeff.clear();
 }
  
 harp::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {
@@ -173,16 +172,14 @@ harp::vector_double specex::Legendre2DPol::Monomials(const double &x, const doub
   
   harp::vector_double mx(xdeg+1);
   for(int i=0;i<=xdeg;i++)
-    mx(i)=LegendrePol(i,rx);
-  
-  harp::vector_double my(ydeg+1);
-  for(int j=0;j<=ydeg;j++)
-    my(j)=LegendrePol(j,ry);
+    mx[i]=LegendrePol(i,rx);
   
   harp::vector_double m((xdeg+1)*(ydeg+1));
+  int index=0;
   for(int j=0;j<=ydeg;j++) {
-    for(int i=0;i<=xdeg;i++) {
-      m(i+j*(xdeg+1))=mx(i)*my(j);
+    double myj = LegendrePol(j,ry);
+    for(int i=0;i<=xdeg;i++,index++) {
+      m[index]=mx[i]*myj;
     }
   }
   return m;

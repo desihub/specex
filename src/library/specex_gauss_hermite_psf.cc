@@ -97,7 +97,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   
   if(ParamDer) {
     
-    specex::zero(*ParamDer);
+    
+    ParamDer->clear();
     
     (*ParamDer)(0) = (x*x-1)*sigma_x_inv*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
     (*ParamDer)(1) = (y*y-1)*sigma_y_inv*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
@@ -154,12 +155,9 @@ harp::vector_double specex::GaussHermitePSF::DefaultParams() const
 {
   
   harp::vector_double Params(LocalNAllPar());
-
-  specex::zero(Params); // all = zero at beginning = a pure gaussian
-
+  Params.clear(); // all = zero at beginning = a pure gaussian
   Params(0) = 1.1; // this is sigma_x !!
   Params(1) = 1.2; // this is sigma_y !!
-  
   return Params;
 }
 

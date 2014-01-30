@@ -5,7 +5,9 @@
 #include <map>
 
 #include <boost/program_options.hpp>
-#include <boost/archive/xml_oarchive.hpp>
+
+// for debug
+// #include <boost/archive/xml_oarchive.hpp>
 
 #include <harp.hpp>
 
@@ -231,7 +233,7 @@ int main ( int argc, char *argv[] ) {
 #ifdef EXTERNAL_TAIL
     psf->RTailAmplitudePol.deg = 1;
     psf->RTailAmplitudePol.coeff.resize(psf->RTailAmplitudePol.deg+1);
-    specex::zero(psf->RTailAmplitudePol.coeff);
+    psf->RTailAmplitudePol.coeff.clear();
 #ifdef EXPONENTIAL_TAIL_AMPLITUDE
     psf->RTailAmplitudePol.coeff(0) = -7;
 #endif
@@ -251,7 +253,7 @@ int main ( int argc, char *argv[] ) {
 #ifdef CONTINUUM
     psf->ContinuumPol.deg = 1;
     psf->ContinuumPol.coeff.resize(psf->ContinuumPol.deg+1);
-    specex::zero(psf->ContinuumPol.coeff);
+    psf->ContinuumPol.coeff.clear();
     psf->ContinuumPol.xmin = 1000; // need to change this
     psf->ContinuumPol.xmax = 10000; // need to change this  
     fitter.scheduled_fit_of_continuum   = fit_continuum;
@@ -330,6 +332,8 @@ int main ( int argc, char *argv[] ) {
       // --------------------------------------------
       fitter.FitEverything(spots,true);
 
+      // FOR DEBUG
+      /*
       {
 	// writing spots as xml
 	std::ofstream os("spots.xml");
@@ -338,12 +342,17 @@ int main ( int argc, char *argv[] ) {
 	os.close();
 	SPECEX_INFO("wrote spots in " << "spots.xml");
       }
+      */
 
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
     } // end of loop on bundles
     
-    write_psf_xml(fitter.psf,"psf.xml");
+    // FOR DEBUG
+    //write_psf_xml(fitter.psf,"psf.xml");
+    
+
+
     //write_psf_fits_image(fitter.psf,"psf.fits",500,2000,1,4);
 
 

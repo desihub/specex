@@ -28,6 +28,62 @@ int main() {
   basic_text_oa << BOOST_SERIALIZATION_NVP(x);
   }
 
+
+  {
+
+
+    //ublas::mapped_vector<double> sv (4000);
+    //ublas::compressed_vector<double> sv (4000);
+     cout << "==================" << endl;
+  cout << " SPARSE VECTORS   " << endl;
+  cout << "==================" << endl;
+
+ublas::coordinate_vector<double> sv (4000);
+    harp::vector_double v (4000);
+    harp::vector_double v2 (8000);
+    harp::matrix_double m(4000,4000);
+    v.clear();
+    v2.clear();
+    
+    for (unsigned i = 0; i < sv.size (); i ++) {
+      v2(i)=i;
+    }
+    
+    
+
+    for (unsigned i = 0; i < sv.size (); i += 20) {
+        sv (i) = i;
+	v(i)=i;
+    }
+    
+    // see http://www.boost.org/doc/libs/1_38_0/libs/numeric/ublas/doc/blas.htm
+
+    
+    {
+      clock_t tstart = clock();
+      specex::syr(1,v,m);
+      clock_t tstop = clock();
+      cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+    }
+    {
+      clock_t tstart = clock();
+      specex::syr(1,v2,m);
+      clock_t tstop = clock();
+      cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+    }
+    
+    {
+      clock_t tstart = clock();
+      m += ublas::outer_prod(v,v);
+      //ublas::blas_3::srk(m,1,1,v);
+      
+      clock_t tstop = clock();
+      cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+    }
+    
+    return 0;
+
+}
   cout << "==================" << endl;
   cout << " LINEAR SYSTEMS   " << endl;
   cout << "==================" << endl;
@@ -56,8 +112,8 @@ int main() {
   
   harp::matrix_double A(nparams,nparams);
   harp::vector_double B(nparams);
-  specex::zero(A);
-  specex::zero(B);
+  A.clear();
+  B.clear();
   
   harp::vector_double data(ndata);
   for( int i=0; i<ndata; i++) {
@@ -89,7 +145,8 @@ int main() {
   
   harp::vector_double one(16);
   harp::vector_double zero(16);
-  specex::zero(zero);
+  zero.clear();
+  
   for(size_t i=0;i<one.size();i++) one[i]=i+1;
   for(int j=0;j<4;j++)
     ublas::project(zero,ublas::range(4*j,4*(j+1))) += pow(10,j)* ublas::project(one,ublas::range(4*j,4*(j+1)));
@@ -108,7 +165,7 @@ int main() {
     cout << specex::dot(x,ublas::project(y,ublas::range(7,7+x.size()))) << endl;
 
 
-    specex::zero(y);
+    y.clear();
     size_t x_size = x.size();
     for(size_t k=0;(k+1)*x_size<=y.size();k++) {
       ublas::project(y,ublas::range(k*x_size,(k+1)*x_size)) = (k+1)*x;
@@ -125,17 +182,13 @@ int main() {
     cout << " SPARSE VECTORS   " << endl;
     cout << "==================" << endl;
 
-    //ublas::mapped_vector<double> sv (4000);
-    //ublas::compressed_vector<double> sv (4000);
-    ublas::coordinate_vector<double> sv (4000);
-    ublas::vector<double> v (4000);
+    //ublas::mapped_vector<double> sv (8000);
+    ublas::compressed_vector<double> sv (8000);
+    //ublas::coordinate_vector<double> sv (8000);
+    harp::vector_double v (8000);
     
-    for (unsigned i = 0; i < sv.size (); i += 20) {
-        sv (i) = i;
-	v(i)=i;
-    }
-    
-    
+   
+
     if(0) {
       
       cout << sv << endl;

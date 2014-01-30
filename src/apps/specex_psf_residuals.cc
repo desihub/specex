@@ -181,7 +181,7 @@ int main ( int argc, char *argv[] ) {
     
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
-    specex::zero(model.data);
+    model.data.clear();
 
 #ifdef CONTINUUM
 
@@ -239,9 +239,9 @@ int main ( int argc, char *argv[] ) {
 
     // now compute variance 
     image_data variance(image.n_cols(),image.n_rows());
-    specex::zero(variance.data);
+    variance.data.clear();
     image_data data_in_stamp(image.n_cols(),image.n_rows());
-    specex::zero(data_in_stamp.data);
+    data_in_stamp.data.clear();
     
     
 

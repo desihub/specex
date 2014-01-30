@@ -81,7 +81,7 @@ namespace specex {
 
   
  
-    //#define EXTERNAL_TAIL
+#define EXTERNAL_TAIL
 
 //#define EXPONENTIAL_TAIL_AMPLITUDE
 //#define EXTERNAL_Y_TAIL
@@ -120,7 +120,7 @@ public :
 
 #endif
 
-    //#define CONTINUUM
+#define CONTINUUM
 
 #ifdef CONTINUUM
     Legendre1DPol ContinuumPol;

@@ -39,13 +39,15 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   
   harp::vector_double tmpPosDer;
   if(PosDer) {
-    tmpPosDer = boost::numeric::ublas::zero_vector<double>(2);
+    tmpPosDer.resize(2);
+    tmpPosDer.clear();
   }
   harp::vector_double tmpParamDer;
   int npar=0;
   if(ParamDer) {
     npar = ParamDer->size();
-    tmpParamDer = boost::numeric::ublas::zero_vector<double>(npar);
+    tmpParamDer.resize(npar);
+    tmpParamDer.clear();
   }
   
   double val = 0;

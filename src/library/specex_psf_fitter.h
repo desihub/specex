@@ -64,7 +64,6 @@ class PSF_Fitter {
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
   std::vector<harp::matrix_double> A_of_chunk; // for Gauss-Newton solving
   std::vector<harp::vector_double> B_of_chunk; // for Gauss-Newton solving
-  std::vector<double> chi2_of_chunk; // for Gauss-Newton solving
   harp::matrix_double fitWeight; // saved weight matrix of fitter parameters
   
  public :

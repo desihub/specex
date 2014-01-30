@@ -1,18 +1,7 @@
 #include <specex_linalg.h>
 
 
-#define CHECK_BOUNDS
-
-
-
-void specex::zero(harp::vector_double& v) {
-  v = boost::numeric::ublas::zero_vector<double>(v.size());
-}
-
-void specex::zero(harp::matrix_double& m) {
-  m = boost::numeric::ublas::zero_matrix<double>(m.size1(),m.size2());
-}
-  
+//#define CHECK_BOUNDS
 
 double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2) {
 #ifdef CHECK_BOUNDS
