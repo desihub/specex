@@ -35,6 +35,12 @@ namespace specex {
     int trace_x_parameter_index;
     int trace_y_parameter_index;
     
+#ifdef EXTERNAL_TAIL
+    double tail_amplitude;
+    harp::vector_double tail_monomials;
+#endif
+
+
     Stamp stamp;
     
   };

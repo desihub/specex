@@ -41,7 +41,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
 
 #ifdef EXTERNAL_TAIL
-      img(i,j)+=psf->TailValueA(r_tail_amplitude,ib+int(x)-(x-dx),jb+int(y)-(y-dy));
+      img(i,j)+=r_tail_amplitude*psf->TailProfile(ib+int(x)-(x-dx),jb+int(y)-(y-dy));
 #endif
 
     }

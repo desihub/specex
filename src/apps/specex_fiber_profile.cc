@@ -208,13 +208,13 @@ int main ( int argc, char *argv[] ) {
 	for(size_t s=0;s<spots.size();s++) {
 	  specex::Spot_p& spot = spots[s];
 #ifdef EXTERNAL_TAIL
-	  double r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+	  double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
 #endif
 	  if(fabs(i-spot->xc)<2*psf->hSizeX && fabs(j-spot->yc)<2*psf->hSizeY)
 	    val_ij += spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
 							   psf_params[s], 0, 0);
 #ifdef EXTERNAL_TAIL
-	  val_ij += spot->flux*psf->TailValueA(r_tail_amplitude,i-spot->xc,j-spot->yc);
+	  val_ij += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
 #endif
 	}
 	val_j += val_ij;

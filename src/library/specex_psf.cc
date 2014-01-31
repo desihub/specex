@@ -95,12 +95,7 @@ specex::PSF::PSF() {
   r_tail_core_size = 1;
   r_tail_x_scale   = 1;
   r_tail_y_scale   = 1;
-#ifdef EXTERNAL_Y_TAIL
-  y_tail_amplitude = 0;
-  y_tail_core_size = 1;
-  y_tail_power_law_index = 1;
-  y_tail_sigma_x =1.1;
-#endif
+  r_tail_profile_must_be_computed = true;
 #endif
 #ifdef CONTINUUM
   continuum_sigma_x = 1;
@@ -131,92 +126,34 @@ void specex::PSF::ComputeTailProfile() {
       
     }
   }
-  
-#ifdef EXTERNAL_Y_TAIL
-  y_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
-  
-  double yc2 = square(y_tail_core_size);
-  
-  for(int j=0;j<NY_TAIL_PROFILE;j++) {
-    
-    double y2 = square(j/TAIL_OVERSAMPLING);
-    
-    double yprof = y2/(yc2+y2)*pow(yc2+y2,-y_tail_power_law_index/2.);
-    
-    for(int i=0;i<NX_TAIL_PROFILE;i++) {
-      
-      y_tail_profile(i,j) = yprof*exp(-0.5*square(i/TAIL_OVERSAMPLING/y_tail_sigma_x));
-    }
-  }
-  
-#endif
-  
+  r_tail_profile_must_be_computed = false;
   SPECEX_INFO("specex::PSF::ComputeTailProfile done");
    
   }
   
 }
 
+double specex::PSF::TailProfile(const double& dx, const double &dy) const {
+  
+  if(r_tail_profile_must_be_computed)  const_cast<specex::PSF*>(this)->ComputeTailProfile();
 
+  int di = int(fabs(dx*TAIL_OVERSAMPLING)+0.5);
+  int dj = int(fabs(dy*TAIL_OVERSAMPLING)+0.5);
+  if(di>NX_TAIL_PROFILE || dj>NY_TAIL_PROFILE) return 0.;
+  return r_tail_profile(di,dj);
+}
 double specex::PSF::TailValueW(const double& wavelength, 
 			      const double& dx, const double &dy, 
-			      harp::vector_double* derivative_r_tail_amplitude,
-			      double* derivative_y_tail_amplitude) const {
+			      harp::vector_double* derivative_r_tail_amplitude) const {
   
-  if(r_tail_profile.n_rows()==0) 
-    const_cast<specex::PSF*>(this)->ComputeTailProfile();
-
-  
-  int di = int(fabs(dx*TAIL_OVERSAMPLING)+0.5);
-  int dj = int(fabs(dy*TAIL_OVERSAMPLING)+0.5);
-  if(di>NX_TAIL_PROFILE || dj>NY_TAIL_PROFILE) return 0.;
-
-  double r_prof = r_tail_profile(di,dj);
+  double r_prof = TailProfile(dx,dy);
   
   harp::vector_double monomials = RTailAmplitudePol.Monomials(wavelength);
-#ifndef EXPONENTIAL_TAIL_AMPLITUDE
-  if(derivative_r_tail_amplitude) *derivative_r_tail_amplitude = r_prof*monomials;  
-  double res =  specex::dot(monomials,RTailAmplitudePol.coeff)*r_prof;
-#else
-  double exponent = specex::dot(monomials,RTailAmplitudePol.coeff);
-  if(exponent<-10)  exponent=-10;
-  else if (exponent>10) exponent=10;  
-  double res =  exp(exponent)*r_prof;
-  if(derivative_r_tail_amplitude) *derivative_r_tail_amplitude = res*monomials; 
-#endif
-
-
-#ifdef EXTERNAL_Y_TAIL
-  double y_prof = y_tail_profile(di,dj);
-  if(derivative_y_tail_amplitude) *derivative_y_tail_amplitude = y_prof;
-  res += y_tail_amplitude*y_prof;
-#endif
-
-  return res;
-
-}
-
-
-#ifndef EXTERNAL_Y_TAIL
-double specex::PSF::TailValueA(const double& r_tail_amplitude, 
-			       const double& dx, const double &dy) const {
   
-  if(r_tail_profile.n_rows()==0) 
-    const_cast<specex::PSF*>(this)->ComputeTailProfile();
+  if(derivative_r_tail_amplitude) *derivative_r_tail_amplitude = r_prof*monomials;  
 
-  int di = int(fabs(dx*TAIL_OVERSAMPLING)+0.5);
-  int dj = int(fabs(dy*TAIL_OVERSAMPLING)+0.5);
-  if(di>NX_TAIL_PROFILE || dj>NY_TAIL_PROFILE) return 0.;
-#ifndef EXPONENTIAL_TAIL_AMPLITUDE  
-  return r_tail_amplitude*r_tail_profile(di,dj);
-#else
-  double exponent = r_tail_amplitude;
-  if(exponent<-10)  exponent=-10;
-  else if (exponent>10) exponent=10; 
-  return exp(exponent)*r_tail_profile(di,dj);
-#endif
+  return  specex::dot(monomials,RTailAmplitudePol.coeff)*r_prof;
 }
-#endif
 
 #endif
 

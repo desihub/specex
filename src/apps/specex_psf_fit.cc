@@ -239,7 +239,7 @@ int main ( int argc, char *argv[] ) {
     psf->RTailAmplitudePol.xmin = 1000; // need to change this
     psf->RTailAmplitudePol.xmax = 10000; // need to change this
     
-    psf->r_tail_core_size = 2.;
+    psf->r_tail_core_size = 1.;
     
 #ifdef EXTERNAL_Y_TAIL
     psf->y_tail_amplitude                 = 0;

@@ -212,13 +212,13 @@ int main ( int argc, char *argv[] ) {
       
 #ifdef EXTERNAL_TAIL
       
-      double r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+      double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
 
       // first fill tails on stamp
       for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 	for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
 	  if(weight(i,j)<=0) continue;
-	  model(i,j) += spot->flux*psf->TailValueA(r_tail_amplitude,i-spot->xc,j-spot->yc);
+	  model(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
 	}
       } // end of loop on stamp pixels
       

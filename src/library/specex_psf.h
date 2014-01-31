@@ -83,9 +83,6 @@ namespace specex {
  
 #define EXTERNAL_TAIL
 
-//#define EXPONENTIAL_TAIL_AMPLITUDE
-//#define EXTERNAL_Y_TAIL
-
 public :
 
 #ifdef EXTERNAL_TAIL
@@ -97,26 +94,16 @@ public :
     double r_tail_x_scale;
     double r_tail_y_scale;
     specex::image_data r_tail_profile; // to go much faster    
-    
+    bool r_tail_profile_must_be_computed;
 
-#ifdef EXTERNAL_Y_TAIL
-    double y_tail_amplitude;
-    double y_tail_core_size;
-    double y_tail_power_law_index;
-    double y_tail_sigma_x;
-    specex::image_data y_tail_profile; // to go much faster
-#endif
-    
     void ComputeTailProfile();
     
     double TailValueW(const double& wavelength, 
 		     const double& dx, const double &dy, 
-		     harp::vector_double* derivative_r_tail_amplitude = 0,
-		     double* derivative_y_tail_amplitude = 0) const;
-#ifndef EXTERNAL_Y_TAIL
-    double TailValueA(const double& r_tail_amplitude, 
-		      const double& dx, const double &dy) const;
-#endif
+		     harp::vector_double* derivative_r_tail_amplitude = 0) const;
+
+    double TailProfile(const double& dx, const double &dy) const;
+    
 
 #endif
 
@@ -314,12 +301,6 @@ public :
       ar & BOOST_SERIALIZATION_NVP(r_tail_core_size);
       ar & BOOST_SERIALIZATION_NVP(r_tail_x_scale);
       ar & BOOST_SERIALIZATION_NVP(r_tail_y_scale);
-#ifdef EXTERNAL_Y_TAIL
-      ar & BOOST_SERIALIZATION_NVP(y_tail_amplitude);
-      ar & BOOST_SERIALIZATION_NVP(y_tail_core_size);
-      ar & BOOST_SERIALIZATION_NVP(y_tail_power_law_index);
-      ar & BOOST_SERIALIZATION_NVP(y_tail_sigma_x);
-#endif
 #endif
 #ifdef CONTINUUM
       ar & BOOST_SERIALIZATION_NVP(ContinuumPol);

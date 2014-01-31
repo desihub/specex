@@ -135,6 +135,19 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 }
 
 void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
+
+
+#ifdef EXTERNAL_TAIL
+  if(fit_psf_tail) {
+    psf->RTailAmplitudePol.coeff =  ublas::project(Params,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())); // update tail amplitude
+  }
+#endif
+
+#ifdef CONTINUUM
+  if(fit_continuum)
+    psf->ContinuumPol.coeff = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf->ContinuumPol.coeff.size()));
+#endif
+
   
   // update spot_tmp_data (spots are called several times because we loop on pixels)
   for(size_t s=0;s<spot_tmp_data.size();s++) {
@@ -180,22 +193,14 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 	index += m_size;
       }
     }
-  }
-#ifdef EXTERNAL_TAIL
-  if(fit_psf_tail) {
-    //psf->r_tail_amplitude =  Params(psf_r_tail_amplitude_index); // update tail amplitude
-    psf->RTailAmplitudePol.coeff =  ublas::project(Params,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())); // update tail amplitude
+    if(fit_psf_tail) {
+      tmp.tail_amplitude = specex::dot(psf->RTailAmplitudePol.coeff,tmp.tail_monomials);
+    }
     
-#ifdef EXTERNAL_Y_TAIL  
-    psf->y_tail_amplitude =  Params(psf_y_tail_amplitude_index); // update tail amplitude
-#endif
-  }
-#endif
 
-#ifdef CONTINUUM
-  if(fit_continuum)
-    psf->ContinuumPol.coeff = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf->ContinuumPol.coeff.size()));
-#endif
+  }
+
+
 
 }
 
@@ -229,11 +234,6 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   harp::vector_double *gradPos_pointer = 0;
   std::vector<int> indices_of_fitpar_in_allpar;
   
-#ifdef EXTERNAL_TAIL
-  harp::vector_double r_tail_amplitude_derivative;
-  harp::vector_double *r_tail_amplitude_derivative_pointer = 0;
-#endif
-  
   if(compute_ab) {
     Ap->clear();
     Bp->clear();
@@ -263,12 +263,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     }// will remain zero if (!fit_psf)
     if(fit_position || fit_trace) {gradPos.resize(2); gradPos_pointer = &gradPos;}
   
-#ifdef EXTERNAL_TAIL 
-    if(fit_psf_tail) {
-      r_tail_amplitude_derivative.resize(psf->RTailAmplitudePol.coeff.size());
-      r_tail_amplitude_derivative_pointer = &r_tail_amplitude_derivative;
-    }
-#endif
+    
     
   }
   
@@ -278,28 +273,38 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 #ifdef CONTINUUM
   if(psf_params->fiber_min<psf_params->fiber_min) SPECEX_ERROR("fibers not defined");
   
-  
-  int np_continuum = psf->ContinuumPol.coeff.size();
   harp::vector_double continuum_params;
-  if(fit_continuum)
-    continuum_params = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
-  else
-    continuum_params = psf->ContinuumPol.coeff;
-  
+  harp::vector_double x_of_trace_for_continuum;
+  //harp::vector_double w_of_trace_for_continuum;
+  double expfact_for_continuum = 0;
   map<int,harp::vector_double> continuum_monomials;
-  double expfact_for_continuum=1./(2*M_PI*square(psf->continuum_sigma_x));
+  size_t np_continuum = psf->ContinuumPol.coeff.size();
+  bool has_continuum  = fit_continuum;
+  if(!has_continuum) for(size_t k=0; k<np_continuum; k++) if(psf->ContinuumPol.coeff[k]!=0) {has_continuum = true; break;}
+
+  if(has_continuum) {
+    if(fit_continuum)
+      continuum_params = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
+    else
+      continuum_params = psf->ContinuumPol.coeff;
+    
+    expfact_for_continuum=1./(2*M_PI*square(psf->continuum_sigma_x));
+    
+    x_of_trace_for_continuum.resize(psf_params->fiber_max-psf_params->fiber_min+1);
+  }
 #endif
+
+  //BUG DANS CONTINUUM
 
 
   for (int j=begin_j; j <end_j; ++j) {
     
 #ifdef CONTINUUM
-    harp::vector_double x_of_trace_for_continuum(psf_params->fiber_max-psf_params->fiber_min+1);
-    harp::vector_double w_of_trace_for_continuum(psf_params->fiber_max-psf_params->fiber_min+1);
-    for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
-      x_of_trace_for_continuum(fiber-psf_params->fiber_min) = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
-      w_of_trace_for_continuum(fiber-psf_params->fiber_min) = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
-      continuum_monomials[fiber]=psf->ContinuumPol.Monomials(w_of_trace_for_continuum(fiber-psf_params->fiber_min));
+    if(has_continuum) {
+      for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
+	x_of_trace_for_continuum(fiber-psf_params->fiber_min) = psf->GetTrace(fiber).X_vs_Y.Value(j);
+	continuum_monomials[fiber]=psf->ContinuumPol.Monomials(psf->GetTrace(fiber).W_vs_Y.Value(j));
+      }
     }
 #endif  
 
@@ -320,15 +325,17 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
 
 #ifdef CONTINUUM
-      double continuum_value=0;
-      for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
-	double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf->continuum_sigma_x));
-	continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
-	if(compute_ab && fit_continuum) {
-	  ublas::project(H,ublas::range(continuum_index,continuum_index+np_continuum)) += continuum_prof*continuum_monomials[fiber];
+      if(has_continuum) {
+	double continuum_value=0;
+	for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
+	  double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf->continuum_sigma_x));
+	  continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
+	  if(compute_ab && fit_continuum) {
+	    ublas::project(H,ublas::range(continuum_index,continuum_index+np_continuum)) += continuum_prof*continuum_monomials[fiber];
+	  }
 	}
+	res -= continuum_value;
       }
-      res -= continuum_value;
 #endif      
       
       
@@ -342,33 +349,21 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 #ifdef EXTERNAL_TAIL
 	
-#ifdef EXTERNAL_Y_TAIL  
-	double derivative_y_tail_amplitude;
-	double tail_val = psf->TailValueW(tmp.wavelength,i-tmp.frozen_x,j-tmp.frozen_y,r_tail_amplitude_derivative_pointer,&derivative_y_tail_amplitude);
-#else
-	double tail_val = psf->TailValueW(tmp.wavelength,i-tmp.frozen_x,j-tmp.frozen_y,r_tail_amplitude_derivative_pointer);
-#endif
-	//const double& flux_for_tail = tmp.frozen_flux;
-	const double& flux_for_tail = tmp.flux;
-	
-	res -= flux_for_tail*tail_val;
-	
-	if (compute_ab) {
-
-	  if(fit_flux) H(tmp.flux_parameter_index) += tail_val;
-
-	  if(fit_psf_tail) {
-
-	    ublas::project(H,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())) += flux_for_tail*r_tail_amplitude_derivative;
-	    //H(psf_r_tail_amplitude_index) += flux_for_tail*derivative_r_tail_amplitude;
-
-#ifdef EXTERNAL_Y_TAIL
-	    H(psf_y_tail_amplitude_index) += flux_for_tail*derivative_y_tail_amplitude;
-#endif
+	if(tmp.tail_amplitude!=0 || fit_psf_tail) {
+	  double tail_prof = psf->TailProfile(i-tmp.frozen_x,j-tmp.frozen_y);
+	  
+	  const double& flux_for_tail = tmp.frozen_flux;
+	  //const double& flux_for_tail = tmp.flux;
+	  
+	  res -= flux_for_tail*tmp.tail_amplitude*tail_prof;
+	  
+	  if (compute_ab) {
+	    //if(fit_flux) H(tmp.flux_parameter_index) += tail_val; // only if unfrozen
+	    if(fit_psf_tail)
+	      ublas::project(H,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())) += (flux_for_tail*tail_prof)*tmp.tail_monomials;
 	  }
 	}
-	
-	
+
 #endif
 
 	if( ! tmp.stamp.Contains(i,j)) continue;
@@ -377,13 +372,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	double psfVal =  psf->PSFValueWithParamsXY(tmp.x,tmp.y, i, j, tmp.psf_all_params, gradPos_pointer, gradAllPar_pointer);
 	
-	//if(gradAllPar_pointer) {
-	//for(int  k=0;k<npar_fixed_coord;k++)
-	//  gradFitPar(k) = gradAllPar(indices_of_fitpar_in_allpar[k]);
-	//}
-	if(psfVal==PSF_NAN_VALUE && isnan(psfVal)) SPECEX_ERROR("PSF value returns NAN");
+	//if(psfVal==PSF_NAN_VALUE || isnan(psfVal)) SPECEX_ERROR("PSF value returns NAN");
 	
-
 	if(fabs(tmp.flux*psfVal)>1.e20) {
 	  SPECEX_ERROR("SEVERE BUG flux,psf,params " << tmp.flux << " " << psfVal << " " << tmp.psf_all_params);
 	}
@@ -593,7 +583,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  specex::Spot_p spot= spots[s];
 	  if(spot->flux<=0) continue;
 
-	  double r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+	  double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
 
 	  for(size_t s2=0;s2<spots.size();s2++) {
 	    
@@ -601,7 +591,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	    for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
 	      for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
 		if(weight(i,j)<=0) continue;
-		footprint_weight(i,j) += spot->flux*psf->TailValueA(r_tail_amplitude,i-spot->xc,j-spot->yc);
+		footprint_weight(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
 	      }
 	    } // end of loop on stamp pixels
 	  }
@@ -670,14 +660,14 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	    specex::Spot_p spot= spots[s];
 	    if(spot->flux<0) continue;
 	    
-	    double r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+	    double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
 	    
 
 	    for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
 	      for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
 		if(weight(i,j)==0) continue; // no need to compute anything
 		
-		footprint_weight(i,j) += spot->flux*psf->TailValueA(r_tail_amplitude,i-spot->xc,j-spot->yc);
+		footprint_weight(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
 	      }
 	    } 
 	  }
@@ -707,8 +697,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	}
 	
 	
-	SPECEX_INFO("WEIGHTS: writing weight image for debug");
-	write_new_fits_image("weights.fits",footprint_weight);
+	//SPECEX_INFO("WEIGHTS: writing weight image for debug");
+	//write_new_fits_image("weights.fits",footprint_weight);
       }
       
 
@@ -946,6 +936,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	// SPECEX_WARNING("Setting flux to zero for spot at flux =" << tmp.frozen_flux << " for tail fit")
 	tmp.frozen_flux = 0; // for robustness
       }
+      tmp.tail_monomials = psf->RTailAmplitudePol.Monomials(tmp.wavelength);
+      tmp.tail_amplitude = specex::dot(tmp.tail_monomials,psf->RTailAmplitudePol.coeff);
 #endif
 
       // set parameters concerning spots
@@ -1094,6 +1086,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots linear because only fit psf (linear wrt params)");
       linear = true;
     } 
+    if( (fit_psf_tail || fit_continuum) && (!fit_position) && (!fit_trace) && (!fit_flux) && (!fit_psf)) {
+      if( verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots linear because only fit tail and continuum");
+      linear = true;
+    } 
+
     
     bool use_brent = true;
     
