@@ -55,7 +55,11 @@ namespace specex {
     int fiber_min; // first fiber this set of params applies to
     int fiber_max; // last fiber this set of params applies to
 
-    
+    double chi2; // fit results
+    int ndata;
+    int nparams;
+    int fit_status; // 0=ok 1=cholesky error 2=no convergence 3=nan in fit
+    int nspots_in_fit;
     
 
     PSF_Params() : bundle_id(0), fiber_min(0), fiber_max(0) {};
@@ -68,6 +72,11 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(bundle_id);
       ar & BOOST_SERIALIZATION_NVP(fiber_min);
       ar & BOOST_SERIALIZATION_NVP(fiber_max);
+      ar & BOOST_SERIALIZATION_NVP(chi2);
+      ar & BOOST_SERIALIZATION_NVP(ndata);
+      ar & BOOST_SERIALIZATION_NVP(nparams);
+      ar & BOOST_SERIALIZATION_NVP(fit_status);
+      ar & BOOST_SERIALIZATION_NVP(nspots_in_fit);
     }
   };
 

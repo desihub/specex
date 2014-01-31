@@ -20,7 +20,7 @@ namespace specex {
   public :
 
     
-    double x,y,wavelength,flux;
+    double x,y,wavelength,fiber,flux;
     double frozen_x,frozen_y,frozen_flux; // for tails, keep fixed during minimization to avoid fitting flux with tails
     
     harp::vector_double trace_x_monomials;
@@ -161,6 +161,7 @@ class PSF_Fitter {
    //int Index_PSF() const;
    //int Index_Flux(int spotid, int nspots) const;
     
+    void InitTmpData(const std::vector<Spot_p>& spots);
     void UpdateTmpData(bool compute_ab);
     double ParallelizedComputeChi2AB(bool compute_ab);
     double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, harp::matrix_double* Ap=0, harp::vector_double* Bp=0, bool update_tmp_data=true) const;

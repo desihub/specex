@@ -182,6 +182,8 @@ int main ( int argc, char *argv[] ) {
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
     model.data.clear();
+    image_data core_footprint(image.n_cols(),image.n_rows());
+    core_footprint.data.clear();
 
 #ifdef CONTINUUM
 
@@ -194,11 +196,13 @@ int main ( int argc, char *argv[] ) {
 	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
 	double continuum_flux = psf->ContinuumPol.Value(w);
 	double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
-	for (int i=global_stamp.begin_i ; i <global_stamp.end_i; ++i) {
-	  
-	  if(weight(i,j)<=0) continue;
-	  model(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
-	} // end of loop on i
+	if(expfact_for_continuum>0) {
+	  for (int i=global_stamp.begin_i ; i <global_stamp.end_i; ++i) {
+	    
+	    if(weight(i,j)<=0) continue;
+	    model(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
+	  } // end of loop on i
+	}
       } // end of loop on fiber
     } // end of loop on j
 
@@ -213,14 +217,15 @@ int main ( int argc, char *argv[] ) {
 #ifdef EXTERNAL_TAIL
       
       double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
-
-      // first fill tails on stamp
-      for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
-	for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
-	  if(weight(i,j)<=0) continue;
+      if(r_tail_amplitude>0) {
+	// first fill tails on stamp
+	for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+	  for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
+	    if(weight(i,j)<=0) continue;
 	  model(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
-	}
-      } // end of loop on stamp pixels
+	  }
+	} // end of loop on stamp pixels
+      }
       
 #endif
 
@@ -233,6 +238,7 @@ int main ( int argc, char *argv[] ) {
 	  
 	  if(weight(i,j)<=0) continue;
 	  model(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
+	  core_footprint(i,j) = 1;
 	}
       } // end of loop on stamp pixels
     } // end of loop on spots
@@ -240,6 +246,8 @@ int main ( int argc, char *argv[] ) {
     // now compute variance 
     image_data variance(image.n_cols(),image.n_rows());
     variance.data.clear();
+    image_data variance2(image.n_cols(),image.n_rows());
+    variance2.data.clear();
     image_data data_in_stamp(image.n_cols(),image.n_rows());
     data_in_stamp.data.clear();
     
@@ -251,11 +259,18 @@ int main ( int argc, char *argv[] ) {
       
       data_in_stamp.data(i) = image.data(i);
 
-      // use data here for the variance : 
-      flux = max(0.,image.data(i));
+      
       
       variance.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
       if(flux>0) variance.data(i) += flux; // Poisson noise
+      
+      // use data here for the variance : 
+      flux = max(0.,image.data(i));
+      
+      variance2.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
+      if(flux>0) variance2.data(i) += flux; // Poisson noise
+      
+
     } // end of loop on all pixels
     
 
@@ -263,36 +278,60 @@ int main ( int argc, char *argv[] ) {
     // ---------------------------
     image_data residual = image; 
     residual.data -= model.data;
-
+    
     double chi2_image = 0;
     int ndata_image = 0;
-    for(size_t i=0; i<residual.data.size() ;i++) {
-      if(variance.data(i)>0) {
-	chi2_image += square(residual.data(i))/(variance.data(i));
-	ndata_image ++;
+    double chi2_core = 0;
+    double chi2_core2 = 0;
+    double chi2_core_trimed = 0;
+    int ndata_core = 0;
+    int ndata_core_trimed = 0;
+    int npix_trim = 20;
+    for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+      for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
+	if(variance(i,j)>0) {
+	  double dchi2 = square(residual(i,j))/(variance(i,j));
+	  
+	  chi2_image += dchi2;
+	  ndata_image ++;
+	
+	  if(core_footprint(i,j)>0) {
+	    chi2_core += dchi2;
+	    chi2_core2 += square(residual(i,j))/(variance2(i,j));
+	    ndata_core ++;
+	    if(i>global_stamp.begin_i+npix_trim && i<global_stamp.end_i-npix_trim) {
+	      chi2_core_trimed += dchi2;
+	      ndata_core_trimed ++;
+	    }
+	  }
+	}
       }
     }
-    double chi2_core = 0;
-    int ndata_core = 0;
-    for(size_t s=0;s<spots.size();s++) {
-      const Stamp& spot_stamp = spot_stamps[s];
-      for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
-	for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
-	  if(variance(i,j)>0) {
-	    chi2_core += square(residual(i,j))/(variance(i,j));
-	    ndata_core ++;
-	  }
-	  
-	}
-      } // end of loop on stamp pixels
-    }
+    
     cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNAllPar() << " gnpar=" << psf->BundleNAllPar(spots[0]->fiber_bundle) << endl;
     int npar = psf->BundleNAllPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
+
+#ifdef EXTERNAL_TAIL
+    npar += psf->RTailAmplitudePol.coeff.size();
+#endif
+#ifdef CONTINUUM
+    npar += psf->ContinuumPol.coeff.size();
+#endif
+
+
     int ndf_image  = ndata_image-npar; 
-    int ndf_core   = ndata_core-npar; 
-    cout << "image chi2/ndf     = " << chi2_image/ndf_image << " ndf=" << ndf_image << " ndata=" << ndata_image << endl;
-    cout << "spot core chi2/ndf = " << chi2_core/ndf_core << " ndf=" << ndf_core << " ndata=" << ndata_core << endl;
-    
+    int ndf_core   = ndata_core-npar;
+    int ndf_core_trimed   = ndata_core_trimed-npar;
+    cout << "readout noise      = " << readout_noise << endl;
+    cout << "assumed psf error  = " << psf_error << endl;
+    cout << "number of spots    = " << spots.size() << endl;
+    cout << "image chi2/ndf     = " << chi2_image << "/" << ndf_image << " = " << chi2_image/ndf_image << endl;
+    cout << "spot core chi2/ndf (using model in var) = " << chi2_core << "/" << ndf_core << " =" << chi2_core/ndf_core << endl;
+    cout << "spot core chi2/ndf (using data in var)  = " << chi2_core2 << "/" << ndf_core << " =" << chi2_core2/ndf_core << endl;
+    if(ndf_core_trimed>0)
+      cout << "spot core chi2/ndf (using model in var, trimed,  " << npix_trim << " pixs)  = " << chi2_core_trimed << "/" << ndf_core_trimed << " =" << chi2_core2/ndf_core_trimed << endl;
+    cout << "ndata in image = " << ndata_image << endl;
+    cout << "ndata in core  = " << ndata_core << endl;
     
     // write images of model and residuals
     // ---------------------------
