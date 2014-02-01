@@ -1707,6 +1707,27 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
+  
+  }
+  
+  if(scheduled_fit_of_traces) {
+    SPECEX_INFO("Starting FitSeveralSpots TRACE");
+    SPECEX_INFO("=======================================");
+    fit_flux       = false;
+    fit_position   = false;
+    fit_psf        = false;
+    fit_trace      = true;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
+    
+    SPECEX_INFO("Starting FitSeveralSpots FLUX+TRACE ");
+    SPECEX_INFO("=======================================");
+    fit_flux       = true;
+    fit_position   = false;
+    fit_psf        = false;
+    fit_trace      = true;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
   }
   
 
@@ -1738,22 +1759,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
   SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise);
   
-  
-  SPECEX_INFO("Starting FitSeveralSpots PSF");
-  SPECEX_INFO("=======================================");
-  chi2=1e30;
-  fit_flux       = false;
-  fit_position   = false;
-  fit_psf        = true;
-  fit_trace      = false;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
-  
-  // write_spots_list(spots,"spots-tmp-psf->list",PSF);
-  
-  // SPECEX_INFO("STOP HERE FOR DEBUGGING"); return ok;
-  
-    
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1835,61 +1840,22 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     include_signal_in_weight = false; // restore previous state
     psf_error = saved_psf_error; // restore previous state
   }
-  
-  
-
-  
-  
-  if(scheduled_fit_of_traces || scheduled_fit_of_psf_tail || scheduled_fit_of_continuum) {
-    
-    
-    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis)");
-    SPECEX_INFO("=======================================");
-    fit_flux       = true;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    //include_signal_in_weight = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  }
 
 #endif
 #endif
 
   
-  if(scheduled_fit_of_traces) {
-    SPECEX_INFO("Starting FitSeveralSpots TRACE");
-    SPECEX_INFO("=======================================");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
-    
-    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX+TRACE (bis bis)");
-    SPECEX_INFO("=======================================");
-    fit_flux       = true;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    chi2_precision = 0.1;
-    include_signal_in_weight = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX+TRACE");
-  }else{
-    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis)");
-    SPECEX_INFO("=======================================");
-    fit_flux       = true;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    chi2_precision = 0.1;
-    include_signal_in_weight = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  }
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis)");
+  SPECEX_INFO("=======================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  chi2_precision = 0.1;
+  include_signal_in_weight = true;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+  
     
   SPECEX_INFO("Compute final chi2");
   SPECEX_INFO("=======================================");
