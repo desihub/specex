@@ -363,8 +363,11 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const dou
   int index=0;
   for (size_t ak =0; ak < AP.size(); ++ak) { // loop on all params
     const Legendre2DPol_p APk = AP[ak];
-    size_t c_size = APk->coeff.size();
-    if(fk<FP.size() && APk==FP[fk]) { // this is a fit param because the addresses are the same
+    
+    if((fk<FP.size()) && (APk==FP[fk])) { // this is a fit param because the addresses are the same
+
+      size_t c_size = APk->coeff.size();
+
       params(ak)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),APk->Monomials(X,wave));
       
       //SPECEX_INFO("DEBUG all param " << ak << " and fit = " << fk << " are the same, param val =  " << params(ak));

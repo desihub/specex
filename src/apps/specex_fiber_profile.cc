@@ -237,10 +237,13 @@ int main ( int argc, char *argv[] ) {
   }catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;
     return EXIT_FAILURE;
-  }catch(std::exception e) {
+  }
+    /*
+      }catch(std::exception e) {
     cerr << "FATAL ERROR " << e.what() << endl;
     return EXIT_FAILURE;
-  }
+    }*/
+
   return EXIT_SUCCESS;
 }
 

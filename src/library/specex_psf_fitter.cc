@@ -150,6 +150,8 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     tmp.wavelength    = spot->wavelength;
     tmp.fiber         = spot->fiber;
     
+    if(fit_psf && tmp.flux<0) tmp.flux =0; // more robust
+    
 #ifdef EXTERNAL_TAIL
     tmp.frozen_x = tmp.x;
     tmp.frozen_y = tmp.y;
@@ -657,7 +659,12 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  r_tail_amplitude *= spot->flux;
 	  
 	  for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
-	    for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+	    
+	    int begin_i = max(stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
+	    int end_i   = min(stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+	    
+	    for (int i=begin_i ; i < end_i; ++i) {
+	      
 	      if(weight(i,j)==0) continue; // no need to compute anything
 	      
 	      footprint_weight(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
@@ -680,6 +687,11 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 
 	for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  
 	  
+	  
+	  int begin_i = max(stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
+	  int end_i   = min(stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+	    
+
 	  for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
 	    double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
 	    double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
@@ -687,7 +699,9 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	    if(continuum_flux==0) continuum_flux=10;
 	    double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
 	    
-	    for (int i=stamp.begin_i ; i <stamp.end_i; ++i) {
+	    
+
+	    for (int i=begin_i ; i <end_i; ++i) {
 	      
 	      if(footprint_weight(i,j)!=0 ) { // we have something here 
 		footprint_weight(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
@@ -876,7 +890,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
   map<int,int> tmp_trace_x_parameter;
   map<int,int> tmp_trace_y_parameter;
-  int index_of_spot_parameters;
+  int index_of_spot_parameters = 0;
   
   {
     int index=0;
@@ -914,14 +928,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #ifdef EXTERNAL_TAIL
     if(fit_psf_tail) {
       psf_r_tail_amplitude_index = index;
-      ublas::project(Params,ublas::range(psf_r_tail_amplitude_index,psf->RTailAmplitudePol.coeff.size())) = psf->RTailAmplitudePol.coeff;
+      ublas::project(Params,ublas::range(psf_r_tail_amplitude_index,psf_r_tail_amplitude_index+psf->RTailAmplitudePol.coeff.size())) = psf->RTailAmplitudePol.coeff;
       index+=psf->RTailAmplitudePol.coeff.size();
-      
-#ifdef EXTERNAL_Y_TAIL
-      psf_y_tail_amplitude_index = index;
-      Params(psf_y_tail_amplitude_index) = psf->y_tail_amplitude;
-      index++;
-#endif
     }
 #endif
 
@@ -948,14 +956,17 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     SpotTmpData& tmp = spot_tmp_data[s];
     if(fit_flux) {
-      tmp.flux_parameter_index = index++; 
+      tmp.flux_parameter_index = index; 
       Params(tmp.flux_parameter_index) = tmp.flux;
+      index++; 
     }
     if(fit_position) {
-      tmp.x_parameter_index = index++; 
+      tmp.x_parameter_index = index; 
       Params(tmp.x_parameter_index) = tmp.x;
-      tmp.y_parameter_index = index++; 
+      index++;
+      tmp.y_parameter_index = index; 
       Params(tmp.y_parameter_index) = tmp.y;
+      index++;
     }
     if(fit_psf) {
       tmp.psf_monomials.resize(npar_varying_coord);
@@ -1713,11 +1724,11 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
 
   // lower selection threshold because PSF is now linear in its parameters and hence fit is more robust
-  minimum_signal_to_noise = 3;
+  minimum_signal_to_noise = -3; // keep everything except very bizarre neg. flux
   selected_spots.clear();
   for(size_t s=0;s<input_spots.size();s++) {
     specex::Spot_p& spot = input_spots[s];
-    if(spot->flux>0  && spot->eflux>0 && spot->flux/spot->eflux>minimum_signal_to_noise) {
+    if(spot->eflux>0 && spot->flux/spot->eflux>minimum_signal_to_noise) {
       spot->status=1;
       selected_spots.push_back(spot);
     }else{

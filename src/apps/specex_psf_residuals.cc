@@ -190,14 +190,19 @@ int main ( int argc, char *argv[] ) {
     const PSF_Params * psf_params = &(psf->ParamsOfBundles.find(spots[0]->fiber_bundle)->second);
     
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+
+      int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
+      int end_i   = min(global_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
       
+
+
       for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
 	double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
 	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
 	double continuum_flux = psf->ContinuumPol.Value(w);
 	double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
 	if(expfact_for_continuum>0) {
-	  for (int i=global_stamp.begin_i ; i <global_stamp.end_i; ++i) {
+	  for (int i=begin_i ; i <end_i; ++i) {
 	    
 	    if(weight(i,j)<=0) continue;
 	    model(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
@@ -220,7 +225,11 @@ int main ( int argc, char *argv[] ) {
       if(r_tail_amplitude>0) {
 	// first fill tails on stamp
 	for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
-	  for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
+
+	  int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
+	  int end_i   = min(global_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+      
+	  for (int i=begin_i ; i < end_i; ++i) {
 	    if(weight(i,j)<=0) continue;
 	  model(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
 	  }
@@ -288,7 +297,12 @@ int main ( int argc, char *argv[] ) {
     int ndata_core_trimed = 0;
     int npix_trim = 20;
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
-      for (int i=global_stamp.begin_i ; i < global_stamp.end_i; ++i) {
+
+      int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
+      int end_i   = min(global_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+      
+
+      for (int i=begin_i ; i <end_i; ++i) {
 	if(variance(i,j)>0) {
 	  double dchi2 = square(residual(i,j))/(variance(i,j));
 	  
@@ -311,12 +325,14 @@ int main ( int argc, char *argv[] ) {
     cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNAllPar() << " gnpar=" << psf->BundleNAllPar(spots[0]->fiber_bundle) << endl;
     int npar = psf->BundleNAllPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
 
+    if(0) { // not included in final fit 
 #ifdef EXTERNAL_TAIL
-    npar += psf->RTailAmplitudePol.coeff.size();
+      npar += psf->RTailAmplitudePol.coeff.size();
 #endif
 #ifdef CONTINUUM
-    npar += psf->ContinuumPol.coeff.size();
+      npar += psf->ContinuumPol.coeff.size();
 #endif
+    }
 
 
     int ndf_image  = ndata_image-npar; 
