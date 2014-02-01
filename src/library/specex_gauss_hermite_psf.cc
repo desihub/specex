@@ -63,54 +63,86 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   double x = input_X*sigma_x_inv;
   double y = input_Y*sigma_y_inv;
  
-  double psf_val = 0;
+  int nx=(degree+1);
+  int ny=(degree+1);
+  int nc=nx*ny-4; // skip (0,0)(1,0)(0,1)(1,1)
   
   // precompute to go faster
-  harp::vector_double Hx(degree+1);
-  for(int i=0;i<=degree;i++) {
-    Hx[i]=HermitePol(i,x);
-  }
-  harp::vector_double Hy(degree+1);
-  for(int i=0;i<=degree;i++) {
-    Hy[i]=HermitePol(i,y);
-  }
-  
+  harp::vector_double Monomials;
+  harp::vector_double Monomials_dx;
+  harp::vector_double Monomials_dy;
+  double prefactor=1;
+  int first_hermite_param_index = 2; // first 2 params are sigmas
   double expfact=1./(2*M_PI)*sigma_x_inv*sigma_y_inv*exp(-0.5*(x*x+y*y));
-    
-  double prefactor = 1; // first constant term is not a free parameter, it is = 1 because PSF integral = 1, all higher order gauss hermite terms have integral = 0 
-    
-  int first_hermite_param_index = 2; // first 2 params are sigmas, 
   
-  // we skip constant monomial (0,0)(1,0)(0,1)(1,1) because degenerate with position
-  {
-    int param_index=first_hermite_param_index; 
-    for(int j=0;j<=degree;j++) {
+  if(PosDer==0 && ParamDer==0) {
+    int param_index=first_hermite_param_index;
+    for(int j=0;j<ny;j++) {
+      double Hyj=HermitePol(j,y);
       int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
-      const double& Hyj = Hy[j];
-      for(int i=imin;i<=degree;i++,param_index++) {
-	prefactor+=Params(param_index)*Hx[i]*Hyj;
-      } 
-    }  
+      for(int i=imin;i<nx;i++,param_index++) {
+	prefactor+=Params(param_index)*Hyj*HermitePol(i,x);
+      }
+    }
+    return expfact*prefactor;
+    
+  }else if(PosDer && ParamDer) {
+    Monomials.resize(nc);
+    Monomials_dx.resize(nc);
+    Monomials_dy.resize(nc);
+    int index=0;
+    for(int j=0;j<ny;j++) {
+      double Hyj=HermitePol(j,y);
+      double dHyj=HermitePolDerivative(j,y);
+      
+      int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+      for(int i=imin;i<nx;i++,index++) {
+	double Hxi=HermitePol(i,x);
+	Monomials[index]=Hyj*Hxi;
+	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x);
+	Monomials_dy[index]=dHyj*Hxi;
+      }
+    }
+    prefactor += specex::dot(Monomials,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
+
+  } else if(PosDer && ParamDer==0) {
+    Monomials_dx.resize(nc);
+    Monomials_dy.resize(nc);
+    int param_index=first_hermite_param_index;
+    int index=0;
+    for(int j=0;j<ny;j++) {
+      double Hyj=HermitePol(j,y);
+      double dHyj=HermitePolDerivative(j,y);
+      
+      int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+      for(int i=imin;i<nx;i++,index++,param_index++) {
+	
+	double Hxi=HermitePol(i,x);
+	prefactor+=Params(param_index)*Hxi*Hyj;
+	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x);
+	Monomials_dy[index]=dHyj*Hxi;
+      }
+    }
+  } else if(PosDer==0 && ParamDer) {
+    Monomials.resize(nc);
+    int index=0;
+    for(int j=0;j<ny;j++) {
+      double Hyj=HermitePol(j,y);
+      int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
+      for(int i=imin;i<nx;i++,index++) {
+	Monomials[index]=Hyj*HermitePol(i,x);
+      }
+    }
+    prefactor += specex::dot(Monomials,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
   }
   
-  psf_val = prefactor*expfact;
+  double psf_val = expfact*prefactor;
   
   if(ParamDer) {
+    (*ParamDer)[0] = (x*x-1)*sigma_x_inv*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
+    (*ParamDer)[1] = (y*y-1)*sigma_y_inv*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
     
-    
-    ParamDer->clear();
-    
-    (*ParamDer)(0) = (x*x-1)*sigma_x_inv*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
-    (*ParamDer)(1) = (y*y-1)*sigma_y_inv*psf_val; // exact ONLY if all gauss-hermite terms except zeroth order  = 0
-    
-    int param_index=first_hermite_param_index;    
-    for(int j=0;j<=degree;j++) {
-      int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
-      double eHyj = expfact*Hy[j];
-      for(int i=imin;i<=degree;i++,param_index++) {
-	(*ParamDer)(param_index) = eHyj*Hx[i];
-      } 
-    }  
+    ublas::project(*ParamDer,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)) = expfact*Monomials;
   }
   
   if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
@@ -120,31 +152,10 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     dvdx=x*sigma_x_inv*psf_val;
     dvdy=y*sigma_y_inv*psf_val;
     
-    // precompute to go faster
-    harp::vector_double dHx(degree+1); 
-    for(int i=0;i<=degree;i++) {
-      dHx[i]=HermitePolDerivative(i,x);
-    }
-    
-    double d_poly_dx = 0;
-    double d_poly_dy = 0;
-          
-    int param_index=first_hermite_param_index; //    
-    for(int j=0;j<=degree;j++) {
-      
-      int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)	
-      const double& Hyj = Hy[j];
-      double dHyj = HermitePolDerivative(j,y);
-      
-      for(int i=imin;i<=degree;i++,param_index++) {
-	d_poly_dx += Params(param_index)*dHx[i]*Hyj;
-	d_poly_dy += Params(param_index)*Hx[i]*dHyj;
-      } 
-    }
-    
+    double d_poly_dx = specex::dot(Monomials_dx,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
+    double d_poly_dy = specex::dot(Monomials_dy,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
     dvdx -= d_poly_dx*expfact*sigma_x_inv; // minus sign cause derivative wrt -x
     dvdy -= d_poly_dy*expfact*sigma_y_inv;
-    
   }
   
   return psf_val;
