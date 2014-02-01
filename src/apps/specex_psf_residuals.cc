@@ -145,26 +145,12 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------
     // definition of fitted region of image
     // ----------------------------------------------------
-    double xc_min=1e20;
-    double xc_max=-1e20;
-    double yc_min=1e20;
-    double yc_max=-1e20;
-    for(size_t s=0;s<spots.size();++s) {
-      const specex::Spot_p& spot = spots[s];
-      if(spot->xc<xc_min) xc_min=spot->xc;
-      if(spot->xc>xc_max) xc_max=spot->xc;
-      if(spot->yc<yc_min) yc_min=spot->yc;
-      if(spot->yc>yc_max) yc_max=spot->yc;
-    }
     Stamp global_stamp(image);
-    global_stamp.begin_i = max(global_stamp.begin_i,int(xc_min+0.5)-psf->hSizeX);
-    global_stamp.end_i   = min(global_stamp.end_i,int(xc_max+0.5)+psf->hSizeX+1); 
-    global_stamp.begin_j = max(global_stamp.begin_j,int(yc_min+0.5)-psf->hSizeY);
-    global_stamp.end_j   = min(global_stamp.end_j,int(yc_max+0.5)+psf->hSizeY+1); 
-    // ----------------------------------------------------
+    global_stamp.begin_i = 10000;
+    global_stamp.end_i   = 0;
+    global_stamp.begin_j = 10000;
+    global_stamp.end_j   = 0;
     
-    
-    // create a list of stamps
     vector<specex::Stamp> spot_stamps;
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
@@ -175,6 +161,12 @@ int main ( int argc, char *argv[] ) {
       stamp.end_i   = min(stamp.Parent_n_cols(),stamp.end_i);
       stamp.begin_j = max(0,stamp.begin_j);
       stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
+      
+      global_stamp.begin_i = min(global_stamp.begin_i,stamp.begin_i);
+      global_stamp.end_i   = max(global_stamp.end_i,stamp.end_i);
+      global_stamp.begin_j = min(global_stamp.begin_j,stamp.begin_j);
+      global_stamp.end_j   = max(global_stamp.end_j,stamp.end_j);
+      
       spot_stamps.push_back(stamp);
     }
 
@@ -223,7 +215,7 @@ int main ( int argc, char *argv[] ) {
       
       double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
       if(r_tail_amplitude>0) {
-	// first fill tails on stamp
+      	// first fill tails on stamp
 	for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
 	  int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
@@ -242,8 +234,14 @@ int main ( int argc, char *argv[] ) {
 
       // then the core of the psf for this spot's stamp only
       const Stamp& spot_stamp = spot_stamps[s];
-      for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
-	for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
+      for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) { 
+
+	
+	int begin_i = max(spot_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
+	int end_i   = min(spot_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+      
+ 
+	for (int i=begin_i ; i < end_i; ++i) {
 	  
 	  if(weight(i,j)<=0) continue;
 	  model(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
@@ -323,7 +321,11 @@ int main ( int argc, char *argv[] ) {
     }
     
     cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNAllPar() << " gnpar=" << psf->BundleNAllPar(spots[0]->fiber_bundle) << endl;
-    int npar = psf->BundleNAllPar(spots[0]->fiber_bundle)+spots.size()+psf->TracesNPar();
+    int npar = psf->BundleNAllPar(spots[0]->fiber_bundle)+spots.size(); 
+    // psf->TracesNPar();
+    npar -= psf_params->AllParPolXW[0]->coeff.size(); // not in last fit
+    npar -= psf_params->AllParPolXW[1]->coeff.size(); // not in last fit
+    cout << "npar in last fit = " << npar << endl;
 
     if(0) { // not included in final fit 
 #ifdef EXTERNAL_TAIL

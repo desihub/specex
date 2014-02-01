@@ -844,7 +844,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   }
   SetStampLimitsFromPSF(stamp,psf,xc_min,xc_max,yc_min,yc_max);
   
-  if(spots.size()>1) {
+  if(0 && spots.size()>1) {
     // remove boundaries of stamp to avoid contamination of spots not included in the fit
     stamp.begin_i += (psf->hSizeX-min(psf->hSizeX,5)); // leave 5 pix
     stamp.end_i   -= (psf->hSizeX-min(psf->hSizeX,5)); // leave 5 pix
