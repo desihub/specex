@@ -25,6 +25,7 @@ void specex::PSF_Fitter::SelectFiberBundle(int bundle) {
 }
 
 void specex::PSF_Fitter::SetStampLimitsFromPSF(specex::Stamp& stamp, const specex::PSF_p psf, const double &X, const double &Y) {
+  stamp = Stamp(*(stamp.parent_image)); // reset
   psf->StampLimits(X,Y,stamp.begin_i,stamp.end_i,stamp.begin_j,stamp.end_j);
   // now check image bounds
   stamp.begin_i = max(0,stamp.begin_i);
@@ -141,7 +142,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
   
   
   for(size_t s=0;s<spots.size();s++) {
-    const specex::Spot_p& spot=spots[s];
+    const specex::Spot_p spot=spots[s];
     
     SpotTmpData tmp;
     tmp.flux = spot->flux;
@@ -359,7 +360,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	w=weight(i,j);
       }
       if (w<=0) continue;
-      
+
+      // w=1; // DEBUG
+
       double res = double(image(i,j));
       
       if(compute_ab)
@@ -586,6 +589,23 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
      - if include_signal_in_weighg, weight account for Poisson signal to noise.
   */
   
+  // definition of fitted region of image
+  // ----------------------------------------------------
+  double xc_min=1e20;
+  double xc_max=-1e20;
+  double yc_min=1e20;
+  double yc_max=-1e20;
+  for(size_t s=0;s<spots.size();++s) {
+    const specex::Spot_p spot = spots[s];
+    if(spot->xc<xc_min) xc_min=spot->xc;
+    if(spot->xc>xc_max) xc_max=spot->xc;
+    if(spot->yc<yc_min) yc_min=spot->yc;
+    if(spot->yc>yc_max) yc_max=spot->yc;
+  }
+  SetStampLimitsFromPSF(stamp,psf,xc_min,xc_max,yc_min,yc_max);
+  
+
+
   if(spots.size()>1) {
     // compute psf footprint
     footprint_weight.resize(weight.Nx(),weight.Ny());
@@ -599,6 +619,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       
       SPECEX_INFO("WEIGHTS: Computing weights");
       SPECEX_INFO("WEIGHTS: readout noise = " << readout_noise);
+      SPECEX_INFO("WEIGHTS: gain = " << gain);
+      SPECEX_INFO("WEIGHTS: psf error = " << psf_error);
      
       // create a list of stamps
       vector<specex::Stamp> spot_stamps;
@@ -616,72 +638,78 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       
       bool add_spots_core_signal = true;
       bool zero_weight_for_core  = false;
+      bool fill_core_footprint = false;
+
+#ifdef EXTERNAL_TAIL     
+      bool has_tails = (psf->RTailAmplitudePol.coeff.size() && psf->RTailAmplitudePol.coeff(0)!=0);
+      fill_core_footprint |= ( (! fit_psf_tail) &&  has_tails);
+#endif
+#ifdef CONTINUUM
+      bool has_continuum = (psf->ContinuumPol.coeff.size() && psf->ContinuumPol.coeff(0)!=0);
+      fill_core_footprint |= ( (! fit_continuum) &&  has_continuum);
+#endif
+
+      image_data core_stamp_footprint;
+
+      if(fill_core_footprint) {
+	SPECEX_INFO("WEIGHTS: computing footprint of core of stamps");
+	core_stamp_footprint = image_data(image.n_cols(),image.n_rows());
+	
+	for(size_t s2=0;s2<spots.size();s2++) {
+	  const Stamp& spot_stamp = spot_stamps[s2];
+	  for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
+	    for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
+	      core_stamp_footprint(i,j)=1;
+	    }
+	  }
+	}
+      }
 
 #ifdef EXTERNAL_TAIL
 
-      bool has_tails = (psf->RTailAmplitudePol.coeff.size() && psf->RTailAmplitudePol.coeff(0)!=0);
       if( (! fit_psf_tail)  &&  has_tails ) {
-	
-	  SPECEX_INFO("WEIGHTS: Fill spots stamps model with PSF tails");
-	  
-	  for(size_t s=0;s<spots.size();s++) {
-	    specex::Spot_p spot= spots[s];
-	    if(spot->flux<=0) continue;
-	    
-	    double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
-	    
-	    if(r_tail_amplitude>0) {
-	      for(size_t s2=0;s2<spots.size();s2++) {
-		
-		const Stamp& spot_stamp = spot_stamps[s2];
-		for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) {  
-		  for (int i=spot_stamp.begin_i ; i < spot_stamp.end_i; ++i) {
-		    if(weight(i,j)<=0) continue;
-		    footprint_weight(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
-		  }
-		} // end of loop on stamp pixels
-	      }
-	    }
-	  }
-      }
-      if( fit_psf_tail ) {
-	
+	SPECEX_INFO("WEIGHTS: Fill spots stamps model with PSF tails");
+      }else if(fit_psf_tail ) {
 	SPECEX_INFO("WEIGHTS: Fill all pixels between spots with PSF tail value (to fit tails)");
-	
+      }
+
+      if( has_tails || fit_psf_tail) {
+
 	for(size_t s=0;s<spots.size();s++) {
-	    
 	  specex::Spot_p spot= spots[s];
-	  if(spot->flux<0) continue;
 	  
-	  
-	  double r_tail_amplitude = 0.005;
-	  if(has_tails) r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
-	  r_tail_amplitude *= spot->flux;
+	  double r_tail_amplitude;
+	  if(!fit_psf_tail) {
+	    r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+	  } else {
+	    r_tail_amplitude = 0.005;
+	    if(has_tails) r_tail_amplitude = psf->RTailAmplitudePol.Value(spot->wavelength);
+	  }	
+	  r_tail_amplitude = max(spot->flux*r_tail_amplitude,1.e-20);
 	  
 	  for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
 	    
-	    int begin_i = max(stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
-	    int end_i   = min(stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+	    int begin_i = max(stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	    int end_i   = min(stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
 	    
 	    for (int i=begin_i ; i < end_i; ++i) {
 	      
 	      if(weight(i,j)==0) continue; // no need to compute anything
-	      
+	      if(fill_core_footprint && core_stamp_footprint(i,j)==0) continue; // no need to compute anything
 	      footprint_weight(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
-	    }
-	  } 
+	      
+	    } 
+	  }
 	}
       }
-      
       if((fit_psf_tail) && !fit_flux && !fit_psf) { add_spots_core_signal = false; zero_weight_for_core = true;}
       
 #endif
       
 #ifdef CONTINUUM
-
-      bool has_continuum = (psf->ContinuumPol.coeff.size() && psf->ContinuumPol.coeff(0)!=0);
+      
       // need to add continuum here as well
-      if( has_continuum ) {
+      if( has_continuum || fit_continuum) {
 
 	SPECEX_INFO("WEIGHTS: Fill continuum");
 
@@ -696,17 +724,22 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	    double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
 	    double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
 	    double continuum_flux = psf->ContinuumPol.Value(w);
-	    if(continuum_flux==0) continuum_flux=10;
+	    
+	    if(continuum_flux==0 && fit_continuum) continuum_flux=10; // to assign weights
+	    
 	    double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
 	    
-	    
-
-	    for (int i=begin_i ; i <end_i; ++i) {
+	    if(expfact_for_continuum>0) {
 	      
-	      if(footprint_weight(i,j)!=0 ) { // we have something here 
+	      for (int i=begin_i ; i <end_i; ++i) {
+		
+		if(weight(i,j)==0) continue; // no need to compute anything
+		if(fill_core_footprint && core_stamp_footprint(i,j)==0) continue; // no need to compute anything
+	    
 		footprint_weight(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
-	      }
-	    } // end of loop on i
+		
+	      } // end of loop on i
+	    }
 	  } // end of loop on fiber
 	} // end of loop on j
       }
@@ -720,10 +753,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	SPECEX_INFO("WEIGHTS: Fill spots stamps model with PSF core");
 	
 	for(size_t s=0;s<spots.size();s++) {
-	  specex::Spot_p spot= spots[s];
-	  
-	  
-	  if(spot->flux<=0) continue;
+	  const specex::Spot_p spot= spots[s];
 	  
 	  harp::vector_double psfParams = psf->AllLocalParamsXW(spot->xc,spot->wavelength,psf_params->bundle_id);
 	  
@@ -733,7 +763,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
 	    for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
 	      if(weight(i,j)==0) continue; // no need to compute anything
-	      footprint_weight(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc,i,j,psfParams,0,0);
+	      footprint_weight(i,j) += max(1.e-20,spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc,i,j,psfParams,0,0));
 	      
 	    }
 	  }
@@ -826,33 +856,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   int maxiter = 100; 
   double oldChi2=1e30;
   if(*psfChi2<=0) *psfChi2 = 1e20;
+  
   // ----------------------------------------------------
-  
-  
-  // definition of fitted region of image
-  // ----------------------------------------------------
-  double xc_min=1e20;
-  double xc_max=-1e20;
-  double yc_min=1e20;
-  double yc_max=-1e20;
-  for(size_t s=0;s<spots.size();++s) {
-    const specex::Spot_p& spot = spots[s];
-    if(spot->xc<xc_min) xc_min=spot->xc;
-    if(spot->xc>xc_max) xc_max=spot->xc;
-    if(spot->yc<yc_min) yc_min=spot->yc;
-    if(spot->yc>yc_max) yc_max=spot->yc;
-  }
-  SetStampLimitsFromPSF(stamp,psf,xc_min,xc_max,yc_min,yc_max);
-  
-  if(0 && spots.size()>1) {
-    // remove boundaries of stamp to avoid contamination of spots not included in the fit
-    stamp.begin_i += (psf->hSizeX-min(psf->hSizeX,5)); // leave 5 pix
-    stamp.end_i   -= (psf->hSizeX-min(psf->hSizeX,5)); // leave 5 pix
-    //stamp.begin_j += max(0,psf->hSizeY-2);
-    //stamp.end_j   -= max(0,psf->hSizeY-2);
-  }
-  // ----------------------------------------------------
-  
+    
   int npar_psf = 0;
   if(fit_psf) npar_psf = psf->BundleNFitPar(psf_params->bundle_id);
   int npar_trace = 0;
@@ -1317,6 +1323,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     if(fit_trace) {
       spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
       spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
+
+      if(spot->xc != tmp.x || spot->yc != tmp.y) {
+	SPECEX_ERROR("spot coord. " << spot->xc << "," << spot->yc << " tmp " << tmp.x << "," << tmp.y);
+      }
+
     }
   }
   

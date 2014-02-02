@@ -169,22 +169,21 @@ int main ( int argc, char *argv[] ) {
       
       spot_stamps.push_back(stamp);
     }
-
+    
     
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
-    model.data.clear();
+    image_data model_for_var(image.n_cols(),image.n_rows());
     image_data core_footprint(image.n_cols(),image.n_rows());
-    core_footprint.data.clear();
+    
+    const PSF_Params * psf_params = &(psf->ParamsOfBundles.find(spots[0]->fiber_bundle)->second);
 
 #ifdef CONTINUUM
-
-    const PSF_Params * psf_params = &(psf->ParamsOfBundles.find(spots[0]->fiber_bundle)->second);
     
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
-      int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
-      int end_i   = min(global_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
+      int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+      int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
       
 
 
@@ -193,80 +192,85 @@ int main ( int argc, char *argv[] ) {
 	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
 	double continuum_flux = psf->ContinuumPol.Value(w);
 	double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
-	if(expfact_for_continuum>0) {
-	  for (int i=begin_i ; i <end_i; ++i) {
-	    
+	if(expfact_for_continuum!=0) {
+	  for (int i=begin_i ; i <end_i; ++i) {    
 	    if(weight(i,j)<=0) continue;
-	    model(i,j) += expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
+	    double val = expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
+	    model(i,j) += val;
+	    if(val>0) model_for_var(i,j) += val;
 	  } // end of loop on i
 	}
       } // end of loop on fiber
     } // end of loop on j
 
 #endif  
+    
+    
+    
+#ifdef EXTERNAL_TAIL    
+    for(size_t s=0;s<spots.size();s++) {
+      specex::Spot_p spot = spots[s];
+      
+      double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
+      double r_tail_amplitude_for_var = max(r_tail_amplitude,1e-20);
+      
+      if(spot->flux<0) r_tail_amplitude = 0; // this is frozen_flux=0 in fitter
+
+      // first fill tails on stamp
+      for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+	
+	int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	
+	
+	for (int i=begin_i ; i < end_i; ++i) {
+	  if(weight(i,j)<=0) continue;
+	  double prof = psf->TailProfile(i-spot->xc,j-spot->yc);
+	  model(i,j) += r_tail_amplitude*prof;
+	  model_for_var(i,j) += r_tail_amplitude_for_var*prof;
+	  
+	}
+      } // end of loop on stamp pixels
+    }
+#endif
+    
 
     
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
-      
+       
       harp::vector_double params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
       
-#ifdef EXTERNAL_TAIL
       
-      double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
-      if(r_tail_amplitude>0) {
-      	// first fill tails on stamp
-	for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
-
-	  int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
-	  int end_i   = min(global_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
-      
-	  for (int i=begin_i ; i < end_i; ++i) {
-	    if(weight(i,j)<=0) continue;
-	  model(i,j) += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
-	  }
-	} // end of loop on stamp pixels
-      }
-      
-#endif
-
-
-
       // then the core of the psf for this spot's stamp only
       const Stamp& spot_stamp = spot_stamps[s];
       for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) { 
-
 	
-	int begin_i = max(spot_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
-	int end_i   = min(spot_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
-      
- 
+	
+	int begin_i = max(spot_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	int end_i   = min(spot_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	
 	for (int i=begin_i ; i < end_i; ++i) {
 	  
 	  if(weight(i,j)<=0) continue;
-	  model(i,j) += spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
+	  double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
+	  model(i,j) += val;
+	  model_for_var(i,j) += max(1e-20,val);
 	  core_footprint(i,j) = 1;
 	}
       } // end of loop on stamp pixels
     } // end of loop on spots
-
+    
     // now compute variance 
     image_data variance(image.n_cols(),image.n_rows());
-    variance.data.clear();
     image_data variance2(image.n_cols(),image.n_rows());
-    variance2.data.clear();
     image_data data_in_stamp(image.n_cols(),image.n_rows());
-    data_in_stamp.data.clear();
     
-    
-
     for(size_t i=0; i<model.data.size() ;i++) {
-      double flux = model.data(i);
+      double flux = model_for_var.data(i);
       if(flux==0) continue; // never been on this pixel
       
       data_in_stamp.data(i) = image.data(i);
-
-      
       
       variance.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
       if(flux>0) variance.data(i) += flux; // Poisson noise
@@ -277,7 +281,6 @@ int main ( int argc, char *argv[] ) {
       variance2.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
       if(flux>0) variance2.data(i) += flux; // Poisson noise
       
-
     } // end of loop on all pixels
     
 
@@ -296,12 +299,14 @@ int main ( int argc, char *argv[] ) {
     int npix_trim = 20;
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
-      int begin_i = max(global_stamp.begin_i,int(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))-psf->hSizeX));
-      int end_i   = min(global_stamp.end_i,int(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+psf->hSizeX+1));
-      
+      int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+      int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
 
       for (int i=begin_i ; i <end_i; ++i) {
 	if(variance(i,j)>0) {
+
+	  // variance(i,j) = 1; // debug
+
 	  double dchi2 = square(residual(i,j))/(variance(i,j));
 	  
 	  chi2_image += dchi2;
