@@ -160,7 +160,10 @@ int main ( int argc, char *argv[] ) {
     os << "# y :" << endl;
     os << "# w :" << endl;
     os << "# data :" << endl;
-    os << "# model :" << endl;
+    os << "# model : core+tail+cont" << endl;
+    os << "# core :" << endl;
+    os << "# tail :" << endl;
+    os << "# cont :" << endl;
     
     for(size_t p=0;p<psf->paramNames.size();p++) {
       os << "# " << psf->paramNames[p] << " :" << endl;
@@ -192,16 +195,21 @@ int main ( int argc, char *argv[] ) {
     
       double data_j = 0;
       double val_j   = 0;
+      double val_j_core   = 0;
+      double val_j_tail   = 0;
+      double val_j_cont   = 0;
+      
       for(int i=i_begin ; i<i_end; i++) {
 	
 	if(weight(i,j)=0) continue;
 	data_j += image(i,j);
 	
-	double val_ij = 0;
+	
 	
 #ifdef CONTINUUM
-	double continuum_value = psf->ContinuumPol.Value(wave)*expfact_for_continuum*exp(-0.5*square((i-x_center)/psf->continuum_sigma_x));
-	val_ij += continuum_value;
+	double continuum_val = psf->ContinuumPol.Value(wave)*expfact_for_continuum*exp(-0.5*square((i-x_center)/psf->continuum_sigma_x));
+	val_j += continuum_val;
+	val_j_cont += continuum_val;
 #endif
 
 
@@ -210,17 +218,24 @@ int main ( int argc, char *argv[] ) {
 #ifdef EXTERNAL_TAIL
 	  double r_tail_amplitude = spot->flux*psf->RTailAmplitudePol.Value(spot->wavelength);
 #endif
-	  if(fabs(i-spot->xc)<2*psf->hSizeX && fabs(j-spot->yc)<2*psf->hSizeY)
-	    val_ij += spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
-							   psf_params[s], 0, 0);
+	  if(fabs(i-spot->xc)<2*psf->hSizeX && fabs(j-spot->yc)<2*psf->hSizeY) {
+	    double core_val = spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
+								   psf_params[s], 0, 0);
+
+	    val_j += core_val;
+	    val_j_core += core_val;
+	  }
+
 #ifdef EXTERNAL_TAIL
-	  val_ij += r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc);
+	  double tail_val = r_tail_amplitude*psf->TailProfile(i-spot->xc,j-spot->yc); 
+	  val_j += tail_val;
+	  val_j_tail += tail_val;
 #endif
 	}
-	val_j += val_ij;
+	
       }
       
-      os << " " << data_j << " " << val_j;
+      os << " " << data_j << " " << val_j << " " << val_j_core << " " << val_j_tail << " " << val_j_cont;
       
       harp::vector_double params = psf->AllLocalParamsFW(fiber,wave,bundle);
       for(size_t p=0;p<params.size();p++)
