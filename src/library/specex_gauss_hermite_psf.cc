@@ -240,8 +240,8 @@ harp::vector_double specex::GaussHermitePSF::DefaultParams() const
   Params(0) = 1.1; // this is sigma_x
   Params(1) = 1.1; // this is sigma_y
 #ifdef TWO_GAUSSIANS
-  Params(2) = 4.; // this is sigma_x_2
-  Params(3) = 4.; // this is sigma_y_2
+  Params(2) = 3.; // this is sigma_x_2
+  Params(3) = 3.; // this is sigma_y_2
   Params(4) = 0.1; // this is the amplitude of the second gaussian
 #endif
   return Params;

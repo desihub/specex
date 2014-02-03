@@ -1618,8 +1618,15 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       int npar = psf->LocalNAllPar();
       
       for(int p=0;p<npar;p++) {
-
-	specex::Legendre2DPol_p pol(new specex::Legendre2DPol(polynomial_degree_along_x,min_x,max_x,polynomial_degree_along_wave,min_wave,max_wave));
+	int degx=polynomial_degree_along_x;
+	int degw=polynomial_degree_along_wave;
+	
+	const string& name = psf->paramNames[p];
+	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2") {
+	  degx=0;
+	  degw=1;
+	}
+	specex::Legendre2DPol_p pol(new specex::Legendre2DPol(degx,min_x,max_x,degw,min_wave,max_wave));
 	psf_params->AllParPolXW.push_back(pol);
       }
       
@@ -1682,6 +1689,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   int saved_psf_hsizey = psf->hSizeY;
   
   
+  
   {
     SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
     psf->hSizeX=min(4,psf->hSizeX);
@@ -1694,15 +1702,12 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok |= (name=="GHSIGX" || name=="GHSIGY");
       //ok |= (name=="GHSIGX2");
       //ok |= (name=="GHSIGY2");
-      ok |= (name=="GHSCAL2");
-
+      //ok |= (name=="GHSCAL2");
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
   }
   
-  if(psf_params->FitParPolXW.size()>0) { // those parameters exist 
-
   SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms");
   SPECEX_INFO("===================================================");
   chi2=1e30;
@@ -1714,11 +1719,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
   
   
-  // write_spots_list(spots,"spots-tmp-psf->list",PSF);
-  
-  // SPECEX_INFO("STOP HERE FOR DEBUGGING"); return ok;
-
-
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
   SPECEX_INFO("========================================================");
   fit_flux       = true;
@@ -1728,8 +1728,32 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
-  //cout << "debug" << endl; return ok;
-  
+  if(0) {
+  // now add parameters using signal in weights
+  {
+    SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
+    psf_params->FitParPolXW.clear();
+    int npar = psf->LocalNAllPar();
+    for(int p=0;p<npar;p++) {
+      const string& name = psf->paramNames[p];
+      bool ok = false;
+      ok |= (name=="GHSIGX" || name=="GHSIGY");
+      //ok |= (name=="GHSIGX2");
+      //ok |= (name=="GHSIGY2");
+      ok |= (name=="GHSCAL2");
+      if(ok)
+	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+    }
+  }
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms (more)");
+  SPECEX_INFO("========================================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+  include_signal_in_weight = false; 
   }
   
   if(scheduled_fit_of_traces) {
@@ -1893,6 +1917,42 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+
+  SPECEX_INFO("Starting FitSeveralSpots FLUX (updated tails)");
+  SPECEX_INFO("=======================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = false;
+  fit_trace      = false;
+  chi2_precision = 10;
+  include_signal_in_weight = true;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX");
+
+  
+
+  if(scheduled_fit_of_continuum && scheduled_fit_of_psf_tail) {
+    
+    SPECEX_INFO("Starting FitSeveralSpots TAIL+CONTINUUM (bis)");
+    SPECEX_INFO("=============================================");
+    fit_flux       = false;
+    fit_position   = false;
+    fit_psf        = false;
+    fit_trace      = false;
+    fit_psf_tail   = true;
+    fit_continuum  = true;
+    
+    include_signal_in_weight = true; 
+    
+    double saved_psf_error = psf_error;
+    psf_error = 1; // to deweight the core of the psf
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    
+    fit_psf_tail    = false; // don't fit this anymore
+    fit_continuum   = false; // don't fit this anymore
+    include_signal_in_weight = false; // restore previous state
+    psf_error = saved_psf_error; // restore previous state
+  }
   
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
   SPECEX_INFO("=======================================");
