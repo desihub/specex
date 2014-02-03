@@ -38,6 +38,7 @@ int main() {
 
   // test for derivatives of sigma
   // for(size_t i=2;i<P.size();i++) P(i)=0;
+  for(size_t i=5;i<P.size();i++) P(i)=1;
 
   cout << P << endl;
 

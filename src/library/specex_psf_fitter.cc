@@ -13,6 +13,7 @@
 #include "specex_image_data.h"
 #include "specex_fits.h"
 #include "specex_message.h"
+#include "specex_psf_io.h"
 
 //#include <boost/archive/xml_oarchive.hpp>
 
@@ -1181,7 +1182,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	       << " chi2pdf = " << best_chi2/(*npix-Params.size())
 	      );
 	}else{
-	  SPECEX_WARNING("problem with brent dchi2 = " << dchi2);
+	  SPECEX_ERROR("problem with brent dchi2 = " << dchi2);
 	  best_step = 0;
 	  best_chi2 = *psfChi2;
 	}
@@ -1629,7 +1630,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	psf_params->AllParPolXW[p]->coeff(0) = default_params(p);
 	SPECEX_INFO("Coeff for par " << p << " = " << psf_params->AllParPolXW[p]->coeff);
       }
-      
+      //write_psf_xml(psf,"psf_init.xml"); exit(12);
       
     }
     
@@ -1680,21 +1681,29 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   int saved_psf_hsizex = psf->hSizeX;
   int saved_psf_hsizey = psf->hSizeY;
   
+  
   {
-    SPECEX_INFO("Choose the parameters that participate to the fit : only GHSIGX and GHSIGY");
-    psf->hSizeX=3;
-    psf->hSizeY=3;
+    SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
+    psf->hSizeX=min(4,psf->hSizeX);
+    psf->hSizeY=min(4,psf->hSizeY);
     psf_params->FitParPolXW.clear();
     int npar = psf->LocalNAllPar();
     for(int p=0;p<npar;p++) {
       const string& name = psf->paramNames[p];
-      if(name=="GHSIGX" || name=="GHSIGY")
+      bool ok = false;
+      ok |= (name=="GHSIGX" || name=="GHSIGY");
+      //ok |= (name=="GHSIGX2");
+      //ok |= (name=="GHSIGY2");
+      ok |= (name=="GHSCAL2");
+
+      if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
   }
+  
   if(psf_params->FitParPolXW.size()>0) { // those parameters exist 
 
-  SPECEX_INFO("Starting FitSeveralSpots PSF only GHSIGX and GHSIGY");
+  SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms");
   SPECEX_INFO("===================================================");
   chi2=1e30;
   fit_flux       = false;
@@ -1704,12 +1713,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
   
+  
   // write_spots_list(spots,"spots-tmp-psf->list",PSF);
   
   // SPECEX_INFO("STOP HERE FOR DEBUGGING"); return ok;
 
 
-  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only GHSIGX and GHSIGY");
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
   SPECEX_INFO("========================================================");
   fit_flux       = true;
   fit_position   = false;
@@ -1718,6 +1728,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
+  //cout << "debug" << endl; return ok;
   
   }
   
@@ -1743,14 +1754,18 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
 
   {
-    SPECEX_INFO("Choose the parameters that participate to the fit : all but GHSIGX and GHSIGY");
+    SPECEX_INFO("Choose the parameters that participate to the fit : all but gaussian terms");
     psf->hSizeX=saved_psf_hsizex;
     psf->hSizeY=saved_psf_hsizey;
     psf_params->FitParPolXW.clear();
     int npar = psf->LocalNAllPar();
     for(int p=0;p<npar;p++) {
       const string& name = psf->paramNames[p];
-      if(name!="GHSIGX" && name!="GHSIGY")
+      ok = (name!="GHSIGX" && name!="GHSIGY");
+      ok &= (name!="GHSIGX2" && name!="GHSIGY2");
+      ok &= (name!="GHSCAL2");
+
+      if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
   }
@@ -1768,7 +1783,19 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     
   }
+  
+  //write_psf_xml(psf,"psf.xml"); exit(12);
+  
   SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise);
+  
+  SPECEX_INFO("Starting FitSeveralSpots PSF");
+  SPECEX_INFO("=======================================");
+  fit_flux       = false;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX");
   SPECEX_INFO("=======================================");
@@ -1862,7 +1889,18 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_psf        = true;
   fit_trace      = false;
-  chi2_precision = 0.1;
+  chi2_precision = 10;
+  include_signal_in_weight = true;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+  
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
+  SPECEX_INFO("=======================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  chi2_precision = 1;
   include_signal_in_weight = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
