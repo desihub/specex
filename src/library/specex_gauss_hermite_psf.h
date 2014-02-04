@@ -1,5 +1,5 @@
-#ifndef SPECEX_GAUSS_HERMITE_ANALYTIC_PSF__H
-#define SPECEX_GAUSS_HERMITE_ANALYTIC_PSF__H
+#ifndef SPECEX_GAUSS_HERMITE_PSF__H
+#define SPECEX_GAUSS_HERMITE_PSF__H
 
 #include "specex_psf.h"
 
@@ -35,6 +35,7 @@ namespace specex {
 		   harp::vector_double *ParamGradient = 0) const;
     
     harp::vector_double DefaultParams() const;
+    std::vector<std::string> DefaultParamNames() const;
     
     bool CheckParams(const harp::vector_double &Params) const 
     { return true;}
@@ -44,6 +45,8 @@ namespace specex {
     
   private :
 
+    void WriteFits_v1(fitsfile* fp, int first_hdu=1) const;
+    void ReadFits_v1(fitsfile* fp, int first_hdu=1);
     void WriteFits_v0(fitsfile* fp, int first_hdu=1) const;
     void ReadFits_v0(fitsfile* fp, int first_hdu=1);
     

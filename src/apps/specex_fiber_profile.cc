@@ -165,8 +165,8 @@ int main ( int argc, char *argv[] ) {
     os << "# tail :" << endl;
     os << "# cont :" << endl;
     
-    for(size_t p=0;p<psf->paramNames.size();p++) {
-      os << "# " << psf->paramNames[p] << " :" << endl;
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      os << "# " << psf->ParamName(p) << " :" << endl;
     }
     os << "#end" << endl;
     

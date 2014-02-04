@@ -44,7 +44,9 @@ namespace specex {
     friend class boost::serialization::access;
 
   public :
+
     
+
     // those are polynomials of x_cdd and lambda to allow continuous variation in CCD and at the same time
     // and easy projection per fiber for subsequent use
     
@@ -61,8 +63,12 @@ namespace specex {
     int fit_status; // 0=ok 1=cholesky error 2=no convergence 3=nan in fit
     int nspots_in_fit;
     
+    
 
-    PSF_Params() : bundle_id(0), fiber_min(0), fiber_max(0) {};
+  PSF_Params() : 
+    bundle_id(0), fiber_min(0), fiber_max(0), 
+      chi2(0),ndata(0),fit_status(12), nspots_in_fit(0)
+      {};
   
   private :
 
@@ -123,13 +129,15 @@ public :
     double continuum_sigma_x;
 #endif
 
-    std::vector<std::string> paramNames;
-
+    const std::string& ParamName(int p) const;
+    int ParamIndex(const std::string& name) const;
+    bool HasParam(const std::string& name) const;
+    
   protected :
     
     
     
-    harp::vector_double TmpParamDer;
+    //harp::vector_double TmpParamDer;
     std::string name;
 
     std::map<int,Legendre1DPol*> XPol; // Legendre1DPol X_vs_W of fibers, data are in FiberTraces
@@ -156,14 +164,7 @@ public :
     std::string camera_id;
     
     virtual std::string Name() const {return name;};
-    virtual std::string ParamName(const int Rank) const {return paramNames.at(unsigned(Rank));};
-    virtual int ParamIndex(const std::string& name) const {
-      for(size_t i=0;i<paramNames.size();++i) {
-	if(paramNames[i] == name) return int(i);
-      }
-      return -1;
-    };
-    virtual bool HasParam(const std::string& name) const { return (ParamIndex(name)>=0);}
+    
     
   protected :
     //! integrates PSF and requested derivatives over the pixel that contains XPix and YPix (pixel limits are at integer values + 1/2)
@@ -183,6 +184,7 @@ public :
 			   harp::vector_double *ParamGradient = 0) const {return 0;};
     
     virtual harp::vector_double DefaultParams() const = 0;
+    virtual std::vector<std::string> DefaultParamNames() const = 0;
     
     // check if parameter values are within bounds
     virtual bool CheckParams(const harp::vector_double &Params) const {return false;};

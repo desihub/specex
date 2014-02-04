@@ -37,8 +37,11 @@ int main() {
   }
   
   // write psf in specter format
-  psf->WriteFits("test-psf-for-specter2.fits");
+  psf->WriteFits("psf.fits");
+  
+  return 0;
 
+  
   // write an image of the psf at a precise location
   write_psf_fits_image(psf,"psf-image.fits",400,2000,1,4);
   

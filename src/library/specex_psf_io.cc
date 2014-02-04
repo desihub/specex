@@ -78,7 +78,7 @@ void specex::write_psf_xml(const specex::PSF_p psf, const std::string& filename)
   xml_oa << BOOST_SERIALIZATION_NVP(psf);
   
   os.close();
-
+  
   SPECEX_INFO("wrote psf in " << filename);
 }
 

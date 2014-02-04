@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstdio>
 #include <string>
+#include <sstream>
 
 #include <harp.hpp>
 
@@ -9,6 +10,79 @@
 #include <specex_message.h>
 
 using namespace std;
+
+static vector<string> DecomposeString(const string &Source,vector<string> &Tokens)
+{
+  vector<string> SubStrings;
+
+  string source_copy = Source;
+  
+  string::size_type start = 0;
+
+  string::size_type tokpos = source_copy.npos;
+  for(size_t t=0;t<Tokens.size();t++) {
+    string::size_type pos = source_copy.find_first_of(Tokens[t],start);
+    if(pos<tokpos) tokpos=pos;
+  }
+
+  while (tokpos != (string::size_type) source_copy.npos)
+    {
+      string sub = source_copy.substr(start,tokpos-start);
+      if (sub.length() > 0) SubStrings.push_back(sub);
+      start = tokpos+1;
+      
+      tokpos = source_copy.npos;
+      for(size_t t=0;t<Tokens.size();t++) {
+	string::size_type pos = source_copy.find_first_of(Tokens[t],start);
+	if(pos<tokpos) tokpos=pos;
+      }
+    }
+  
+  // get the last element
+  string sublast = source_copy.substr(start, source_copy.length());
+  if (sublast.length() > 0) SubStrings.push_back(sublast);
+  
+  return SubStrings;
+}
+
+
+static std::vector<int> decode_dimension(const string& tdim) {
+  
+  vector<string> tokens; 
+  tokens.push_back(" "); 
+  tokens.push_back(","); 
+  tokens.push_back("("); 
+  tokens.push_back(")"); 
+  vector<string> substrings = DecomposeString(tdim,tokens);
+  std::vector<int> dimension;
+  for(size_t s=0;s<substrings.size();s++) {
+    // cout << "dim='" << substrings[s] << "'" << endl;
+    dimension.push_back(atoi(substrings[s].c_str()));
+  }
+
+  /*
+  SPECEX_INFO("decode_dimension '" << tdim << "'");
+  for(size_t d = 0 ; d < dimension.size(); d++) {
+    SPECEX_INFO("d[" << d << "]=" << dimension[d]);
+  }
+  */
+  return dimension;
+}
+
+static string encode_dimension(const std::vector<int>& dimension) {
+  std::stringstream tdim;
+  tdim << "( ";
+  for(size_t i=0;i<dimension.size();i++) {
+    tdim << dimension[i];
+    if(i<dimension.size()-1) tdim << ", ";
+  }
+  tdim << ")";
+  return string(tdim.str());
+}
+
+
+////////////////////////////////////////
+
 
 
 void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const harp::vector_double& data) {
@@ -78,39 +152,7 @@ void specex::read_fits_images(std::string const & path, image_data& img_in_hdu1,
 // the following should be better written and placed in HARP
 
 
-static vector<string> DecomposeString(const string &Source,vector<string> &Tokens)
-{
-  vector<string> SubStrings;
 
-  string source_copy = Source;
-  
-  string::size_type start = 0;
-
-  string::size_type tokpos = source_copy.npos;
-  for(size_t t=0;t<Tokens.size();t++) {
-    string::size_type pos = source_copy.find_first_of(Tokens[t],start);
-    if(pos<tokpos) tokpos=pos;
-  }
-
-  while (tokpos != (string::size_type) source_copy.npos)
-    {
-      string sub = source_copy.substr(start,tokpos-start);
-      if (sub.length() > 0) SubStrings.push_back(sub);
-      start = tokpos+1;
-      
-      tokpos = source_copy.npos;
-      for(size_t t=0;t<Tokens.size();t++) {
-	string::size_type pos = source_copy.find_first_of(Tokens[t],start);
-	if(pos<tokpos) tokpos=pos;
-      }
-    }
-  
-  // get the last element
-  string sublast = source_copy.substr(start, source_copy.length());
-  if (sublast.length() > 0) SubStrings.push_back(sublast);
-  
-  return SubStrings;
-}
                                                   
 
 bool specex::FitsColumnDescription::IsString() const {
@@ -141,6 +183,49 @@ specex::FitsTable::FitsTable() : fptr(0) {
 specex::FitsTable::FitsTable(const string& filename, int hdu_number, bool verbose) : fptr(0) {
   Read(filename,hdu_number);
 }
+
+
+void specex::FitsTable::AddColumnDescription(const string& ttype, const string& tform,  const string& tdim, const string& tunit) {
+  FitsColumnDescription column;
+  column.unit=tunit;
+  column.format=tform;
+  column.dimension=decode_dimension(tdim);
+  column.col = int(columns.size());
+  columns[ttype]=column;
+}
+/*
+int specex::FitsTable::Write(fitsfile *fp) {
+  cout << "todo" << endl;
+  
+  int status = 0;
+  int nrows  = data.size();
+  int ncols  = columns.size();
+  
+  char **ttype = new char*[ncols]; for(int c=0;c<ncols;c++) ttype[c] = new char[8];
+  char **tform = new char*[ncols]; for(int c=0;c<ncols;c++) tform[c] = new char[8];
+  char **tunit = new char*[ncols]; for(int c=0;c<ncols;c++) tunit[c] = new char[8];
+  char **tdim = new char*[ncols]; for(int c=0;c<ncols;c++) tdim[c] = new char[8];
+  
+  for(std::map<std::string,FitsColumnDescription>::const_iterator it = columns.begin(); it!=columns.end(); ++it) {
+    sprintf(ttype[it->second.col],"%s",it->first.c_str());
+    sprintf(tform[it->second.col],"%s",it->second.format.c_str());
+    sprintf(tunit[it->second.col],"%s",it->second.unit.c_str());
+    sprintf(tdim[it->second.col],"%s",encode_dimension(it->second.dimension).c_str());  
+  }
+  
+  
+  char extname[] = "";
+  int tfields = ncols;
+  
+  fits_create_tbl( fp, BINARY_TBL, nrows, tfields, ttype, tform,
+		   tunit, extname, &status);
+  CHECKERROR;
+  
+
+ 
+  return 0;
+}
+*/
 
 void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbose)  {
   int status = 0;
@@ -188,15 +273,7 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
       
       sprintf(key,"TDIM%d", c+1);
       if(HasKey(key)) {
-	string dimension_string = StringKeyValue(key);
-	vector<string> tokens; tokens.push_back(" "); tokens.push_back(","); tokens.push_back("("); tokens.push_back(")"); 
-	vector<string> substrings = DecomposeString(dimension_string,tokens);
-	
-	column.dimension.clear();
-	for(size_t s=0;s<substrings.size();s++) {
-	  // cout << "dim='" << substrings[s] << "'" << endl;
-	  column.dimension.push_back(atoi(substrings[s].c_str()));
-	}
+	column.dimension = decode_dimension(StringKeyValue(key));
       } else {
 	column.dimension.clear();
 	column.dimension.push_back(1);

@@ -184,7 +184,24 @@ int specex::PSF::TracesNPar() const {
   }
   return n;
 }
+
 specex::PSF::~PSF() {
+}
+
+const std::string& specex::PSF::ParamName(int p) const {
+  if(!ParamsOfBundles.size()) SPECEX_ERROR("Requiring name of param when no params of bundles in PSF");
+  if(p>=int(ParamsOfBundles.begin()->second.AllParPolXW.size())) SPECEX_ERROR("Requiring name of param at index " << p << " when only " << ParamsOfBundles.begin()->second.AllParPolXW.size() << " PSF params");
+  return ParamsOfBundles.begin()->second.AllParPolXW[p]->name;
+}
+int specex::PSF::ParamIndex(const std::string& name) const {
+  if(!ParamsOfBundles.size()) return -1;
+  for(size_t p=0;p< ParamsOfBundles.begin()->second.AllParPolXW.size();p++) {
+    if( ParamsOfBundles.begin()->second.AllParPolXW[p]->name == name) return int(p);
+  }
+  return -1;
+};
+bool specex::PSF::HasParam(const std::string& name) const { 
+  return (ParamIndex(name)>=0);
 }
 
 void specex::PSF::StampLimits(const double &X, const double &Y,

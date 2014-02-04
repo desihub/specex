@@ -59,8 +59,7 @@ namespace specex {
     int IntKeyValue(const std::string& key) const;
     
     int DumpKeys(std::ostream& stream) const;
-    
-  
+    void AddColumnDescription(const std::string& ttype, const std::string& tform,  const std::string& tdim="", const std::string& tunit="");
   };
 
   typedef std::map<std::string,FitsColumnDescription>::const_iterator ColumnDescriptionConstIterator;

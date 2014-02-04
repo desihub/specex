@@ -1617,30 +1617,32 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       
       int npar = psf->LocalNAllPar();
       
+      harp::vector_double default_params = psf->DefaultParams();
+      std::vector<string> param_names = psf->DefaultParamNames();
+      SPECEX_INFO("Default PSF params = " <<  default_params);
+      
+      if(int(default_params.size()) != npar) SPECEX_ERROR("Fatal inconsistency in number of parameters of PSF");
+      if(int(param_names.size()) != npar) SPECEX_ERROR("Fatal inconsistency in number of parameters of PSF");
+      
       for(int p=0;p<npar;p++) {
 	int degx=polynomial_degree_along_x;
 	int degw=polynomial_degree_along_wave;
 	
-	const string& name = psf->paramNames[p];
+	const string& name = param_names[p];
 	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2") {
 	  degx=0;
 	  degw=1;
 	}
 	specex::Legendre2DPol_p pol(new specex::Legendre2DPol(degx,min_x,max_x,degw,min_wave,max_wave));
+	pol->name = param_names[p];
+	pol->coeff.clear();
+	pol->coeff(0) = default_params(p);
+	//SPECEX_INFO("Coeff for par " << p << " = " << pol->coeff);
+	
 	psf_params->AllParPolXW.push_back(pol);
-      }
-      
-      harp::vector_double default_params = psf->DefaultParams();
-      SPECEX_INFO("Default PSF params = " <<  default_params);
-      for(int p=0;p<npar;p++) {
-	psf_params->AllParPolXW[p]->coeff.clear();
-	psf_params->AllParPolXW[p]->coeff(0) = default_params(p);
-	SPECEX_INFO("Coeff for par " << p << " = " << psf_params->AllParPolXW[p]->coeff);
-      }
-      //write_psf_xml(psf,"psf_init.xml"); exit(12);
-      
+	
+      }     
     }
-    
   }
   
   
@@ -1697,7 +1699,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     psf_params->FitParPolXW.clear();
     int npar = psf->LocalNAllPar();
     for(int p=0;p<npar;p++) {
-      const string& name = psf->paramNames[p];
+      const string& name = psf->ParamName(p);
       bool ok = false;
       ok |= (name=="GHSIGX" || name=="GHSIGY");
       //ok |= (name=="GHSIGX2");
@@ -1735,7 +1737,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     psf_params->FitParPolXW.clear();
     int npar = psf->LocalNAllPar();
     for(int p=0;p<npar;p++) {
-      const string& name = psf->paramNames[p];
+      const string& name = psf->ParamName(p);
       bool ok = false;
       ok |= (name=="GHSIGX" || name=="GHSIGY");
       //ok |= (name=="GHSIGX2");
@@ -1784,7 +1786,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     psf_params->FitParPolXW.clear();
     int npar = psf->LocalNAllPar();
     for(int p=0;p<npar;p++) {
-      const string& name = psf->paramNames[p];
+      const string& name = psf->ParamName(p);
       ok = (name!="GHSIGX" && name!="GHSIGY");
       ok &= (name!="GHSIGX2" && name!="GHSIGY2");
       ok &= (name!="GHSCAL2");

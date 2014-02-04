@@ -14,6 +14,7 @@ class Legendre1DPol
 friend class boost::serialization::access;
  
  public :
+ string name;
   harp::vector_double coeff;
   int deg;
   double xmin,xmax;
@@ -30,6 +31,7 @@ friend class boost::serialization::access;
 
     template < class Archive >
       void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(name);
       ar & BOOST_SERIALIZATION_NVP(coeff);
       ar & BOOST_SERIALIZATION_NVP(deg);
       ar & BOOST_SERIALIZATION_NVP(xmin);
@@ -50,6 +52,7 @@ class Legendre2DPol
   friend class boost::serialization::access;
 
  public :
+  string name;
   harp::vector_double coeff;
   int xdeg,ydeg;
   double xmin,xmax,ymin,ymax;
@@ -64,6 +67,7 @@ class Legendre2DPol
 
     template < class Archive >
       void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(name);
       ar & BOOST_SERIALIZATION_NVP(coeff);
       ar & BOOST_SERIALIZATION_NVP(xdeg);
       ar & BOOST_SERIALIZATION_NVP(ydeg);
