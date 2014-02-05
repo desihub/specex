@@ -101,6 +101,9 @@ specex::PSF::PSF() {
 #ifdef CONTINUUM
   continuum_sigma_x = 1;
 #endif
+  gain=1;
+  readout_noise=1;
+  psf_error=0.01;
 }
 
 #ifdef EXTERNAL_TAIL

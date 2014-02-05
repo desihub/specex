@@ -462,6 +462,8 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     
     harp::fits::key_write(fp,"NPIX_X",(long long int)NPIX_X,"number of columns in input CCD image");
     harp::fits::key_write(fp,"NPIX_Y",(long long int)NPIX_Y,"number of rows in input CCD image");
+    harp::fits::key_write(fp,"HSIZEX",(long long int)psf->hSizeX,"Half size of PSF in fit, NX=2*HSIZEX+1");
+    harp::fits::key_write(fp,"HSIZEY",(long long int)psf->hSizeY,"Half size of PSF in fit, NY=2*HSIZEY+1");
     harp::fits::key_write(fp,"BUNDLMIN",(long long int)BUNDLMIN,"first bundle of fibers (starting at 0)");
     harp::fits::key_write(fp,"BUNDLMAX",(long long int)BUNDLMAX,"last bundle of fibers (included)");
     harp::fits::key_write(fp,"FIBERMIN",(long long int)FIBERMIN,"first fiber (starting at 0)");
@@ -470,6 +472,12 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     harp::fits::key_write(fp,"LEGDEG",(long long int)(ncoeff-1),"degree of Legendre pol.(wave) for parameters");
     harp::fits::key_write(fp,"GHDEGX",(long long int)GHDEGX,"degree of Hermite polynomial along CCD columns");
     harp::fits::key_write(fp,"GHDEGY",(long long int)GHDEGY,"degree of Hermite polynomial along CCD rows");
+
+    // add chi2
+    harp::fits::key_write(fp,"PSFERROR",psf->psf_error,"assumed PSF fractional error in chi2");
+    harp::fits::key_write(fp,"READNOIS",psf->,"assumed read out noise in chi2");
+    
+
     //harp::fits::key_write(fp,"LEGWMIN",(long long int)LEGWMIN,"min. wave (A) for Legendre pol.");
     //harp::fits::key_write(fp,"LEGWMAX",(long long int)LEGWMAX,"max. wave (A) for Legendre pol.");
     // harp::fits::key_write(fp,"NFIBERS",(long long int)NFIBERS,"number of fibers");

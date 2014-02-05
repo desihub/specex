@@ -619,8 +619,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
     if(include_signal_in_weight) {
       
       SPECEX_INFO("WEIGHTS: Computing weights");
-      SPECEX_INFO("WEIGHTS: readout noise = " << readout_noise);
-      SPECEX_INFO("WEIGHTS: gain = " << gain);
+      SPECEX_INFO("WEIGHTS: readout noise = " << psf->readout_noise);
+      SPECEX_INFO("WEIGHTS: gain = " << psf->gain);
       SPECEX_INFO("WEIGHTS: psf error = " << psf_error);
      
       // create a list of stamps
@@ -793,9 +793,9 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  double model_flux=footprint_weight(i,j);
 	  if(model_flux==0) continue;
 	  
-	  double var = square(readout_noise);
+	  double var = square(psf->readout_noise);
 	  if(model_flux>0) { // else negative fluctuation
-	    var += model_flux/gain;
+	    var += model_flux/psf->gain;
 	  }
 	  var += square(psf_error*model_flux);
 	  

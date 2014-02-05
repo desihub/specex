@@ -109,9 +109,6 @@ class PSF_Fitter {
   bool include_signal_in_weight;
   bool verbose;
   bool fatal;
-  double gain; // for Poisson noise, with gain in e/ADU
-  double readout_noise; // rms value
-  double psf_error; // fraction, like 0.01, accounts for flat and psf relative error
   
   double polynomial_degree_along_x;
   double polynomial_degree_along_wave;
@@ -143,9 +140,7 @@ class PSF_Fitter {
 #endif
     fatal(true),
     verbose(true),
-    gain(1),
-    readout_noise(0),
-      psf_error(0.01),
+    
       polynomial_degree_along_x(1),
       polynomial_degree_along_wave(4)
       {

@@ -197,6 +197,10 @@ public :
     //! half size of the PSF in pixels in ccd
     int hSizeX, hSizeY; 
     
+    double gain; // for Poisson noise, with gain in e/ADU
+    double readout_noise; // rms value
+    double psf_error; // fraction, like 0.01, accounts for flat and psf relative error
+    
     std::map<int,PSF_Params> ParamsOfBundles;
     
 
@@ -318,7 +322,10 @@ public :
 #ifdef CONTINUUM
       ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
       ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
-#endif     
+#endif 
+      ar & BOOST_SERIALIZATION_NVP(gain);
+      ar & BOOST_SERIALIZATION_NVP(readout_noise);
+      ar & BOOST_SERIALIZATION_NVP(psf_error);
       return;
     }
     
