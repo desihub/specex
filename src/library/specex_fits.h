@@ -53,11 +53,14 @@ namespace specex {
     FitsTable(const std::string& filename, int hdu_number, bool verbose = false);
     void Read(const std::string& filename, int hdu_number, bool verbose = false);
     bool HasKey(const std::string& key) const;
-    
+    bool Write(fitsfile *fp) const;
     double DoubleKeyValue(const std::string& key) const;
     std::string StringKeyValue(const std::string& key) const;
     int IntKeyValue(const std::string& key) const;
     
+    std::vector<int> decode_dimension(const std::string& tdim) const;
+    std::string encode_dimension(const std::vector<int>& dimension) const;
+
     int DumpKeys(std::ostream& stream) const;
     void AddColumnDescription(const std::string& ttype, const std::string& tform,  const std::string& tdim="", const std::string& tunit="");
   };

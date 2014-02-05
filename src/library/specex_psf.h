@@ -108,6 +108,7 @@ public :
     double r_tail_core_size;
     double r_tail_x_scale;
     double r_tail_y_scale;
+    double r_tail_power_law_index;
     specex::image_data r_tail_profile; // to go much faster    
     bool r_tail_profile_must_be_computed;
 
@@ -312,6 +313,7 @@ public :
       ar & BOOST_SERIALIZATION_NVP(r_tail_core_size);
       ar & BOOST_SERIALIZATION_NVP(r_tail_x_scale);
       ar & BOOST_SERIALIZATION_NVP(r_tail_y_scale);
+      ar & BOOST_SERIALIZATION_NVP(r_tail_power_law_index);
 #endif
 #ifdef CONTINUUM
       ar & BOOST_SERIALIZATION_NVP(ContinuumPol);

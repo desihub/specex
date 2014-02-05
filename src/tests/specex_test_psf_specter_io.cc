@@ -37,7 +37,7 @@ int main() {
   }
   
   // write psf in specter format
-  psf->WriteFits("psf.fits");
+  write_psf_fits(psf,"psf.fits");
   
   return 0;
 
@@ -49,8 +49,8 @@ int main() {
     specex::PSF_p ipsf(new specex::GaussHermitePSF());
     // read psf in specter format
     
-    ipsf->ReadFits("test-psf-for-specter2.fits");
-
+    read_psf_fits(ipsf,"test-psf-for-specter2.fits");
+    
     write_psf_fits_image(ipsf,"psf-image-bis.fits",400,2000,1,4);
   }
 

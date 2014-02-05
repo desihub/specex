@@ -46,7 +46,7 @@ static vector<string> DecomposeString(const string &Source,vector<string> &Token
 }
 
 
-static std::vector<int> decode_dimension(const string& tdim) {
+std::vector<int> specex::FitsTable::decode_dimension(const string& tdim) const {
   
   vector<string> tokens; 
   tokens.push_back(" "); 
@@ -69,7 +69,8 @@ static std::vector<int> decode_dimension(const string& tdim) {
   return dimension;
 }
 
-static string encode_dimension(const std::vector<int>& dimension) {
+string specex::FitsTable::encode_dimension(const std::vector<int>& dimension) const {
+  if(dimension.size()==0) return "";
   std::stringstream tdim;
   tdim << "( ";
   for(size_t i=0;i<dimension.size();i++) {
@@ -193,9 +194,9 @@ void specex::FitsTable::AddColumnDescription(const string& ttype, const string& 
   column.col = int(columns.size());
   columns[ttype]=column;
 }
-/*
-int specex::FitsTable::Write(fitsfile *fp) {
-  cout << "todo" << endl;
+
+
+bool specex::FitsTable::Write(fitsfile *fp) const {
   
   int status = 0;
   int nrows  = data.size();
@@ -221,11 +222,104 @@ int specex::FitsTable::Write(fitsfile *fp) {
 		   tunit, extname, &status);
   CHECKERROR;
   
-
+  for(int c=0;c<ncols;c++) {
+    if(strlen(tdim[c])>0) {
+      char key[8];
+      sprintf(key,"TDIM%d",c+1);
+      harp::fits::key_write(fp,key,tdim[c],"dimension");
+    }
+  }
  
-  return 0;
+  // now we need to write the data .........
+#ifdef EXAMPLE
+  int fits_write_col / ffpcl
+      (fitsfile *fptr, int datatype, int colnum, LONGLONG firstrow,
+       LONGLONG firstelem, LONGLONG nelements, DTYPE *array, > int *status)
+       firstrow  = 1;  /* first row in table to write   */
+    firstelem = 1;  /* first element in row  (ignored in ASCII tables) */
+
+    /* write names to the first column (character strings) */
+    /* write diameters to the second column (longs) */
+    /* write density to the third column (floats) */
+
+    fits_write_col(fptr, TSTRING, 1, firstrow, firstelem, nrows, planet,
+                   &status);
+    fits_write_col(fptr, TLONG, 2, firstrow, firstelem, nrows, diameter,
+                   &status);
+    fits_write_col(fptr, TFLOAT, 3, firstrow, firstelem, nrows, density,
+                   &status);
+#endif
+
+    // Automatic data type conversion is performed for numerical data types (only) if the data type of the column (defined by the TFORMn keyword) differs from the data type of the array in the calling routine. ASCII and binary tables support the following data type values: TSTRING, TBYTE, TSBYTE, TSHORT, TUSHORT, TINT, TUINT, TLONG, TLONGLONG, TULONG, TFLOAT, or TDOUBLE. Binary tables also support TLOGICAL (internally mapped to the `char' data type), TCOMPLEX, and TDBLCOMPLEX. 
+
+    
+    int firstrow  = 1;  // first row in table to write 
+    int firstelem = 1; // first element in row  (ignored in ASCII tables)
+    
+    for(std::map<std::string,FitsColumnDescription>::const_iterator it = columns.begin(); it!=columns.end(); ++it) {
+      
+      
+      const FitsColumnDescription& column = it->second;
+      
+      if(column.IsString()) {
+	char ** string_vals= new char*[nrows];
+	for(int r=0;r<nrows;r++) {
+	  const char *input_val = data[r][column.col].string_val.c_str();
+	  string_vals[r] = new char[strlen(input_val)];
+	  strcpy(string_vals[r],input_val);
+	}
+	fits_write_col(fp, TSTRING, column.col+1, firstrow, firstelem, nrows, string_vals, &status);
+	CHECKERROR;
+
+	// delete
+	for(int r=0;r<nrows;r++) {
+	  delete [] string_vals[r];
+	}
+	delete [] string_vals;
+	
+
+      }else if(column.IsDouble()) {
+	/*
+	double ** double_vals = new double*[nrows];
+	int nd = column.SizeOfVectorOfDouble();
+	for(int r=0;r<nrows;r++) {
+	  if(nd !=  int(data[r][column.col].double_vals.size())) SPECEX_ERROR("specex::FitsTable::Write inconsistent data size");
+	  double_vals[r] = new double[nd];
+	  for(int d=0;d<nd;d++) {
+	    double_vals[r][d] = data[r][column.col].double_vals(d);
+	    cout << r << " " << d << " " << double_vals[r][d] << endl;
+	  }
+	}
+	*/
+	
+	int nd = column.SizeOfVectorOfDouble();
+	
+	double * double_vals = new double[nrows*nd];
+	
+	for(int r=0;r<nrows;r++) {
+	  
+	  if(nd !=  int(data[r][column.col].double_vals.size())) SPECEX_ERROR("specex::FitsTable::Write inconsistent data size");
+	  
+	  for(int d=0;d<nd;d++) {
+	    
+	    double_vals[r*nd+d] = data[r][column.col].double_vals(d); // ordering checked with pyfits
+	    //double_vals[r+d*nrows] = data[r][column.col].double_vals(d);
+	  
+	  }
+	}
+	//SPECEX_INFO("specex::FitsTable::Write column " << column.col << " with " << nrows*nd << " data");
+	fits_write_col(fp, TDOUBLE, column.col+1, firstrow, firstelem, nrows*nd, double_vals, &status);
+	CHECKERROR;
+	
+	delete [] double_vals;
+
+      }else{
+	SPECEX_ERROR("specex::FitsTable::Write format not yet implemented");
+      }
+    }
+    return 0;
 }
-*/
+
 
 void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbose)  {
   int status = 0;

@@ -95,6 +95,7 @@ specex::PSF::PSF() {
   r_tail_core_size = 1;
   r_tail_x_scale   = 1;
   r_tail_y_scale   = 1;
+  r_tail_power_law_index   = 2;
   r_tail_profile_must_be_computed = true;
 #endif
 #ifdef CONTINUUM
@@ -122,7 +123,7 @@ void specex::PSF::ComputeTailProfile() {
       double r2 = square(i/TAIL_OVERSAMPLING*r_tail_x_scale)+square(j/TAIL_OVERSAMPLING*r_tail_y_scale);
 	
       //r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-1.5/2.);
-      r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-2./2.);
+      r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-r_tail_power_law_index/2.);
       
     }
   }

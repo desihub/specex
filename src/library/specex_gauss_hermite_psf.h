@@ -39,17 +39,6 @@ namespace specex {
     
     bool CheckParams(const harp::vector_double &Params) const 
     { return true;}
-
-    void WriteFits(fitsfile* fp, int first_hdu=1) const;
-    void ReadFits(fitsfile* fp, int first_hdu=1);
-    
-  private :
-
-    void WriteFits_v1(fitsfile* fp, int first_hdu=1) const;
-    void ReadFits_v1(fitsfile* fp, int first_hdu=1);
-    void WriteFits_v0(fitsfile* fp, int first_hdu=1) const;
-    void ReadFits_v0(fitsfile* fp, int first_hdu=1);
-    
     
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
