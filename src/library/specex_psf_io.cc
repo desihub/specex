@@ -462,8 +462,8 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     
     harp::fits::key_write(fp,"NPIX_X",(long long int)NPIX_X,"number of columns in input CCD image");
     harp::fits::key_write(fp,"NPIX_Y",(long long int)NPIX_Y,"number of rows in input CCD image");
-    harp::fits::key_write(fp,"HSIZEX",(long long int)psf->hSizeX,"Half size of PSF in fit, NX=2*HSIZEX+1");
-    harp::fits::key_write(fp,"HSIZEY",(long long int)psf->hSizeY,"Half size of PSF in fit, NY=2*HSIZEY+1");
+    harp::fits::key_write(fp,"HSIZEX",(long long int)psf.hSizeX,"Half size of PSF in fit, NX=2*HSIZEX+1");
+    harp::fits::key_write(fp,"HSIZEY",(long long int)psf.hSizeY,"Half size of PSF in fit, NY=2*HSIZEY+1");
     harp::fits::key_write(fp,"BUNDLMIN",(long long int)BUNDLMIN,"first bundle of fibers (starting at 0)");
     harp::fits::key_write(fp,"BUNDLMAX",(long long int)BUNDLMAX,"last bundle of fibers (included)");
     harp::fits::key_write(fp,"FIBERMIN",(long long int)FIBERMIN,"first fiber (starting at 0)");
@@ -474,21 +474,36 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     harp::fits::key_write(fp,"GHDEGY",(long long int)GHDEGY,"degree of Hermite polynomial along CCD rows");
 
     // add chi2
-    harp::fits::key_write(fp,"PSFERROR",psf->psf_error,"assumed PSF fractional error in chi2");
-    harp::fits::key_write(fp,"READNOIS",psf->,"assumed read out noise in chi2");
+    harp::fits::key_write(fp,"PSFERROR",psf.psf_error,"assumed PSF fractional error in chi2");
+    harp::fits::key_write(fp,"READNOIS",psf.readout_noise,"assumed read out noise in chi2");
+    harp::fits::key_write(fp,"GAIN",psf.gain,"assumed gain in chi2");
     
+    for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
+	bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
+      
+      const specex::PSF_Params & params_of_bundle = bundle_it->second;
+      
+      
+      int ndf = params_of_bundle.ndata - params_of_bundle.nparams;
+      double chi2pdf = 0;
+      if(ndf>0) chi2pdf = params_of_bundle.chi2/ndf;
+      
+      char key[20];
+      char comment[800];
 
-    //harp::fits::key_write(fp,"LEGWMIN",(long long int)LEGWMIN,"min. wave (A) for Legendre pol.");
-    //harp::fits::key_write(fp,"LEGWMAX",(long long int)LEGWMAX,"max. wave (A) for Legendre pol.");
-    // harp::fits::key_write(fp,"NFIBERS",(long long int)NFIBERS,"number of fibers");
-    
-    // write first dummy GH param
-    char keyname[8];
-    char comment[80];
-    for(size_t k=0;k<keys.size(); k++) {
-      sprintf(keyname,"P%03d",int(k));
-      sprintf(comment,"Param. Leg. coeff in cols %d-%d (start. at 0)",int(k*ncoeff),int((k+1)*ncoeff-1));
-      harp::fits::key_write(fp,keyname,keys[k].c_str(),comment);
+      
+      sprintf(key,"B%02dRCHI2",params_of_bundle.bundle_id);
+      sprintf(comment,"best fit chi2/ndf for fiber bundle %d",params_of_bundle.bundle_id);
+      harp::fits::key_write(fp,key,chi2pdf,comment);
+      
+      sprintf(key,"B%02dNDATA",params_of_bundle.bundle_id);
+      sprintf(comment,"number of pixels in fit for fiber bundle %d",params_of_bundle.bundle_id);   
+      harp::fits::key_write(fp,key,(long long int)params_of_bundle.ndata,comment);
+      
+      sprintf(key,"B%02dNPAR",params_of_bundle.bundle_id);
+      sprintf(comment,"number of parameters in fit for fiber bundle %d",params_of_bundle.bundle_id);   
+      harp::fits::key_write(fp,key,(long long int)params_of_bundle.nparams,comment);
+      
     }
   }
   

@@ -621,7 +621,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       SPECEX_INFO("WEIGHTS: Computing weights");
       SPECEX_INFO("WEIGHTS: readout noise = " << psf->readout_noise);
       SPECEX_INFO("WEIGHTS: gain = " << psf->gain);
-      SPECEX_INFO("WEIGHTS: psf error = " << psf_error);
+      SPECEX_INFO("WEIGHTS: psf error = " << psf->psf_error);
      
       // create a list of stamps
       vector<specex::Stamp> spot_stamps;
@@ -797,7 +797,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  if(model_flux>0) { // else negative fluctuation
 	    var += model_flux/psf->gain;
 	  }
-	  var += square(psf_error*model_flux);
+	  var += square(psf->psf_error*model_flux);
 	  
 	  footprint_weight(i,j) = 1./var;
 	  (*npix)++;
@@ -1847,15 +1847,15 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     include_signal_in_weight = true; 
     
-    double saved_psf_error = psf_error;
-    psf_error = 1; // to deweight the core of the psf
+    double saved_psf_error = psf->psf_error;
+    psf->psf_error = 1; // to deweight the core of the psf
     
     for(int i=0; i<2; i++) { 
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     }
     fit_psf_tail   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
-    psf_error = saved_psf_error; // restore previous state
+    psf->psf_error = saved_psf_error; // restore previous state
   }
   if(scheduled_fit_of_continuum && !scheduled_fit_of_psf_tail) {
     
@@ -1870,15 +1870,15 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     include_signal_in_weight = true; 
     
-    double saved_psf_error = psf_error;
-    psf_error = 1; // to deweight the core of the psf
+    double saved_psf_error = psf->psf_error;
+    psf->psf_error = 1; // to deweight the core of the psf
     
     for(int i=0; i<2; i++) { 
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     }
     fit_continuum   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
-    psf_error = saved_psf_error; // restore previous state
+    psf->psf_error = saved_psf_error; // restore previous state
   }
   if(scheduled_fit_of_continuum && scheduled_fit_of_psf_tail) {
     
@@ -1893,8 +1893,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     include_signal_in_weight = true; 
     
-    double saved_psf_error = psf_error;
-    psf_error = 1; // to deweight the core of the psf
+    double saved_psf_error = psf->psf_error;
+    psf->psf_error = 1; // to deweight the core of the psf
     
     for(int i=0; i<2; i++) { 
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
@@ -1902,7 +1902,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_psf_tail    = false; // don't fit this anymore
     fit_continuum   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
-    psf_error = saved_psf_error; // restore previous state
+    psf->psf_error = saved_psf_error; // restore previous state
   }
 
 #endif
@@ -1946,14 +1946,14 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     include_signal_in_weight = true; 
     
-    double saved_psf_error = psf_error;
-    psf_error = 1; // to deweight the core of the psf
+    double saved_psf_error = psf->psf_error;
+    psf->psf_error = 1; // to deweight the core of the psf
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     
     fit_psf_tail    = false; // don't fit this anymore
     fit_continuum   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
-    psf_error = saved_psf_error; // restore previous state
+    psf->psf_error = saved_psf_error; // restore previous state
   }
   
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
