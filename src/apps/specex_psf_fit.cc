@@ -71,6 +71,10 @@ int main ( int argc, char *argv[] ) {
   
   double psf_error = 0.01;
   
+  string output_xml_filename="";
+  string output_fits_filename="";
+  
+
   if(getenv("IDLSPEC2D_DIR")) 
     lamp_lines_filename = string(getenv("IDLSPEC2D_DIR"))+"/opfiles/lamplines.par";
    
@@ -105,6 +109,8 @@ int main ( int argc, char *argv[] ) {
     ( "fit_continuum", "unable fit of continuum")
 #endif
     ( "no_trace_fit", "do not fit traces")
+    ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
+    ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
 
@@ -352,7 +358,10 @@ int main ( int argc, char *argv[] ) {
     } // end of loop on bundles
     
     
-    write_psf_xml(fitter.psf,"psf.xml");
+    if(output_xml_filename != "")
+      write_psf_xml(fitter.psf,output_xml_filename);
+    if(output_fits_filename != "")
+      write_psf_fits(fitter.psf,output_fits_filename);
     
 
 
