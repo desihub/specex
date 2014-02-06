@@ -1814,7 +1814,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise);
   
-  SPECEX_INFO("Starting FitSeveralSpots PSF");
+  SPECEX_INFO("Starting FitSeveralSpots PSF (only hermite terms)");
   SPECEX_INFO("=======================================");
   fit_flux       = false;
   fit_position   = false;
@@ -1823,7 +1823,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
-  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX");
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (only hermite terms)");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
   fit_position   = false;
@@ -1832,6 +1832,52 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
+  {
+    psf_params->FitParPolXW.clear();
+    int npar = psf->LocalNAllPar();
+    for(int p=0;p<npar;p++) {
+      const string& name = psf->ParamName(p);
+      bool ok = false;
+      ok |= (name=="GHSIGX" || name=="GHSIGY");
+      if(ok)
+	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+    }
+  }
+  
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (gaussian + hermite terms)");
+  SPECEX_INFO("=======================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+  
+  {
+    psf_params->FitParPolXW.clear();
+    int npar = psf->LocalNAllPar();
+    for(int p=0;p<npar;p++) {
+      const string& name = psf->ParamName(p);
+      ok = true;
+      ok &= (name!="GHSIGX2" && name!="GHSIGY2");
+      ok &= (name!="GHSCAL2");
+      //ok &= (name!="GH-2-0" && name!="GH-0-2"); large penalty in chi2
+      
+    if(ok)
+      psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+    }
+  }
+  /*
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (only hermite terms)");
+  SPECEX_INFO("=======================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+  */
+
 #ifdef CONTINUUM
 #ifdef EXTERNAL_TAIL  
 
