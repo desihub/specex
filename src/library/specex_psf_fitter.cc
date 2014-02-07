@@ -1149,7 +1149,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       double best_chi2=compute_chi2_for_a_given_step(1,&bbox);      
       double best_step = 1;
       
-      if(fabs(best_chi2-*psfChi2)>chi2_precision) { // really try brent now
+      if(fabs(best_chi2-*psfChi2)>brent_precision) { // really try brent now
 	best_step = brent((AnalyticFunction*)(compute_chi2_for_a_given_step),
 			  min_step,prefered_step,max_step,
 			  brent_precision,&bbox,best_chi2,status,100);
@@ -1328,9 +1328,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
       spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
 
-      if(spot->xc != tmp.x || spot->yc != tmp.y) {
-	SPECEX_ERROR("spot coord. " << spot->xc << "," << spot->yc << " tmp " << tmp.x << "," << tmp.y);
-      }
+      //if(spot->xc != tmp.x || spot->yc != tmp.y) {
+      //SPECEX_ERROR("spot coord. " << spot->xc << "," << spot->yc << " tmp " << tmp.x << "," << tmp.y);
+      //}
 
     }
   }

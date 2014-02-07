@@ -23,6 +23,7 @@
 
 #include <specex_psf_io.h>
 #include <specex_gauss_hermite_psf.h>
+#include <specex_hat_hermite_psf.h>
 #include <specex_serialization.h>
 
 
@@ -187,19 +188,13 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------
     specex::PSF_p psf;
 
-    if(psf_model=="GAUSSHERMITE") {
+    if(psf_model=="GAUSSHERMITE")
       psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
-      //boost::static_pointer_cast<specex::GaussHermitePSF>(psf)->sigma = gauss_hermite_sigma;
-      
-      //psf->SetPrior("GHSIGX",new GaussianPrior(1.1,0.1));
-      //psf->SetPrior("GHSIGY",new GaussianPrior(1.2,0.1));
-      
-
-      //} else if(psf_model=="GAUSSIAN") {
-      //psf = new GaussPSF();
-    }else {
+    else if(psf_model=="HATHERMITE")
+      psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
+    else
       SPECEX_ERROR("don't know this psf model");
-    }
+    
     psf->ccd_image_n_cols = image.n_cols();
     psf->ccd_image_n_rows = image.n_rows();
     psf->hSizeX = half_size_x;

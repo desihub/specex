@@ -20,8 +20,8 @@ int main() {
   specex_set_verbose(true);
   
   specex::PSF_p psf;
-  specex::read_psf_xml(psf,"psf.xml");
-
+  specex::read_psf_xml(psf,"psf_hh.xml");
+  
   int fiber=20;
   double wave=6000;
   
@@ -78,7 +78,7 @@ int main() {
 	 << " diff=" <<  PosDer(1)-numDer << " ratio=" << PosDer(1)/numDer-1 << endl;
   }
 
-  {
+  if(0){
   cout  << "testing global monomials" << endl;
   specex::PSF_Params &psf_global_params = psf->ParamsOfBundles[bundle];
   harp::vector_double gP(psf->BundleNAllPar(bundle));

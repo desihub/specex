@@ -17,6 +17,7 @@
 #include <specex_spot_array.h>
 #include <specex_fits.h>
 #include <specex_gauss_hermite_psf.h>
+#include <specex_hat_hermite_psf.h>
 #include <specex_serialization.h>
 #include <specex_image_data.h>
 #include <specex_stamp.h>

@@ -11,6 +11,7 @@
 #include <specex_fits.h>
 
 #include <specex_gauss_hermite_psf.h>
+#include <specex_hat_hermite_psf.h>
 
 // also need #included <specex_serialisation.h>  before main() 
 
