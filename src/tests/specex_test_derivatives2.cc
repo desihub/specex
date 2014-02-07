@@ -35,7 +35,7 @@ int main() {
 
   P(0)=0.6;
   P(1)=0.7;
-  P(4)=0.;
+  P(4)=0.1;
   for(size_t i=5;i<P.size();i++) P(i)=0.05;
 
   cout << P << endl;

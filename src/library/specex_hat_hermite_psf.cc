@@ -90,7 +90,7 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   double fr = 1.53; // fiber radius, hardcoded for test purposes, this number of for b-channel
   double fr2 = fr*fr;
   
-  double s2si     = 1./sqrt(2*sr2); 
+  double s2si     = 1./(sqrt(2)*sr); 
   double erfrs    = erf(fr/sr);
   double exprs    = exp(-fr2/sr2);
 
@@ -212,6 +212,8 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   
   if(ParamDer || PosDer) {
 
+    // faux ???
+
     exp1 = exp(-square(s2si*(fr-r)));
     exp2 = exp(-square(s2si*(fr+r)));
     
@@ -222,10 +224,16 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     
     // der wrt hat_norm:
     // MEMO hat_norm = 1/(2*sqrt(M_PI)*fr*sr*exprs+M_PI*(2*fr2+sr2)*erfrs);
-    dvdsr += prefactor*hat*(-hat_norm)*( 2*sqrt(M_PI)*fr*exprs*(1-2*fr2/sr2)
+    // MEMO s2si     = 1./(sqrt(2)*sr); 
+    // MEMO exprs    = exp(-fr2/sr2);
+    // MEMO erfrs    = erf(fr/sr);
+    
+    dvdsr += prefactor*hat*(-hat_norm)*( 2*sqrt(M_PI)*fr*exprs*(1+2*fr2/sr2)
 					 + M_PI*2*sr*erfrs
 					 + M_PI*(2*fr2+sr2)*(-fr/sr2)*2/sqrt(M_PI)*exp(-fr2/sr2)
 					 );
+
+    cout << " dvdsr = " << dvdsr << endl;
 
 #ifdef HAT_AND_GAUSSIAN
     dvdsr *= scale_1;
