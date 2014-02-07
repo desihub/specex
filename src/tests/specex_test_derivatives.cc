@@ -20,7 +20,7 @@ int main() {
   specex_set_verbose(true);
   
   specex::PSF_p psf;
-  specex::read_psf_xml(psf,"psf_hh.xml");
+  specex::read_psf_xml(psf,"psf-hh.xml");
   
   int fiber=20;
   double wave=6000;
@@ -38,8 +38,9 @@ int main() {
 
   // test for derivatives of sigma
   // for(size_t i=2;i<P.size();i++) P(i)=0;
-  for(size_t i=5;i<P.size();i++) P(i)=1;
-
+  //for(size_t i=5;i<P.size();i++) P(i)=1;
+  P(4)=0; // test
+  
   cout << P << endl;
 
   harp::vector_double ParamDer(P.size());
@@ -49,6 +50,7 @@ int main() {
 
   for(int k=0;k<int(P.size());k++) {
     double eps = fabs(P(k))/1000.;
+    if(eps==0) eps=1.e-6;
     harp::vector_double Pp = P; Pp(k)+=eps/2.;
     double valp = psf->PSFValueWithParamsXY(x,y,i,j,Pp,0,0);
     harp::vector_double Pm = P; Pm(k)-=eps/2.;

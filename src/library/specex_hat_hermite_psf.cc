@@ -150,6 +150,9 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   double prefactor=1;
   if(PosDer==0 && ParamDer==0) {
     int param_index=first_hermite_param_index;
+
+    
+
     for(int j=0;j<ny;j++) {
       double Hyj=HermitePol(j,y);
       //int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
@@ -243,6 +246,9 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     
 #ifdef HAT_AND_GAUSSIAN
     // need to compute derivatives here if we care
+    (*ParamDer)[2] = 0;
+    (*ParamDer)[3] = 0;
+    (*ParamDer)[4] = (-hat+gaus)*prefactor;
 #endif 
     
     ublas::project(*ParamDer,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)) = prof*Monomials;
@@ -294,8 +300,8 @@ harp::vector_double specex::HatHermitePSF::DefaultParams() const
   
   harp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning 
-  Params(0) = 0.5; // this is sigma_x of the hat
-  Params(1) = 0.1; // this is sigma_y of the hat
+  Params(0) = 0.3; // this is sigma_x of the hat
+  Params(1) = 0.3; // this is sigma_y of the hat
 #ifdef HAT_AND_GAUSSIAN
   Params(2) = 3.; // this is sigma_x_2
   Params(3) = 3.; // this is sigma_y_2

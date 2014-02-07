@@ -31,8 +31,12 @@ int main() {
   harp::vector_double P = psf->DefaultParams();
 
   // test for derivatives of sigma
-  for(size_t i=2;i<P.size();i++) P(i)=1;
-  // for(size_t i=5;i<P.size();i++) P(i)=1;
+  // for(size_t i=2;i<P.size();i++) P(i)=1;
+
+  P(0)=0.6;
+  P(1)=0.7;
+  P(4)=0.;
+  for(size_t i=5;i<P.size();i++) P(i)=0.05;
 
   cout << P << endl;
 
