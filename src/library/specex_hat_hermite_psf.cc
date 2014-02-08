@@ -224,10 +224,17 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     // MEMO exprs    = exp(-fr2/sr2);
     // MEMO erfrs    = erf(fr/sr);
     
+    /*
     dvdsr += prefactor*hat*(-hat_norm)*( 2*sqrt(M_PI)*fr*exprs*(1+2*fr2/sr2)
 					 + M_PI*2*sr*erfrs
 					 + M_PI*(2*fr2+sr2)*(-fr/sr2)*2/sqrt(M_PI)*exp(-fr2/sr2)
 					 );
+    */
+    
+    // simplification :
+    
+    dvdsr += prefactor*hat*(-hat_norm)*( M_PI*2*sr*erfrs );
+        
 
 #ifdef HAT_AND_GAUSSIAN
     dvdsr *= scale_1;

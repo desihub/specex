@@ -1804,7 +1804,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     for(int p=0;p<npar;p++) {
       const string& name = psf->ParamName(p);
       ok = true;
-      ok &= (name!="GHSIGX" && name!="GHSIGY");
+      //ok &= (name!="GHSIGX" && name!="GHSIGY");
       ok &= (name!="GHSIGX2" && name!="GHSIGY2");
       ok &= (name!="GHSCAL2");
       if(ok)
