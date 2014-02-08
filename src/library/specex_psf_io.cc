@@ -24,9 +24,14 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   y = int(y);
 
   harp::vector_double P=psf->AllLocalParamsFW(fiber,wavelength,bundle);
-  
+  if(0) {
+  for(int i=5;i<P.size();i++) P(i)=0; 
+  P(0)=0.05;
+  P(3)=0.0;
+  SPECEX_WARNING("Hacking the parameters for test purpose!");
+  }
   SPECEX_INFO("PSF Params " << P);
-
+  SPECEX_INFO("PSF value at center = " << psf->PSFValueWithParamsXY(int(x),int(y),int(x),int(y),P,0,0));
   
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;

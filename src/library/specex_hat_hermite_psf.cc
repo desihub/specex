@@ -31,7 +31,7 @@ void specex::HatHermitePSF::SetDegree(const int ideg) {
 
 int specex::HatHermitePSF::LocalNAllPar() const {
     
-  int npar = 2; // sigma_x and sigma_y
+  int npar = 1; // sigma
   
 #ifdef HAT_AND_GAUSSIAN
   npar += 3;
@@ -51,19 +51,12 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
 {
 
   
-  const double &sx = Params[0];
-  const double &sy = Params[1];
-  double sx2 = sx*sx;
-  double sy2 = sy*sy;
+  const double &sr = Params[0];
   double x2 = x*x;
   double y2 = y*y;
   double r2 = x2+y2;
   double r  = sqrt(r2);
-
-  // radial sigma from (x2+y2)/sr2 = x2/dx2+y2/sy2
-  double sr2 = r2/(x2/sx2+y2/sy2); 
-  double sr  = sqrt(sr2);
-  
+  double sr2 = sr*sr;
   
   /*
     about BOSS fibers diameters in CCD images
@@ -117,9 +110,9 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   
 
 #ifdef HAT_AND_GAUSSIAN
-  double sigma_x_2_inv = 1./Params[2];
-  double sigma_y_2_inv = 1./Params[3];
-  double scale_2       = Params[4];
+  double sigma_x_2_inv = 1./Params[1];
+  double sigma_y_2_inv = 1./Params[2];
+  double scale_2       = Params[3];
   double scale_1       = 1-scale_2;
   double x_2 = x*sigma_x_2_inv;
   double y_2 = y*sigma_y_2_inv;
@@ -142,9 +135,9 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   harp::vector_double Monomials_dy;
   
 #ifndef HAT_AND_GAUSSIAN
-  int first_hermite_param_index = 2; // first 2 params are sigmas
+  int first_hermite_param_index = 1; // first 1 param is sigma
 #else
-  int first_hermite_param_index = 5; // 
+  int first_hermite_param_index = 4; // 
 #endif
   
   double prefactor=1;
@@ -206,21 +199,24 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   
   double psf_val = prof*prefactor;
   
-  double dvdsr=0;
-  double exp1=0;
-  double exp2=0;
+  double exp1 = 0;
+  double exp2 = 0;
   
   if(ParamDer || PosDer) {
-
-    // faux ???
-
+    
     exp1 = exp(-square(s2si*(fr-r)));
     exp2 = exp(-square(s2si*(fr+r)));
+  }
+  
+  if(ParamDer) {
+    
+    
+    
     
     // der wrt erf terms:
     // MEMO psf_val = prefactor*hat_norm*(erf(s2si*(fr-r))+erf(s2si*(fr+r)));
     
-    dvdsr += (prefactor*hat_norm*s2si*2/sqrt(M_PI))*(-1./sr)*((fr-r)*exp1+(fr+r)*exp2); 
+    double dvdsr = (prefactor*hat_norm*s2si*2/sqrt(M_PI))*(-1./sr)*((fr-r)*exp1+(fr+r)*exp2); 
     
     // der wrt hat_norm:
     // MEMO hat_norm = 1/(2*sqrt(M_PI)*fr*sr*exprs+M_PI*(2*fr2+sr2)*erfrs);
@@ -233,30 +229,18 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
 					 + M_PI*(2*fr2+sr2)*(-fr/sr2)*2/sqrt(M_PI)*exp(-fr2/sr2)
 					 );
 
-    cout << " dvdsr = " << dvdsr << endl;
-
 #ifdef HAT_AND_GAUSSIAN
     dvdsr *= scale_1;
-#endif   
+#endif 
 
-  }
 
-  if(ParamDer) {
-    // here the derivative with sx and sy and jolly complicated
-    
-    // dsr2/dsx2 = (sr4*x2)/(r2*sx4) 
-    // dsr/dsy   = sx/sr * (sr4*x2)/(r2*sx4) = (sr3*x2)/r2*sx3)
-    double dsrdsx=(sr2*sr*x2)/(r2*sx2*sx);
-    double dsrdsy=(sr2*sr*y2)/(r2*sy2*sy);
-    
-    (*ParamDer)[0] = dvdsr*dsrdsx;
-    (*ParamDer)[1] = dvdsr*dsrdsy;
+    (*ParamDer)[0] = dvdsr;
     
 #ifdef HAT_AND_GAUSSIAN
     // need to compute derivatives here if we care
+    (*ParamDer)[1] = 0;
     (*ParamDer)[2] = 0;
-    (*ParamDer)[3] = 0;
-    (*ParamDer)[4] = (-hat+gaus)*prefactor;
+    (*ParamDer)[3] = (-hat+gaus)*prefactor;
 #endif 
     
     ublas::project(*ParamDer,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)) = prof*Monomials;
@@ -278,12 +262,6 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     dvdx=-(x/r)*dvdr; // minus sign cause derivative wrt -x
     dvdy=-(y/r)*dvdr; // minus sign cause derivative wrt -y
     
-    // sr is also changing if sx!=sy  !!!
-    double dsrdx = (x/sr)*(sr2/r2)*(1-sr2/sx2);
-    double dsrdy = (y/sr)*(sr2/r2)*(1-sr2/sy2);
-    dvdx -= dvdsr*dsrdx; // minus sign cause derivative wrt -x
-    dvdy -= dvdsr*dsrdy; // minus sign cause derivative wrt -y
-        
     double d_poly_dx = specex::dot(Monomials_dx,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
     double d_poly_dy = specex::dot(Monomials_dy,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
     dvdx -= d_poly_dx*prof; // minus sign cause derivative wrt -x
@@ -309,11 +287,10 @@ harp::vector_double specex::HatHermitePSF::DefaultParams() const
   harp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning 
   Params(0) = 0.3; // this is sigma_x of the hat
-  Params(1) = 0.3; // this is sigma_y of the hat
 #ifdef HAT_AND_GAUSSIAN
-  Params(2) = 3.; // this is sigma_x_2
-  Params(3) = 3.; // this is sigma_y_2
-  Params(4) = 0.1; // this is the amplitude of the second gaussian
+  Params(1) = 3.; // this is sigma_x_2
+  Params(2) = 3.; // this is sigma_y_2
+  Params(3) = 0.1; // this is the amplitude of the second gaussian
 #endif
   return Params;
 }
@@ -322,8 +299,7 @@ std::vector<std::string> specex::HatHermitePSF::DefaultParamNames() const
 {
   std::vector<std::string> paramNames;
   paramNames.push_back("GHSIGX");
-  paramNames.push_back("GHSIGY");
-    
+  
 #ifdef HAT_AND_GAUSSIAN
   paramNames.push_back("GHSIGX2");
   paramNames.push_back("GHSIGY2");
