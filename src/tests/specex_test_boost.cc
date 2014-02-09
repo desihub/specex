@@ -37,49 +37,56 @@ int main() {
      cout << "==================" << endl;
   cout << " SPARSE VECTORS   " << endl;
   cout << "==================" << endl;
+  
+  int n = 8000;
+  ublas::coordinate_vector<double> sv (n);
+  //ublas::mapped_vector<double> sv (n);
+  harp::vector_double v (n);
+  harp::vector_double v2 (n);
+  double w = 0.2;
+  v.clear();
+  v2.clear();
+  
+  for (unsigned i = 0; i < sv.size (); i ++) {
+    v2(i)=i;
+  }
+  
+  
 
-ublas::coordinate_vector<double> sv (4000);
-    harp::vector_double v (4000);
-    harp::vector_double v2 (8000);
-    harp::matrix_double m(4000,4000);
-    v.clear();
-    v2.clear();
-    
-    for (unsigned i = 0; i < sv.size (); i ++) {
-      v2(i)=i;
-    }
-    
-    
-
-    for (unsigned i = 0; i < sv.size (); i += 20) {
-        sv (i) = i;
-	v(i)=i;
-    }
+  for (unsigned i = 0; i < sv.size (); i += 20) {
+    sv (i) = i;
+    v(i)=i;
+  }
     
     // see http://www.boost.org/doc/libs/1_38_0/libs/numeric/ublas/doc/blas.htm
 
     
-    {
-      clock_t tstart = clock();
-      specex::syr(1,v,m);
-      clock_t tstop = clock();
+  {
+    harp::matrix_double m(n,n); m.clear();
+    clock_t tstart = clock();
+    specex::syr(w,v,m);
+    clock_t tstop = clock();
+    cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+  }
+  {
+    harp::matrix_double m(n,n); m.clear();
+    clock_t tstart = clock();
+    specex::syr(w,v2,m);
+    clock_t tstop = clock();
       cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
-    }
-    {
-      clock_t tstart = clock();
-      specex::syr(1,v2,m);
-      clock_t tstop = clock();
-      cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
-    }
+  }
+  
+  {
+    //ublas::coordinate_matrix<double> m (n,n);
+    ublas::matrix<double> m (n,n);
+    clock_t tstart = clock();
+    //ublas::outer_prod(sv,sv);
+    ublas::noalias(m) += w*ublas::outer_prod(sv,sv);
+    //ublas::blas_3::srk(m,1,1,v);
     
-    {
-      clock_t tstart = clock();
-      m += ublas::outer_prod(v,v);
-      //ublas::blas_3::srk(m,1,1,v);
-      
-      clock_t tstop = clock();
-      cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
-    }
+    clock_t tstop = clock();
+    cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+  }
     
     return 0;
 

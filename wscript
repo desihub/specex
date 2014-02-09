@@ -125,6 +125,8 @@ def configure(conf):
     else :
         conf.env['CFLAGS'].append('-DNDEBUG')
         conf.env['CXXFLAGS'].append('-DNDEBUG')
+        conf.env['CFLAGS'].append('-DBOOST_UBLAS_NDEBUG')
+        conf.env['CXXFLAGS'].append('-DBOOST_UBLAS_NDEBUG')
     if conf.options.harp_pkgconfig_dir :
         harp_pkgconfig(conf.options.harp_pkgconfig_dir)
     

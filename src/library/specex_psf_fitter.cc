@@ -266,7 +266,13 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   
   if(update_tmp_data) const_cast<specex::PSF_Fitter*>(this)->UpdateTmpData(compute_ab);
   
-  harp::vector_double H;
+  // #define SPARSE_H // much slower, I don't understand why
+#ifdef SPARSE_H
+  //ublas::coordinate_vector<double> H;
+  ublas::mapped_vector<double> H;
+#else
+  ublas::vector<double> H;  
+#endif
   if(compute_ab) {
     H.resize(nparTot);
   }
@@ -501,7 +507,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	  
 	  double chi2_der_numeric  = (chi2_plus-chi2_minus)/eps;
 	  if(chi2_der_numeric) {
-	    double chi2_der_analytic = -2*w*res*H(p); 
+	    double chi2_der_analytic = -2*w*resH(p); 
 	  
 	    cout << "DEBUGGING chi2 derivative p=" << p << " numeric=" <<  chi2_der_numeric << " analytic=" << chi2_der_analytic << " diff=" << chi2_der_numeric-chi2_der_analytic;
 	    if(chi2_der_analytic!=0) cout << " ratio " << chi2_der_numeric/chi2_der_analytic -1; 
@@ -514,9 +520,14 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       /////////////////////////////////////////////////////
 
 
-      if (compute_ab) { 	
-	specex::syr(w,H,*Ap); //  A += w*h*h.transposed(); this routine takes advantage of the zeros in h, its faster than sparce matrices
-	specex::axpy(w*res,H,*Bp); // B += w*res*h;
+      if (compute_ab) { 
+#ifdef SPARSE_H
+	  ublas::noalias(*Ap) += w*ublas::outer_prod(H,H);
+	  ublas::noalias(*Bp) += (w*res)*H;
+#else
+	  specex::syr(w,H,*Ap); //  this is still way too slow A += w*h*h.transposed(); this routine takes advantage of the zeros in h, its faster than sparce matrices
+	  specex::axpy(w*res,H,*Bp); // B += w*res*h;
+#endif
       }
       
     } // end of loop on pix coord. i
@@ -1708,7 +1719,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok |= (name=="GHSIGX" || name=="GHSIGY");
       //ok |= (name=="GHSIGX2");
       //ok |= (name=="GHSIGY2");
-      //ok |= (name=="GHSCAL2");
+      ok |= (name=="GHSCAL2");
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
@@ -1804,7 +1815,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     for(int p=0;p<npar;p++) {
       const string& name = psf->ParamName(p);
       ok = true;
-      //ok &= (name!="GHSIGX" && name!="GHSIGY");
+      ok &= (name!="GHSIGX" && name!="GHSIGY");
       ok &= (name!="GHSIGX2" && name!="GHSIGY2");
       ok &= (name!="GHSCAL2");
       if(ok)
