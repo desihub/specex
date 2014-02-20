@@ -40,8 +40,6 @@ int main ( int argc, char *argv[] ) {
   // default arguments
   // --------------------------------------------
   string spectrograph_name = "BOSS";
-  int    first_fiber_bundle=1;
-  int    last_fiber_bundle=1;
   
   string psf_xml_filename="";
   string spots_xml_filename="";
@@ -177,38 +175,51 @@ int main ( int argc, char *argv[] ) {
     image_data model_for_var(image.n_cols(),image.n_rows());
     image_data core_footprint(image.n_cols(),image.n_rows());
     
-    const PSF_Params * psf_params = &(psf->ParamsOfBundles.find(spots[0]->fiber_bundle)->second);
-
+    
+    int first_fitted_fiber=1000;
+    int last_fitted_fiber=-1000;
+    for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+      first_fitted_fiber=min(first_fitted_fiber,bundle_it->second.fiber_min);
+      last_fitted_fiber=max(last_fitted_fiber,bundle_it->second.fiber_max);
+    }
+    
 #ifdef CONTINUUM
     
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
-      int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
       
-
-
-      for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
-	double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
-	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
-	double continuum_flux = psf->ContinuumPol.Value(w);
-	double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
-	if(expfact_for_continuum!=0) {
-	  for (int i=begin_i ; i <end_i; ++i) {    
-	    if(weight(i,j)<=0) continue;
-	    double val = expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
-	    model(i,j) += val;
-	    if(val>0) model_for_var(i,j) += val;
-	  } // end of loop on i
-	}
-      } // end of loop on fiber
-    } // end of loop on j
-
+      for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+	
+	const PSF_Params * psf_params = &(bundle_it->second);
+	
+	int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	
+	for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
+	  double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
+	  double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
+	  double continuum_flux = psf->ContinuumPol.Value(w);
+	  double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
+	  if(expfact_for_continuum!=0) {
+	    for (int i=begin_i ; i <end_i; ++i) {    
+	      if(weight(i,j)<=0) continue;
+	      double val = expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
+	      model(i,j) += val;
+	      if(val>0) model_for_var(i,j) += val;
+	    } // end of loop on i
+	  } // expfact
+	} // end of loop on fiber
+      } // end of loop on bundles
+      } // end of loop on j
+      
 #endif  
     
     
     
-#ifdef EXTERNAL_TAIL    
+#ifdef EXTERNAL_TAIL  
+
+#warning I need to define a tail per bundle !
+  
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p spot = spots[s];
       
@@ -220,16 +231,21 @@ int main ( int argc, char *argv[] ) {
       // first fill tails on stamp
       for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 	
-	int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-	int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
 	
-	
-	for (int i=begin_i ; i < end_i; ++i) {
-	  if(weight(i,j)<=0) continue;
-	  double prof = psf->TailProfile(i-spot->xc,j-spot->yc);
-	  model(i,j) += r_tail_amplitude*prof;
-	  model_for_var(i,j) += r_tail_amplitude_for_var*prof;
+	  const PSF_Params * psf_params = &(bundle_it->second);
 	  
+	  int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	  int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	  
+	
+	  for (int i=begin_i ; i < end_i; ++i) {
+	    if(weight(i,j)<=0) continue;
+	    double prof = psf->TailProfile(i-spot->xc,j-spot->yc);
+	    model(i,j) += r_tail_amplitude*prof;
+	    model_for_var(i,j) += r_tail_amplitude_for_var*prof;
+	    
+	  }
 	}
       } // end of loop on stamp pixels
     }
@@ -247,17 +263,21 @@ int main ( int argc, char *argv[] ) {
       const Stamp& spot_stamp = spot_stamps[s];
       for (int j=spot_stamp.begin_j; j <spot_stamp.end_j; ++j) { 
 	
-	
-	int begin_i = max(spot_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-	int end_i   = min(spot_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
-	
-	for (int i=begin_i ; i < end_i; ++i) {
+	for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
 	  
-	  if(weight(i,j)<=0) continue;
-	  double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
-	  model(i,j) += val;
-	  model_for_var(i,j) += max(1e-20,val);
-	  core_footprint(i,j) = 1;
+	  const PSF_Params * psf_params = &(bundle_it->second);
+	  
+	  int begin_i = max(spot_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	  int end_i   = min(spot_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	  
+	  for (int i=begin_i ; i < end_i; ++i) {
+	    
+	    if(weight(i,j)<=0) continue;
+	    double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, params, 0, 0);
+	    model(i,j) += val;
+	    model_for_var(i,j) += max(1e-20,val);
+	    core_footprint(i,j) = 1;
+	  }
 	}
       } // end of loop on stamp pixels
     } // end of loop on spots
@@ -300,8 +320,8 @@ int main ( int argc, char *argv[] ) {
     int npix_trim = 20;
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
-      int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+      int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(first_fitted_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+      int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(last_fitted_fiber).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
 
       for (int i=begin_i ; i <end_i; ++i) {
 	if(variance(i,j)>0) {
@@ -327,10 +347,15 @@ int main ( int argc, char *argv[] ) {
     }
     
     cout << "psf" << " hx=" << psf->hSizeX << " hy=" <<  psf->hSizeY << " lpar=" << psf->LocalNAllPar() << " gnpar=" << psf->BundleNAllPar(spots[0]->fiber_bundle) << endl;
-    int npar = psf->BundleNAllPar(spots[0]->fiber_bundle)+spots.size(); 
-    // psf->TracesNPar();
-    npar -= psf_params->AllParPolXW[0]->coeff.size(); // not in last fit
-    npar -= psf_params->AllParPolXW[1]->coeff.size(); // not in last fit
+    
+    int npar = 0;
+    for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+
+      npar += psf->BundleNAllPar(bundle_it->first)+spots.size(); 
+      // psf->TracesNPar();
+      npar -= bundle_it->second.AllParPolXW[0]->coeff.size(); // not in last fit
+      npar -= bundle_it->second.AllParPolXW[1]->coeff.size(); // not in last fit
+    }
     cout << "npar in last fit = " << npar << endl;
 
     if(0) { // not included in final fit 
@@ -395,10 +420,13 @@ int main ( int argc, char *argv[] ) {
   }catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;
     return EXIT_FAILURE;
-  }catch(std::exception e) {
+  }
+  /*
+  catch(std::exception e) {
     cerr << "FATAL ERROR " << e.what() << endl;
     return EXIT_FAILURE;
   }
+  */
   return EXIT_SUCCESS;
 }
 

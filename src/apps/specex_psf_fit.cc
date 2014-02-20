@@ -289,6 +289,10 @@ int main ( int argc, char *argv[] ) {
     */
     
     
+    int first_fitted_fiber=-1;
+    int last_fitted_fiber=-1;
+    vector<Spot_p> fitted_spots;
+    
     // loop on fiber bundles 
     // -------------------------------------------- 
     for(int bundle = first_fiber_bundle; bundle <= last_fiber_bundle ; bundle ++) {
@@ -338,18 +342,46 @@ int main ( int argc, char *argv[] ) {
       SPECEX_INFO("Bundle " << bundle << " PSF fit ndata    = "<< psf->ParamsOfBundles[bundle].ndata);
       SPECEX_INFO("Bundle " << bundle << " PSF fit nspots   = "<< psf->ParamsOfBundles[bundle].nspots_in_fit);
       
+      if(bundle == first_fiber_bundle) {
+	first_fitted_fiber=psf->ParamsOfBundles[bundle].fiber_min;
+	last_fitted_fiber=psf->ParamsOfBundles[bundle].fiber_max;
+      }
+      
+      first_fitted_fiber=min(first_fitted_fiber,psf->ParamsOfBundles[bundle].fiber_min);
+      last_fitted_fiber=max(last_fitted_fiber,psf->ParamsOfBundles[bundle].fiber_max);
+      
+      
+      for(size_t s=0;s<spots.size();s++) {
+	fitted_spots.push_back(spots[s]);
+      }
+
       {
 	// writing spots as xml
-	std::ofstream os("spots.xml");
+
+	char filename[100];
+	sprintf(filename,"spots-%d-%02d-%02d.xml",psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	
+	std::ofstream os(filename);
 	boost::archive::xml_oarchive xml_oa ( os );
-	xml_oa << BOOST_SERIALIZATION_NVP(spots);
+	xml_oa << BOOST_SERIALIZATION_NVP(fitted_spots);
 	os.close();
 	SPECEX_INFO("wrote spots in " << "spots.xml");
       }
-      
+      {
+	// writing psf as xml
+	char filename[100];
+	sprintf(filename,"psf-%d-%02d-%02d.fits",psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	write_psf_fits(fitter.psf,filename);
+	sprintf(filename,"psf-%d-%02d-%02d.xml",psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	write_psf_xml(fitter.psf,filename);
+
+      }
 
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
+
+      
+
     } // end of loop on bundles
     
     

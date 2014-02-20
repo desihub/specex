@@ -36,9 +36,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   int nx = 2*psf->hSizeX*oversampling+1;
   int ny = 2*psf->hSizeY*oversampling+1;
   
-#ifdef EXTERNAL_TAIL
-  double r_tail_amplitude = psf->RTailAmplitudePol.Value(wavelength);
-#endif
+
 
   specex::image_data img(nx,ny);
   for(int j=0;j<ny;j++) {
@@ -50,10 +48,6 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       double dy = (j-ny/2)/double(oversampling)-jb;
       
       img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
-
-#ifdef EXTERNAL_TAIL
-      img(i,j)+=r_tail_amplitude*psf->TailProfile(ib+int(x)-(x-dx),jb+int(y)-(y-dy));
-#endif
 
     }
   }
@@ -175,7 +169,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     BUNDLMIN = min(BUNDLMIN,bundle_it->second.bundle_id);
     BUNDLMAX = max(BUNDLMAX,bundle_it->second.bundle_id);
     FIBERMIN = min(FIBERMIN,bundle_it->second.fiber_min);
-    FIBERMAX = min(FIBERMAX,bundle_it->second.fiber_max);
+    FIBERMAX = max(FIBERMAX,bundle_it->second.fiber_max);
   
     NFIBERS += (bundle_it->second.fiber_max-bundle_it->second.fiber_min+1);
   }

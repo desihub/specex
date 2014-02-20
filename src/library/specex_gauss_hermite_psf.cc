@@ -29,20 +29,7 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
   degree = ideg;
 }
 
-int specex::GaussHermitePSF::LocalNAllPar() const {
-    
-  int npar = 2; // sigma_x and sigma_y
-  
-#ifdef TWO_GAUSSIANS
-  npar += 3;
-#endif
 
-  // npar += (degree+1)*(degree+1)-4;// skip (0,0)(1,0)(0,1)(1,1) : -1 because normalized, -3 because centered 
-  npar += (degree+1)*(degree+1)-1;// skip (0,0) : -1 because normalized
-  
-
-  return npar;
-}
 
 double specex::GaussHermitePSF::Profile(const double &input_X, const double &input_Y,
 			  const harp::vector_double &Params,
@@ -211,18 +198,49 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 }
 
   
+int specex::GaussHermitePSF::LocalNAllPar() const {
+    
+  int npar = 2; // sigma_x and sigma_y
+  
+#ifdef TWO_GAUSSIANS
+  npar += 3;
+#endif
+
+  // npar += (degree+1)*(degree+1)-4;// skip (0,0)(1,0)(0,1)(1,1) : -1 because normalized, -3 because centered 
+  npar += (degree+1)*(degree+1)-1;// skip (0,0) : -1 because normalized
+  
+#ifdef EXTERNAL_TAIL
+  npar += 5;
+#endif
+
+  return npar;
+}
+
 harp::vector_double specex::GaussHermitePSF::DefaultParams() const 
 {
   
   harp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning = a pure gaussian
-  Params(0) = 1.1; // this is sigma_x
-  Params(1) = 1.1; // this is sigma_y
+  int index=0;
+  Params(index++) = 1.1; // this is sigma_x
+  Params(index++) = 1.1; // this is sigma_y  
 #ifdef TWO_GAUSSIANS
-  Params(2) = 3.; // this is sigma_x_2
-  Params(3) = 3.; // this is sigma_y_2
-  Params(4) = 0.1; // this is the amplitude of the second gaussian
+  Params(index++) = 3.; // this is sigma_x_2
+  Params(index++) = 3.; // this is sigma_y_2
+  Params(index++) = 0.1; // this is the amplitude of the second gaussian
 #endif
+
+  index += ((degree+1)*(degree+1)-1);
+  
+#ifdef EXTERNAL_TAIL
+  
+  Params(index++) = 0.; // tail amplitude
+  Params(index++) = 1.; // tail core size
+  Params(index++) = 1.; // tail x scale
+  Params(index++) = 1.; // tail y scale
+  Params(index++) = 2.; // tail power law index
+#endif
+
   return Params;
 }
 
@@ -250,6 +268,15 @@ std::vector<std::string> specex::GaussHermitePSF::DefaultParamNames() const
       paramNames.push_back(n);
     }
   }
+
+#ifdef EXTERNAL_TAIL
+  paramNames.push_back("TAILAMP");
+  paramNames.push_back("TAILCORE");
+  paramNames.push_back("TAILXSCA");
+  paramNames.push_back("TAILYSCA");
+  paramNames.push_back("TAILINDE");
+#endif  
+
   return paramNames;
 }
 

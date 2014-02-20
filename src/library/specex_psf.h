@@ -62,8 +62,7 @@ namespace specex {
     int nparams;
     int fit_status; // 0=ok 1=cholesky error 2=no convergence 3=nan in fit
     int nspots_in_fit;
-    
-    
+
 
   PSF_Params() : 
     bundle_id(0), fiber_min(0), fiber_max(0), 
@@ -98,32 +97,37 @@ namespace specex {
  
 #define EXTERNAL_TAIL
 
-public :
+
 
 #ifdef EXTERNAL_TAIL
-  
-    //double r_tail_amplitude;
-    double r_tail_amplitude(const double& wavelength) const { return RTailAmplitudePol.Value(wavelength);}
-    Legendre1DPol RTailAmplitudePol;
-    double r_tail_core_size;
-    double r_tail_x_scale;
-    double r_tail_y_scale;
-    double r_tail_power_law_index;
+
+  protected :
+
     specex::image_data r_tail_profile; // to go much faster    
     bool r_tail_profile_must_be_computed;
+    void ComputeTailProfile(const harp::vector_double &Params);
+    int psf_tail_amplitude_index;    
+    double TailProfile(const double& dx, const double &dy, const harp::vector_double &Params) const;
 
-    void ComputeTailProfile();
+    /*
+    double TailAmplitudeXW(const double &x, const double& wavelength, int fiber_bundle) const;
+    double TailAmplitudeFW(const int fiber, const double& wavelength, int fiber_bundle) const;
     
-    double TailValueW(const double& wavelength, 
-		     const double& dx, const double &dy, 
-		     harp::vector_double* derivative_r_tail_amplitude = 0) const;
-
-    double TailProfile(const double& dx, const double &dy) const;
-    
-
+    double TailValueWithParamsXY(const double &Xc, const double &Yc, 
+				 const int IPix, const int JPix,
+				 const harp::vector_double &Params,
+				 harp::vector_double* derivative_r_tail_amplitude) const;
+   
+    double TailValueFW(const int fiber, const double& wavelength, 
+		       const int IPix, const int JPix, int bundle_id, 
+		       harp::vector_double* derivative_r_tail_amplitude) const;    
+    */
+       
 #endif
 
 #define CONTINUUM
+
+public :
 
 #ifdef CONTINUUM
     Legendre1DPol ContinuumPol;
@@ -257,19 +261,22 @@ public :
     double PSFValueWithParamsXY(const double& X, const double &Y, 
 				const int IPix, const int JPix,
 				const harp::vector_double &Params,
-				harp::vector_double *PosDer, harp::vector_double *ParamDer) const;
+				harp::vector_double *PosDer, harp::vector_double *ParamDer,
+				bool with_core=true, bool with_tail=true) const;
     
     double PSFValueWithParamsFW(const int fiber, const double &wave, 
 				const int IPix, const int JPix,
 				const harp::vector_double &Params,
-				harp::vector_double *PosDer, harp::vector_double *ParamDer) const;
+				harp::vector_double *PosDer, harp::vector_double *ParamDer,
+				bool with_core=true, bool with_tail=true) const;
     
     
 
     //! Access to the current PSF pixels.
     double PSFValueFW(const int fiber, const double &wave, 
 		    const int IPix, const int JPix, int bundle_id,
-		    harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0) const;
+		      harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0,
+		      bool with_core=true, bool with_tail=true) const;
     
     
 
@@ -311,21 +318,15 @@ public :
       ar & BOOST_SERIALIZATION_NVP(camera_id);
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_cols);
       ar & BOOST_SERIALIZATION_NVP(ccd_image_n_rows);
-#ifdef EXTERNAL_TAIL
-      //ar & BOOST_SERIALIZATION_NVP(r_tail_amplitude);
-      ar & BOOST_SERIALIZATION_NVP(RTailAmplitudePol);
-      ar & BOOST_SERIALIZATION_NVP(r_tail_core_size);
-      ar & BOOST_SERIALIZATION_NVP(r_tail_x_scale);
-      ar & BOOST_SERIALIZATION_NVP(r_tail_y_scale);
-      ar & BOOST_SERIALIZATION_NVP(r_tail_power_law_index);
-#endif
-#ifdef CONTINUUM
-      ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
-      ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
-#endif 
+
       ar & BOOST_SERIALIZATION_NVP(gain);
       ar & BOOST_SERIALIZATION_NVP(readout_noise);
       ar & BOOST_SERIALIZATION_NVP(psf_error);
+
+#ifdef CONTINUUM
+      ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
+      ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
+#endif  
       return;
     }
     

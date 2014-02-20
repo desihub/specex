@@ -91,12 +91,8 @@ specex::PSF::PSF() {
   hSizeX = hSizeY = 12;
 
 #ifdef EXTERNAL_TAIL
-  //r_tail_amplitude = 0;
-  r_tail_core_size = 1;
-  r_tail_x_scale   = 1;
-  r_tail_y_scale   = 1;
-  r_tail_power_law_index   = 2;
   r_tail_profile_must_be_computed = true;
+  psf_tail_amplitude_index = -1;
 #endif
 #ifdef CONTINUUM
   continuum_sigma_x = 1;
@@ -111,13 +107,18 @@ specex::PSF::PSF() {
 #define NY_TAIL_PROFILE 8000
 #define TAIL_OVERSAMPLING 2.
 
-void specex::PSF::ComputeTailProfile() {
+void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
   
 #pragma omp critical 
   {
   SPECEX_INFO("specex::PSF::ComputeTailProfile ...");
   
   r_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
+  
+  double r_tail_core_size = Params(ParamIndex("TAILCORE"));
+  double r_tail_x_scale   = Params(ParamIndex("TAILXSCA"));
+  double r_tail_y_scale   = Params(ParamIndex("TAILYSCA"));
+  double r_tail_power_law_index = Params(ParamIndex("TAILINDE"));
   
   double rc2 = square(r_tail_core_size);
   
@@ -130,6 +131,10 @@ void specex::PSF::ComputeTailProfile() {
       
     }
   }
+
+  // store index of PSF tail amplitude
+  psf_tail_amplitude_index = ParamIndex("TAILAMP");
+
   r_tail_profile_must_be_computed = false;
   SPECEX_INFO("specex::PSF::ComputeTailProfile done");
    
@@ -137,27 +142,50 @@ void specex::PSF::ComputeTailProfile() {
   
 }
 
-double specex::PSF::TailProfile(const double& dx, const double &dy) const {
+double specex::PSF::TailProfile(const double& dx, const double &dy, const harp::vector_double &Params) const {
   
-  if(r_tail_profile_must_be_computed)  const_cast<specex::PSF*>(this)->ComputeTailProfile();
+  if(r_tail_profile_must_be_computed)  const_cast<specex::PSF*>(this)->ComputeTailProfile(Params);
 
   int di = int(fabs(dx*TAIL_OVERSAMPLING)+0.5);
   int dj = int(fabs(dy*TAIL_OVERSAMPLING)+0.5);
   if(di>NX_TAIL_PROFILE || dj>NY_TAIL_PROFILE) return 0.;
   return r_tail_profile(di,dj);
 }
-double specex::PSF::TailValueW(const double& wavelength, 
-			      const double& dx, const double &dy, 
+
+
+/*
+double specex::PSF::TailAmplitudeXW(const double &x, const double& wavelength, int fiber_bundle) const {
+  const PSF_Params& params = ParamsOfBundles.find(fiber_bundle)->second;
+  params.AllParPolXW[ParamIndex("TAILAMP")]->Value(x,wavelength);
+}
+
+double specex::PSF::TailAmplitudeFW(const int fiber, const double& wavelength, int fiber_bundle) const {
+  return TailAmplitudeXW(Xccd(fiber,wavelength),wavelength,fiber_bundle);
+}
+
+double specex::PSF::TailValueWithParamsXY(const double &Xc, const double &Yc, 
+					  const int IPix, const int JPix,
+					  const harp::vector_double &Params,
+					  harp::vector_double* derivative_r_tail_amplitude) const {
+  
+  double r_prof = TailProfile(IPix-Xc,JPix-Yc, Params);
+  
+  if(derivative_r_tail_amplitude) {
+    SPECEX_ERROR("need a way to do this");
+    // return scalar ?
+  }
+  return Params(psf_tail_amplitude_index)*r_prof;
+}
+
+double specex::PSF::TailValueFW(const int fiber, const double& wave, 
+			      const int IPix, const int JPix, int bundle_id, 
 			      harp::vector_double* derivative_r_tail_amplitude) const {
   
-  double r_prof = TailProfile(dx,dy);
-  
-  harp::vector_double monomials = RTailAmplitudePol.Monomials(wavelength);
-  
-  if(derivative_r_tail_amplitude) *derivative_r_tail_amplitude = r_prof*monomials;  
-
-  return  specex::dot(monomials,RTailAmplitudePol.coeff)*r_prof;
+  double X=Xccd(fiber,wave);
+  double Y=Yccd(fiber,wave);
+  return TailValueWithParamsXY(X,Y,IPix,JPix,AllLocalParamsXW(X,wave,bundle_id), derivative_r_tail_amplitude);
 }
+*/
 
 #endif
 
@@ -277,18 +305,29 @@ double specex::PSF::Yccd(int fiber, const double& wave) const {
 
 //! Access to the current PSF, with user provided Params.
 double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc, 
-				     const int IPix, const int JPix,
-				     const harp::vector_double &Params,
-				     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
+					 const int IPix, const int JPix,
+					 const harp::vector_double &Params,
+					 harp::vector_double *PosDer, harp::vector_double *ParamDer,
+					 bool with_core, bool with_tail) const {
   
-  return PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
+  double val = 0;
+  if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
+
+  if(with_tail) {
+    double prof = TailProfile(IPix-Xc,JPix-Yc, Params);
+    if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
+    val += Params(psf_tail_amplitude_index)*prof;
+  }
+  
+  return val;
 }
 
 //! Access to the current PSF, with user provided Params.
 double specex::PSF::PSFValueWithParamsFW(const int fiber, const double &wave,
 				     const int IPix, const int JPix,
 				     const harp::vector_double &Params,
-				     harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
+					 harp::vector_double *PosDer, harp::vector_double *ParamDer,
+					 bool with_core, bool with_tail) const {
   
   double X=Xccd(fiber,wave);
   double Y=Yccd(fiber,wave);
@@ -298,7 +337,8 @@ double specex::PSF::PSFValueWithParamsFW(const int fiber, const double &wave,
 //! Access to the current PSF 
 double specex::PSF::PSFValueFW(const int fiber, const double &wave,
 			       const int IPix, const int JPix, int bundle_id,
-			       harp::vector_double *PosDer, harp::vector_double *ParamDer) const {
+			       harp::vector_double *PosDer, harp::vector_double *ParamDer,
+			       bool with_core, bool with_tail) const {
   double X=Xccd(fiber,wave);
   double Y=Yccd(fiber,wave);
   return PSFValueWithParamsXY(X,Y,IPix,JPix,AllLocalParamsXW(X,wave,bundle_id), PosDer, ParamDer);

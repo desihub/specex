@@ -55,12 +55,7 @@ class PSF_Fitter {
   size_t nparTot;
   
   std::vector<SpotTmpData> spot_tmp_data;
-#ifdef EXTERNAL_TAIL
-  size_t psf_r_tail_amplitude_index;
-#ifdef EXTERNAL_Y_TAIL
-  size_t psf_y_tail_amplitude_index;
-#endif
-#endif
+
 #ifdef CONTINUUM
   size_t continuum_index;
 #endif
