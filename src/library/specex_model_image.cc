@@ -130,8 +130,8 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     
     for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
       
-      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(first_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(last_fiber).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(bundle_it->second.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(bundle_it->second.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
       
       for(int fiber=first_fiber; fiber<=last_fiber; fiber++) {
 	double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
@@ -164,6 +164,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p spot = spots[s];
     harp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+    const PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
     
 #ifdef EXTERNAL_TAIL 
     if(minimal_tail_amp) {
@@ -173,8 +174,8 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
 
     for (int j=begin_j; j <end_j; ++j) {  
       
-      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(first_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(last_fiber).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
       
       for(int i=begin_i; i<end_i;i++) {
 	
