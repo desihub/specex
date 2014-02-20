@@ -155,14 +155,7 @@ int main ( int argc, char *argv[] ) {
     bool only_psf_core = false;
     bool only_positive = false;
     
-    int first_fiber = psf->ParamsOfBundles.begin()->second.fiber_min;
-    int last_fiber = psf->ParamsOfBundles.begin()->second.fiber_max;
-    for(std::map<int, specex::PSF_Params>::const_iterator it=psf->ParamsOfBundles.begin(); it != psf->ParamsOfBundles.end();it++) {
-      first_fiber = min(first_fiber,it->second.fiber_min);
-      last_fiber = max(last_fiber,it->second.fiber_max);
-    }
-
-    parallelized_compute_model_image(model,weight,psf,spots,first_fiber,last_fiber,only_on_spots,only_psf_core,only_positive);
+    parallelized_compute_model_image(model,weight,psf,spots,only_on_spots,only_psf_core,only_positive);
     
     const image_data& model_for_var = model;
 
@@ -205,8 +198,10 @@ int main ( int argc, char *argv[] ) {
     int npix_trim = 20;
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
-      int begin_i = max(global_stamp.begin_i,int(floor(psf->GetTrace(first_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i,int(floor(psf->GetTrace(last_fiber).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+      
+      
+      int begin_i = global_stamp.begin_i;
+      int end_i   = global_stamp.end_i;
 
       for (int i=begin_i ; i <end_i; ++i) {
 	if(variance(i,j)>0) {

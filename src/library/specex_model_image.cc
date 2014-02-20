@@ -31,7 +31,7 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   return global_stamp;
 }
 
-void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp) {
+void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp) {
 
   SPECEX_INFO("parallelized_compute_model_image");
   
@@ -51,14 +51,7 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
   Stamp stamp = compute_stamp(model_image,psf,spots);
   int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
   
-
-  vector<specex::image_data> image_chunks;
-  
-  for(int c=0;c<number_of_image_chuncks;c++) {
-    //image_data toto; 
-    //toto.resize(model_image.Nx(),model_image.Ny());
-    image_chunks.push_back(image_data(model_image.Nx(),model_image.Ny()));
-  }
+  model_image.data.clear();
   
   int chunk=0;
   
@@ -69,24 +62,17 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
     int end_j   = stamp.begin_j + (chunk+1)*step_j;
     if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
     
-    compute_model_image(image_chunks[chunk],weight,psf,spots,first_fiber,last_fiber,only_on_spots,only_psf_core,only_positive,minimal_tail_amp,begin_j,end_j);
-  }
-  
-  model_image.data.clear();
-  for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
-    model_image.data += image_chunks[chunk].data;
-  }
-  
-  
+    compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,minimal_tail_amp,begin_j,end_j);
+  } 
 }
 
 
 
-void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp, int predefined_begin_j, int predefined_end_j) {
+void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp, int predefined_begin_j, int predefined_end_j) {
   
   Stamp global_stamp = compute_stamp(model_image,psf,spots);
   
-  model_image.data.clear();
+  
   
   vector<specex::Stamp> spot_stamps;
   image_data spot_stamp_footprint; // because can overlap
@@ -122,79 +108,84 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     end_j = min(end_j,predefined_end_j);
   			     
   
-  double eps=1.e-20;
-
-#ifdef CONTINUUM
-  for (int j=begin_j; j <end_j; ++j) {  
-    
-    
-    for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
-      
-      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(bundle_it->second.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(bundle_it->second.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
-      
-      for(int fiber=first_fiber; fiber<=last_fiber; fiber++) {
-	double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
-	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
-	double continuum_flux = bundle_it->second.ContinuumPol.Value(w);
-	double expfact_for_continuum=continuum_flux/(2*M_PI*square(bundle_it->second.continuum_sigma_x));
-	if(expfact_for_continuum!=0) {
-	  for (int i=begin_i ; i <end_i; ++i) {    
-
-	    if(weight(i,j)<=0) continue;
-	    if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
-	    
-	    double val = expfact_for_continuum*exp(-0.5*square((i-x)/bundle_it->second.continuum_sigma_x));
-	    if(val>0 || (!only_positive))
-	      model_image(i,j) += val;
-	    else if(model_image(i,j)==0) 
-	      model_image(i,j) = eps;
-	      
-	  } // end of loop on i
-	} // expfact
-      } // end of loop on fiber
-    } // end of loop on bundles
-  } // end of loop on j   
-#endif  
-
+  
 #ifdef EXTERNAL_TAIL  
   int psf_tail_index = psf->ParamIndex("TAILAMP");
 #endif
+  double eps=1.e-20;
 
-  for(size_t s=0;s<spots.size();s++) {
-    specex::Spot_p spot = spots[s];
-    harp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
-    const PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
+  // process per bundle
+  for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
     
-#ifdef EXTERNAL_TAIL 
-    if(minimal_tail_amp) {
-      if(spot_params(psf_tail_index)<minimal_tail_amp) spot_params(psf_tail_index)=minimal_tail_amp;
-    }
-#endif   
-
-    for (int j=begin_j; j <end_j; ++j) {  
+    const PSF_Params& params_of_bundle = bundle_it->second;
+    
+    for (int j=begin_j; j <end_j; ++j) { 
       
       int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
       int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
-      
-      for(int i=begin_i; i<end_i;i++) {
-	
-	if(weight(i,j)<=0) continue;
-		
-	bool in_core =  spot_stamps[s].Contains(i,j);
-	if(!in_core && only_psf_core) continue;
-	
-	if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
-	
-	double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, spot_params, 0, 0, in_core, true); // compute CPU expensive PSF core only if needed
 
-	if(val>0 || (!only_positive))
-	  model_image(i,j) += val; // this now includes core and tails
-	else if(model_image(i,j)==0) 
-	  model_image(i,j) = eps;
-	     
-	
+      // zero the frame
+      for (int i=begin_i ; i <end_i; ++i) {
+	model_image(i,j) = 0;
       }
-    }
-  }
-}
+      
+      
+#ifdef CONTINUUM
+      
+      if(params_of_bundle.ContinuumPol.coeff(0)!=0) {
+	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
+	  double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
+	  double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
+	  double continuum_flux = params_of_bundle.ContinuumPol.Value(w);
+	  double expfact_for_continuum=continuum_flux/(2*M_PI*square(params_of_bundle.continuum_sigma_x));
+	  if(expfact_for_continuum!=0) {
+	    for (int i=begin_i ; i <end_i; ++i) {    
+	      if(weight(i,j)<=0) continue;
+	      if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
+	      
+	      double val = expfact_for_continuum*exp(-0.5*square((i-x)/params_of_bundle.continuum_sigma_x));
+	      if(val>0 || (!only_positive))
+		model_image(i,j) += val;
+	      else if(model_image(i,j)==0) 
+		model_image(i,j) = eps;
+	      
+	    } // end of loop on i
+	  } // expfact
+	} // end of loop on fiber
+      } // end of test on continuum
+#endif  
+
+      
+      // loop on spots
+      for(size_t s=0;s<spots.size();s++) {
+	specex::Spot_p spot = spots[s];
+	if(spot->fiber_bundle != bundle_it->first) continue; // keep only spots of this bundle
+
+	harp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+	
+#ifdef EXTERNAL_TAIL 
+	if(minimal_tail_amp) {
+	  if(spot_params(psf_tail_index)<minimal_tail_amp) spot_params(psf_tail_index)=minimal_tail_amp;
+	}
+#endif   
+	for(int i=begin_i; i<end_i;i++) {
+	  
+	  if(weight(i,j)<=0) continue;
+		
+	  bool in_core =  spot_stamps[s].Contains(i,j);
+	  if(!in_core && only_psf_core) continue;
+	  
+	  if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
+	  
+	  double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, spot_params, 0, 0, in_core, true); // compute CPU expensive PSF core only if needed
+	  
+	  if(val>0 || (!only_positive))
+	    model_image(i,j) += val; // this now includes core and tails
+	  else if(model_image(i,j)==0) 
+	    model_image(i,j) = eps;
+	  
+	} // end of loop on i
+      } // end of loop on spots
+    } // end of loop on j
+  } // end of loop on bundles
+} // end of func

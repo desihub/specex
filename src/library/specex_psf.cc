@@ -146,7 +146,7 @@ double specex::PSF::TailProfile(const double& dx, const double &dy, const harp::
 
   int di = int(fabs(dx*TAIL_OVERSAMPLING)+0.5);
   int dj = int(fabs(dy*TAIL_OVERSAMPLING)+0.5);
-  if(di>NX_TAIL_PROFILE || dj>NY_TAIL_PROFILE) return 0.;
+  if(di>=NX_TAIL_PROFILE || dj>=NY_TAIL_PROFILE) return 0.;
   return r_tail_profile(di,dj);
 }
 
