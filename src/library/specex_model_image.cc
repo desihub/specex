@@ -30,7 +30,7 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   return global_stamp;
 }
 
-void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive) {
+void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp) {
   
   Stamp global_stamp = compute_stamp(model_image,psf,spots);
   
@@ -95,12 +95,21 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     } // end of loop on bundles
   } // end of loop on j   
 #endif  
-  
-  
+
+#ifdef EXTERNAL_TAIL  
+  int psf_tail_index = psf->ParamIndex("TAILAMP");
+#endif
+
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p spot = spots[s];
     harp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
     
+#ifdef EXTERNAL_TAIL 
+    if(minimal_tail_amp) {
+      if(spot_params(psf_tail_index)<minimal_tail_amp) spot_params(psf_tail_index)=minimal_tail_amp;
+    }
+#endif   
+
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
       
       int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(first_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
