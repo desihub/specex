@@ -28,6 +28,8 @@ int main( int argc, char *argv[] ) {
   string output_xml_filename="";
   string output_fits_filename="";
   
+  specex_set_verbose(true);
+
   if(argc<3) usage(argv[0]);
   
   
@@ -54,13 +56,18 @@ int main( int argc, char *argv[] ) {
   specex::read_psf_xml(psf,input_xml_filenames[0]);
   
   for(size_t i=1;i<input_xml_filenames.size();i++) {
+    
     specex::PSF_p psf_i;
     specex::read_psf_xml(psf_i,input_xml_filenames[i]);
-  
-    // now merge ...
     
+    psf->Append(psf_i);
   }
-
-
+  
+  if(output_fits_filename!="")
+    specex::write_psf_fits(psf,output_fits_filename);
+  
+  if(output_xml_filename!="")
+    specex::write_psf_xml(psf,output_xml_filename);
+  
   return EXIT_SUCCESS;
 }

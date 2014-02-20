@@ -39,7 +39,9 @@ namespace specex {
     
     bool CheckParams(const harp::vector_double &Params) const 
     { return true;}
-    
+
+    void Append(const specex::PSF_p other);
+
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {

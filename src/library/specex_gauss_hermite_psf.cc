@@ -280,4 +280,39 @@ std::vector<std::string> specex::GaussHermitePSF::DefaultParamNames() const
   return paramNames;
 }
 
+void specex::GaussHermitePSF::Append(const specex::PSF_p other_p) {
+  SPECEX_INFO("GaussHermitePSF::Append starting");
 
+  if(Name() != other_p->Name()) SPECEX_ERROR("Cannot append two different kind of PSF " << Name() << " " << other_p->Name());
+  // casting
+  const specex::GaussHermitePSF& other = (const specex::GaussHermitePSF&)(*other_p);
+  if(degree != other.degree) SPECEX_ERROR("Cannot append two GaussHermitePSF of different Hermite degree " << degree << " " << other.degree );
+  if(LocalNAllPar() != other.LocalNAllPar()) SPECEX_ERROR("Cannot append two PSF with different number of parameters " << LocalNAllPar()  << " " << other.LocalNAllPar() );
+ 
+  if(arc_exposure_id != other.arc_exposure_id) SPECEX_ERROR("Cannot append two PSF with different arc expsure id " <<  arc_exposure_id << " " << other.arc_exposure_id);
+  
+  // append fibertraces
+  for(std::map<int,Trace>::const_iterator it=other.FiberTraces.begin(); it!=other.FiberTraces.end(); it++) {
+    
+    if(FiberTraces.find(it->first) != FiberTraces.end()) {
+      SPECEX_WARNING("Ignore same fiber trace info in GaussHermitePSF::Append for fiber " << it->first);
+      continue;
+    }
+    SPECEX_INFO("Appending trace of fiber " << it->first);
+    FiberTraces[it->first] = it->second;
+  } 
+
+  // append parameters
+  for(std::map<int,PSF_Params>::const_iterator it = other.ParamsOfBundles.begin(); it != other.ParamsOfBundles.end(); ++it) {
+    if(ParamsOfBundles.find(it->first) != ParamsOfBundles.end()) {
+      SPECEX_WARNING("Ignore parameters of same bundle in GaussHermitePSF::Append for bundle " << it->first);
+      continue;
+    }
+    SPECEX_INFO("Appending parameters of bundle " << it->first);
+    ParamsOfBundles[it->first] = it->second;
+  }
+
+  
+  SPECEX_INFO("GaussHermitePSF::Append successful");
+  
+}

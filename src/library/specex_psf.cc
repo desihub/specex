@@ -477,6 +477,7 @@ bool specex::PSF::IsLinear() const {
   return false;
 }
 
+/*
 void specex::PSF::WriteFits(const std::string& filename, int first_hdu) const {  
   fitsfile * fp;  
   harp::fits::create ( fp, filename );
@@ -494,4 +495,4 @@ void specex::PSF::ReadFits(const std::string& filename, int first_hdu)  {
   
   SPECEX_INFO("read psf in " << filename);
 }
-    
+*/  

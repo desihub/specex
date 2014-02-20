@@ -312,11 +312,16 @@ public :
     
     
     //! I/O for interface with specter
+    /*
     virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};
     virtual void ReadFits(fitsfile* fp, int first_hdu=1) {};  
     virtual void WriteFits(const std::string& filename, int first_hdu=1) const;
     virtual void ReadFits(const std::string& filename, int first_hdu=1);
+    */
+
+    virtual void Append(const boost::shared_ptr < specex::PSF > other) = 0;
     
+
     ~PSF();
     
   private :

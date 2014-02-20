@@ -328,4 +328,6 @@ std::vector<std::string> specex::HatHermitePSF::DefaultParamNames() const
   return paramNames;
 }
 
-
+void specex::HatHermitePSF::Append(const specex::PSF_p other) {
+  SPECEX_ERROR("specex::HatHermitePSF::Append not implemented");
+}
