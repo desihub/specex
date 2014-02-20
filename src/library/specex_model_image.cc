@@ -87,7 +87,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
 	    if(val>0 || (!only_positive))
 	      model_image(i,j) += val;
 	    else if(model_image(i,j)==0) 
-	      model_image(i,j)=eps;
+	      model_image(i,j) = eps;
 	      
 	  } // end of loop on i
 	} // expfact
@@ -120,7 +120,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
 	if(val>0 || (!only_positive))
 	  model_image(i,j) += val; // this now includes core and tails
 	else if(model_image(i,j)==0) 
-	  model_image(i,j)=eps;
+	  model_image(i,j) = eps;
 	     
 	
       }

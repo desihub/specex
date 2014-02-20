@@ -580,9 +580,13 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       SPECEX_INFO("WEIGHTS: gain = " << psf->gain);
       SPECEX_INFO("WEIGHTS: psf error = " << psf->psf_error);
       
-      bool only_on_spots = false;
-      bool only_psf_core = !(fit_psf_tail || fit_continuum);
+      bool only_on_spots = !(fit_psf_tail || fit_continuum);
+      bool only_psf_core = false;
       bool only_positive = true;
+      
+      if(only_on_spots) SPECEX_INFO("WEIGHTS: only on spots");
+      if(only_psf_core) SPECEX_INFO("WEIGHTS: only psf core");
+      if(only_positive) SPECEX_INFO("WEIGHTS: only positive");
       
       compute_model_image(footprint_weight,weight,psf,spots,psf_params->fiber_min,psf_params->fiber_max,only_on_spots,only_psf_core,only_positive);
       
