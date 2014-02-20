@@ -64,10 +64,19 @@ namespace specex {
     int fit_status; // 0=ok 1=cholesky error 2=no convergence 3=nan in fit
     int nspots_in_fit;
 
+#define CONTINUUM
+
+#ifdef CONTINUUM
+    Legendre1DPol ContinuumPol;
+    double continuum_sigma_x;
+#endif
 
   PSF_Params() : 
     bundle_id(0), fiber_min(0), fiber_max(0), 
       chi2(0),ndata(0),fit_status(12), nspots_in_fit(0)
+#ifdef CONTINUUM
+, continuum_sigma_x(1)
+#endif
       {};
   
   private :
@@ -83,6 +92,12 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(nparams);
       ar & BOOST_SERIALIZATION_NVP(fit_status);
       ar & BOOST_SERIALIZATION_NVP(nspots_in_fit);
+
+#ifdef CONTINUUM
+      ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
+      ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
+#endif 
+
     }
   };
 
@@ -129,14 +144,11 @@ namespace specex {
        
 #endif
 
-#define CONTINUUM
+
 
 public :
 
-#ifdef CONTINUUM
-    Legendre1DPol ContinuumPol;
-    double continuum_sigma_x;
-#endif
+
 
     const std::string& ParamName(int p) const;
     int ParamIndex(const std::string& name) const;
@@ -327,10 +339,7 @@ public :
       ar & BOOST_SERIALIZATION_NVP(readout_noise);
       ar & BOOST_SERIALIZATION_NVP(psf_error);
 
-#ifdef CONTINUUM
-      ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
-      ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
-#endif  
+ 
       return;
     }
     

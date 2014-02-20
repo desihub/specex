@@ -75,15 +75,15 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       for(int fiber=first_fiber; fiber<=last_fiber; fiber++) {
 	double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
 	double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
-	double continuum_flux = psf->ContinuumPol.Value(w);
-	double expfact_for_continuum=continuum_flux/(2*M_PI*square(psf->continuum_sigma_x));
+	double continuum_flux = bundle_it->second.ContinuumPol.Value(w);
+	double expfact_for_continuum=continuum_flux/(2*M_PI*square(bundle_it->second.continuum_sigma_x));
 	if(expfact_for_continuum!=0) {
 	  for (int i=begin_i ; i <end_i; ++i) {    
 
 	    if(weight(i,j)<=0) continue;
 	    if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
 	    
-	    double val = expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
+	    double val = expfact_for_continuum*exp(-0.5*square((i-x)/bundle_it->second.continuum_sigma_x));
 	    if(val>0 || (!only_positive))
 	      model_image(i,j) += val;
 	    else if(model_image(i,j)==0) 

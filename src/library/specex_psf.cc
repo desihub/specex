@@ -94,9 +94,7 @@ specex::PSF::PSF() {
   r_tail_profile_must_be_computed = true;
   psf_tail_amplitude_index = -1;
 #endif
-#ifdef CONTINUUM
-  continuum_sigma_x = 1;
-#endif
+  
   gain=1;
   readout_noise=1;
   psf_error=0.01;

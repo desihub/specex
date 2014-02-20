@@ -235,11 +235,6 @@ int main ( int argc, char *argv[] ) {
 #endif
 
 #ifdef CONTINUUM
-    psf->ContinuumPol.deg = 1;
-    psf->ContinuumPol.coeff.resize(psf->ContinuumPol.deg+1);
-    psf->ContinuumPol.coeff.clear();
-    psf->ContinuumPol.xmin = 1000; // need to change this
-    psf->ContinuumPol.xmax = 10000; // need to change this  
     fitter.scheduled_fit_of_continuum   = fit_continuum;
 #endif
     

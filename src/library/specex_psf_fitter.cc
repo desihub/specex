@@ -88,7 +88,7 @@ int specex::PSF_Fitter::NPar(int nspots) const {
   if(fit_flux) npar += nspots;
   if(fit_position) npar += 2*nspots;
 #ifdef CONTINUUM
-  if(fit_continuum) npar += psf->ContinuumPol.coeff.size();
+  if(fit_continuum) npar += psf_params->ContinuumPol.coeff.size();
 #endif
   return npar;
 }
@@ -174,7 +174,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 #ifdef CONTINUUM
   if(fit_continuum)
-    psf->ContinuumPol.coeff = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf->ContinuumPol.coeff.size()));
+    psf_params->ContinuumPol.coeff = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size()));
 #endif
   
   // update spot_tmp_data (spots are called several times because we loop on pixels)
@@ -307,17 +307,17 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   //harp::vector_double w_of_trace_for_continuum;
   double expfact_for_continuum = 0;
   map<int,harp::vector_double> continuum_monomials;
-  size_t np_continuum = psf->ContinuumPol.coeff.size();
+  size_t np_continuum = psf_params->ContinuumPol.coeff.size();
   bool has_continuum  = fit_continuum;
-  if(!has_continuum) for(size_t k=0; k<np_continuum; k++) if(psf->ContinuumPol.coeff[k]!=0) {has_continuum = true; break;}
+  if(!has_continuum) for(size_t k=0; k<np_continuum; k++) if(psf_params->ContinuumPol.coeff[k]!=0) {has_continuum = true; break;}
 
   if(has_continuum) {
     if(fit_continuum)
       continuum_params = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
     else
-      continuum_params = psf->ContinuumPol.coeff;
+      continuum_params = psf_params->ContinuumPol.coeff;
     
-    expfact_for_continuum=1./(2*M_PI*square(psf->continuum_sigma_x));
+    expfact_for_continuum=1./(2*M_PI*square(psf_params->continuum_sigma_x));
     
     x_of_trace_for_continuum.resize(psf_params->fiber_max-psf_params->fiber_min+1);
   }
@@ -330,7 +330,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     if(has_continuum) {
       for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
 	x_of_trace_for_continuum(fiber-psf_params->fiber_min) = psf->GetTrace(fiber).X_vs_Y.Value(j);
-	continuum_monomials[fiber]=psf->ContinuumPol.Monomials(psf->GetTrace(fiber).W_vs_Y.Value(j));
+	continuum_monomials[fiber]=psf_params->ContinuumPol.Monomials(psf->GetTrace(fiber).W_vs_Y.Value(j));
       }
     }
 #endif  
@@ -357,7 +357,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       if(has_continuum) {
 	double continuum_value=0;
 	for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
-	  double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf->continuum_sigma_x));
+	  double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf_params->continuum_sigma_x));
 	  continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
 	  if(compute_ab && fit_continuum) {
 	    ublas::project(H,ublas::range(continuum_index,continuum_index+np_continuum)) += continuum_prof*continuum_monomials[fiber];
@@ -723,6 +723,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #ifdef EXTERNAL_TAIL
     if(fit_psf_tail) ss << "+tail";
 #endif
+#ifdef CONTINUUM
+    if(fit_continuum) ss << "+continuum";
+#endif
     if(fit_psf) ss << " npar_psf=" << npar_psf;
     if(fit_trace) ss << " npar_trace=" << npar_trace;
     specex_info(ss.str());
@@ -780,8 +783,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #ifdef CONTINUUM
     if(fit_continuum) {
       continuum_index = index;
-      ublas::project(Params,ublas::range(continuum_index,continuum_index+psf->ContinuumPol.coeff.size())) = psf->ContinuumPol.coeff;
-      index += psf->ContinuumPol.coeff.size();
+      ublas::project(Params,ublas::range(continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size())) = psf_params->ContinuumPol.coeff;
+      index += psf_params->ContinuumPol.coeff.size();
     }
     
 #endif
@@ -1124,7 +1127,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 #ifdef CONTINUUM
     if(fit_continuum) {
-      psf->ContinuumPol.coeff = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf->ContinuumPol.coeff.size()));
+      psf_params->ContinuumPol.coeff = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size()));
     }
 #endif
 
@@ -1493,7 +1496,14 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	
 	psf_params->AllParPolXW.push_back(pol);
 	
-      }     
+      }
+#ifdef CONTINUUM
+      psf_params->ContinuumPol.deg = 1;
+      psf_params->ContinuumPol.coeff.resize(psf_params->ContinuumPol.deg+1);
+      psf_params->ContinuumPol.coeff.clear();
+      psf_params->ContinuumPol.xmin = min_wave;
+      psf_params->ContinuumPol.xmax = max_wave;
+#endif
     }
   }
   

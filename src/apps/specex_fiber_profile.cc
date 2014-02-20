@@ -178,7 +178,8 @@ int main ( int argc, char *argv[] ) {
 
     
 #ifdef CONTINUUM
-    double expfact_for_continuum=1./(2*M_PI*square(psf->continuum_sigma_x));
+    PSF_Params &params_of_bundle = psf->ParamsOfBundles.find(bundle)->second;
+    double expfact_for_continuum=1./(2*M_PI*square(params_of_bundle.continuum_sigma_x));
 #endif
 
 
@@ -207,7 +208,7 @@ int main ( int argc, char *argv[] ) {
 	
 	
 #ifdef CONTINUUM
-	double continuum_val = psf->ContinuumPol.Value(wave)*expfact_for_continuum*exp(-0.5*square((i-x_center)/psf->continuum_sigma_x));
+	double continuum_val = params_of_bundle.ContinuumPol.Value(wave)*expfact_for_continuum*exp(-0.5*square((i-x_center)/params_of_bundle.continuum_sigma_x));
 	val_j += continuum_val;
 	val_j_cont += continuum_val;
 #endif
