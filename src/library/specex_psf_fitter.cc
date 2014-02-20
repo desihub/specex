@@ -110,7 +110,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
   int chunk;
   
-  //#pragma omp parallel for 
+#pragma omp parallel for 
   for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
     
     int begin_j = stamp.begin_j + chunk*step_j;
@@ -730,7 +730,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   {
     int index=0;
-    if(fit_psf) {
+    if(fit_psf || fit_psf_tail) {
       for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
 	const harp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
 	size_t c_size = coeff.size();
@@ -1168,7 +1168,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	
 #ifdef EXTERNAL_TAIL
 	if(fit_psf_tail) {
-	  SPECEX_INFO("psf tail amplitudes, " << spot_tmp_data[spot_tmp_data.size()/2].psf_all_params(psf->ParamIndex("TAILAMP")));
+	  
+	  harp::vector_double spot_params = psf->AllLocalParamsXW_with_FitBundleParams(spot_tmp_data[spot_tmp_data.size()/2].x
+										       ,spot_tmp_data[spot_tmp_data.size()/2].wavelength,psf_params->bundle_id,Params);
+	  SPECEX_INFO("psf tail amplitudes, " << spot_params(psf->ParamIndex("TAILAMP")));
 	}
 #endif
 	
