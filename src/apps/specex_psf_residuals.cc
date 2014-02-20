@@ -162,7 +162,7 @@ int main ( int argc, char *argv[] ) {
       last_fiber = max(last_fiber,it->second.fiber_max);
     }
 
-    compute_model_image(model,weight,psf,spots,first_fiber,last_fiber,only_on_spots,only_psf_core,only_positive);
+    parallelized_compute_model_image(model,weight,psf,spots,first_fiber,last_fiber,only_on_spots,only_psf_core,only_positive);
     
     const image_data& model_for_var = model;
 

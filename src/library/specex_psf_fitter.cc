@@ -595,7 +595,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       if(only_psf_core) SPECEX_INFO("WEIGHTS: only psf core");
       if(only_positive) SPECEX_INFO("WEIGHTS: only positive");
       
-      compute_model_image(footprint_weight,weight,psf,spots,psf_params->fiber_min,psf_params->fiber_max,only_on_spots,only_psf_core,only_positive,0.005);
+      parallelized_compute_model_image(footprint_weight,weight,psf,spots,psf_params->fiber_min,psf_params->fiber_max,only_on_spots,only_psf_core,only_positive,0.005);
       
       bool zero_weight_for_core = ((fit_psf_tail || fit_continuum) && !fit_flux && !fit_psf);
       

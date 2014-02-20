@@ -1,4 +1,5 @@
 #include <specex_model_image.h>
+#include <specex_message.h>
 
 using namespace std;
 
@@ -30,7 +31,58 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   return global_stamp;
 }
 
-void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp) {
+void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp) {
+
+  SPECEX_INFO("parallelized_compute_model_image");
+  
+  int number_of_image_chuncks = 1;
+  char* OMP_NUM_THREADS = getenv("OMP_NUM_THREADS");
+  if(OMP_NUM_THREADS) {
+    number_of_image_chuncks = atoi(OMP_NUM_THREADS);
+    SPECEX_INFO("Using " << number_of_image_chuncks << " image chunks equal to value of OMP_NUM_THREADS");
+  }
+
+#ifdef EXTERNAL_TAIL  
+  // precompute tail profile
+  psf->TailProfile(0,0,psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
+#endif
+
+
+  Stamp stamp = compute_stamp(model_image,psf,spots);
+  int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
+  
+
+  vector<specex::image_data> image_chunks;
+  
+  for(int c=0;c<number_of_image_chuncks;c++) {
+    //image_data toto; 
+    //toto.resize(model_image.Nx(),model_image.Ny());
+    image_chunks.push_back(image_data(model_image.Nx(),model_image.Ny()));
+  }
+  
+  int chunk=0;
+  
+#pragma omp parallel for 
+  for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
+
+    int begin_j = stamp.begin_j + chunk*step_j;
+    int end_j   = stamp.begin_j + (chunk+1)*step_j;
+    if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
+    
+    compute_model_image(image_chunks[chunk],weight,psf,spots,first_fiber,last_fiber,only_on_spots,only_psf_core,only_positive,minimal_tail_amp,begin_j,end_j);
+  }
+  
+  model_image.data.clear();
+  for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
+    model_image.data += image_chunks[chunk].data;
+  }
+  
+  
+}
+
+
+
+void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp, int predefined_begin_j, int predefined_end_j) {
   
   Stamp global_stamp = compute_stamp(model_image,psf,spots);
   
@@ -61,10 +113,19 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     }
   }
   
+  int begin_j = global_stamp.begin_j;
+  int end_j   = global_stamp.end_j;
+  
+  if(predefined_begin_j>=0)
+    begin_j = max(begin_j,predefined_begin_j);
+  if(predefined_end_j>=0)
+    end_j = min(end_j,predefined_end_j);
+  			     
+  
   double eps=1.e-20;
 
 #ifdef CONTINUUM
-  for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+  for (int j=begin_j; j <end_j; ++j) {  
     
     
     for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
@@ -110,7 +171,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     }
 #endif   
 
-    for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
+    for (int j=begin_j; j <end_j; ++j) {  
       
       int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(first_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
       int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(last_fiber).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
