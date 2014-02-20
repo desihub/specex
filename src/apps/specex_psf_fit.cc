@@ -354,9 +354,9 @@ int main ( int argc, char *argv[] ) {
       {
 	// writing psf as xml
 	char filename[100];
-	sprintf(filename,"psf-%d-%02d-%02d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"psf-%08d-%03d-%03d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	write_psf_fits(fitter.psf,filename);
-	sprintf(filename,"psf-%d-%02d-%02d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"psf-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	write_psf_xml(fitter.psf,filename);
 
       }

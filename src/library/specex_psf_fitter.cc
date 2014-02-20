@@ -1674,6 +1674,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     }
     fit_psf_tail   = false; // don't fit this anymore
+    fit_continuum   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
     psf->psf_error = saved_psf_error; // restore previous state
     {
@@ -1752,6 +1753,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     }
     fit_psf_tail   = false; // don't fit this anymore
+    fit_continuum  = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
     psf->psf_error = saved_psf_error; // restore previous state
     {
