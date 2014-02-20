@@ -382,16 +382,22 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	nspots_in_pix++;
 	
+
+
 	double psfVal =  psf->PSFValueWithParamsXY(tmp.x,tmp.y, i, j, tmp.psf_all_params, gradPos_pointer, gradAllPar_pointer, in_core, true); // compute core part of psf only in core
 	
-	//if(psfVal==PSF_NAN_VALUE || isnan(psfVal)) SPECEX_ERROR("PSF value returns NAN");
 	
-	if(fabs(tmp.flux*psfVal)>1.e20) {
-	  SPECEX_ERROR("SEVERE BUG flux,psf,params " << tmp.flux << " " << psfVal << " " << tmp.psf_all_params);
+	double flux = tmp.flux;
+	
+	if(!in_core) flux = tmp.frozen_flux; // to decorrelate tails
+
+	
+	if(fabs(flux*psfVal)>1.e20) {
+	  SPECEX_ERROR("SEVERE BUG flux,psf,params " << flux << " " << psfVal << " " << tmp.psf_all_params);
 	}
 
 	
-	res -= tmp.flux*psfVal;
+	res -= flux*psfVal;
 	
 	if (compute_ab) {
 	  
@@ -399,23 +405,23 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    size_t index = 0;
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      size_t m_size = psf_params->FitParPolXW[p]->coeff.size();
-	      //blas::axpy(tmp.flux*gradPar[p],ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size)),ublas::project(H,ublas::range(index,index+m_size))); // doesnt compile
-	      ublas::project(H,ublas::range(index,index+m_size)) += (tmp.flux*gradAllPar(indices_of_fitpar_in_allpar[p]))*ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size));
+	      //blas::axpy(flux*gradPar[p],ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size)),ublas::project(H,ublas::range(index,index+m_size))); // doesnt compile
+	      ublas::project(H,ublas::range(index,index+m_size)) += (flux*gradAllPar(indices_of_fitpar_in_allpar[p]))*ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size));
 	      index += m_size;
 	    }
 	  }
 	  if(fit_trace) {
 	    ublas::project(H,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size())) 
-	      += (gradPos(0) * tmp.flux)*tmp.trace_x_monomials;
+	      += (gradPos(0) * flux)*tmp.trace_x_monomials;
 	    ublas::project(H,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size())) 
-	      += (gradPos(1) * tmp.flux)*tmp.trace_y_monomials;
+	      += (gradPos(1) * flux)*tmp.trace_y_monomials;
 	  }
 	  
-	  if(fit_flux) H(tmp.flux_parameter_index) += psfVal;
+	  if(fit_flux && in_core) H(tmp.flux_parameter_index) += psfVal;
 	  
 	  if(fit_position) {
-	    H(tmp.x_parameter_index) += gradPos(0) * tmp.flux;
-	    H(tmp.y_parameter_index) += gradPos(1) * tmp.flux;
+	    H(tmp.x_parameter_index) += gradPos(0) * flux;
+	    H(tmp.y_parameter_index) += gradPos(1) * flux;
 	  }
 
 
