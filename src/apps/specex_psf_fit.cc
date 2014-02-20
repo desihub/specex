@@ -338,7 +338,7 @@ int main ( int argc, char *argv[] ) {
 	// writing spots as xml
 
 	char filename[100];
-	sprintf(filename,"spots-%d-%02d-%02d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"spots-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	
 	std::ofstream os(filename);
 	boost::archive::xml_oarchive xml_oa ( os );
