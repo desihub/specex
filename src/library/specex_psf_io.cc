@@ -189,8 +189,8 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
   int nparams_all = nparams;
   nparams_all += 2; // X and Y
   nparams_all += 1; // GH trivial order zero
-#ifdef EXTERNAL_TAIL
-  nparams_all += 5; // tail params
+#ifdef CONTINUUM
+  nparams_all += 1; // continuum
 #endif
   
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
@@ -349,7 +349,30 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
       AddRow(table,pname,LEGWMIN,LEGWMAX,coeff);
       
     } // end of loop on params
-    
+
+#ifdef CONTINUUM
+    {
+      coeff.clear();
+      int fiber_index=0;
+      for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
+	  bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
+	const specex::PSF_Params & params_of_bundle = bundle_it->second;
+	specex::Legendre1DPol pol1d(ncoeff-1,wavemin,wavemax);
+	for(int w=0;w<ncoeff;w++) {
+	  values[w]   = params_of_bundle.ContinuumPol.Value(wave[w]);
+	}
+	pol1d.Fit(wave,values,0,false);
+	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
+	  for(int w = 0; w < ncoeff ; w++) {
+	    coeff(fiber_index*ncoeff+w)   =  pol1d.coeff(w);
+	  }    
+	}
+      }
+      AddRow(table,"CONT",LEGWMIN,LEGWMAX,coeff);
+    }
+#endif    
+
+
   }
   
   // write table
@@ -390,6 +413,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     fits_write_comment(fp,"TAILXSCA : Scaling apply to CCD coordinate along columns for PSF tail",&status); harp::fits::check ( status );
     fits_write_comment(fp,"TAILYSCA : Scaling apply to CCD coordinate along rows for PSF tail",&status); harp::fits::check ( status );
     fits_write_comment(fp,"TAILINDE : Asymptotic power law index of PSF tail",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"CONT     : Continuum flux in arc image (not part of PSF)",&status); harp::fits::check ( status );
     fits_write_comment(fp,"-  ",&status); harp::fits::check ( status );
     fits_write_comment(fp,"PSF_core(X,Y) = [ SUM_ij (GH-i-j)*HERM(i,X/GHSIGX)*HERM(j,Y/GHSIGX) ]",&status); harp::fits::check ( status );
     fits_write_comment(fp,"              * [ (1-GHSCAL2)*GAUS(X,GHSIGX)*GAUS(Y,GHSIGY)",&status); harp::fits::check ( status );
