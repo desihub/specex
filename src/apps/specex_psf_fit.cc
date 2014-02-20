@@ -231,22 +231,6 @@ int main ( int argc, char *argv[] ) {
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
     fitter.psf->psf_error               = psf_error;
 #ifdef EXTERNAL_TAIL
-    psf->RTailAmplitudePol.deg = 1;
-    psf->RTailAmplitudePol.coeff.resize(psf->RTailAmplitudePol.deg+1);
-    psf->RTailAmplitudePol.coeff.clear();
-#ifdef EXPONENTIAL_TAIL_AMPLITUDE
-    psf->RTailAmplitudePol.coeff(0) = -7;
-#endif
-    psf->RTailAmplitudePol.xmin = 1000; // need to change this
-    psf->RTailAmplitudePol.xmax = 10000; // need to change this
-    
-    psf->r_tail_core_size = 1.;
-    
-#ifdef EXTERNAL_Y_TAIL
-    psf->y_tail_amplitude                 = 0;
-    psf->y_tail_core_size = 2.;    
-#endif
-    
     fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
 #endif
 
@@ -359,7 +343,7 @@ int main ( int argc, char *argv[] ) {
 	// writing spots as xml
 
 	char filename[100];
-	sprintf(filename,"spots-%d-%02d-%02d.xml",psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"spots-%d-%02d-%02d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	
 	std::ofstream os(filename);
 	boost::archive::xml_oarchive xml_oa ( os );
@@ -370,9 +354,9 @@ int main ( int argc, char *argv[] ) {
       {
 	// writing psf as xml
 	char filename[100];
-	sprintf(filename,"psf-%d-%02d-%02d.fits",psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"psf-%d-%02d-%02d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	write_psf_fits(fitter.psf,filename);
-	sprintf(filename,"psf-%d-%02d-%02d.xml",psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"psf-%d-%02d-%02d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	write_psf_xml(fitter.psf,filename);
 
       }

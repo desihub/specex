@@ -213,19 +213,10 @@ int main( int argc, char *argv[] ) {
 	
 	harp::vector_double psf_params = psf->AllLocalParamsXW(x_ccd,wave,bundle_id);
 	
-#ifdef EXTERNAL_TAIL
-	double tail_amp = psf->r_tail_amplitude(wave);
-#endif
 	// loop on pixels of PSF footprint
 	for(int j=y_begin;j<y_end;++j)
 	  for(int i=x_begin;i<x_end;++i)
 	    img(i,j) += psf->PSFValueWithParamsXY(x_ccd,y_ccd,i,j,psf_params,0,0);
-	
-#ifdef EXTERNAL_TAIL
-	for(int j=begin_j;j<end_j;j++)
-	  for(int i=begin_i;i<end_i;i++)
-	    img(i,j) += tail_amp*psf->TailProfile(i-x_ccd,j-y_ccd);
-#endif	
 	
 
       } // end of loop on wavelength

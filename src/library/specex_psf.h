@@ -53,6 +53,7 @@ namespace specex {
     std::vector<Legendre2DPol_p> AllParPolXW; // all the parameters of the PSF , varying with x_ccd and lambda
     std::vector<Legendre2DPol_p> FitParPolXW; // subsamples of parameters that are fit
     
+
     int bundle_id;
     int fiber_min; // first fiber this set of params applies to
     int fiber_max; // last fiber this set of params applies to
@@ -100,6 +101,10 @@ namespace specex {
 
 
 #ifdef EXTERNAL_TAIL
+    
+  public :
+    double TailProfile(const double& dx, const double &dy, const harp::vector_double &Params) const;
+
 
   protected :
 
@@ -107,8 +112,7 @@ namespace specex {
     bool r_tail_profile_must_be_computed;
     void ComputeTailProfile(const harp::vector_double &Params);
     int psf_tail_amplitude_index;    
-    double TailProfile(const double& dx, const double &dy, const harp::vector_double &Params) const;
-
+    
     /*
     double TailAmplitudeXW(const double &x, const double& wavelength, int fiber_bundle) const;
     double TailAmplitudeFW(const int fiber, const double& wavelength, int fiber_bundle) const;

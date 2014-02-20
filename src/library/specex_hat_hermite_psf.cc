@@ -23,7 +23,7 @@ specex::HatHermitePSF::HatHermitePSF(int ideg) {
   
 }
 
-#define HAT_AND_GAUSSIAN
+//#define HAT_AND_GAUSSIAN
 
 void specex::HatHermitePSF::SetDegree(const int ideg) {
   degree = ideg;

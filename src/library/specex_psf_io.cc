@@ -350,59 +350,8 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
       
     } // end of loop on params
     
-    
-    
-    
-#ifdef EXTERNAL_TAIL
-    
-    {
-      // refit AMP
-      specex::Legendre1DPol pol1d(ncoeff-1,wavemin,wavemax);
-      for(int w=0;w<ncoeff;w++) {
-	values[w] = psf.RTailAmplitudePol.Value(wave[w]);
-      }
-      pol1d.Fit(wave,values,0,false);
-      coeff.clear();
-      for(int fiber_index=0;fiber_index<NFIBERS;fiber_index++) {
-	for(int w = 0; w < ncoeff ; w++) {
-	  coeff(fiber_index*ncoeff+w) =  pol1d.coeff(w);
-	}
-      }
-      AddRow(table,"TAILAMP",LEGWMIN,LEGWMAX,coeff);
-    }
-    {
-      coeff.clear();
-      for(int fiber_index=0;fiber_index<NFIBERS;fiber_index++) {
-	coeff(fiber_index*ncoeff) = psf.r_tail_core_size; 
-      }
-      AddRow(table,"TAILCORE",LEGWMIN,LEGWMAX,coeff);
-    }
-    {
-       coeff.clear();
-       for(int fiber_index=0;fiber_index<NFIBERS;fiber_index++) {
-	 coeff(fiber_index*ncoeff) = psf.r_tail_x_scale;
-       }
-       AddRow(table,"TAILXSCA",LEGWMIN,LEGWMAX,coeff);
-    }
-    {
-      coeff.clear();
-      for(int fiber_index=0;fiber_index<NFIBERS;fiber_index++) {
-	coeff(fiber_index*ncoeff) = psf.r_tail_y_scale;
-      }
-      AddRow(table,"TAILYSCA",LEGWMIN,LEGWMAX,coeff);
-    }
-    {
-      coeff.clear();
-      for(int fiber_index=0;fiber_index<NFIBERS;fiber_index++) {
-	 coeff(fiber_index*ncoeff) = psf.r_tail_power_law_index;
-      }
-      AddRow(table,"TAILINDE",LEGWMIN,LEGWMAX,coeff);
-    }
-    
   }
-#endif
   
-
   // write table
   table.Write(fp);
   
@@ -670,47 +619,6 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
       } // end of loop on bundles
     } // end of loop on params
     
-    
-    
-    
-#ifdef EXTERNAL_TAIL
-    
-    int param_index = keys.size();
-    keys.push_back("TAILAMP");
-    // refit AMP
-    specex::Legendre1DPol pol1d(ncoeff-1,wavemin,wavemax);
-    double wavestep = (wavemax-wavemin)/(ncoeff-1);
-    for(int w=0;w<ncoeff;w++) {
-      wave[w]   = wavemin + wavestep*w;
-      values[w] = psf.RTailAmplitudePol.Value(wave[w]);
-    }
-    pol1d.Fit(wave,values,0,false);
-    for(int f=0;f<NFIBERS;f++) {
-      for(int w = 0; w < ncoeff ; w++) {
-	image(param_index*ncoeff+w,f) =  pol1d.coeff(w);
-      }
-    }
-    param_index ++;
-    
-    keys.push_back("TAILCORE");
-    for(int f=0;f<NFIBERS;f++) image(param_index*ncoeff,f)=psf.r_tail_core_size;
-    param_index ++;
-    
-    keys.push_back("TAILXSCA");
-    for(int f=0;f<NFIBERS;f++) image(param_index*ncoeff,f)=psf.r_tail_x_scale;
-    param_index ++;
-
-    keys.push_back("TAILYSCA");
-    for(int f=0;f<NFIBERS;f++) image(param_index*ncoeff,f)=psf.r_tail_y_scale;
-    param_index ++;
-    
-    keys.push_back("TAILINDE");
-    for(int f=0;f<NFIBERS;f++) image(param_index*ncoeff,f)=psf.r_tail_power_law_index;
-    param_index ++;
-    
-
-#endif
-
   }
   
   // write image

@@ -584,19 +584,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       bool only_psf_core = true;
       bool only_positive = true;
       
-      compute_model_image(footprint_weight,psf,spots,psf_params->fiber_min,psf_params->fiber_max,only_on_spots,only_psf_core,only_positive);
+      compute_model_image(footprint_weight,weight,psf,spots,psf_params->fiber_min,psf_params->fiber_max,only_on_spots,only_psf_core,only_positive);
       
-#ifdef EXTERNAL_TAIL     
-      const harp::vector_double& tail_coeff=psf_params->AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff;
-      bool has_tails = (tail_coeff.size() && tail_coeff(0)!=0);
-      fill_core_footprint |= ( (! fit_psf_tail) &&  has_tails);
-#endif
-#ifdef CONTINUUM
-      bool has_continuum = (psf->ContinuumPol.coeff.size() && psf->ContinuumPol.coeff(0)!=0);
-      fill_core_footprint |= ( (! fit_continuum) &&  has_continuum);
-#endif
-
-     
       bool zero_weight_for_core = ((fit_psf_tail) && !fit_flux && !fit_psf);
       
       
@@ -605,7 +594,12 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	SPECEX_INFO("WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails or continuum)");
 	
 	for(size_t s=0;s<spots.size();s++) {
-	  Stamp& spot_stamp = spot_stamps[s];
+	  Stamp spot_stamp(image);
+	  psf->StampLimits(spots[s]->xc,spots[s]->yc,stamp.begin_i,stamp.end_i,stamp.begin_j,stamp.end_j);
+	  stamp.begin_i = max(0,stamp.begin_i);
+	  stamp.end_i   = min(stamp.Parent_n_cols(),stamp.end_i);
+	  stamp.begin_j = max(0,stamp.begin_j);
+	  stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
 	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
 	    for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
 	      footprint_weight(i,j) = 0; 
@@ -613,10 +607,14 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  }
 	}
       }
+      
+      SPECEX_INFO("debug, writing toto.fits");
+      
 
       // compute variance and weight
       
       SPECEX_INFO("WEIGHTS: Compute weights");
+      
       for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
 	for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
 	  
@@ -830,7 +828,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 
 #ifdef EXTERNAL_TAIL
-  if(psf->r_tail_profile.n_rows()==0) psf->ComputeTailProfile();
+  // compute this before parallel computing
+  psf->TailProfile(0,0,psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
 #endif
 
   ////////////////////////////////////////////////////////////////////////// 
@@ -1110,30 +1109,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	PY(k)=Params(index);
     }
   }
-#ifdef EXTERNAL_TAIL
-    if(fit_psf_tail) {
-      
-      psf->RTailAmplitudePol.coeff = ublas::project(Params,ublas::range(psf_tail_amplitude_global_index,psf_tail_amplitude_global_index+psf->RTailAmplitudePol.coeff.size()));
-     
-      /*
-      if(psf->r_tail_amplitude<0) {
-	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative r tail amplitude " << psf->r_tail_amplitude << " set to 0 ");
-	psf->r_tail_amplitude = 0;
-      }
-      */
-
-#ifdef EXTERNAL_Y_TAIL
-      
-      psf->y_tail_amplitude = Params(psf_y_tail_amplitude_index);
-      if(psf->y_tail_amplitude<0) {
-	SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots negative y tail amplitude " << psf->y_tail_amplitude << " set to 0 ");
-	psf->y_tail_amplitude = 0;
-      }
-
-#endif
-
-    }
-#endif
 
 #ifdef CONTINUUM
     if(fit_continuum) {
@@ -1189,14 +1164,15 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	cout << " chi2= " << *psfChi2;
 	cout << " niter=" << *niter;
 	cout << endl;
+	
 #ifdef EXTERNAL_TAIL
-if(fit_psf_tail) 
-	  SPECEX_INFO("psf tail amplitudes, " << Params(psf_tail_amplitude_global_index) );
+	if(fit_psf_tail) 
+	  SPECEX_INFO("psf tail amplitudes, " << Params(psf->ParamIndex("TAILAMP")));
 #endif
-
+	
 #ifdef CONTINUUM
- if(fit_continuum)
-   SPECEX_INFO("continuum amplitude, " << Params(continuum_index) );
+	if(fit_continuum)
+	  SPECEX_INFO("continuum amplitude, " << Params(continuum_index) );
 #endif
 
       }
@@ -1484,6 +1460,15 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  degx=0;
 	  degw=1;
 	}
+	if(name=="TAILAMP") {
+	  degx=0;
+	  degw=1;
+	}
+	if(name=="TAILCORE" || name=="TAILXSCA" || name=="TAILYSCA" || name=="TAILINDE" ) {
+	  degx=0;
+	  degw=0;
+	}
+	
 	specex::Legendre2DPol_p pol(new specex::Legendre2DPol(degx,min_x,max_x,degw,min_wave,max_wave));
 	pol->name = param_names[p];
 	pol->coeff.clear();
@@ -1629,13 +1614,12 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   {
     psf_params->FitParPolXW.clear();
-    int npar = psf->LocalNAllPar();
-    for(int p=0;p<npar;p++) {
+    for(int p=0;p<psf->LocalNAllPar();p++) {
       const string& name = psf->ParamName(p);
       ok = true;
       ok &= (name!="GHSIGX" && name!="GHSIGY");
-      ok &= (name!="GHSIGX2" && name!="GHSIGY2");
-      ok &= (name!="GHSCAL2");
+      ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+      ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
@@ -1655,15 +1639,26 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 #ifdef CONTINUUM
 #ifdef EXTERNAL_TAIL  
 
-  if(scheduled_fit_of_psf_tail && !scheduled_fit_of_continuum) {
+  if(scheduled_fit_of_psf_tail && scheduled_fit_of_continuum) {
+
+    {
+      psf_params->FitParPolXW.clear();
+      for(int p=0;p<psf->LocalNAllPar();p++) {
+	const string& name = psf->ParamName(p);
+	ok = !(name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+	if(ok)
+	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+      }
+    }
     
-    SPECEX_INFO("Starting FitSeveralSpots TAIL");
+    SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
     SPECEX_INFO("=======================================");
     fit_flux       = false;
     fit_position   = false;
     fit_psf        = false;
     fit_trace      = false;
     fit_psf_tail   = true;
+    fit_continuum  = true;
     
     include_signal_in_weight = true; 
     
@@ -1676,58 +1671,24 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_psf_tail   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
     psf->psf_error = saved_psf_error; // restore previous state
-  }
-  if(scheduled_fit_of_continuum && !scheduled_fit_of_psf_tail) {
-    
-    SPECEX_INFO("Starting FitSeveralSpots CONTINUUM");
-    SPECEX_INFO("=======================================");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = false;
-    fit_psf_tail   = false;
-    fit_continuum  = true;
-    
-    include_signal_in_weight = true; 
-    
-    double saved_psf_error = psf->psf_error;
-    psf->psf_error = 1; // to deweight the core of the psf
-    
-    for(int i=0; i<2; i++) { 
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    {
+      psf_params->FitParPolXW.clear();
+      for(int p=0;p<psf->LocalNAllPar();p++) {
+	const string& name = psf->ParamName(p);
+	ok = true;
+	ok &= (name!="GHSIGX" && name!="GHSIGY");
+	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+	ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+	if(ok)
+	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+      }
     }
-    fit_continuum   = false; // don't fit this anymore
-    include_signal_in_weight = false; // restore previous state
-    psf->psf_error = saved_psf_error; // restore previous state
+    
+    
   }
-  if(scheduled_fit_of_continuum && scheduled_fit_of_psf_tail) {
-    
-    SPECEX_INFO("Starting FitSeveralSpots TAIL+CONTINUUM");
-    SPECEX_INFO("=======================================");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = false;
-    fit_psf_tail   = true;
-    fit_continuum  = true;
-    
-    include_signal_in_weight = true; 
-    
-    double saved_psf_error = psf->psf_error;
-    psf->psf_error = 1; // to deweight the core of the psf
-    
-    for(int i=0; i<2; i++) { 
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    }
-    fit_psf_tail    = false; // don't fit this anymore
-    fit_continuum   = false; // don't fit this anymore
-    include_signal_in_weight = false; // restore previous state
-    psf->psf_error = saved_psf_error; // restore previous state
-  }
-
 #endif
 #endif
-
+  
   
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis)");
   SPECEX_INFO("=======================================");
@@ -1739,7 +1700,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-
+  
   SPECEX_INFO("Starting FitSeveralSpots FLUX (updated tails)");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1753,10 +1714,23 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
   
 
-  if(scheduled_fit_of_continuum && scheduled_fit_of_psf_tail) {
+  #ifdef CONTINUUM
+#ifdef EXTERNAL_TAIL  
+
+  if(scheduled_fit_of_psf_tail && scheduled_fit_of_continuum) {
+
+    {
+      psf_params->FitParPolXW.clear();
+      for(int p=0;p<psf->LocalNAllPar();p++) {
+	const string& name = psf->ParamName(p);
+	ok = !(name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+	if(ok)
+	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+      }
+    }
     
-    SPECEX_INFO("Starting FitSeveralSpots TAIL+CONTINUUM (bis)");
-    SPECEX_INFO("=============================================");
+    SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
+    SPECEX_INFO("=======================================");
     fit_flux       = false;
     fit_position   = false;
     fit_psf        = false;
@@ -1768,13 +1742,30 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     double saved_psf_error = psf->psf_error;
     psf->psf_error = 1; // to deweight the core of the psf
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     
-    fit_psf_tail    = false; // don't fit this anymore
-    fit_continuum   = false; // don't fit this anymore
+    for(int i=0; i<2; i++) { 
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    }
+    fit_psf_tail   = false; // don't fit this anymore
     include_signal_in_weight = false; // restore previous state
     psf->psf_error = saved_psf_error; // restore previous state
+    {
+      psf_params->FitParPolXW.clear();
+      for(int p=0;p<psf->LocalNAllPar();p++) {
+	const string& name = psf->ParamName(p);
+	ok = true;
+	ok &= (name!="GHSIGX" && name!="GHSIGY");
+	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+	ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+	if(ok)
+	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+      }
+    }
+    
+    
   }
+#endif
+#endif
   
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
   SPECEX_INFO("=======================================");

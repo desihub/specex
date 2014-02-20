@@ -3,7 +3,7 @@
 using namespace std;
 
 
-specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, std::vector<specex::Spot_p>& spots) {
+specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots) {
   
   Stamp global_stamp(model_image);
   global_stamp.begin_i = 10000;
@@ -30,11 +30,11 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   return global_stamp;
 }
 
-specex::Stamp specex::compute_model_image(specex::image_data& model_image, const specex::PSF_p psf, std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive) {
+void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, const int first_fiber, const int last_fiber, bool only_on_spots, bool only_psf_core, bool only_positive) {
   
   Stamp global_stamp = compute_stamp(model_image,psf,spots);
   
-  model_image.clear();
+  model_image.data.clear();
   
   vector<specex::Stamp> spot_stamps;
   image_data spot_stamp_footprint; // because can overlap
@@ -61,14 +61,13 @@ specex::Stamp specex::compute_model_image(specex::image_data& model_image, const
     }
   }
   
-  
+  double eps=1.e-20;
+
 #ifdef CONTINUUM
   for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
     
     
     for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
-      
-      const PSF_Params * psf_params = &(bundle_it->second);
       
       int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(first_fiber).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
       int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(last_fiber).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
@@ -85,8 +84,11 @@ specex::Stamp specex::compute_model_image(specex::image_data& model_image, const
 	    if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
 	    
 	    double val = expfact_for_continuum*exp(-0.5*square((i-x)/psf->continuum_sigma_x));
-	    model(i,j) += val;
-	    if(val>0) model_for_var(i,j) += val;
+	    if(val>0 || (!only_positive))
+	      model_image(i,j) += val;
+	    else if(model_image(i,j)==0) 
+	      model_image(i,j)=eps;
+	      
 	  } // end of loop on i
 	} // expfact
       } // end of loop on fiber
@@ -117,7 +119,9 @@ specex::Stamp specex::compute_model_image(specex::image_data& model_image, const
 
 	if(val>0 || (!only_positive))
 	  model_image(i,j) += val; // this now includes core and tails
-	
+	else if(model_image(i,j)==0) 
+	  model_image(i,j)=eps;
+	     
 	
       }
     }
