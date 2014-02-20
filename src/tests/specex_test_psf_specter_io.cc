@@ -57,7 +57,7 @@ int main( int argc, char *argv[] ) {
   
   specex::read_psf_xml(psf,input_psf_xml_filename);
   
-  specex::write_psf_fits(psf,"toto.fits");
+  //specex::write_psf_fits(psf,"toto.fits");
   
 
   if(0){
