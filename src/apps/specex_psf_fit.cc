@@ -23,6 +23,7 @@
 
 #include <specex_psf_io.h>
 #include <specex_gauss_hermite_psf.h>
+#include <specex_gauss_hermite_two_psf.h>
 #include <specex_hat_hermite_psf.h>
 #include <specex_serialization.h>
 
@@ -190,6 +191,8 @@ int main ( int argc, char *argv[] ) {
 
     if(psf_model=="GAUSSHERMITE")
       psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
+    else if(psf_model=="GAUSSHERMITE2")
+      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg));
     else if(psf_model=="HATHERMITE")
       psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
     else
@@ -349,8 +352,11 @@ int main ( int argc, char *argv[] ) {
       {
 	// writing psf as xml
 	char filename[100];
-	sprintf(filename,"psf-%08d-%03d-%03d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
-	write_psf_fits(fitter.psf,filename);
+	
+	if(psf_model == "GAUSSHERMITE") {
+	  sprintf(filename,"psf-%08d-%03d-%03d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	  write_psf_fits(fitter.psf,filename);
+	}
 	sprintf(filename,"psf-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	write_psf_xml(fitter.psf,filename);
 

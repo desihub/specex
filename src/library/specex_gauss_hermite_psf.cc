@@ -12,12 +12,14 @@
 #include "specex_linalg.h"
 #include "specex_message.h"
 #include "specex_fits.h"
+#include "specex_psf.h"
 
 using namespace std;
 
 
 
-specex::GaussHermitePSF::GaussHermitePSF(int ideg) {
+specex::GaussHermitePSF::GaussHermitePSF(int ideg) : PSF() 
+{
   name = "GaussHermitePSF";
   SetDegree(ideg);
   
@@ -225,8 +227,8 @@ harp::vector_double specex::GaussHermitePSF::DefaultParams() const
   Params(index++) = 1.1; // this is sigma_x
   Params(index++) = 1.1; // this is sigma_y  
 #ifdef TWO_GAUSSIANS
-  Params(index++) = 4.; // this is sigma_x_2
-  Params(index++) = 4.; // this is sigma_y_2
+  Params(index++) = 3.; // this is sigma_x_2
+  Params(index++) = 3.; // this is sigma_y_2
   Params(index++) = 0.1; // this is the amplitude of the second gaussian
 #endif
 

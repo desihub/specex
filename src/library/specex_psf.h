@@ -12,6 +12,8 @@
 
 #define PSF_NAN_VALUE 9999999
 
+#define EXTERNAL_TAIL
+
 namespace specex {
 
   
@@ -111,7 +113,7 @@ namespace specex {
 
   
  
-#define EXTERNAL_TAIL
+
 
 
 
@@ -206,6 +208,7 @@ public :
     
     virtual harp::vector_double DefaultParams() const = 0;
     virtual std::vector<std::string> DefaultParamNames() const = 0;
+    virtual void AllocateDefaultParams();
     
     // check if parameter values are within bounds
     virtual bool CheckParams(const harp::vector_double &Params) const {return false;};

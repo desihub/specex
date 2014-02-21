@@ -572,7 +572,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 
   // definition of fitted region of image
   // ----------------------------------------------------
-  stamp = compute_stamp(image,psf,spots,psf_params->bundle_id,0,0);
+  stamp = compute_stamp(image,psf,spots,0,0,psf_params->bundle_id);
   
   if(spots.size()>1) {
     // compute psf footprint
@@ -1565,7 +1565,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok |= (name=="GHSIGX" || name=="GHSIGY");
       //ok |= (name=="GHSIGX2");
       //ok |= (name=="GHSIGY2");
-      ok |= (name=="GHSCAL2");
+      //ok |= (name=="GHSCAL2");
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }

@@ -12,12 +12,13 @@
 #include "specex_linalg.h"
 #include "specex_message.h"
 #include "specex_fits.h"
+#include "specex_psf.h"
 
 using namespace std;
 
 
 
-specex::HatHermitePSF::HatHermitePSF(int ideg) {
+specex::HatHermitePSF::HatHermitePSF(int ideg) : PSF() {
   name = "HatHermitePSF";
   SetDegree(ideg);
   

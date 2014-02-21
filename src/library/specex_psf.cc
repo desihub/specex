@@ -113,6 +113,10 @@ void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
   
   r_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
   
+  if(! HasParam("TAILCORE")) {
+    SPECEX_ERROR("in PSF::ComputeTailProfile, missing param TAILCORE, need to allocate them, for instance with PSF::AllocateDefaultParams()");
+  }
+
   double r_tail_core_size = Params(ParamIndex("TAILCORE"));
   double r_tail_x_scale   = Params(ParamIndex("TAILXSCA"));
   double r_tail_y_scale   = Params(ParamIndex("TAILYSCA"));
@@ -232,6 +236,19 @@ int specex::PSF::ParamIndex(const std::string& name) const {
 };
 bool specex::PSF::HasParam(const std::string& name) const { 
   return (ParamIndex(name)>=0);
+}
+
+void specex::PSF::AllocateDefaultParams() {
+  harp::vector_double params = DefaultParams();
+  std::vector<std::string> param_names = DefaultParamNames();
+  
+  PSF_Params pars;
+  ParamsOfBundles[0] = pars;
+  for(size_t p = 0; p<params.size(); p++) {
+    Legendre2DPol_p pol(new Legendre2DPol(0,0,1,0,0,1));
+    pol->name = param_names[p];
+    ParamsOfBundles[0].AllParPolXW.push_back(pol);
+  }
 }
 
 void specex::PSF::StampLimits(const double &X, const double &Y,
