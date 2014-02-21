@@ -187,12 +187,69 @@ int main( int argc, char *argv[] ) {
   bool only_psf_core = false;
   bool only_positive = false;
 
-  SPECEX_INFO("computing  image ...");  
-  specex::parallelized_compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive);
-  //specex::compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,12);
+  if(0) {
+    SPECEX_INFO("computing  image ...");  
+    specex::parallelized_compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0);
+    //specex::compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,12);
   
-  SPECEX_INFO("writing image ...");
-  specex::write_new_fits_image(output_image_fits_filename,img);
+    SPECEX_INFO("writing image ...");
+    specex::write_new_fits_image(output_image_fits_filename,img);
+  }else{
+    SPECEX_INFO("skipping full image");  
+  }
   
+  { // one spot
+    vector<specex::Spot_p> one_spot;
+    specex::Spot_p spot = spots[0];
+    spot->wavelength = (double)((int)spot->wavelength); 
+    one_spot.push_back(spot);
+    
+    img    = specex::image_data(spot->xc+50,spot->yc+50);
+    weight = specex::image_data(spot->xc+50,spot->yc+50);
+    for(size_t i=0;i<weight.data.size();i++) weight.data(i)=1;
+    
+    char filename[1000];
+    
+    const specex::PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
+    
+    harp::vector_double saved_GHSCAL2_coeff = params_of_bundle.AllParPolXW[psf->ParamIndex("GHSCAL2")]->coeff;
+    harp::vector_double saved_TAILAMP_coeff = params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff;
+    
+
+    
+    img.data.clear();
+    specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
+    specex::image_data all_contributions_img = img;
+    
+    params_of_bundle.AllParPolXW[psf->ParamIndex("GHSCAL2")]->coeff.clear();
+    img.data.clear();
+    specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
+    specex::image_data core_gaussian_and_tails_img = img;
+    
+    params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff.clear();
+    img.data.clear();
+    specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
+    specex::image_data only_core_gaussian_img = img;
+    
+    specex::image_data only_tails_img = core_gaussian_and_tails_img; 
+    only_tails_img.data -= only_core_gaussian_img.data;
+
+    specex::image_data only_second_gaussian_img = all_contributions_img;
+    only_second_gaussian_img.data -= core_gaussian_and_tails_img.data;
+
+    
+    sprintf(filename,"single_spot_fiber_%d_wave_%d_all_contributions.fits",spot->fiber,(int)spot->wavelength);
+    specex::write_new_fits_image(filename,all_contributions_img);
+    sprintf(filename,"single_spot_fiber_%d_wave_%d_only_core_gaussian.fits",spot->fiber,(int)spot->wavelength);
+    specex::write_new_fits_image(filename,only_core_gaussian_img);
+    sprintf(filename,"single_spot_fiber_%d_wave_%d_only_second_gaussian.fits",spot->fiber,(int)spot->wavelength);
+    specex::write_new_fits_image(filename,only_second_gaussian_img);
+    sprintf(filename,"single_spot_fiber_%d_wave_%d_only_tails.fits",spot->fiber,(int)spot->wavelength);
+    specex::write_new_fits_image(filename,only_tails_img);
+    
+    
+    
+  }
+
   return EXIT_SUCCESS;
 }

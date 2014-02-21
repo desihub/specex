@@ -4,7 +4,7 @@
 using namespace std;
 
 
-specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, int only_this_bundle) {
+specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, int x_margin, int y_margin, int only_this_bundle) {
   
   Stamp global_stamp(model_image);
   global_stamp.begin_i = 10000;
@@ -25,15 +25,23 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
     stamp.begin_j = max(0,stamp.begin_j);
     stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
     
-    global_stamp.begin_i = min(global_stamp.begin_i,stamp.begin_i);
-    global_stamp.end_i   = max(global_stamp.end_i,stamp.end_i);
-    global_stamp.begin_j = min(global_stamp.begin_j,stamp.begin_j);
-    global_stamp.end_j   = max(global_stamp.end_j,stamp.end_j);
+    global_stamp.begin_i = min(global_stamp.begin_i,stamp.begin_i-x_margin);
+    global_stamp.end_i   = max(global_stamp.end_i,stamp.end_i+x_margin);
+    global_stamp.begin_j = min(global_stamp.begin_j,stamp.begin_j-y_margin);
+    global_stamp.end_j   = max(global_stamp.end_j,stamp.end_j+y_margin);
   }
+  global_stamp.begin_i = max(0,global_stamp.begin_i);
+  global_stamp.end_i = min(global_stamp.end_i,global_stamp.Parent_n_cols());
+  global_stamp.begin_j = max(0,global_stamp.begin_j);
+  global_stamp.end_j = min(global_stamp.end_j,global_stamp.Parent_n_rows());
+  
+
+  SPECEX_INFO("stamp [" << global_stamp.begin_i << ":" << global_stamp.end_i << "," << global_stamp.begin_j << ":" << global_stamp.end_j << "]");
+
   return global_stamp;
 }
 
-void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int only_this_bundle) {
+void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int x_margin, int y_margin, int only_this_bundle) {
 
   SPECEX_INFO("parallelized_compute_model_image");
   
@@ -49,8 +57,8 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
   psf->TailProfile(0,0,psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
 #endif
 
-
-  Stamp stamp = compute_stamp(model_image,psf,spots);
+  //SPECEX_INFO("specex::parallelized_compute_model_image");
+  Stamp stamp = compute_stamp(model_image,psf,spots,x_margin,y_margin);
   int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
   
   model_image.data.clear();
@@ -64,15 +72,16 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
     int end_j   = stamp.begin_j + (chunk+1)*step_j;
     if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
     
-    compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,begin_j,end_j,only_this_bundle);
+    compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,begin_j,end_j,x_margin,y_margin,only_this_bundle);
   } 
 }
 
 
 
-void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int predefined_begin_j, int predefined_end_j, int only_this_bundle) {
+void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int predefined_begin_j, int predefined_end_j, int x_margin, int y_margin, int only_this_bundle) {
   
-  Stamp global_stamp = compute_stamp(model_image,psf,spots,only_this_bundle);
+  //SPECEX_INFO("specex::compute_model_image");
+  Stamp global_stamp = compute_stamp(model_image,psf,spots,x_margin,y_margin,only_this_bundle);
   
   
   
@@ -121,15 +130,23 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
   double eps=1.e-20;
 
   // process per bundle
-  for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+  int count=0;
+  for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++ , count++) {
     
     const PSF_Params& params_of_bundle = bundle_it->second;
     if(only_this_bundle>=0 && (params_of_bundle.bundle_id != only_this_bundle)) continue;
     
+    /*
+    int left_margin = 0;
+    if(count==0) left_margin = x_margin;
+    int right_margin = 0;
+    if(count==psf->ParamsOfBundles.size()-1) right_margin = x_margin;
+    */
+    
     for (int j=begin_j; j <end_j; ++j) { 
       
-      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1 - x_margin);
+      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2 + x_margin);
 
       // zero the frame
       for (int i=begin_i ; i <end_i; ++i) {
@@ -189,8 +206,15 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       
       for (int j=begin_j; j <end_j; ++j) { 
 	
-	int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
-	int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	/*
+	int left_margin = 0;
+	if(count==0) left_margin = x_margin;
+	int right_margin = 0;
+	if(count==psf->ParamsOfBundles.size()-1) right_margin = x_margin;
+	*/
+
+	int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1 - x_margin);
+	int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2 + x_margin);
 	
 	if(only_core) {
 	  if(j<spot_stamp.begin_j || j>=spot_stamp.end_j ) continue;

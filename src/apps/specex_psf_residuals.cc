@@ -145,7 +145,7 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------
     // definition of fitted region of image
     // ----------------------------------------------------
-    Stamp global_stamp = compute_stamp(image,psf,spots);
+    Stamp global_stamp = compute_stamp(image,psf,spots,0,0);
     
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
@@ -155,7 +155,7 @@ int main ( int argc, char *argv[] ) {
     bool only_psf_core = false;
     bool only_positive = false;
     
-    parallelized_compute_model_image(model,weight,psf,spots,only_on_spots,only_psf_core,only_positive);
+    parallelized_compute_model_image(model,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0);
     
     const image_data& model_for_var = model;
 

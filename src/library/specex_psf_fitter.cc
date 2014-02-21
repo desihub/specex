@@ -572,7 +572,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 
   // definition of fitted region of image
   // ----------------------------------------------------
-  stamp = compute_stamp(image,psf,spots,psf_params->bundle_id);
+  stamp = compute_stamp(image,psf,spots,psf_params->bundle_id,0,0);
   
   if(spots.size()>1) {
     // compute psf footprint
@@ -607,7 +607,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	}
       }
       
-      parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,psf_params->bundle_id);
+      parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0,psf_params->bundle_id);
       
       if(modified_tail_amplitude) {
 	psf_params->AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff = saved_tail_amplitude_coeff;
@@ -1494,7 +1494,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	const string& name = param_names[p];
 	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2") {
 	  degx=0;
-	  degw=1;
+	  degw=0;
 	}
 	if(name=="TAILAMP") {
 	  degx=0;
@@ -1565,7 +1565,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok |= (name=="GHSIGX" || name=="GHSIGY");
       //ok |= (name=="GHSIGX2");
       //ok |= (name=="GHSIGY2");
-      //ok |= (name=="GHSCAL2");
+      ok |= (name=="GHSCAL2");
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
