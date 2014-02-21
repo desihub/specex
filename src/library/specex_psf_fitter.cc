@@ -1116,7 +1116,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   int index=0;
 
   // copy fitted parameters in the right places:
-  if (fit_psf) {
+  if (fit_psf || fit_psf_tail) {
     // save params to psf
     
     for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
