@@ -4,7 +4,7 @@
 using namespace std;
 
 
-specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots) {
+specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, int only_this_bundle) {
   
   Stamp global_stamp(model_image);
   global_stamp.begin_i = 10000;
@@ -15,7 +15,9 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   for(size_t s=0;s<spots.size();s++) {
     
     specex::Spot_p spot = spots[s];
-      
+
+    if((only_this_bundle>=0) && (spot->fiber_bundle != only_this_bundle)) continue;
+
     Stamp stamp(model_image);
     psf->StampLimits(spot->xc,spot->yc,stamp.begin_i,stamp.end_i,stamp.begin_j,stamp.end_j);
     stamp.begin_i = max(0,stamp.begin_i);
@@ -31,7 +33,7 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   return global_stamp;
 }
 
-void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp) {
+void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int only_this_bundle) {
 
   SPECEX_INFO("parallelized_compute_model_image");
   
@@ -62,15 +64,15 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
     int end_j   = stamp.begin_j + (chunk+1)*step_j;
     if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
     
-    compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,minimal_tail_amp,begin_j,end_j);
+    compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,begin_j,end_j,only_this_bundle);
   } 
 }
 
 
 
-void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, double minimal_tail_amp, int predefined_begin_j, int predefined_end_j) {
+void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int predefined_begin_j, int predefined_end_j, int only_this_bundle) {
   
-  Stamp global_stamp = compute_stamp(model_image,psf,spots);
+  Stamp global_stamp = compute_stamp(model_image,psf,spots,only_this_bundle);
   
   
   
@@ -83,7 +85,9 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
   for(size_t s=0;s<spots.size();s++) {
     
     specex::Spot_p spot = spots[s];
-      
+    
+    
+
     Stamp stamp(model_image);
     psf->StampLimits(spot->xc,spot->yc,stamp.begin_i,stamp.end_i,stamp.begin_j,stamp.end_j);
     stamp.begin_i = max(0,stamp.begin_i);
@@ -91,7 +95,9 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     stamp.begin_j = max(0,stamp.begin_j);
     stamp.end_j   = min(stamp.Parent_n_rows(),stamp.end_j);
     spot_stamps.push_back(stamp);
-   
+
+    if(only_this_bundle>=0 && (spot->fiber_bundle != only_this_bundle)) continue;
+
     if(only_on_spots) {
       for(int j=stamp.begin_j;j<stamp.end_j;j++)
 	for(int i=stamp.begin_i;i<stamp.end_i;i++)
@@ -118,6 +124,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
   for(std::map<int,PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
     
     const PSF_Params& params_of_bundle = bundle_it->second;
+    if(only_this_bundle>=0 && (params_of_bundle.bundle_id != only_this_bundle)) continue;
     
     for (int j=begin_j; j <end_j; ++j) { 
       
@@ -154,38 +161,61 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
 	} // end of loop on fiber
       } // end of test on continuum
 #endif  
+    
+    } // end of loop on j
+      
+    int nspots_in_stamp = 0;
+    for(size_t s=0;s<spots.size();s++) {
+      if(spots[s]->fiber_bundle == bundle_it->first) nspots_in_stamp ++;
+    }
+
+    // loop on spots
+    int sok=0;
+    for(size_t s=0;s<spots.size();s++) {
 
       
-      // loop on spots
-      for(size_t s=0;s<spots.size();s++) {
-	specex::Spot_p spot = spots[s];
-	if(spot->fiber_bundle != bundle_it->first) continue; // keep only spots of this bundle
 
-	harp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+      specex::Spot_p spot = spots[s];
+      if(spot->fiber_bundle != bundle_it->first) continue; // keep only spots of this bundle
+      
+      //if(sok%100==0) SPECEX_INFO("spot " << sok << "/" << nspots_in_stamp);
+      sok++;
+      
+      const Stamp& spot_stamp=spot_stamps[s];
+
+      harp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+      bool has_tail  = spot_params(psf_tail_index)!=0;
+      bool only_core = ( only_psf_core || (!has_tail) );
+      
+      for (int j=begin_j; j <end_j; ++j) { 
 	
-#ifdef EXTERNAL_TAIL 
-	if(minimal_tail_amp) {
-	  if(spot_params(psf_tail_index)<minimal_tail_amp) spot_params(psf_tail_index)=minimal_tail_amp;
+	int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1);
+	int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2);
+	
+	if(only_core) {
+	  if(j<spot_stamp.begin_j || j>=spot_stamp.end_j ) continue;
+	  begin_i = max(begin_i,spot_stamp.begin_i);
+	  end_i   = min(end_i,spot_stamp.end_i);	  
 	}
-#endif   
+
 	for(int i=begin_i; i<end_i;i++) {
 	  
 	  if(weight(i,j)<=0) continue;
-		
-	  bool in_core =  spot_stamps[s].Contains(i,j);
+	  
+	  bool in_core =  spot_stamp.Contains(i,j);
 	  if(!in_core && only_psf_core) continue;
 	  
 	  if(only_on_spots && spot_stamp_footprint(i,j)==0) continue;
 	  
-	  double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, spot_params, 0, 0, in_core, true); // compute CPU expensive PSF core only if needed
+	  double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc,spot->yc, i, j, spot_params, 0, 0, in_core, has_tail); // compute CPU expensive PSF core only if needed
 	  
 	  if(val>0 || (!only_positive))
 	    model_image(i,j) += val; // this now includes core and tails
 	  else if(model_image(i,j)==0) 
 	    model_image(i,j) = eps;
 	  
-	} // end of loop on i
-      } // end of loop on spots
-    } // end of loop on j
+	} // end of loop on i  
+      } // end of loop on j
+    } // end of loop on spots
   } // end of loop on bundles
 } // end of func

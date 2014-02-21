@@ -133,14 +133,16 @@ int main( int argc, char *argv[] ) {
 
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf->ParamsOfBundles.begin();
       bundle_it != psf->ParamsOfBundles.end(); ++bundle_it) {
-    for(std::map<int,specex::Trace>::const_iterator fiber_it = psf->FiberTraces.begin(); 
-	fiber_it != psf->FiberTraces.end(); ++fiber_it) {
+    for(int fiber = bundle_it->second.fiber_min;
+	fiber <= bundle_it->second.fiber_max; ++fiber) {
       
-      const specex::Trace& trace = fiber_it->second;
+      const specex::Trace& trace = psf->GetTrace(fiber);
       double trace_wave_min = trace.X_vs_W.xmin;
       double trace_wave_max = trace.X_vs_W.xmax;
       double min_wave = wave_step*int(max(3500.,trace_wave_min)/wave_step+1);
       
+      SPECEX_INFO("bundle " << bundle_it->first << " fiber " << fiber << " wave range = " << trace_wave_min << " " << trace_wave_max);
+
       // loop on wavelength
       for(double wave = min_wave ; wave<= trace_wave_max; wave += wave_step) {
 	
@@ -150,7 +152,7 @@ int main( int argc, char *argv[] ) {
 	spot->yc = trace.Y_vs_W.Value(wave);
 	spot->flux = 1;
 	spot->wavelength = wave;
-	spot->fiber = fiber_it->first;
+	spot->fiber = fiber;
 	spot->fiber_bundle = bundle_it->first;
 	spots.push_back(spot);
 	
@@ -159,12 +161,21 @@ int main( int argc, char *argv[] ) {
     }
   }
   
-  // remove continuum
+#ifdef CONTINUUM
+  SPECEX_INFO("remove continuum");
   for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin();
       bundle_it != psf->ParamsOfBundles.end(); ++bundle_it) {
     bundle_it->second.ContinuumPol.coeff.clear();
   }
+#endif
 
+  if(0) {
+    SPECEX_INFO("remove psf tail");
+    for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin();
+	bundle_it != psf->ParamsOfBundles.end(); ++bundle_it) {
+      bundle_it->second.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff.clear();
+    }
+  }
 
    // create image
   specex::image_data img(psf->ccd_image_n_cols,psf->ccd_image_n_rows);
@@ -178,6 +189,7 @@ int main( int argc, char *argv[] ) {
 
   SPECEX_INFO("computing  image ...");  
   specex::parallelized_compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive);
+  //specex::compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,12);
   
   SPECEX_INFO("writing image ...");
   specex::write_new_fits_image(output_image_fits_filename,img);

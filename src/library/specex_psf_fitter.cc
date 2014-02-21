@@ -572,7 +572,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 
   // definition of fitted region of image
   // ----------------------------------------------------
-  stamp = compute_stamp(image,psf,spots);
+  stamp = compute_stamp(image,psf,spots,psf_params->bundle_id);
   
   if(spots.size()>1) {
     // compute psf footprint
@@ -595,8 +595,25 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       if(only_psf_core) SPECEX_INFO("WEIGHTS: only psf core");
       if(only_positive) SPECEX_INFO("WEIGHTS: only positive");
       
-      parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0.005);
+      bool modified_tail_amplitude = false;
+      harp::vector_double saved_tail_amplitude_coeff;
+      if(fit_psf_tail || fit_continuum) {
+	int index=psf->ParamIndex("TAILAMP");
+	if(psf_params->AllParPolXW[index]->coeff(0)==0) {
+	  saved_tail_amplitude_coeff=psf_params->AllParPolXW[index]->coeff;
+	  psf_params->AllParPolXW[index]->coeff(0)=0.005;
+	  modified_tail_amplitude = true;
+	  SPECEX_INFO("WEIGHTS: setting tail amplitude = " << psf_params->AllParPolXW[index]->coeff(0) << " for weights");
+	}
+      }
       
+      parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,psf_params->bundle_id);
+      
+      if(modified_tail_amplitude) {
+	psf_params->AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff = saved_tail_amplitude_coeff;
+      }
+      
+
       bool zero_weight_for_core = ((fit_psf_tail || fit_continuum) && !fit_flux && !fit_psf);
       
       
