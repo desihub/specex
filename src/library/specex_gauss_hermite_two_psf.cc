@@ -258,8 +258,8 @@ harp::vector_double specex::GaussHermite2PSF::DefaultParams() const
   int index=0;
   Params(index++) = 1.1; // this is sigma_x
   Params(index++) = 1.1; // this is sigma_y  
-  Params(index++) = 4.; // this is sigma_x_2
-  Params(index++) = 4.; // this is sigma_y_2
+  Params(index++) = 3.; // this is sigma_x_2
+  Params(index++) = 3.; // this is sigma_y_2
   
   index += ((core_degree+1)*(core_degree+1)-1);
   index += ((second_degree+1)*(second_degree+1)); // here norm is a free param
