@@ -149,7 +149,22 @@ int main ( int argc, char *argv[] ) {
     
     // fill model image
     image_data model(image.n_cols(),image.n_rows());
+    
     image_data core_footprint(image.n_cols(),image.n_rows());
+    int hsize=3;   
+    for(size_t s=0;s<spots.size();s++) {     
+      specex::Spot_p spot = spots[s];
+      
+      int i = int(floor(spot->xc+0.5));
+      int j = int(floor(spot->yc+0.5));
+      int begin_i = max(0,i-hsize);
+      int end_i = min(int(image.n_cols()),i+hsize+1);
+      int begin_j = max(0,j-hsize);
+      int end_j = min(int(image.n_rows()),j+hsize+1);
+      for(j=begin_j;j<end_j;j++)
+	for(i=begin_i;i<end_i;i++)
+	  core_footprint(i,j)=1;
+    }
     
     bool only_on_spots = false;
     bool only_psf_core = false;
