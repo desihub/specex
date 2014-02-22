@@ -216,26 +216,41 @@ int main( int argc, char *argv[] ) {
     harp::vector_double saved_TAILAMP_coeff = params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff;
     
 
+    harp::vector_double psf_params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
+    vector<string> names = psf->DefaultParamNames();
+    for(size_t k=0;k<psf_params.size(); k++) {
+      cout << k << " " << names[k] << " " << psf_params(k) << endl;
+    }
     
     img.data.clear();
     specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
     specex::image_data all_contributions_img = img;
     
-    params_of_bundle.AllParPolXW[psf->ParamIndex("GHSCAL2")]->coeff.clear();
-    img.data.clear();
-    specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
-    specex::image_data core_gaussian_and_tails_img = img;
+    double tail_amp = psf_params[psf->ParamIndex("TAILAMP")];
+    double scal2    = psf_params[psf->ParamIndex("GHSCAL2")];
     
     params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff.clear();
     img.data.clear();
     specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
-    specex::image_data only_core_gaussian_img = img;
+    specex::image_data only_core_and_second_gaussian_img = img;
+    specex::image_data only_tails_img = all_contributions_img;
+    only_tails_img.data -= only_core_and_second_gaussian_img.data;
     
-    specex::image_data only_tails_img = core_gaussian_and_tails_img; 
-    only_tails_img.data -= only_core_gaussian_img.data;
-
-    specex::image_data only_second_gaussian_img = all_contributions_img;
-    only_second_gaussian_img.data -= core_gaussian_and_tails_img.data;
+    params_of_bundle.AllParPolXW[psf->ParamIndex("GHSCAL2")]->coeff.clear();
+    img.data.clear();
+    specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
+    specex::image_data only_core_gaussian_img = img;
+    only_core_gaussian_img.data *= (1-scal2);
+    
+    specex::image_data only_second_gaussian_img = only_core_and_second_gaussian_img;
+    only_second_gaussian_img.data -= only_core_gaussian_img.data;
+    
+    
+    specex::image_data zero = all_contributions_img;
+    zero.data -= only_core_gaussian_img.data;
+    zero.data -= only_second_gaussian_img.data;
+    zero.data -= only_tails_img.data;
+    
 
     
     sprintf(filename,"single_spot_fiber_%d_wave_%d_all_contributions.fits",spot->fiber,(int)spot->wavelength);
@@ -246,6 +261,8 @@ int main( int argc, char *argv[] ) {
     specex::write_new_fits_image(filename,only_second_gaussian_img);
     sprintf(filename,"single_spot_fiber_%d_wave_%d_only_tails.fits",spot->fiber,(int)spot->wavelength);
     specex::write_new_fits_image(filename,only_tails_img);
+    sprintf(filename,"zero.fits");
+    specex::write_new_fits_image(filename,zero);
     
     
     
