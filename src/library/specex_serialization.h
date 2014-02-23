@@ -10,6 +10,7 @@
 #include <specex_gauss_hermite_psf.h>
 #include <specex_gauss_hermite_two_psf.h>
 #include <specex_hat_hermite_psf.h>
+#include <specex_hat_moffat_psf.h>
 
 
 
@@ -18,5 +19,6 @@ BOOST_CLASS_EXPORT(specex::PSF)
 BOOST_CLASS_EXPORT(specex::GaussHermitePSF)
 BOOST_CLASS_EXPORT(specex::GaussHermite2PSF)
 BOOST_CLASS_EXPORT(specex::HatHermitePSF)
+BOOST_CLASS_EXPORT(specex::HatMoffatPSF)
 
 #endif

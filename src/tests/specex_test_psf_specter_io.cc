@@ -226,7 +226,7 @@ int main( int argc, char *argv[] ) {
     specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
     specex::image_data all_contributions_img = img;
     
-    double tail_amp = psf_params[psf->ParamIndex("TAILAMP")];
+    
     double scal2    = psf_params[psf->ParamIndex("GHSCAL2")];
     
     params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff.clear();

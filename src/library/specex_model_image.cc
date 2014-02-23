@@ -143,10 +143,13 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     if(count==psf->ParamsOfBundles.size()-1) right_margin = x_margin;
     */
     
+    int margin = 3;
+    if(x_margin>0) margin=x_margin;
+    
     for (int j=begin_j; j <end_j; ++j) { 
       
-      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1 - x_margin);
-      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2 + x_margin);
+      int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
+      int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
 
       // zero the frame
       for (int i=begin_i ; i <end_i; ++i) {
@@ -206,15 +209,11 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       
       for (int j=begin_j; j <end_j; ++j) { 
 	
-	/*
-	int left_margin = 0;
-	if(count==0) left_margin = x_margin;
-	int right_margin = 0;
-	if(count==psf->ParamsOfBundles.size()-1) right_margin = x_margin;
-	*/
-
-	int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-psf->hSizeX-1 - x_margin);
-	int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+psf->hSizeX+2 + x_margin);
+	int margin = 3;
+	if(x_margin>0) margin=x_margin;
+	
+	int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
+	int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
 	
 	if(only_core) {
 	  if(j<spot_stamp.begin_j || j>=spot_stamp.end_j ) continue;

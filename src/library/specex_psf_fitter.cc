@@ -390,7 +390,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	double flux = tmp.flux;
 	
-	if(!in_core) flux = tmp.frozen_flux; // to decorrelate tails
+	// if(!in_core) flux = tmp.frozen_flux; // to decorrelate tails
 
 	
 	if(fabs(flux*psfVal)>1.e20) {
@@ -1562,7 +1562,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     for(int p=0;p<npar;p++) {
       const string& name = psf->ParamName(p);
       bool ok = false;
-      ok |= (name=="GHSIGX" || name=="GHSIGY");
+      ok |= (name=="GHSIGX" || name=="GHSIGY" || name=="RADIUS"  || name=="SIGMA" );
       //ok |= (name=="GHSIGX2");
       //ok |= (name=="GHSIGY2");
       //ok |= (name=="GHSCAL2");
@@ -1662,12 +1662,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok = true;
       ok &= (name!="GHSIGX" && name!="GHSIGY");
       ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+      ok &= (name!="RADIUS" && name!="SIGMA");
       ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
   }
-  
+  if(psf_params->FitParPolXW.size()) {
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (gaussian + hermite terms)");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1677,7 +1678,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = false;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  
+  }
 
 #ifdef CONTINUUM
 #ifdef EXTERNAL_TAIL  
@@ -1722,6 +1723,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	ok = true;
 	ok &= (name!="GHSIGX" && name!="GHSIGY");
 	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+	//ok &= (name!="RADIUS" && name!="SIGMA");
+	ok &= (name!="RADIUS");
 	ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
 	if(ok)
 	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
@@ -1733,7 +1736,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 #endif
 #endif
   
-  
+  if(psf_params->FitParPolXW.size()) {
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis)");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1744,7 +1747,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  
+  }
   SPECEX_INFO("Starting FitSeveralSpots FLUX (updated tails)");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1801,17 +1804,18 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	ok = true;
 	ok &= (name!="GHSIGX" && name!="GHSIGY");
 	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
-	ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+	ok &= (name!="RADIUS" && name!="SIGMA");
+	//ok &= (name!="RADIUS");
+	ok &= (name!="TAILAMP");
+	ok &= (name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
 	if(ok)
 	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
       }
     }
-    
-    
   }
 #endif
 #endif
-  
+  if(psf_params->FitParPolXW.size()) {
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
   SPECEX_INFO("=======================================");
   fit_flux       = true;
@@ -1822,7 +1826,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  
+  }
     
   SPECEX_INFO("Compute final chi2");
   SPECEX_INFO("=======================================");

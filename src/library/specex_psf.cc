@@ -346,7 +346,7 @@ double specex::PSF::PSFValueWithParamsFW(const int fiber, const double &wave,
   
   double X=Xccd(fiber,wave);
   double Y=Yccd(fiber,wave);
-  return PixValue(X,Y,IPix, JPix, Params, PosDer, ParamDer);
+  return PSFValueWithParamsFW(X,Y,IPix,JPix,Params,PosDer,ParamDer,with_core,with_tail);
 }
 
 //! Access to the current PSF 

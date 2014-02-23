@@ -30,26 +30,13 @@ void specex::HatHermitePSF::SetDegree(const int ideg) {
   degree = ideg;
 }
 
-int specex::HatHermitePSF::LocalNAllPar() const {
-    
-  int npar = 1; // sigma
-  
-#ifdef HAT_AND_GAUSSIAN
-  npar += 3;
-#endif
-
-  // npar += (degree+1)*(degree+1)-4;// skip (0,0)(1,0)(0,1)(1,1) : -1 because normalized, -3 because centered 
-  npar += (degree+1)*(degree+1)-1;// skip (0,0) : -1 because normalized
-  
-
-  return npar;
-}
 
 double specex::HatHermitePSF::Profile(const double &x, const double &y,
 			  const harp::vector_double &Params,
 			  harp::vector_double *PosDer,
 			  harp::vector_double *ParamDer) const
 {
+
 
   
   const double &sr = Params[0];
@@ -81,7 +68,8 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     - Fiber diameter b-channel in pixels = (6.65*15)/260*120./15 = 3.07 pixels
         
   */
-  double fr = 1.53; // fiber radius, hardcoded for test purposes, this number of for b-channel
+  
+  double fr = 1.53; // fiber radius, hardcoded for test purposes, this number of for b-channel  
   double fr2 = fr*fr;
   
   double s2si     = 1./(sqrt(2)*sr); 
@@ -105,57 +93,40 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     the true profile is not analytic.
   */
   double hat = hat_norm*(erf(s2si*(fr-r))+erf(s2si*(fr+r)));
-  double prof = hat;
+  
   
   /* for hermite terms we use an effective sigma=1 anyway*/
   
-
-#ifdef HAT_AND_GAUSSIAN
+  int first_hermite_param_index = 3;
+  
   double sigma_x_2_inv = 1./Params[1];
   double sigma_y_2_inv = 1./Params[2];
-  double scale_2       = Params[3];
-  double scale_1       = 1-scale_2;
+  double scale_hat     = 1-Params[first_hermite_param_index];
   double x_2 = x*sigma_x_2_inv;
   double y_2 = y*sigma_y_2_inv;
   
   double gaus=1/(2*M_PI)*sigma_x_2_inv*sigma_y_2_inv*exp(-0.5*(x_2*x_2+y_2*y_2));
   
-  prof = scale_1*hat+scale_2*gaus;
   
-  
-#endif
   
   int nx=(degree+1);
   int ny=(degree+1);
-  //int nc=nx*ny-4; // skip (0,0)(1,0)(0,1)(1,1)
-  int nc=nx*ny-1; // skip (0,0)
+  int nc=nx*ny;
   
   // precompute to go faster
   harp::vector_double Monomials;
   harp::vector_double Monomials_dx;
   harp::vector_double Monomials_dy;
   
-#ifndef HAT_AND_GAUSSIAN
-  int first_hermite_param_index = 1; // first 1 param is sigma
-#else
-  int first_hermite_param_index = 4; // 
-#endif
-  
-  double prefactor=1;
+  double prefactor=0;
   if(PosDer==0 && ParamDer==0) {
     int param_index=first_hermite_param_index;
-
-    
-
     for(int j=0;j<ny;j++) {
-      double Hyj=HermitePol(j,y);
-      //int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
-      int imin=0; if(j==0) imin=1; // skip (0,0)
-      for(int i=imin;i<nx;i++,param_index++) {
-	prefactor+=Params(param_index)*Hyj*HermitePol(i,x);
+      double Hyj=HermitePol(j,y_2);
+      for(int i=0;i<nx;i++,param_index++) {
+	prefactor+=Params(param_index)*Hyj*HermitePol(i,x_2);
       }
     }
-    return prof*prefactor;
     
   } else if(ParamDer) {
     Monomials.resize(nc);
@@ -163,15 +134,12 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     Monomials_dy.resize(nc);
     int index=0;
     for(int j=0;j<ny;j++) {
-      double Hyj=HermitePol(j,y);
-      double dHyj=HermitePolDerivative(j,y);
-      
-      //int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
-      int imin=0; if(j==0) imin=1; // skip (0,0)
-      for(int i=imin;i<nx;i++,index++) {
-	double Hxi=HermitePol(i,x);
+      double Hyj=HermitePol(j,y_2);
+      double dHyj=HermitePolDerivative(j,y_2);
+      for(int i=0;i<nx;i++,index++) {
+	double Hxi=HermitePol(i,x_2);
 	Monomials[index]=Hyj*Hxi;
-	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x);
+	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x_2);
 	Monomials_dy[index]=dHyj*Hxi;
       }
     }
@@ -182,23 +150,19 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     int param_index=first_hermite_param_index;
     int index=0;
     for(int j=0;j<ny;j++) {
-      double Hyj=HermitePol(j,y);
-      double dHyj=HermitePolDerivative(j,y);
-      
-      //int imin=0; if(j<2) {imin=2;} // skip (0,0)(1,0)(0,1)(1,1)
-      int imin=0; if(j==0) imin=1; // skip (0,0)
-      for(int i=imin;i<nx;i++,index++,param_index++) {
-	
-	double Hxi=HermitePol(i,x);
+      double Hyj=HermitePol(j,y_2);
+      double dHyj=HermitePolDerivative(j,y_2);
+      for(int i=0;i<nx;i++,index++,param_index++) {
+	double Hxi=HermitePol(i,x_2);
 	prefactor+=Params(param_index)*Hxi*Hyj;
-	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x);
+	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x_2);
 	Monomials_dy[index]=dHyj*Hxi;
       }
     }
   }
   
   
-  double psf_val = prof*prefactor;
+  double psf_val = scale_hat*hat+gaus*prefactor;
   
   double exp1 = 0;
   double exp2 = 0;
@@ -210,14 +174,10 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
   }
   
   if(ParamDer) {
-    
-    
-    
-    
     // der wrt erf terms:
     // MEMO psf_val = prefactor*hat_norm*(erf(s2si*(fr-r))+erf(s2si*(fr+r)));
     
-    double dvdsr = (prefactor*hat_norm*s2si*2/sqrt(M_PI))*(-1./sr)*((fr-r)*exp1+(fr+r)*exp2); 
+    double dvdsr = (scale_hat*hat_norm*s2si*2/sqrt(M_PI))*(-1./sr)*((fr-r)*exp1+(fr+r)*exp2); 
     
     // der wrt hat_norm:
     // MEMO hat_norm = 1/(2*sqrt(M_PI)*fr*sr*exprs+M_PI*(2*fr2+sr2)*erfrs);
@@ -234,24 +194,21 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     
     // simplification :
     
-    dvdsr += prefactor*hat*(-hat_norm)*( M_PI*2*sr*erfrs );
+    dvdsr += scale_hat*hat*(-hat_norm)*( M_PI*2*sr*erfrs );
         
-
-#ifdef HAT_AND_GAUSSIAN
-    dvdsr *= scale_1;
-#endif 
-
-
     (*ParamDer)[0] = dvdsr;
     
-#ifdef HAT_AND_GAUSSIAN
     // need to compute derivatives here if we care
-    (*ParamDer)[1] = 0;
-    (*ParamDer)[2] = 0;
-    (*ParamDer)[3] = (-hat+gaus)*prefactor;
-#endif 
+    // error somewhere here :
+    (*ParamDer)[1] = (x_2*x_2-1)*sigma_x_2_inv*gaus*prefactor;
+    (*ParamDer)[2] = (y_2*y_2-1)*sigma_y_2_inv*gaus*prefactor;
+    (*ParamDer)[1] -= (x_2*sigma_x_2_inv*gaus)*specex::dot(Monomials_dx,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
+    (*ParamDer)[2] -= (y_2*sigma_y_2_inv*gaus)*specex::dot(Monomials_dy,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
     
-    ublas::project(*ParamDer,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)) = prof*Monomials;
+    ublas::project(*ParamDer,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)) = gaus*Monomials;
+    
+    (*ParamDer)[first_hermite_param_index] -= hat; // norm of hat
+  
   }
   
   if(PosDer) { 
@@ -261,31 +218,35 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
 
    
     // MEMO psf_val = prefactor*hat_norm*erf(s2si*(fr-r))+erf(s2si*(fr+r));
-    double dvdr  = (prefactor*hat_norm*s2si*2/sqrt(M_PI))*(-exp1+exp2);
-
-#ifdef HAT_AND_GAUSSIAN 
-    dvdr *= scale_1;
-#endif
+    double dvdr  = (scale_hat*hat_norm*s2si*2/sqrt(M_PI))*(-exp1+exp2);
     
     dvdx=-(x/r)*dvdr; // minus sign cause derivative wrt -x
     dvdy=-(y/r)*dvdr; // minus sign cause derivative wrt -y
     
     double d_poly_dx = specex::dot(Monomials_dx,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
     double d_poly_dy = specex::dot(Monomials_dy,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
-    dvdx -= d_poly_dx*prof; // minus sign cause derivative wrt -x
-    dvdy -= d_poly_dy*prof; // minus sign cause derivative wrt -y
+    dvdx -= d_poly_dx*gaus; // minus sign cause derivative wrt -x
+    dvdy -= d_poly_dy*gaus; // minus sign cause derivative wrt -y
 
-#ifdef HAT_AND_GAUSSIAN
-    // derivative due to gaussian terms
-    
-    dvdx += x_2*sigma_x_2_inv*scale_2*gaus*prefactor;
-    dvdy += y_2*sigma_y_2_inv*scale_2*gaus*prefactor;
-
-#endif
+    dvdx += x_2*sigma_x_2_inv*gaus*prefactor;
+    dvdy += y_2*sigma_y_2_inv*gaus*prefactor;
 
   }
   
   return psf_val;
+}
+
+int specex::HatHermitePSF::LocalNAllPar() const {
+    
+  int npar = 1; // sigma
+  npar += 2; // gh sigmas
+  npar += (degree+1)*(degree+1); // hermite coeffs
+
+#ifdef EXTERNAL_TAIL
+  npar += 5;
+#endif
+
+  return npar;
 }
 
   
@@ -294,11 +255,19 @@ harp::vector_double specex::HatHermitePSF::DefaultParams() const
   
   harp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning 
-  Params(0) = 0.3; // this is sigma_x of the hat
-#ifdef HAT_AND_GAUSSIAN
-  Params(1) = 3.; // this is sigma_x_2
-  Params(2) = 3.; // this is sigma_y_2
-  Params(3) = 0.1; // this is the amplitude of the second gaussian
+  int index=0;
+  Params(index++) = 0.3; // this is sigma_x of the hat
+  Params(index++) = 1.9; // this is sigma_x_2
+  Params(index++) = 1.9; // this is sigma_y_2
+  
+  index += (degree+1)*(degree+1); // hermite coeffs
+  
+#ifdef EXTERNAL_TAIL  
+  Params(index++) = 0.; // tail amplitude
+  Params(index++) = 1.; // tail core size
+  Params(index++) = 1.; // tail x scale
+  Params(index++) = 1.; // tail y scale
+  Params(index++) = 2.3; // tail power law index
 #endif
   return Params;
 }
@@ -306,26 +275,25 @@ harp::vector_double specex::HatHermitePSF::DefaultParams() const
 std::vector<std::string> specex::HatHermitePSF::DefaultParamNames() const
 {
   std::vector<std::string> paramNames;
-  paramNames.push_back("GHSIGX");
-  
-#ifdef HAT_AND_GAUSSIAN
+  paramNames.push_back("SIGMA");
   paramNames.push_back("GHSIGX2");
   paramNames.push_back("GHSIGY2");
-  paramNames.push_back("GHSCAL2");
-#endif 
-    
+  
   char n[10];
   for(int j=0;j<degree+1;j++) {
     for(int i=0;i<degree+1;i++) {
-      if(i==0 && j==0) continue;
-      //if(i==1 && j==0) continue;
-      //if(i==0 && j==1) continue;
-      //if(i==1 && j==1) continue;
-      
       sprintf(n,"GH-%d-%d",i,j);
       paramNames.push_back(n);
     }
   }
+#ifdef EXTERNAL_TAIL
+  paramNames.push_back("TAILAMP");
+  paramNames.push_back("TAILCORE");
+  paramNames.push_back("TAILXSCA");
+  paramNames.push_back("TAILYSCA");
+  paramNames.push_back("TAILINDE");
+#endif 
+  
   return paramNames;
 }
 

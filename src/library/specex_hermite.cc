@@ -12,6 +12,7 @@ double specex::HermitePol(const int Degree, const double &x) {
     case 3: return x*(x*x-3); break;
     case 4: return x*x*(x*x-6)+3; break;
     case 5: return x*x*x*(x*x-10)+15*x; break;
+    case 6: return -15+x*x*(45+x*x*(-15+x*x)); break;
       /*
 	H0(x)=1
 	H1(x)=x
@@ -43,6 +44,7 @@ double specex::HermitePolDerivative(const int Degree, const double &x) {
     case 3: return 3*x*x-3; break;
     case 4: return 4*x*(x*x-3); break;
     case 5: return 5*x*x*(x*x-6)+15; break;
+    case 6: return 6*x*x*x*x*x-15*4*x*x*x+45*2*x; break;
       /*
 	H0(x)=1
 	H1(x)=x

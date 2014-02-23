@@ -50,9 +50,6 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
   int first_hermite1_param_index = 4;
   int first_hermite2_param_index = 4+((core_degree+1)*(core_degree+1)-1);
   
-  double scale2       = 1;
-  double scale1       = 1-Params(first_hermite2_param_index);
-  
   int nx1=(core_degree+1);
   int ny1=(core_degree+1);
   int nc1=nx1*ny1-1; // skip (0,0)
@@ -69,7 +66,7 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
   harp::vector_double Monomials2_dx;
   harp::vector_double Monomials2_dy;
   
-  double prefactor1=1; // includes order 0
+  double prefactor1=1-Params(first_hermite2_param_index); // includes order 0
   double prefactor2=0;
   double expfact1=1./(2*M_PI)*sigma_x_1_inv*sigma_y_1_inv*exp(-0.5*(x_1*x_1+y_1*y_1));
   double expfact2=1./(2*M_PI)*sigma_x_2_inv*sigma_y_2_inv*exp(-0.5*(x_2*x_2+y_2*y_2));
@@ -93,7 +90,7 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
       }
     }
     
-    return scale1*expfact1*prefactor1+scale2*expfact2*prefactor2;
+    return expfact1*prefactor1+expfact2*prefactor2;
     
   } else if(ParamDer) {
     Monomials1.resize(nc1);
@@ -176,8 +173,8 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
     }
   }
 
-  double psf_val1 = scale1*expfact1*prefactor1;
-  double psf_val2 = scale2*expfact2*prefactor2;
+  double psf_val1 = expfact1*prefactor1;
+  double psf_val2 = expfact2*prefactor2;
 
   double psf_val = psf_val1+psf_val2;
   
@@ -196,16 +193,16 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
                    -= x/sigmax * sum_i P_i Monomials_dx_i * expfact
      */
      
-    (*ParamDer)[0] -= (x_1*sigma_x_1_inv*scale1*expfact1)*specex::dot(Monomials1_dx,ublas::project(Params,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)));
-    (*ParamDer)[1] -= (y_1*sigma_y_1_inv*scale1*expfact1)*specex::dot(Monomials1_dy,ublas::project(Params,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)));
-    (*ParamDer)[2] -= (x_2*sigma_x_2_inv*scale2*expfact2)*specex::dot(Monomials2_dx,ublas::project(Params,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)));
-    (*ParamDer)[3] -= (y_2*sigma_y_2_inv*scale2*expfact2)*specex::dot(Monomials2_dy,ublas::project(Params,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)));
+    (*ParamDer)[0] -= (x_1*sigma_x_1_inv*expfact1)*specex::dot(Monomials1_dx,ublas::project(Params,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)));
+    (*ParamDer)[1] -= (y_1*sigma_y_1_inv*expfact1)*specex::dot(Monomials1_dy,ublas::project(Params,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)));
+    (*ParamDer)[2] -= (x_2*sigma_x_2_inv*expfact2)*specex::dot(Monomials2_dx,ublas::project(Params,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)));
+    (*ParamDer)[3] -= (y_2*sigma_y_2_inv*expfact2)*specex::dot(Monomials2_dy,ublas::project(Params,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)));
     
-    ublas::project(*ParamDer,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)) = (scale1*expfact1)*Monomials1;
-    ublas::project(*ParamDer,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)) = (scale2*expfact2)*Monomials2;
+    ublas::project(*ParamDer,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)) = expfact1*Monomials1;
+    ublas::project(*ParamDer,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)) = expfact2*Monomials2;
 
     // add one thing, change of scale1
-    (*ParamDer)[first_hermite2_param_index] -= expfact1*prefactor1;
+    (*ParamDer)[first_hermite2_param_index] -= expfact1;
     
   }
   
@@ -220,16 +217,16 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
     
     d_poly_dx = specex::dot(Monomials1_dx,ublas::project(Params,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)));
     d_poly_dy = specex::dot(Monomials1_dy,ublas::project(Params,ublas::range(first_hermite1_param_index,first_hermite1_param_index+nc1)));
-    dvdx -= d_poly_dx*scale1*expfact1*sigma_x_1_inv; // minus sign cause derivative wrt -x
-    dvdy -= d_poly_dy*scale1*expfact1*sigma_y_1_inv;
+    dvdx -= d_poly_dx*expfact1*sigma_x_1_inv; // minus sign cause derivative wrt -x
+    dvdy -= d_poly_dy*expfact1*sigma_y_1_inv;
     
     dvdx += x_2*sigma_x_2_inv*psf_val2;
     dvdy += y_2*sigma_y_2_inv*psf_val2;
     
     d_poly_dx = specex::dot(Monomials2_dx,ublas::project(Params,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)));
     d_poly_dy = specex::dot(Monomials2_dy,ublas::project(Params,ublas::range(first_hermite2_param_index,first_hermite2_param_index+nc2)));
-    dvdx -= d_poly_dx*scale2*expfact2*sigma_x_2_inv; // minus sign cause derivative wrt -x
-    dvdy -= d_poly_dy*scale2*expfact2*sigma_y_2_inv;
+    dvdx -= d_poly_dx*expfact2*sigma_x_2_inv; // minus sign cause derivative wrt -x
+    dvdy -= d_poly_dy*expfact2*sigma_y_2_inv;
 }
   
   return psf_val;
@@ -270,7 +267,7 @@ harp::vector_double specex::GaussHermite2PSF::DefaultParams() const
   Params(index++) = 1.; // tail core size
   Params(index++) = 1.; // tail x scale
   Params(index++) = 1.; // tail y scale
-  Params(index++) = 2.; // tail power law index
+  Params(index++) = 2.6; // tail power law index
 #endif
 
   return Params;

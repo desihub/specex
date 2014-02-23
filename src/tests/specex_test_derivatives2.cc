@@ -8,9 +8,6 @@
 #include "specex_fits.h"
 #include "specex_psf.h"
 #include "specex_psf_io.h"
-#include "specex_gauss_hermite_psf.h"
-#include "specex_gauss_hermite_two_psf.h"
-#include "specex_hat_hermite_psf.h"
 #include "specex_image_data.h"
 #include "specex_serialization.h"
 
@@ -21,9 +18,10 @@ int main() {
   
   specex_set_verbose(true);
   
-  //specex::PSF_p psf(new specex::HatHermitePSF(3));
-  specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
+  specex::PSF_p psf(new specex::HatHermitePSF(3));
+  //specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
   //specex::PSF_p psf(new specex::GaussHermitePSF(3));
+  //specex::PSF_p psf(new specex::HatMoffatPSF(3));
   psf->AllocateDefaultParams();
   
   vector<string> pnames = psf->DefaultParamNames();
@@ -38,10 +36,7 @@ int main() {
 
   // test for derivatives of sigma
   // for(size_t i=2;i<P.size();i++) P(i)=1;
-
-  
-  for(size_t i=4;i<P.size();i++) P(i)=0.05;
-  P(19)=0.5;
+  for(size_t i=3;i<min(35,int(P.size()));i++) P(i)=0.2;
   
   cout << P << endl;
 

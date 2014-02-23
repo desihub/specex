@@ -37,7 +37,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   int ny = 2*psf->hSizeY*oversampling+1;
   
 
-
+  double sum=0;
   specex::image_data img(nx,ny);
   for(int j=0;j<ny;j++) {
     for(int i=0;i<nx;i++) {
@@ -48,10 +48,12 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       double dy = (j-ny/2)/double(oversampling)-jb;
       
       img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
-
+      sum += img(i,j);
     }
   }
-
+  SPECEX_INFO("PSF integral in image = " << sum/(oversampling*oversampling));
+ 
+  
   // get maximum of psf profile numerically
   {
     double maxval=0;
@@ -64,7 +66,7 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
 	  double val=psf->PSFValueWithParamsXY(x,y,i,j,P,0,0);
 	  if(val>maxval) {maxval=val; imax=i; jmax=j;}
 	}
-    cout << "for x,y=" << x << "," << y << " max at i,j=" << imax << "," << jmax << endl;
+    SPECEX_INFO("for x,y=" << x << "," << y << " max at i,j=" << imax << "," << jmax);
   }
   
   specex::write_new_fits_image(filename,img);

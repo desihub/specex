@@ -22,12 +22,7 @@
 #include <specex_psf_fitter.h>
 
 #include <specex_psf_io.h>
-#include <specex_gauss_hermite_psf.h>
-#include <specex_gauss_hermite_two_psf.h>
-#include <specex_hat_hermite_psf.h>
 #include <specex_serialization.h>
-
-
 
 using namespace std;
 using namespace specex;
@@ -192,9 +187,11 @@ int main ( int argc, char *argv[] ) {
     if(psf_model=="GAUSSHERMITE")
       psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
     else if(psf_model=="GAUSSHERMITE2")
-      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg));
+      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,3));
     else if(psf_model=="HATHERMITE")
       psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
+    else if(psf_model=="HATMOFFAT")
+      psf = PSF_p(new specex::HatMoffatPSF(gauss_hermite_deg));
     else
       SPECEX_ERROR("don't know this psf model");
     
