@@ -348,7 +348,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       // w=1; // DEBUG
 
       double res = double(image(i,j));
-      
+      double signal = 0;
+
       if(compute_ab)
 	H.clear();
 
@@ -363,7 +364,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    ublas::project(H,ublas::range(continuum_index,continuum_index+np_continuum)) += continuum_prof*continuum_monomials[fiber];
 	  }
 	}
-	res -= continuum_value;
+	signal += continuum_value;
       }
 #endif      
       
@@ -398,7 +399,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	}
 
 	
-	res -= flux*psfVal;
+	signal += flux*psfVal;
 	
 	if (compute_ab) {
 	  
@@ -433,6 +434,16 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
 	} // end of test compute_ab
       } // end of loop on spots
+      
+      if(recompute_weight_in_fit) {
+	w =  square(psf->readout_noise);
+	if(signal>0) {
+	   w += signal/psf->gain;
+	}
+	w += square(psf->psf_error*signal);
+	w = 1./w;
+      }
+      res -= signal;
       
       chi2 += w*res*res;
 
@@ -487,13 +498,19 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       /////////////////////////////////////////////////////
 
 
-      if (compute_ab) { 
+      if (compute_ab) {
+
+	double bfact = w*res;
+	if(recompute_weight_in_fit) {
+	  bfact += 0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*fabs(signal));
+	}
+ 
 #ifdef SPARSE_H
 	  ublas::noalias(*Ap) += w*ublas::outer_prod(H,H);
 	  ublas::noalias(*Bp) += (w*res)*H;
 #else
 	  specex::syr(w,H,*Ap); //  this is still way too slow A += w*h*h.transposed(); this routine takes advantage of the zeros in h, its faster than sparce matrices
-	  specex::axpy(w*res,H,*Bp); // B += w*res*h;
+	  specex::axpy(bfact,H,*Bp); // B += w*res*h;
 #endif
       }
       
@@ -664,15 +681,19 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       
       
     }else{
-      // only footprint
+      SPECEX_INFO("WEIGHTS: Only footprint");
       for(size_t s=0;s<spots.size();s++) {
 	specex::Spot_p& spot= spots[s];
 	Stamp spot_stamp(image);
 	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
-	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++)
-	  for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
+	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
+	  int margin = 3;
+	  int begin_i = max(spot_stamp.begin_i, int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
+	  int end_i   = min(spot_stamp.end_i  , int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
+	  for(int i=begin_i;i<end_i;i++) {
 	    footprint_weight(i,j)=weight(i,j);
 	  }
+	}
       }
     }
     
@@ -1119,12 +1140,20 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   if (fit_psf || fit_psf_tail) {
     // save params to psf
     
+    //SPECEX_INFO("TESTING : input params of first spot = " << psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
+    
+    UpdateTmpData(false);
+    
+    //SPECEX_INFO("TESTING : fit params of first spot = " << spot_tmp_data[0].psf_all_params);
+		
+
     for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
       harp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
       for(size_t c=0;c<coeff.size();c++,index++)
 	coeff(c)=Params(index);
     }
-    
+  
+    //SPECEX_INFO("TESTING : output params of first spot = " << psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
     
   }
   if (fit_trace) {
@@ -1172,7 +1201,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
     }
   }
-  
+    
   // spot->chi2=*psfChi2;
   
   bool ok=(*niter < maxiter);
@@ -1823,7 +1852,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_psf        = true;
   fit_trace      = false;
   chi2_precision = 10;
-  include_signal_in_weight = true;
+  include_signal_in_weight = false;
+  recompute_weight_in_fit  = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }

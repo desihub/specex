@@ -102,6 +102,7 @@ class PSF_Fitter {
 
   double chi2_precision;
   bool include_signal_in_weight;
+  bool recompute_weight_in_fit;
   bool verbose;
   bool fatal;
   
@@ -124,6 +125,7 @@ class PSF_Fitter {
     fit_position(false), 
     chi2_precision(0.1),
     include_signal_in_weight(false),
+    recompute_weight_in_fit(false),
     scheduled_fit_of_traces(true),
 #ifdef EXTERNAL_TAIL
     fit_psf_tail(false),
