@@ -25,7 +25,7 @@ specex::GaussHermitePSF::GaussHermitePSF(int ideg) : PSF()
   
 }
 
-#define TWO_GAUSSIANS
+//#define TWO_GAUSSIANS
 
 void specex::GaussHermitePSF::SetDegree(const int ideg) {
   degree = ideg;
