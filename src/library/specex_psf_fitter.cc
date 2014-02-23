@@ -687,7 +687,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	Stamp spot_stamp(image);
 	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
 	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
-	  int margin = 3;
+	  int margin = max(6,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
 	  int begin_i = max(spot_stamp.begin_i, int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
 	  int end_i   = min(spot_stamp.end_i  , int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
 	  for(int i=begin_i;i<end_i;i++) {
@@ -1527,7 +1527,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	}
 	if(name=="TAILAMP") {
 	  degx=0;
-	  degw=1;
+	  degw=min(0,int(polynomial_degree_along_wave));
 	}
 	if(name=="TAILCORE" || name=="TAILXSCA" || name=="TAILYSCA" || name=="TAILINDE" ) {
 	  degx=0;
@@ -1544,7 +1544,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	
       }
 #ifdef CONTINUUM
-      psf_params->ContinuumPol.deg = 1;
+      SPECEX_WARNING("I set deg=0 to cont and tail");
+      psf_params->ContinuumPol.deg = 0;
       psf_params->ContinuumPol.coeff.resize(psf_params->ContinuumPol.deg+1);
       psf_params->ContinuumPol.coeff.clear();
       psf_params->ContinuumPol.xmin = min_wave;

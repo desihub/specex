@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
 
     int bundle = fiber/20; // to be modified
 
-    
+    cout << "wavelength = " << wavelength << " fiber = " << fiber << " bundle = " << bundle << endl;
     write_psf_fits_image(psf,output_fits_image_filename,fiber,wavelength,bundle,oversampling);
     
   }catch(harp::exception e) {

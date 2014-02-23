@@ -136,14 +136,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
     const PSF_Params& params_of_bundle = bundle_it->second;
     if(only_this_bundle>=0 && (params_of_bundle.bundle_id != only_this_bundle)) continue;
     
-    /*
-    int left_margin = 0;
-    if(count==0) left_margin = x_margin;
-    int right_margin = 0;
-    if(count==psf->ParamsOfBundles.size()-1) right_margin = x_margin;
-    */
-    
-    int margin = 3;
+    int margin = max(6,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
     if(x_margin>0) margin=x_margin;
     
     for (int j=begin_j; j <end_j; ++j) { 
@@ -209,8 +202,8 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       
       for (int j=begin_j; j <end_j; ++j) { 
 	
-	int margin = 3;
-	if(x_margin>0) margin=x_margin;
+	int margin = max(6,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
+ 	if(x_margin>0) margin=x_margin;
 	
 	int begin_i = max(global_stamp.begin_i, int(floor(psf->GetTrace(params_of_bundle.fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
 	int end_i   = min(global_stamp.end_i  , int(floor(psf->GetTrace(params_of_bundle.fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
