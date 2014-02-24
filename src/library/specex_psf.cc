@@ -153,7 +153,7 @@ double specex::PSF::TailProfile(const double& dx, const double &dy, const harp::
   int di = int(dxo);
   int dj = int(dyo);
   if(di>=NX_TAIL_PROFILE-1 || dj>=NY_TAIL_PROFILE-1) return 0.;
-  // return r_tail_profile(di,dj);
+  //return r_tail_profile(di,dj);
   return (
 	  (di+1-dxo)*(dj+1-dyo)*r_tail_profile(di,dj)
 	  +(dxo-di)*(dj+1-dyo)*r_tail_profile(di+1,dj)

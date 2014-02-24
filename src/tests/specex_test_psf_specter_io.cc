@@ -110,7 +110,7 @@ int main( int argc, char *argv[] ) {
   
   I'll compare to those numbers and then we'll continue from there...
   */
-  {
+  if(0){
     int bundle = 1;
     int fiber = 20;
     
