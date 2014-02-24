@@ -378,7 +378,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	bool in_core = tmp.stamp.Contains(i,j);
 
-	if( ! in_core && (!fit_psf_tail)  ) continue; // if we fit tails we use the data outside the core
+	//if( (!in_core) && (!fit_psf_tail)  ) continue; // if we fit tails we use the data outside the core, completely wrong, we need tails values everywhere
 		
 	nspots_in_pix++;
 	
@@ -389,7 +389,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	double flux = tmp.flux;
 	
-	// if(!in_core) flux = tmp.frozen_flux; // to decorrelate tails
+	if(!in_core) flux = tmp.frozen_flux; // to decorrelate tails
 
 	
 	if(fabs(flux*psfVal)>1.e20) {
@@ -1613,8 +1613,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
   {
     SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
-    psf->hSizeX=min(4,psf->hSizeX);
-    psf->hSizeY=min(4,psf->hSizeY);
+    psf->hSizeX=min(3,psf->hSizeX);
+    psf->hSizeY=min(3,psf->hSizeY);
     psf_params->FitParPolXW.clear();
     int npar = psf->LocalNAllPar();
     for(int p=0;p<npar;p++) {
