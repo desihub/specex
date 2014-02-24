@@ -84,6 +84,8 @@ class PSF_Fitter {
   const image_data& image;
   const image_data& weight;
   image_data footprint_weight; // weight x psf footprint for global fit
+  image_data corefootprint;
+  double corefootprint_weight_boost;
   Stamp stamp; // rectangle in image where the fit occurs
   bool fit_psf;
   bool fit_trace;
@@ -141,7 +143,7 @@ class PSF_Fitter {
       polynomial_degree_along_x(1),
       polynomial_degree_along_wave(4)
       {
-	
+	corefootprint_weight_boost=0;
 
 
       };

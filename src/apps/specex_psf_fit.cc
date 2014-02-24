@@ -60,13 +60,13 @@ int main ( int argc, char *argv[] ) {
   string lamp_lines_filename="";  
   double min_wavelength = 0;
   double max_wavelength = 1e6;
-  
   int gauss_hermite_deg = 3;
   //double gauss_hermite_sigma = 1.1;
   int legendre_deg_wave = 4;
   int legendre_deg_x = 1;
   
-  double psf_error = 0.01;
+  double psf_error = 0;
+  double psf_core_wscale = 0;
   
   string output_xml_filename="";
   string output_fits_filename="";
@@ -99,6 +99,7 @@ int main ( int argc, char *argv[] ) {
     ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave ), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
     ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x ), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
     ( "psf_error",  popts::value<double>( &psf_error ), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
+    ( "psf_core_wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 7x7 PSF core")
 #ifdef EXTERNAL_TAIL
     ( "fit_psf_tails", "unable fit of psf tails")
 #endif
@@ -230,6 +231,8 @@ int main ( int argc, char *argv[] ) {
     fitter.polynomial_degree_along_x    = legendre_deg_x;
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
     fitter.psf->psf_error               = psf_error;
+    fitter.corefootprint_weight_boost   = psf_core_wscale;
+    
 #ifdef EXTERNAL_TAIL
     fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
 #endif

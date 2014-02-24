@@ -323,7 +323,6 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   }
 #endif
 
-  
   for (int j=begin_j; j <end_j; ++j) {
     
 #ifdef CONTINUUM
@@ -378,10 +377,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	const specex::SpotTmpData &tmp = spot_tmp_data[s];
 	
 	bool in_core = tmp.stamp.Contains(i,j);
-	
+
 	if( ! in_core && (!fit_psf_tail)  ) continue; // if we fit tails we use the data outside the core
-	
-	
+		
 	nspots_in_pix++;
 	
 
@@ -435,6 +433,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	} // end of test compute_ab
       } // end of loop on spots
       
+      
+      
       if(recompute_weight_in_fit) {
 	w =  square(psf->readout_noise);
 	if(signal>0) {
@@ -443,6 +443,13 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	w += square(psf->psf_error*signal);
 	w = 1./w;
       }
+      
+      double wscale=1;
+      if(corefootprint_weight_boost>0 && corefootprint(i,j)>0) {
+	wscale = corefootprint_weight_boost;
+	w *= corefootprint_weight_boost;
+      }
+      
       res -= signal;
       
       chi2 += w*res*res;
@@ -502,7 +509,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
 	double bfact = w*res;
 	if(recompute_weight_in_fit) {
-	  bfact += 0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*fabs(signal));
+	  bfact += wscale*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
 	}
  
 #ifdef SPARSE_H
@@ -832,14 +839,33 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   ComputeWeigthImage(spots,npix);
   
+  
+  
+  
+
+
   InitTmpData(spots);
+  
+  corefootprint = image;
+  corefootprint.data.clear();
+   int core_hsize=3;
+  for(size_t s=0;s<spot_tmp_data.size();s++) {
+    SpotTmpData& tmp = spot_tmp_data[s];
+    for(int j= tmp.stamp.begin_j; j<tmp.stamp.end_j; j++) {
+      if(j<tmp.y-core_hsize || j>tmp.y+core_hsize) continue; 
+      for(int i= tmp.stamp.begin_i; i<tmp.stamp.end_i; i++) {
+	if(i<tmp.x-core_hsize || i>tmp.x+core_hsize) continue; 
+	corefootprint(i,j)=1;
+      }
+    }
+  }
   
   // indexation and Params and monomials for tmp spots 
   {
   int index = index_of_spot_parameters;
-  
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     SpotTmpData& tmp = spot_tmp_data[s];
+
     if(fit_flux) {
       tmp.flux_parameter_index = index; 
       Params(tmp.flux_parameter_index) = tmp.flux;
@@ -1554,8 +1580,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
   }
   
-  
-
   fatal = true;
   include_signal_in_weight = false;
   chi2_precision = 10;
@@ -1853,8 +1877,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_psf        = true;
   fit_trace      = false;
   chi2_precision = 10;
-  //include_signal_in_weight = true;  recompute_weight_in_fit  = false;
-  include_signal_in_weight = false;  recompute_weight_in_fit  = true;
+  include_signal_in_weight = true;  recompute_weight_in_fit  = false;
+  //include_signal_in_weight = false;  recompute_weight_in_fit  = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }
