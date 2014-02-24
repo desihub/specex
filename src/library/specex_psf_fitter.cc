@@ -848,13 +848,17 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   corefootprint = image;
   corefootprint.data.clear();
-   int core_hsize=3;
+  int core_hsize=2;
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     SpotTmpData& tmp = spot_tmp_data[s];
-    for(int j= tmp.stamp.begin_j; j<tmp.stamp.end_j; j++) {
-      if(j<tmp.y-core_hsize || j>tmp.y+core_hsize) continue; 
-      for(int i= tmp.stamp.begin_i; i<tmp.stamp.end_i; i++) {
-	if(i<tmp.x-core_hsize || i>tmp.x+core_hsize) continue; 
+    int iPix = int(floor(tmp.x+0.5));
+    int jPix = int(floor(tmp.y+0.5));
+    int BeginI = max(iPix-core_hsize,tmp.stamp.begin_i);
+    int BeginJ = max(jPix-core_hsize,tmp.stamp.begin_j);
+    int EndI   = min(iPix+core_hsize+1,tmp.stamp.end_i);
+    int EndJ   = min(jPix+core_hsize+1,tmp.stamp.end_j); 
+    for(int j= BeginJ; j<EndJ; j++) {
+      for(int i= BeginI; i<EndI; i++) {
 	corefootprint(i,j)=1;
       }
     }

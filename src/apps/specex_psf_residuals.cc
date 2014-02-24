@@ -151,7 +151,7 @@ int main ( int argc, char *argv[] ) {
     image_data model(image.n_cols(),image.n_rows());
     
     image_data core_footprint(image.n_cols(),image.n_rows());
-    int hsize=3;   
+    int hsize=2;   
     for(size_t s=0;s<spots.size();s++) {     
       specex::Spot_p spot = spots[s];
       
@@ -207,10 +207,7 @@ int main ( int argc, char *argv[] ) {
     int ndata_image = 0;
     double chi2_core = 0;
     double chi2_core2 = 0;
-    double chi2_core_trimed = 0;
     int ndata_core = 0;
-    int ndata_core_trimed = 0;
-    int npix_trim = 20;
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
       
@@ -232,10 +229,6 @@ int main ( int argc, char *argv[] ) {
 	    chi2_core += dchi2;
 	    chi2_core2 += square(residual(i,j))/(variance2(i,j));
 	    ndata_core ++;
-	    if(i>global_stamp.begin_i+npix_trim && i<global_stamp.end_i-npix_trim) {
-	      chi2_core_trimed += dchi2;
-	      ndata_core_trimed ++;
-	    }
 	  }
 	}
       }
@@ -255,15 +248,12 @@ int main ( int argc, char *argv[] ) {
     
     int ndf_image  = ndata_image-npar; 
     int ndf_core   = ndata_core-npar;
-    int ndf_core_trimed   = ndata_core_trimed-npar;
     cout << "readout noise      = " << readout_noise << endl;
     cout << "assumed psf error  = " << psf_error << endl;
     cout << "number of spots    = " << spots.size() << endl;
     cout << "image chi2/ndf     = " << chi2_image << "/" << ndf_image << " = " << chi2_image/ndf_image << endl;
-    cout << "spot core chi2/ndf (using model in var) = " << chi2_core << "/" << ndf_core << " =" << chi2_core/ndf_core << endl;
-    cout << "spot core chi2/ndf (using data in var)  = " << chi2_core2 << "/" << ndf_core << " =" << chi2_core2/ndf_core << endl;
-    if(ndf_core_trimed>0)
-      cout << "spot core chi2/ndf (using model in var, trimed,  " << npix_trim << " pixs)  = " << chi2_core_trimed << "/" << ndf_core_trimed << " =" << chi2_core2/ndf_core_trimed << endl;
+    cout << "spot core 5x5 chi2/ndf (using model in var) = " << chi2_core << "/" << ndf_core << " =" << chi2_core/ndf_core << endl;
+    cout << "spot core 5x5 chi2/ndf (using data in var)  = " << chi2_core2 << "/" << ndf_core << " =" << chi2_core2/ndf_core << endl;
     cout << "ndata in image = " << ndata_image << endl;
     cout << "ndata in core  = " << ndata_core << endl;
     
