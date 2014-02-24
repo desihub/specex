@@ -333,6 +333,10 @@ double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc,
 					 harp::vector_double *PosDer, harp::vector_double *ParamDer,
 					 bool with_core, bool with_tail) const {
   
+  if(PosDer) PosDer->clear();
+  if(ParamDer) ParamDer->clear();
+  
+
   double val = 0;
   if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
 
