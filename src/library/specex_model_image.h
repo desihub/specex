@@ -6,6 +6,12 @@
 #include <specex_stamp.h>
 #include <specex_image_data.h>
 
+// 7 is half distance between center of ext. fibers of adjacent bundles
+// this is the maximum number of pixels allowed in fit right(left) of the last(first) fiber in a bundle
+// a low value increase degeneracy among adjacent fibers PSF
+// a too high value includes signal from neighbour bundle
+#define MAX_X_MARGIN 7
+
 namespace specex {
   
   Stamp compute_stamp(const image_data& model_image, const PSF_p psf, const std::vector<specex::Spot_p>& spots, int x_margin, int y_margin, int only_this_bundle=-1);

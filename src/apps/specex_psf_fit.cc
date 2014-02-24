@@ -187,7 +187,7 @@ int main ( int argc, char *argv[] ) {
     if(psf_model=="GAUSSHERMITE")
       psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
     else if(psf_model=="GAUSSHERMITE2")
-      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,3));
+      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg));
     else if(psf_model=="HATHERMITE")
       psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
     else if(psf_model=="HATMOFFAT")

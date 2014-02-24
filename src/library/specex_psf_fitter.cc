@@ -687,7 +687,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	Stamp spot_stamp(image);
 	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
 	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
-	  int margin = max(6,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
+	  int margin = min(MAX_X_MARGIN,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
 	  int begin_i = max(spot_stamp.begin_i, int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
 	  int end_i   = min(spot_stamp.end_i  , int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
 	  for(int i=begin_i;i<end_i;i++) {
@@ -1853,8 +1853,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_psf        = true;
   fit_trace      = false;
   chi2_precision = 10;
-  include_signal_in_weight = false;
-  recompute_weight_in_fit  = true;
+  //include_signal_in_weight = true;  recompute_weight_in_fit  = false;
+  include_signal_in_weight = false;  recompute_weight_in_fit  = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }
