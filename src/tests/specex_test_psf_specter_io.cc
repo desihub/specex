@@ -58,7 +58,12 @@ int main( int argc, char *argv[] ) {
   
   specex::read_psf_xml(psf,input_psf_xml_filename);
   
-  //specex::write_psf_fits(psf,"toto.fits");
+  if(psf->Name() !=  "GaussHermite2PSF") {
+    cout << "code only works with GAUSSHERMITE2PSF" << endl;
+    return 0;
+  }
+
+  specex::write_psf_fits(psf,"toto.fits");
   
 
   if(0){
@@ -211,12 +216,14 @@ int main( int argc, char *argv[] ) {
     char filename[1000];
     
     const specex::PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
-    
-    harp::vector_double saved_GHSCAL2_coeff = params_of_bundle.AllParPolXW[psf->ParamIndex("GHSCAL2")]->coeff;
-    harp::vector_double saved_TAILAMP_coeff = params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff;
-    
-
     harp::vector_double psf_params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
+    
+    double scal2    = psf_params[psf->ParamIndex("GH2-0-0")];
+    cout << "norm of first  GH PSF = " << (1-scal2) << endl;
+    cout << "norm of second GH PSF = " <<  scal2 << endl;
+    
+    
+    
     vector<string> names = psf->DefaultParamNames();
     for(size_t k=0;k<psf_params.size(); k++) {
       cout << k << " " << names[k] << " " << psf_params(k) << endl;
@@ -227,8 +234,6 @@ int main( int argc, char *argv[] ) {
     specex::image_data all_contributions_img = img;
     
     
-    double scal2    = psf_params[psf->ParamIndex("GHSCAL2")];
-    
     params_of_bundle.AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff.clear();
     img.data.clear();
     specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
@@ -236,11 +241,31 @@ int main( int argc, char *argv[] ) {
     specex::image_data only_tails_img = all_contributions_img;
     only_tails_img.data -= only_core_and_second_gaussian_img.data;
     
-    params_of_bundle.AllParPolXW[psf->ParamIndex("GHSCAL2")]->coeff.clear();
+    for(size_t p=0;p<params_of_bundle.AllParPolXW.size();p++) {
+      if(names[p].find("GH2-")!=names[p].npos) {
+	cout << "clearing " << names[p] << endl;
+	params_of_bundle.AllParPolXW[p]->coeff.clear();
+      }
+    }
+    
     img.data.clear();
     specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
     specex::image_data only_core_gaussian_img = img;
-    only_core_gaussian_img.data *= (1-scal2);
+    
+    // need to compute naked gaussian to fix amplitude offset
+    for(size_t p=0;p<params_of_bundle.AllParPolXW.size();p++) {
+      if(names[p].find("GH-")!=names[p].npos) {
+	cout << "clearing " << names[p] << endl;
+	params_of_bundle.AllParPolXW[p]->coeff.clear();
+      }
+    }
+    
+    img.data.clear();
+    specex::parallelized_compute_model_image(img,weight,psf,one_spot,only_on_spots,only_psf_core,only_positive,50,50,spot->fiber_bundle);
+    specex::image_data only_core_naked_gaussian_img = img;
+    only_core_gaussian_img.data -= scal2*only_core_naked_gaussian_img.data;
+    
+    
     
     specex::image_data only_second_gaussian_img = only_core_and_second_gaussian_img;
     only_second_gaussian_img.data -= only_core_gaussian_img.data;
