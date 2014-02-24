@@ -13,7 +13,7 @@ namespace specex {
 
     friend class boost::serialization::access;
     
-  protected :
+  public :
     int core_degree, second_degree;
     
   public :
