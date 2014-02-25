@@ -60,7 +60,8 @@ int main ( int argc, char *argv[] ) {
   string lamp_lines_filename="";  
   double min_wavelength = 0;
   double max_wavelength = 1e6;
-  int gauss_hermite_deg = 3;
+  int gauss_hermite_deg  = 3;
+  int gauss_hermite_deg2 = 2;
   //double gauss_hermite_sigma = 1.1;
   int legendre_deg_wave = 4;
   int legendre_deg_x = 1;
@@ -95,6 +96,7 @@ int main ( int argc, char *argv[] ) {
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $IDLSPEC2D_DIR/opfiles/lamplines.par)" )
     ( "core", "dump core files when harp exception is thrown" )
     ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
+    ("gauss_hermite_deg2",  popts::value<int>( &gauss_hermite_deg2 ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
     //( "gauss_hermite_sigma",  popts::value<double>( &gauss_hermite_sigma ), "sigma of Gauss-Hermite PSF (same for x and y, only if GAUSSHERMITE psf)")
     ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave ), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
     ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x ), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
@@ -188,7 +190,7 @@ int main ( int argc, char *argv[] ) {
     if(psf_model=="GAUSSHERMITE")
       psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
     else if(psf_model=="GAUSSHERMITE2")
-      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg));
+      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg2));
     else if(psf_model=="HATHERMITE")
       psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
     else if(psf_model=="HATMOFFAT")
@@ -314,6 +316,10 @@ int main ( int argc, char *argv[] ) {
       allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
+
+      
+      //exit(12);
+
       // starting fit
       // --------------------------------------------
       fitter.FitEverything(spots,true);
