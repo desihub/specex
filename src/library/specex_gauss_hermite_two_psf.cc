@@ -200,8 +200,12 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
 			  harp::vector_double *ParamDer) const
 {
 
-  double inner_core_radius = Params(2);
-  bool in_inner_core = (input_X*input_X+input_Y*input_Y<inner_core_radius*inner_core_radius);
+  const double& inner_core_n_sig = Params(2);
+  double sigma_x_1_inv = 1./Params(0);
+  double sigma_y_1_inv = 1./Params(1);
+  double x_1 = input_X*sigma_x_1_inv;
+  double y_1 = input_Y*sigma_y_1_inv;
+  bool in_inner_core = (x_1*x_1+y_1*y_1<inner_core_n_sig*inner_core_n_sig);
     
   int first_hermite1_param_index = 5;
   int first_hermite2_param_index = 5+((core_degree+1)*(core_degree+1)-1);
@@ -215,11 +219,6 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
   if(PosDer) PosDer->clear();
 
   if(in_inner_core) {
-
-    double sigma_x_1_inv = 1./Params(0);
-    double sigma_y_1_inv = 1./Params(1);
-    double x_1 = input_X*sigma_x_1_inv;
-    double y_1 = input_Y*sigma_y_1_inv;
     
     int nx1=(core_degree+1);
     int ny1=(core_degree+1);
@@ -391,7 +390,7 @@ std::vector<std::string> specex::GaussHermite2PSF::DefaultParamNames() const
   std::vector<std::string> paramNames;
   paramNames.push_back("GHSIGX");
   paramNames.push_back("GHSIGY");
-  paramNames.push_back("GHCORE");
+  paramNames.push_back("GHNSIG");
   paramNames.push_back("GHSIGX2");
   paramNames.push_back("GHSIGY2");
 
