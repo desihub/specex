@@ -16,6 +16,33 @@ specex::Trace::Trace(int i_fiber) :
   
 }
 
+void specex::Trace::resize(int ncoeff) {
+  harp::vector_double coeff;
+
+  coeff=X_vs_W.coeff;
+  X_vs_W.deg = ncoeff-1;
+  X_vs_W.coeff.resize(ncoeff);
+  X_vs_W.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  
+  coeff=Y_vs_W.coeff;
+  Y_vs_W.deg = ncoeff-1;
+  Y_vs_W.coeff.resize(ncoeff);
+  Y_vs_W.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  
+  coeff=W_vs_Y.coeff;
+  W_vs_Y.deg = ncoeff-1;
+  W_vs_Y.coeff.resize(ncoeff);
+  W_vs_Y.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  
+  coeff=X_vs_Y.coeff;
+  X_vs_Y.deg = ncoeff-1;
+  X_vs_Y.coeff.resize(ncoeff);
+  X_vs_Y.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  
+  
+  
+}
+
 bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
 
   if(fiber==-1) {
