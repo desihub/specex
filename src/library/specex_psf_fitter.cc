@@ -523,7 +523,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
 	double bfact = w*res;
 	if(recompute_weight_in_fit) {
-	  bfact += wscale*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
+	  bfact += (1./wscale)*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
 	}
  
 #ifdef SPARSE_H
@@ -774,24 +774,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots npar_varying_coord = " << npar_varying_coord);
 
   
-  if(specex_verbose()) {
-    stringstream ss;
-    ss << "specex::PSF_Fitter::FitSeveralSpots starting fitting ";
-    if(fit_flux) ss << "+flux";
-    if(fit_psf) ss << "+psf";
-    if(fit_trace) ss << "+trace";
-    if(fit_position) ss << "+position";
-#ifdef EXTERNAL_TAIL
-    if(fit_psf_tail) ss << "+tail";
-#endif
-#ifdef CONTINUUM
-    if(fit_continuum) ss << "+continuum";
-#endif
-    if(fit_psf) ss << " npar_psf=" << npar_psf;
-    if(fit_trace) ss << " npar_trace=" << npar_trace;
-    specex_info(ss.str());
-  }
-  
   
   // allocation of parameters, setting Params 
   // and recording some indices
@@ -851,6 +833,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #endif
     index_of_spot_parameters = index;
   }
+
+
+  
+
+
+
   // ----------------------------------------------------
   
   ComputeWeigthImage(spots,npix);
@@ -1663,6 +1651,31 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
   if(scheduled_fit_of_traces) {
+
+
+    
+    // reduce trace degree in not enough spots to fit
+    // --------------------------------------------  
+    for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) 
+      {
+	int nspots=0;
+	for(size_t s=0;s<selected_spots.size();s++) {
+	  Spot_p spot= selected_spots[s];
+	  if(spot->fiber==fiber) nspots++;
+	}
+	
+	//SPECEX_INFO("Fiber " << fiber << " nspots= " << nspots);
+	
+	specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
+	if(trace.X_vs_W.deg > (nspots-1) || trace.Y_vs_W.deg > (nspots-1) 
+	   || trace.W_vs_Y.deg > (nspots-1) || trace.X_vs_Y.deg > (nspots-1) ) {
+	  SPECEX_WARNING("Reducing degree of trace of fiber "<< fiber << " to match number of spots = " << nspots);
+	  trace.resize(nspots);
+	}
+      }
+    
+
+
     SPECEX_INFO("Starting FitSeveralSpots TRACE");
     SPECEX_INFO("=======================================");
     fit_flux       = false;
@@ -1893,7 +1906,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_psf        = true;
   fit_trace      = false;
-  chi2_precision = 10;
+  chi2_precision = 1;
   include_signal_in_weight = true;  recompute_weight_in_fit  = false;
   //include_signal_in_weight = false;  recompute_weight_in_fit  = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
