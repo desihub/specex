@@ -40,6 +40,8 @@ namespace specex {
     
     Trace(int i_fiber=-1);
     
+    void resize(int nparams);
+    
     bool Fit(std::vector<Spot_p> spots, bool set_xy_range = true);
     
     /*
