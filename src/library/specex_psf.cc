@@ -105,6 +105,11 @@ specex::PSF::PSF() {
 #define NY_TAIL_PROFILE 8000
 #define TAIL_OVERSAMPLING 2.
 
+double specex::PSF::TailProfileValue(const double& dx, const double &dy) const {
+  double r2 = square(dx*r_tail_x_scale)+square(dy*r_tail_y_scale);
+  return r2/(r2_tail_core_size+r2)*pow(r2_tail_core_size+r2,-r_tail_power_law_index/2.);
+}
+
 void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
   
 #pragma omp critical 
@@ -117,21 +122,15 @@ void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
     SPECEX_ERROR("in PSF::ComputeTailProfile, missing param TAILCORE, need to allocate them, for instance with PSF::AllocateDefaultParams()");
   }
 
-  double r_tail_core_size = Params(ParamIndex("TAILCORE"));
-  double r_tail_x_scale   = Params(ParamIndex("TAILXSCA"));
-  double r_tail_y_scale   = Params(ParamIndex("TAILYSCA"));
-  double r_tail_power_law_index = Params(ParamIndex("TAILINDE"));
+  r2_tail_core_size = square(Params(ParamIndex("TAILCORE")));
+  r_tail_x_scale   = Params(ParamIndex("TAILXSCA"));
+  r_tail_y_scale   = Params(ParamIndex("TAILYSCA"));
+  r_tail_power_law_index = Params(ParamIndex("TAILINDE"));
   
-  double rc2 = square(r_tail_core_size);
   
   for(int j=0;j<NY_TAIL_PROFILE;j++) {
     for(int i=0;i<NX_TAIL_PROFILE;i++) {
-      double r2 = square(i/TAIL_OVERSAMPLING*r_tail_x_scale)+square(j/TAIL_OVERSAMPLING*r_tail_y_scale);
-	
-      //r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-1.5/2.);
-      r_tail_profile(i,j) = r2/(rc2+r2)*pow(rc2+r2,-r_tail_power_law_index/2.);
-      //r_tail_profile(i,j) = pow(rc2+r2,-r_tail_power_law_index/2.);
-      
+      r_tail_profile(i,j) = TailProfileValue(i/TAIL_OVERSAMPLING,j/TAIL_OVERSAMPLING);
     }
   }
 
@@ -145,15 +144,17 @@ void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
   
 }
 
-double specex::PSF::TailProfile(const double& dx, const double &dy, const harp::vector_double &Params) const {
+double specex::PSF::TailProfile(const double& dx, const double &dy, const harp::vector_double &Params, bool full_calculation) const {
   
   if(r_tail_profile_must_be_computed)  const_cast<specex::PSF*>(this)->ComputeTailProfile(Params);
+  if(full_calculation) return TailProfileValue(dx,dy);
+  
   double dxo = fabs(dx*TAIL_OVERSAMPLING);
   double dyo = fabs(dy*TAIL_OVERSAMPLING);
   int di = int(dxo);
   int dj = int(dyo);
   if(di>=NX_TAIL_PROFILE-1 || dj>=NY_TAIL_PROFILE-1) return 0.;
-  //return r_tail_profile(di,dj);
+  return r_tail_profile(di,dj); // faster
   return (
 	  (di+1-dxo)*(dj+1-dyo)*r_tail_profile(di,dj)
 	  +(dxo-di)*(dj+1-dyo)*r_tail_profile(di+1,dj)
@@ -341,7 +342,7 @@ double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc,
   if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
 
   if(with_tail) {
-    double prof = TailProfile(IPix-Xc,JPix-Yc, Params);
+    double prof = TailProfile(IPix-Xc,JPix-Yc, Params, with_core);
     if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
     val += Params(psf_tail_amplitude_index)*prof;
   }

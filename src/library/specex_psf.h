@@ -120,14 +120,19 @@ namespace specex {
 #ifdef EXTERNAL_TAIL
     
   public :
-    double TailProfile(const double& dx, const double &dy, const harp::vector_double &Params) const;
-
-
+    double TailProfile(const double& dx, const double &dy, const harp::vector_double &Params, bool full_calculation=false) const;
+    
   protected :
 
     specex::image_data r_tail_profile; // to go much faster    
+    double r2_tail_core_size;
+    double r_tail_x_scale;
+    double r_tail_y_scale;
+    double r_tail_power_law_index;
+    
     bool r_tail_profile_must_be_computed;
     void ComputeTailProfile(const harp::vector_double &Params);
+    double TailProfileValue(const double& dx, const double &dy) const;
     int psf_tail_amplitude_index;    
     
     /*
