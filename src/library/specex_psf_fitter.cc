@@ -15,6 +15,7 @@
 #include "specex_message.h"
 #include "specex_psf_io.h"
 #include "specex_model_image.h"
+#include "specex_psf.h"
 
 //#include <boost/archive/xml_oarchive.hpp>
 
@@ -95,14 +96,19 @@ int specex::PSF_Fitter::NPar(int nspots) const {
 
 double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
-  
+
+
   int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
  
   
   //SPECEX_INFO("Begin parallelized ComputeChi2AB j range " << stamp.begin_j << " " << stamp.end_j);
   
   UpdateTmpData(compute_ab);
-
+#ifdef EXTERNAL_TAIL  
+  // precompute tail profile
+  specex::SpotTmpData &tmp = spot_tmp_data[0];
+  psf->TailProfile(0,0,psf->AllLocalParamsFW(tmp.fiber,tmp.wavelength,tmp.fiber_bundle));
+#endif
   
   
   harp::vector_double chi2_of_chunk(number_of_image_chuncks);
@@ -153,7 +159,8 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     tmp.y    = psf->Yccd(spot->fiber,spot->wavelength);
     tmp.wavelength     = spot->wavelength;
     tmp.fiber          = spot->fiber;
-    
+    tmp.fiber_bundle   = spot->fiber_bundle;
+        
     if( (fit_psf || fit_psf_tail) && tmp.flux<0) tmp.flux =0; // more robust
     tmp.frozen_flux = tmp.flux;
     
@@ -167,6 +174,13 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     
     spot_tmp_data.push_back(tmp);
   }
+
+  
+#ifdef EXTERNAL_TAIL
+  // compute this before parallel computing
+  psf->TailProfile(0,0,psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
+#endif
+
 }
 
 void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
@@ -313,9 +327,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
   if(has_continuum) {
     if(fit_continuum)
-      ublas::noalias(continuum_params) = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
+      continuum_params = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
     else
-      ublas::noalias(continuum_params) = psf_params->ContinuumPol.coeff;
+      continuum_params = psf_params->ContinuumPol.coeff;
     
     expfact_for_continuum=1./(2*M_PI*square(psf_params->continuum_sigma_x));
     
@@ -631,7 +645,9 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	}
       }
       
-      parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0,psf_params->bundle_id);
+      // generate error for a reason not understood
+      //parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0,psf_params->bundle_id);
+      compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,0,0,psf_params->bundle_id);
       
       if(modified_tail_amplitude) {
 	psf_params->AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff = saved_tail_amplitude_coeff;
@@ -910,10 +926,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots inc. signal in w=" << include_signal_in_weight << ", npix footprint = " << *npix);
 
 
-#ifdef EXTERNAL_TAIL
-  // compute this before parallel computing
-  psf->TailProfile(0,0,psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
-#endif
+
 
   ////////////////////////////////////////////////////////////////////////// 
   number_of_image_chuncks = 1;

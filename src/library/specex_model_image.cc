@@ -1,5 +1,6 @@
 #include <specex_model_image.h>
 #include <specex_message.h>
+#include <specex_psf.h>
 
 using namespace std;
 
@@ -36,7 +37,7 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
   global_stamp.end_j = min(global_stamp.end_j,global_stamp.Parent_n_rows());
   
 
-  SPECEX_INFO("stamp [" << global_stamp.begin_i << ":" << global_stamp.end_i << "," << global_stamp.begin_j << ":" << global_stamp.end_j << "]");
+  //SPECEX_INFO("stamp [" << global_stamp.begin_i << ":" << global_stamp.end_i << "," << global_stamp.begin_j << ":" << global_stamp.end_j << "]");
 
   return global_stamp;
 }
@@ -72,7 +73,8 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
     int end_j   = stamp.begin_j + (chunk+1)*step_j;
     if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
     
-    compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,begin_j,end_j,x_margin,y_margin,only_this_bundle);
+    if(end_j>begin_j)
+      compute_model_image(model_image,weight,psf,spots,only_on_spots,only_psf_core,only_positive,begin_j,end_j,x_margin,y_margin,only_this_bundle);
   } 
 }
 
@@ -80,9 +82,13 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
 
 void specex::compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int predefined_begin_j, int predefined_end_j, int x_margin, int y_margin, int only_this_bundle) {
   
-  //SPECEX_INFO("specex::compute_model_image");
-  Stamp global_stamp = compute_stamp(model_image,psf,spots,x_margin,y_margin,only_this_bundle);
   
+  Stamp global_stamp = compute_stamp(model_image,psf,spots,x_margin,y_margin,only_this_bundle);
+  if(global_stamp.end_i==0) {
+    SPECEX_WARNING("empty global stamp (can occur in parallel processing)");
+    return;
+  }
+  //SPECEX_INFO("specex::compute_model_image [" << global_stamp.begin_i << ":" << global_stamp.end_i << "," << predefined_begin_j << ":" << predefined_end_j << "]");
   
   
   vector<specex::Stamp> spot_stamps;

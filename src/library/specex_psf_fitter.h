@@ -20,7 +20,7 @@ namespace specex {
   public :
 
     
-    double x,y,wavelength,fiber,flux;
+    double x,y,wavelength,fiber,fiber_bundle,flux;
     double frozen_x,frozen_y,frozen_flux; // for tails, keep fixed during minimization to avoid fitting flux with tails
     
     harp::vector_double trace_x_monomials;

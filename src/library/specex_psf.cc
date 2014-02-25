@@ -111,16 +111,18 @@ double specex::PSF::TailProfileValue(const double& dx, const double &dy) const {
 }
 
 void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
-  
-#pragma omp critical 
-  {
+  if(r_tail_profile_must_be_computed == false) {
+    SPECEX_WARNING("calling specex::PSF::ComputeTailProfile when r_tail_profile_must_be_computed =false");
+    return;
+  }
+
   SPECEX_INFO("specex::PSF::ComputeTailProfile ...");
   
   r_tail_profile.resize(NX_TAIL_PROFILE,NY_TAIL_PROFILE); // hardcoded
   
-  if(! HasParam("TAILCORE")) {
+  if(! HasParam("TAILCORE"))
     SPECEX_ERROR("in PSF::ComputeTailProfile, missing param TAILCORE, need to allocate them, for instance with PSF::AllocateDefaultParams()");
-  }
+  
 
   r2_tail_core_size = square(Params(ParamIndex("TAILCORE")));
   r_tail_x_scale   = Params(ParamIndex("TAILXSCA"));
@@ -140,13 +142,17 @@ void specex::PSF::ComputeTailProfile(const harp::vector_double &Params) {
   r_tail_profile_must_be_computed = false;
   SPECEX_INFO("specex::PSF::ComputeTailProfile done");
    
-  }
   
 }
 
 double specex::PSF::TailProfile(const double& dx, const double &dy, const harp::vector_double &Params, bool full_calculation) const {
   
-  if(r_tail_profile_must_be_computed)  const_cast<specex::PSF*>(this)->ComputeTailProfile(Params);
+  if(r_tail_profile_must_be_computed) {
+#pragma omp critical
+    {
+      const_cast<specex::PSF*>(this)->ComputeTailProfile(Params);
+    }
+  }
   if(full_calculation) return TailProfileValue(dx,dy);
   
   double dxo = fabs(dx*TAIL_OVERSAMPLING);
