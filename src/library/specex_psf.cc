@@ -60,8 +60,15 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
 	  double y = yPixCenter+Dx[NPT-1][iy] -Yc;
 	  double weight = wx*Wt[NPT-1][iy];
 	  double prof = Profile(x,y,Params,PosDer,ParamDer);
-
 	  if(prof ==  PSF_NAN_VALUE) return  PSF_NAN_VALUE;
+#ifdef EXTERNAL_TAIL
+#ifdef INTEGRATING_TAIL
+	  double tail_prof = TailProfile(x,y,Params,true); // TRY INTEGRATING TAIL
+	  prof += Params(psf_tail_amplitude_index)*tail_prof;
+	  if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = tail_prof;
+#endif
+#endif
+	  
 	  
 	  val += weight*prof;
 	  
@@ -347,12 +354,21 @@ double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc,
   double val = 0;
   if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
 
+#ifdef EXTERNAL_TAIL
+#ifdef INTEGRATING_TAIL
+  if(with_tail && !with_core) {
+    double prof = TailProfile(IPix-Xc,JPix-Yc, Params, with_core);
+    if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
+    val += Params(psf_tail_amplitude_index)*prof;
+  }
+#else
   if(with_tail) {
     double prof = TailProfile(IPix-Xc,JPix-Yc, Params, with_core);
     if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
     val += Params(psf_tail_amplitude_index)*prof;
   }
-  
+#endif
+#endif
   return val;
 }
 
