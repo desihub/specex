@@ -1552,7 +1552,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	int degw=polynomial_degree_along_wave;
 	
 	const string& name = param_names[p];
-	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2") {
+	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2" || name=="GHCORE") {
 	  degx=0;
 	  degw=0;
 	}
@@ -1695,6 +1695,14 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
   }
 
+  if(psf->HasParam("GHCORE")) {
+    double inner_core_radius = 4;
+    psf_params->AllParPolXW[psf->ParamIndex("GHCORE")]->coeff(0)=inner_core_radius;
+    SPECEX_INFO("Setting PSF inner core radius to " << inner_core_radius);
+  }
+  psf_params->FitParPolXW.clear();
+
+
   // lower selection threshold because PSF is now linear in its parameters and hence fit is more robust
 
   selected_spots = select_spots(input_spots,-3);
@@ -1744,7 +1752,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     for(int p=0;p<psf->LocalNAllPar();p++) {
       const string& name = psf->ParamName(p);
       ok = true;
-      ok &= (name!="GHSIGX" && name!="GHSIGY");
+      ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHCORE");
       ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
       ok &= (name!="RADIUS" && name!="SIGMA");
       ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
@@ -1805,7 +1813,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       for(int p=0;p<psf->LocalNAllPar();p++) {
 	const string& name = psf->ParamName(p);
 	ok = true;
-	ok &= (name!="GHSIGX" && name!="GHSIGY");
+	ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHCORE");
 	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
 	//ok &= (name!="RADIUS" && name!="SIGMA");
 	ok &= (name!="RADIUS");
@@ -1886,7 +1894,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       for(int p=0;p<psf->LocalNAllPar();p++) {
 	const string& name = psf->ParamName(p);
 	ok = true;
-	ok &= (name!="GHSIGX" && name!="GHSIGY");
+	ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHCORE");
 	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
 	ok &= (name!="RADIUS" && name!="SIGMA");
 	//ok &= (name!="RADIUS");

@@ -196,6 +196,16 @@ double specex::HatHermitePSF::Profile(const double &x, const double &y,
     
     dvdsr += scale_hat*hat*(-hat_norm)*( M_PI*2*sr*erfrs );
         
+    /*
+      TODO:
+      derivative wrt fr, see BAO/analyses/hathermite.mw (maple)
+      
+
+
+     */
+
+
+
     (*ParamDer)[0] = dvdsr;
     
     // need to compute derivatives here if we care

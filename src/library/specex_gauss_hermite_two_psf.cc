@@ -200,74 +200,98 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
 			  harp::vector_double *ParamDer) const
 {
 
-  double sigma_x_1_inv = 1./Params(0);
-  double sigma_y_1_inv = 1./Params(1);
-  double x_1 = input_X*sigma_x_1_inv;
-  double y_1 = input_Y*sigma_y_1_inv;
-
-  double sigma_x_2_inv = 1./Params(2);
-  double sigma_y_2_inv = 1./Params(3);
-  double x_2 = input_X*sigma_x_2_inv;
-  double y_2 = input_Y*sigma_y_2_inv;
-  
-  int first_hermite1_param_index = 4;
-  int first_hermite2_param_index = 4+((core_degree+1)*(core_degree+1)-1);
-  
-  int nx1=(core_degree+1);
-  int ny1=(core_degree+1);
-  int nx2=(second_degree+1);
-  int ny2=(second_degree+1);
-  
-  double expfact1=1./(2*M_PI)*sigma_x_1_inv*sigma_y_1_inv*exp(-0.5*(x_1*x_1+y_1*y_1));
-  double expfact2=1./(2*M_PI)*sigma_x_2_inv*sigma_y_2_inv*exp(-0.5*(x_2*x_2+y_2*y_2));
-  
-  //harp::vector_double H1x,H1y;
-  //HermitePols(H1x,core_degree,x_1);
-  //HermitePols(H1y,core_degree,y_1);
-  int index=first_hermite1_param_index;
-  double psf_val1=1-Params(first_hermite2_param_index);
+  double inner_core_radius = Params(2);
+  bool in_inner_core = (input_X*input_X+input_Y*input_Y<inner_core_radius*inner_core_radius);
+    
+  int first_hermite1_param_index = 5;
+  int first_hermite2_param_index = 5+((core_degree+1)*(core_degree+1)-1);
   
   double Hx0,Hx1,Hx;
   double Hy0,Hy1,Hy;
+  
+  double psf_val1=0;
+  
+  if(ParamDer) ParamDer->clear();
+  if(PosDer) PosDer->clear();
+
+  if(in_inner_core) {
+
+    double sigma_x_1_inv = 1./Params(0);
+    double sigma_y_1_inv = 1./Params(1);
+    double x_1 = input_X*sigma_x_1_inv;
+    double y_1 = input_Y*sigma_y_1_inv;
     
-  Hy0=1;
-  Hy1=y_1;
-  for(int j=0;j<ny1;j++) {
-    if(j==0) { 
-      Hy=Hy0;
-    } else if(j==1) {
-      Hy=Hy1;
-    } else {
-      Hy=y_1*Hy1-(j-1)*Hy0;
-      Hy0=Hy1;
-      Hy1=Hy;
-    }
-    
-    Hx0=1;
-    Hx1=x_1;
-    
-    int imin=0; if(j==0) imin=1; // skip (0,0)
-    for(int i=imin;i<nx1;i++,index++) {
+    int nx1=(core_degree+1);
+    int ny1=(core_degree+1);
       
-      if(i==0) { 
-	Hx=Hx0;
-      } else if(i==1) {
-	Hx=Hx1;
+    double expfact1=1./(2*M_PI)*sigma_x_1_inv*sigma_y_1_inv*exp(-0.5*(x_1*x_1+y_1*y_1));
+    int index=first_hermite1_param_index;
+    psf_val1=1-Params(first_hermite2_param_index);
+
+    Hy0=1;
+    Hy1=y_1;
+    for(int j=0;j<ny1;j++) {
+      if(j==0) { 
+	Hy=Hy0;
+      } else if(j==1) {
+	Hy=Hy1;
       } else {
-	Hx=x_1*Hx1-(i-1)*Hx0;
-	Hx0=Hx1;
-	Hx1=Hx;
+	Hy=y_1*Hy1-(j-1)*Hy0;
+	Hy0=Hy1;
+	Hy1=Hy;
       }
       
-      psf_val1+=Params[index]*Hy*Hx;
-      if(ParamDer) (*ParamDer)[index]=expfact1*Hy*Hx;
+      Hx0=1;
+      Hx1=x_1;
+      
+      int imin=0; if(j==0) imin=1; // skip (0,0)
+      for(int i=imin;i<nx1;i++,index++) {
+	
+	if(i==0) { 
+	  Hx=Hx0;
+	} else if(i==1) {
+	  Hx=Hx1;
+	} else {
+	  Hx=x_1*Hx1-(i-1)*Hx0;
+	  Hx0=Hx1;
+	  Hx1=Hx;
+      }
+	
+	psf_val1+=Params[index]*Hy*Hx;
+	if(ParamDer) (*ParamDer)[index]=expfact1*Hy*Hx;
+      }
     }
-  }
   
-  index=first_hermite2_param_index;
+    psf_val1 *= expfact1;
+    if(ParamDer) { 
+      // ok only if all hermite terms with deg>0 are = 0
+      (*ParamDer)[0] = (x_1*x_1-1)*sigma_x_1_inv*psf_val1;
+      (*ParamDer)[1] = (y_1*y_1-1)*sigma_y_1_inv*psf_val1;
+      // add one thing, change of scale1
+      (*ParamDer)[first_hermite2_param_index] -= expfact1;
+    }
+    if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
+      // works ONLY if for deg>0 hermite coeff=0
+      (*PosDer)(0) = x_1*sigma_x_1_inv*psf_val1;
+      (*PosDer)(1) = y_1*sigma_y_1_inv*psf_val1;
+    }
+  } // end of test of inner core
+    
   
-  double psf_val2=0;  
+  // second gauss-hermite
+  
+  double sigma_x_2_inv = 1./Params(3);
+  double sigma_y_2_inv = 1./Params(4);
+  double x_2 = input_X*sigma_x_2_inv;
+  double y_2 = input_Y*sigma_y_2_inv;
+  
+  double expfact2=1./(2*M_PI)*sigma_x_2_inv*sigma_y_2_inv*exp(-0.5*(x_2*x_2+y_2*y_2));
+  
+  int nx2=(second_degree+1);
+  int ny2=(second_degree+1);
 
+  int index=first_hermite2_param_index;
+  double psf_val2=0;  
   Hy0=1;
   Hy1=y_2;
   
@@ -298,28 +322,24 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
       }
       
       psf_val2+=Params[index]*Hy*Hx;
-      if(ParamDer) (*ParamDer)[index]=expfact2*Hy*Hx;
+      if(ParamDer) (*ParamDer)[index]+=expfact2*Hy*Hx;
     }
   }
   
-  psf_val1 *= expfact1;
+  
   psf_val2 *= expfact2;
     
   if(ParamDer) { 
     // ok only if all hermite terms with deg>0 are = 0
-    (*ParamDer)[0] = (x_1*x_1-1)*sigma_x_1_inv*psf_val1;
-    (*ParamDer)[1] = (y_1*y_1-1)*sigma_y_1_inv*psf_val1;
-    (*ParamDer)[2] = (x_2*x_2-1)*sigma_x_2_inv*psf_val2;
-    (*ParamDer)[3] = (y_2*y_2-1)*sigma_y_2_inv*psf_val2;
-    
-    // add one thing, change of scale1
-    (*ParamDer)[first_hermite2_param_index] -= expfact1;
+    (*ParamDer)[3] = (x_2*x_2-1)*sigma_x_2_inv*psf_val2;
+    (*ParamDer)[4] = (y_2*y_2-1)*sigma_y_2_inv*psf_val2;
   }
   if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
     // works ONLY if for deg>0 hermite coeff=0
-    (*PosDer)(0) = x_1*sigma_x_1_inv*psf_val1 + x_2*sigma_x_2_inv*psf_val2;
-    (*PosDer)(1) = y_1*sigma_y_1_inv*psf_val1 + y_2*sigma_y_2_inv*psf_val2;  
+    (*PosDer)(0) += x_2*sigma_x_2_inv*psf_val2;
+    (*PosDer)(1) += y_2*sigma_y_2_inv*psf_val2;  
   }
+  
   return psf_val1+psf_val2;
 }
 #endif
@@ -327,7 +347,7 @@ double specex::GaussHermite2PSF::Profile(const double &input_X, const double &in
   
 int specex::GaussHermite2PSF::LocalNAllPar() const {
     
-  int npar = 4; // sigma_x, sigma_y, sigma_x_2, sigma_y_2
+  int npar = 5; // sigma_x, sigma_y, inner_core, sigma_x_2, sigma_y_2
   
   npar += (core_degree+1)*(core_degree+1)-1;// skip (0,0) : -1 because normalized
   npar += (second_degree+1)*(second_degree+1);// don't skip (0,0)
@@ -347,6 +367,7 @@ harp::vector_double specex::GaussHermite2PSF::DefaultParams() const
   int index=0;
   Params(index++) = 1.1; // this is sigma_x
   Params(index++) = 1.1; // this is sigma_y  
+  Params(index++) = 1000; // inner core radius
   Params(index++) = 3.; // this is sigma_x_2
   Params(index++) = 3.; // this is sigma_y_2
   
@@ -370,6 +391,7 @@ std::vector<std::string> specex::GaussHermite2PSF::DefaultParamNames() const
   std::vector<std::string> paramNames;
   paramNames.push_back("GHSIGX");
   paramNames.push_back("GHSIGY");
+  paramNames.push_back("GHCORE");
   paramNames.push_back("GHSIGX2");
   paramNames.push_back("GHSIGY2");
 
