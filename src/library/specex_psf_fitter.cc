@@ -446,7 +446,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	if (compute_ab) {
 	  
-	  if(fit_psf || fit_psf_tail) {
+	  if((fit_psf && in_core) || fit_psf_tail) {
 	    size_t index = 0;
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      size_t m_size = psf_params->FitParPolXW[p]->coeff.size();
