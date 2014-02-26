@@ -5,6 +5,7 @@
 #include <boost/archive/basic_text_oarchive.hpp>
 #include <time.h>
 #include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/triangular.hpp> 
 #include <boost/random.hpp>
 
 #include <boost/archive/xml_oarchive.hpp>
@@ -58,6 +59,21 @@ int main() {
     v(i)=i;
   }
   
+  {
+    harp::matrix_double a(10,10);
+    a.clear();
+    harp::vector_double h = ublas::project(v2,ublas::range(0,10));
+    cout << h << endl;
+    specex::syr(1,ublas::project(h,ublas::range(0,5)),a);
+    cout << a << endl;
+    a.clear();
+    specex::syr(1,ublas::project(h,ublas::range(5,10)),a);
+    cout << a << endl;
+    
+    exit(12);
+  }	  
+
+
     // see http://www.boost.org/doc/libs/1_38_0/libs/numeric/ublas/doc/blas.htm
   
   harp::matrix_double m(n,n);
@@ -81,7 +97,15 @@ int main() {
     
     clock_t  tstart = clock();
     //ublas::outer_prod(sv,sv);
+    clock_t tstop = clock();
+    cout << "#1 n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+  }
+  {
     
+    clock_t  tstart = clock();
+    //ublas::outer_prod(sv,sv);
+    
+    //ublas::triangular_adaptor<ublas::compressed_matrix<double>,ublas::lower> tsm(sm);
     for(int i=0;i<N;i++)
       ublas::noalias(sm) += w*ublas::outer_prod(sv,sv);
     //ublas::noalias(m) += ublas::sparse_prod(sv,sv);

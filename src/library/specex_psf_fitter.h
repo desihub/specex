@@ -16,8 +16,12 @@
 //#define SPARSE_H
 
 #ifndef SPARSE_H
+
 typedef harp::matrix_double MAYBE_SPARSE_MATRIX;
 typedef harp::vector_double MAYBE_SPARSE_VECTOR;
+
+// #define FASTER_THAN_SYR
+
 #else
 typedef ublas::compressed_matrix<double> MAYBE_SPARSE_MATRIX;
 typedef ublas::compressed_vector<double> MAYBE_SPARSE_VECTOR;
@@ -63,7 +67,9 @@ class PSF_Fitter {
   // internal to fitseveralspots
   unsigned npar_fixed_coord;
   unsigned npar_varying_coord;
+  unsigned npar_trace;
   size_t nparTot;
+  int index_of_spots_parameters;
   
   std::vector<SpotTmpData> spot_tmp_data;
 
@@ -75,6 +81,9 @@ class PSF_Fitter {
   // internal set of parameters and matrices
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
   std::vector<MAYBE_SPARSE_MATRIX> A_of_chunk; // for Gauss-Newton solving
+#ifdef FASTER_THAN_SYR
+  std::vector<MAYBE_SPARSE_MATRIX> Ablock_of_chunk; // for Gauss-Newton solving
+#endif
   std::vector<MAYBE_SPARSE_VECTOR> B_of_chunk; // for Gauss-Newton solving
   harp::matrix_double fitWeight; // saved weight matrix of fitter parameters
   
@@ -169,7 +178,7 @@ class PSF_Fitter {
     void InitTmpData(const std::vector<Spot_p>& spots);
     void UpdateTmpData(bool compute_ab);
     double ParallelizedComputeChi2AB(bool compute_ab);
-    double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, MAYBE_SPARSE_MATRIX* Ap=0, MAYBE_SPARSE_VECTOR* Bp=0, bool update_tmp_data=true) const;
+    double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, MAYBE_SPARSE_MATRIX* Ap=0, MAYBE_SPARSE_MATRIX* Ablockp=0, MAYBE_SPARSE_VECTOR* Bp=0, bool update_tmp_data=true) const;
 
    void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
 
