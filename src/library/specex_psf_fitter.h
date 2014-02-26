@@ -20,7 +20,7 @@
 typedef harp::matrix_double MAYBE_SPARSE_MATRIX;
 typedef harp::vector_double MAYBE_SPARSE_VECTOR;
 
-// #define FASTER_THAN_SYR
+//#define FASTER_THAN_SYR
 
 #else
 typedef ublas::compressed_matrix<double> MAYBE_SPARSE_MATRIX;
