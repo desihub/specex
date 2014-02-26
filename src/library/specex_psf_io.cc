@@ -310,6 +310,45 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
       
     } // end of X Y context
 
+    // precompute coeffs of GH2-0-0
+    harp::vector_double  gh200coeff;
+    harp::vector_double  gh100coeff;
+    {
+      int gh200_index = psf.ParamIndex("GH2-0-0");
+      int fiber_index=0;
+      gh200coeff.resize(coeff.size());
+      gh200coeff.clear();
+      gh100coeff.resize(coeff.size());
+      gh100coeff.clear();
+      
+      // duplicated code that need to be simplified
+      for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
+	  bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
+	const specex::PSF_Params & params_of_bundle = bundle_it->second;
+	const specex::Legendre2DPol_p pol2d = params_of_bundle.AllParPolXW[gh200_index]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
+      
+	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
+	  
+	  const specex::Trace& trace = psf.FiberTraces.find(fiber)->second; // X_vs_W.Value();
+	  
+	  // build a Legendre1DPol out of the Legendre2DPol
+	  specex::Legendre1DPol pol1d(ncoeff-1,wavemin,wavemax);
+	  for(int w=0;w<ncoeff;w++) {
+	    values[w] = pol2d->Value(trace.X_vs_W.Value(wave[w]),wave[w]);
+	  }
+	  pol1d.Fit(wave,values,0,false);
+	  
+	  // now copy parameters;
+	  
+	  for(int w = 0; w < ncoeff ; w++) {
+	    gh200coeff(fiber_index*ncoeff+w) = pol1d.coeff(w); // this is the definition of the ordering, (wave,fiber)
+	    gh100coeff(fiber_index*ncoeff+w) = -gh200coeff(fiber_index*ncoeff+w); // this is the definition of the ordering, (wave,fiber)
+	  }
+	  gh100coeff(fiber_index*ncoeff) += 1;
+	}
+      }
+    }
+
     for(int p=0;p<nparams;p++) { 
       
       coeff.clear();
@@ -317,11 +356,10 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
       string pname = psf.ParamName(p);
 
       if(need_to_add_first_gh && pname.find("GH-")<pname.npos) { // insert now GH param 0
-	
-	for(int fiber_index=0;fiber_index<NFIBERS;fiber_index++) 
-	  coeff(fiber_index*ncoeff)=1; // need check
-	AddRow(table,"GH-0-0",LEGWMIN,LEGWMAX,coeff);
+	AddRow(table,"GH-0-0",LEGWMIN,LEGWMAX,gh100coeff);
 	need_to_add_first_gh = false;
+	cout << "GH-0-0  : " << gh100coeff << endl;
+	cout << "GH2-0-0 : " << gh200coeff << endl;
       }
 
       
@@ -411,6 +449,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
     fits_write_comment(fp,"         (X,Y)=(0,0) means that PSF is centered on center of first pixel",&status); harp::fits::check ( status );
     fits_write_comment(fp,"GHSIGX   : Sigma of first Gaussian along CCD columns for PSF core",&status); harp::fits::check ( status );
     fits_write_comment(fp,"GHSIGY   : Sigma of first Gaussian along CCD rows for PSF core",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"GHNSIG   : NxSigma cutoff for first Gaussian",&status); harp::fits::check ( status );
     fits_write_comment(fp,"GHSIGX2  : Sigma of second Gaussian along CCD columns for PSF wings",&status); harp::fits::check ( status );
     fits_write_comment(fp,"GHSIGY2  : Sigma of second Gaussian along CCD rows for PSF wings",&status); harp::fits::check ( status );
     fits_write_comment(fp,"GH-i-j   : Hermite pol. coefficents, i along columns, j along rows,",&status); harp::fits::check ( status );
@@ -424,12 +463,13 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
     fits_write_comment(fp,"TAILINDE : Asymptotic power law index of PSF tail",&status); harp::fits::check ( status );
     fits_write_comment(fp,"CONT     : Continuum flux in arc image (not part of PSF)",&status); harp::fits::check ( status );
     fits_write_comment(fp,"-  ",&status); harp::fits::check ( status );
-    fits_write_comment(fp,"PSF_core(X,Y) = [ SUM_ij (GH-i-j)*HERM(i,X/GHSIGX)*HERM(j,Y/GHSIGX) ]",&status); harp::fits::check ( status );
-    fits_write_comment(fp,"              * [ (1-GHSCAL2)*GAUS(X,GHSIGX)*GAUS(Y,GHSIGY)",&status); harp::fits::check ( status );
-    fits_write_comment(fp,"                 + GHSCAL2*GAUS(X,GHSIGX2)*GAUS(Y,GHSIGY2) ]",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"PSF_core(X,Y) = SUM_ij (GH-i-j)*HERM(i,X/GHSIGX)*HERM(j,Y/GHSIGY)",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"               * GAUS(X,GHSIGX)*GAUS(Y,GHSIGY)",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"              +SUM_ij (GH2-i-j)*HERM(i,X/GHSIGX2)*HERM(j,Y/GHSIGY2)",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"                * GAUS(X,GHSIGX2)*GAUS(Y,GHSIGY2)",&status); harp::fits::check ( status );
     fits_write_comment(fp,"-  ",&status); harp::fits::check ( status );
     fits_write_comment(fp,"PSF_tail(X,Y) = TAILAMP*R^2/(TAILCORE^2+R^2)^(1+TAILINDE/2)",&status); harp::fits::check ( status );
-    fits_write_comment(fp,"                with R^2=(X/TAILXSCA)^2+(Y/TAILYSCA)^2",&status); harp::fits::check ( status );
+    fits_write_comment(fp,"                with R^2=(X*TAILXSCA)^2+(Y*TAILYSCA)^2",&status); harp::fits::check ( status );
     fits_write_comment(fp,"-  ",&status); harp::fits::check ( status );
     fits_write_comment(fp,"PSF_core is integrated in pixel",&status); harp::fits::check ( status );
     fits_write_comment(fp,"PSF_tail is not, it is evaluated at center of pixel",&status); harp::fits::check ( status );
