@@ -27,6 +27,7 @@ static double Wt[4][4]= {{1.00000000,  0.0       , 0.0       , 0.0       },
 // number of points (per coordinate) to integrate over a pixel.
 #define NPT 3
 
+//#define INTEGRATING_TAIL
 
 double specex::PSF::PixValue(const double &Xc, const double &Yc,
 				     const double &XPix, const double &YPix,
