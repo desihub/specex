@@ -1,0 +1,16 @@
+# -*- mode: python -*-
+# 
+
+import wafutils
+
+def build( bld ):
+    sources = ['harp_plugin_specex.cc',]
+    lib = bld.shlib(source = sources,
+                    target = 'harp_plugin_specex', 
+                    includes = ['.', '../library'], 
+                    libs     = ['m'], 
+                    uselib   = ['HARP'],
+                    use = ['specex'],
+                    vnum     = wafutils.get_version_number())
+    lib.rpath = [bld.env.PREFIX + '/lib']
+    
