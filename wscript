@@ -48,7 +48,8 @@ def harp_pkgconfig(pkgpath):
 
     libdir=os.popen("harpconfig  --ldflags").read().strip().replace("-L","")
     prefix=libdir.replace("/lib","")
-    libs=os.popen("harpconfig  --link").read()
+    libs=os.popen("harpconfig  --link").read().strip()
+    libs=libs+" -ldl"
     cppflags=os.popen("harpconfig --cppflags").read().strip()
     includedir=string.split(str(cppflags)," ")[0].replace("-I","")
 
@@ -117,7 +118,7 @@ def configure(conf):
         conf.env['CXXFLAGS'].append('-fopenmp')
         conf.env['LINKFLAGS'].append('-fopenmp')
         conf.env['LINKFLAGS_HARP'].append('-fopenmp')
-        
+
     print "debug=",conf.options.debug
     if conf.options.debug == "True" :
         conf.env['CFLAGS'].append('-g')
@@ -184,7 +185,7 @@ def check_packages(conf, pkg_list):
 
 
 def build(bld):
-    bld.add_subdirs( ['src/library', 'src/apps', 'src/tests'])
+    bld.add_subdirs( ['src/library', 'src/plugin', 'src/apps', 'src/tests'])
     gen_pkgconfig(bld)
 
 
