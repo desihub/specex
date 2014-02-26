@@ -100,7 +100,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
 
 
-  int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
+  int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_bands;
  
   
   //SPECEX_INFO("Begin parallelized ComputeChi2AB j range " << stamp.begin_j << " " << stamp.end_j);
@@ -113,38 +113,74 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 #endif
   
   
-  harp::vector_double chi2_of_chunk(number_of_image_chuncks);
-  chi2_of_chunk.clear();
+  harp::vector_double chi2_of_band(number_of_image_bands);
+  chi2_of_band.clear();
   
-  int chunk;
+  // choosing bins
+  harp::vector_double begin_j(number_of_image_bands);
+  harp::vector_double end_j(number_of_image_bands);
+  int band = 0;
+  {
+    int ref_fiber=(psf_params->fiber_min + psf_params->fiber_max)/2;
+    while(psf->FiberTraces.find(ref_fiber)==psf->FiberTraces.end()) {ref_fiber++;} // we check we don't choose a missing one
+    vector<int> spots_j;
+    for(size_t s=0;s<spot_tmp_data.size();s++) {
+      const specex::SpotTmpData &tmp = spot_tmp_data[s];
+      if(tmp.fiber != ref_fiber) continue;
+      spots_j.push_back(int(tmp.y));
+    }
+    std::sort(spots_j.begin(),spots_j.end());
+    
+    //cout << "sorted spots yccd = ";
+    //for(vector<int>::const_iterator j=spots_j.begin();j!=spots_j.end();j++) {
+    //cout << " " << *j;
+    //}
+    
+    band = 0;
+    int nspots_per_band = spots_j.size()/number_of_image_bands;
+    vector<int>::const_iterator j=spots_j.begin();
+    begin_j(0) = stamp.begin_j;
+    int nspots=0;
+    for(vector<int>::const_iterator j=spots_j.begin();j!=spots_j.end();j++) {
+      nspots++;
+      if(nspots>=nspots_per_band) {
+	end_j(band) = min(stamp.end_j,(*j)+psf->hSizeY+2);
+	band++;
+	if(band>=number_of_image_bands) break;
+	begin_j(band) = end_j(band-1);
+	nspots=0;
+      }
+    }
+    end_j(number_of_image_bands-1) = stamp.end_j;
+    
+    // for(band=0; band<number_of_image_bands; band++) SPECEX_INFO("band " << band << " [" << begin_j(band) << ":" << end_j(band) << "]");
+    
+  }
+
+  
   
 #pragma omp parallel for 
-  for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
-    
-    int begin_j = stamp.begin_j + chunk*step_j;
-    int end_j   = stamp.begin_j + (chunk+1)*step_j;
-    if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
-    
-     if(end_j>begin_j) {
-       chi2_of_chunk(chunk) = ComputeChi2AB(compute_ab,begin_j,end_j,& A_of_chunk[chunk], & B_of_chunk[chunk],false);
-     }else if(compute_ab) {
-       A_of_chunk[chunk].clear();
-       B_of_chunk[chunk].clear();
-     }
-  }
-  
-  
-  for(int chunk=1; chunk<number_of_image_chuncks; chunk++) {
-    chi2_of_chunk(0) += chi2_of_chunk(chunk);
-  }
-  if(compute_ab) {
-    for(int chunk=1; chunk<number_of_image_chuncks; chunk++) {
-      A_of_chunk[0] += A_of_chunk[chunk];
-      B_of_chunk[0] += B_of_chunk[chunk];
+  for(band=0; band<number_of_image_bands; band++) {
+    if(end_j(band)>begin_j(band)) {
+       chi2_of_band(band) = ComputeChi2AB(compute_ab,begin_j(band),end_j(band),& A_of_band[band], & B_of_band[band],false);
+    }else if(compute_ab) {
+      A_of_band[band].clear();
+      B_of_band[band].clear();
     }
   }
-  //SPECEX_INFO("End of parallelized ComputeChi2AB chi2 = " << chi2_of_chunk(0));
-  return chi2_of_chunk(0);
+  
+  
+  for(int band=1; band<number_of_image_bands; band++) {
+    chi2_of_band(0) += chi2_of_band(band);
+  }
+  if(compute_ab) {
+    for(int band=1; band<number_of_image_bands; band++) {
+      A_of_band[0] += A_of_band[band];
+      B_of_band[0] += B_of_band[band];
+    }
+  }
+  //SPECEX_INFO("End of parallelized ComputeChi2AB chi2 = " << chi2_of_band(0));
+  return chi2_of_band(0);
 }
 
 void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
@@ -262,8 +298,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   if(end_j==0) end_j=stamp.end_j;
   
   if(compute_ab) {
-    if(Ap==0) Ap = & const_cast<specex::PSF_Fitter*>(this)->A_of_chunk[0];
-    if(Bp==0) Bp = & const_cast<specex::PSF_Fitter*>(this)->B_of_chunk[0];
+    if(Ap==0) Ap = & const_cast<specex::PSF_Fitter*>(this)->A_of_band[0];
+    if(Bp==0) Bp = & const_cast<specex::PSF_Fitter*>(this)->B_of_band[0];
   }
 
   //===============================================
@@ -989,20 +1025,20 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 
   ////////////////////////////////////////////////////////////////////////// 
-  number_of_image_chuncks = 1;
+  number_of_image_bands = 1;
   char* OMP_NUM_THREADS = getenv("OMP_NUM_THREADS");
   if(OMP_NUM_THREADS) {
-    number_of_image_chuncks = atoi(OMP_NUM_THREADS);
-    SPECEX_INFO("Using " << number_of_image_chuncks << " image chunks equal to value of OMP_NUM_THREADS");
+    number_of_image_bands = atoi(OMP_NUM_THREADS);
+    SPECEX_INFO("Using " << number_of_image_bands << " image bands equal to value of OMP_NUM_THREADS");
   }
 
  
   
-  A_of_chunk.clear();
-  B_of_chunk.clear();
-  for(int i=0;i<number_of_image_chuncks;i++) {
-    A_of_chunk.push_back(harp::matrix_double(nparTot, nparTot));
-    B_of_chunk.push_back(harp::vector_double(nparTot));
+  A_of_band.clear();
+  B_of_band.clear();
+  for(int i=0;i<number_of_image_bands;i++) {
+    A_of_band.push_back(harp::matrix_double(nparTot, nparTot));
+    B_of_band.push_back(harp::vector_double(nparTot));
   }
 
 
@@ -1026,11 +1062,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
 #ifdef SPARSE_H
 #warning copy sparse mat and vect to dense for the moment 
-    harp::matrix_double A = A_of_chunk[0];
-    harp::vector_double B = B_of_chunk[0];
+    harp::matrix_double A = A_of_band[0];
+    harp::vector_double B = B_of_band[0];
 #else
-    harp::matrix_double& A = A_of_chunk[0];
-    harp::vector_double& B = B_of_chunk[0];
+    harp::matrix_double& A = A_of_band[0];
+    harp::vector_double& B = B_of_band[0];
 #endif 
 
     harp::matrix_double As=A;
@@ -1237,7 +1273,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
 
   
-  fitWeight = A_of_chunk[0];
+  fitWeight = A_of_band[0];
   if (specex::cholesky_invert_after_decomposition(fitWeight) != 0) {
     SPECEX_ERROR("cholesky_invert_after_decomposition failed");
   }
