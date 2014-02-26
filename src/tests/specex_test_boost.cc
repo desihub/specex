@@ -39,55 +39,73 @@ int main() {
   cout << "==================" << endl;
   
   int n = 8000;
-  ublas::coordinate_vector<double> sv (n);
+  //ublas::coordinate_vector<double> sv (n);
   //ublas::mapped_vector<double> sv (n);
+  ublas::compressed_vector<double> sv (n);
+  //ublas::vector<double> sv (n);
   harp::vector_double v (n);
   harp::vector_double v2 (n);
   double w = 0.2;
   v.clear();
   v2.clear();
+  sv.clear();
   
   for (unsigned i = 0; i < sv.size (); i ++) {
     v2(i)=i;
   }
-  
-  
-
-  for (unsigned i = 0; i < sv.size (); i += 20) {
-    sv (i) = i;
+  for (unsigned i = 0; i < sv.size (); i += 10) {
+    sv(i) = i;
     v(i)=i;
   }
-    
+  
     // see http://www.boost.org/doc/libs/1_38_0/libs/numeric/ublas/doc/blas.htm
-
-    
+  
+  harp::matrix_double m(n,n);
+  
+  int N=500;
   {
-    harp::matrix_double m(n,n); m.clear();
+    m.clear();
     clock_t tstart = clock();
-    specex::syr(w,v,m);
+    for(int i=0;i<N;i++)
+      specex::syr(w,v,m);
     clock_t tstop = clock();
-    cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
-  }
-  {
-    harp::matrix_double m(n,n); m.clear();
-    clock_t tstart = clock();
-    specex::syr(w,v2,m);
-    clock_t tstop = clock();
-      cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+    cout << "#1 n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
   }
   
+  //ublas::coordinate_matrix<double> sm (n,n);
+  ublas::compressed_matrix<double> sm (n,n);
+  //ublas::triangular_matrix<double,  ublas::lower> sm (n,n); // crashed
+  //ublas::mapped_matrix<double> sm (n,n);
+  //ublas::matrix<double> sm (n,n);
   {
-    //ublas::coordinate_matrix<double> m (n,n);
-    ublas::matrix<double> m (n,n);
-    clock_t tstart = clock();
+    
+    clock_t  tstart = clock();
     //ublas::outer_prod(sv,sv);
-    ublas::noalias(m) += w*ublas::outer_prod(sv,sv);
+    
+    for(int i=0;i<N;i++)
+      ublas::noalias(sm) += w*ublas::outer_prod(sv,sv);
+    //ublas::noalias(m) += ublas::sparse_prod(sv,sv);
+      
     //ublas::blas_3::srk(m,1,1,v);
     
     clock_t tstop = clock();
-    cout << "n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+    cout << "#2 n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
   }
-    
+  harp::matrix_double dm = m - sm;
+  for(unsigned i = 0; i < 100;i++) {
+    cout << "m dm ("<< i << ") =" << m(i,i) << " " << dm(i,i) << endl;
+  }
+  
+
+  if(0) {
+    harp::matrix_double m(n,n); m.clear();
+    clock_t tstart = clock();
+    for(int i=0;i<N;i++)
+      specex::syr(w,v2,m);
+    clock_t tstop = clock();
+    cout << "#3 n clocks = " << tstop-tstart << " " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << endl;
+  }
+  
     return 0;
 
 }

@@ -1,6 +1,5 @@
-#include <harp_plugin_specex.h>
+#include <specex_harp_plugin.h>
 #include <specex_psf_io.h>
-#include <specex_serialization.h>
 
 using namespace std;
 
@@ -14,6 +13,7 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
   string file_type = props.get("type","");
   string path = props.get("path","");
   
+  
   if( file_type == "xml")
     read_psf_xml(actual_specex_psf,path);
   else if( file_type == "fits")
@@ -23,6 +23,7 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
   nlambda_ = 0; // I don't have lambda
   rows_ = actual_specex_psf->ccd_image_n_rows;
   cols_ = actual_specex_psf->ccd_image_n_cols;
+
   
   cout << "This PSF is a " << actual_specex_psf->Name() << endl;
 }
