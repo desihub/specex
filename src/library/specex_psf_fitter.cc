@@ -118,7 +118,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
   int chunk;
   
-  //#pragma omp parallel for 
+#pragma omp parallel for 
   for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
     
     int begin_j = stamp.begin_j + chunk*step_j;
