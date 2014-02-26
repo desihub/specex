@@ -68,8 +68,8 @@ class PSF_Fitter {
  public :
   // internal set of parameters and matrices
   harp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
-  std::vector<harp::matrix_double> A_of_chunk; // for Gauss-Newton solving
-  std::vector<harp::vector_double> B_of_chunk; // for Gauss-Newton solving
+  std::vector<harp::matrix_double> A_of_band; // for Gauss-Newton solving
+  std::vector<harp::vector_double> B_of_band; // for Gauss-Newton solving
   harp::matrix_double fitWeight; // saved weight matrix of fitter parameters
   
  public :
@@ -84,7 +84,7 @@ class PSF_Fitter {
   void SelectFiberBundle(int bundle); // this sets bundle_id and psf_global_params
 
 
-  int number_of_image_chuncks; // for parallel processing (automatically set = to the variable OMP_NUM_THREADS of openmp)
+  int number_of_image_bands; // for parallel processing (automatically set = to the variable OMP_NUM_THREADS of openmp)
 
   const image_data& image;
   const image_data& weight;
