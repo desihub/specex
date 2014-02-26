@@ -116,7 +116,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
   int chunk;
   
-#pragma omp parallel for 
+  //#pragma omp parallel for 
   for(chunk=0; chunk<number_of_image_chuncks; chunk++) {
     
     int begin_j = stamp.begin_j + chunk*step_j;
@@ -241,15 +241,17 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 }
 
-double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, harp::matrix_double* input_Ap, harp::vector_double* input_Bp, bool update_tmp_data) const 
+double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, MAYBE_SPARSE_MATRIX* input_Ap, MAYBE_SPARSE_VECTOR* input_Bp, bool update_tmp_data) const 
 {
 
   
 
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
-  harp::matrix_double* Ap = input_Ap;
-  harp::vector_double* Bp = input_Bp;
+
+
+  MAYBE_SPARSE_MATRIX* Ap = input_Ap;
+  MAYBE_SPARSE_VECTOR* Bp = input_Bp;
   
   if(begin_j==0) begin_j=stamp.begin_j;
   if(end_j==0) end_j=stamp.end_j;
@@ -260,12 +262,16 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   if(update_tmp_data) const_cast<specex::PSF_Fitter*>(this)->UpdateTmpData(compute_ab);
   
   // #define SPARSE_H // much slower, I don't understand why
+  MAYBE_SPARSE_VECTOR H;  
+  /*  
 #ifdef SPARSE_H
   //ublas::coordinate_vector<double> H;
   ublas::mapped_vector<double> H;
 #else
   ublas::vector<double> H;  
 #endif
+  */
+  
   if(compute_ab) {
     H.resize(nparTot);
   }
@@ -525,13 +531,13 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	if(recompute_weight_in_fit) {
 	  bfact += (1./wscale)*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
 	}
- 
+	// doing A += w*h*h.transposed();  B += fact*h;
 #ifdef SPARSE_H
 	  ublas::noalias(*Ap) += w*ublas::outer_prod(H,H);
-	  ublas::noalias(*Bp) += (w*res)*H;
+	  ublas::noalias(*Bp) += bfact*H;
 #else
-	  specex::syr(w,H,*Ap); //  this is still way too slow A += w*h*h.transposed(); this routine takes advantage of the zeros in h, its faster than sparce matrices
-	  specex::axpy(bfact,H,*Bp); // B += w*res*h;
+	  specex::syr(w,H,*Ap); //  this is still way too slow; this routine takes advantage of the zeros in h, its faster than sparse matrices
+	  specex::axpy(bfact,H,*Bp); 
 #endif
       }
       
@@ -929,8 +935,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   A_of_chunk.clear();
   B_of_chunk.clear();
   for(int i=0;i<number_of_image_chuncks;i++) {
-    A_of_chunk.push_back(harp::matrix_double(nparTot, nparTot));
-    B_of_chunk.push_back(harp::vector_double(nparTot));
+    A_of_chunk.push_back(MAYBE_SPARSE_MATRIX(nparTot, nparTot));
+    B_of_chunk.push_back(MAYBE_SPARSE_VECTOR(nparTot));
   }
   //////////////////////////////////////////////////////////////////////////
   
@@ -947,9 +953,14 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots chi2 = " << *psfChi2);
     if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots solving ...");
     
+#ifdef SPARSE_H
+#warning copy sparse mat and vect to dense for the moment 
+    harp::matrix_double A = A_of_chunk[0];
+    harp::vector_double B = B_of_chunk[0];
+#else
     harp::matrix_double& A = A_of_chunk[0];
     harp::vector_double& B = B_of_chunk[0];
-    
+#endif 
 
     harp::matrix_double As=A;
     //harp::vector_double Bs=B;
