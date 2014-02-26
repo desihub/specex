@@ -94,6 +94,8 @@ int specex::PSF_Fitter::NPar(int nspots) const {
   return npar;
 }
 
+
+
 double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
 
@@ -124,16 +126,9 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     if(chunk==number_of_image_chuncks-1) end_j = stamp.end_j;
     
      if(end_j>begin_j) {
-#ifdef FASTER_THAN_SYR
-       chi2_of_chunk(chunk) = ComputeChi2AB(compute_ab,begin_j,end_j,& A_of_chunk[chunk], & Ablock_of_chunk[chunk], & B_of_chunk[chunk],false);
-#else
-       chi2_of_chunk(chunk) = ComputeChi2AB(compute_ab,begin_j,end_j,& A_of_chunk[chunk], 0, & B_of_chunk[chunk],false);
-#endif
+       chi2_of_chunk(chunk) = ComputeChi2AB(compute_ab,begin_j,end_j,& A_of_chunk[chunk], & B_of_chunk[chunk],false);
      }else if(compute_ab) {
        A_of_chunk[chunk].clear();
-#ifdef FASTER_THAN_SYR
-       Ablock_of_chunk[chunk].clear();
-#endif    
        B_of_chunk[chunk].clear();
      }
   }
@@ -250,54 +245,46 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 
 
-double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, MAYBE_SPARSE_MATRIX* input_Ap, MAYBE_SPARSE_MATRIX* input_Ablockp, MAYBE_SPARSE_VECTOR* input_Bp, bool update_tmp_data) const 
-{
+double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, harp::matrix_double* input_Ap, harp::vector_double* input_Bp, bool update_tmp_data) const  {
 
-#ifdef FASTER_THAN_SYR  
-  vector<int> other_indices;
-#endif
+  
+  
+  
   
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
-
-
-  MAYBE_SPARSE_MATRIX* Ap = input_Ap;
-#ifdef FASTER_THAN_SYR
-  MAYBE_SPARSE_MATRIX* Ablockp = input_Ablockp;
-  vector<harp::vector_double> Arect;
-
-#endif
-  MAYBE_SPARSE_VECTOR* Bp = input_Bp;
+  
+  
+  harp::matrix_double* Ap = input_Ap;
+  harp::vector_double* Bp = input_Bp;
   
   if(begin_j==0) begin_j=stamp.begin_j;
   if(end_j==0) end_j=stamp.end_j;
   
   if(compute_ab) {
     if(Ap==0) Ap = & const_cast<specex::PSF_Fitter*>(this)->A_of_chunk[0];
-#ifdef FASTER_THAN_SYR
-    if(Ablockp==0) Ablockp = & const_cast<specex::PSF_Fitter*>(this)->Ablock_of_chunk[0];
-    
-    for(size_t s=0; s<spot_tmp_data.size(); s++) {
-      Arect.push_back(harp::vector_double(index_of_spots_parameters));
-      Arect.back().clear();
-    }
-#endif
     if(Bp==0) Bp = & const_cast<specex::PSF_Fitter*>(this)->B_of_chunk[0];
   }
+
+  //===============================================
+#define FASTER_THAN_SYR
+#ifdef FASTER_THAN_SYR  
+  vector<int> other_indices;
+  harp::matrix_double Ablock;
+  vector<harp::vector_double> Arect;
+  for(size_t s=0; s<spot_tmp_data.size(); s++) {
+    Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
+    Ablock.clear();
+    Arect.push_back(harp::vector_double(index_of_spots_parameters));
+    Arect.back().clear();    
+  }
+#endif
+  //=============================================== 
   
   if(update_tmp_data) const_cast<specex::PSF_Fitter*>(this)->UpdateTmpData(compute_ab);
   
-  // #define SPARSE_H // much slower, I don't understand why
-  MAYBE_SPARSE_VECTOR H;  
-  /*  
-#ifdef SPARSE_H
-  //ublas::coordinate_vector<double> H;
-  ublas::mapped_vector<double> H;
-#else
-  ublas::vector<double> H;  
-#endif
-  */
-  
+
+  harp::vector_double H;  
   if(compute_ab) {
     H.resize(nparTot);
   }
@@ -311,9 +298,6 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   
   if(compute_ab) {
     Ap->clear();
-#ifdef FASTER_THAN_SYR
-    Ablockp->clear();
-#endif
     Bp->clear();
     
     if(fit_psf || fit_psf_tail) {
@@ -574,17 +558,11 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	if(recompute_weight_in_fit) {
 	  bfact += (1./wscale)*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
 	}
-	// doing A += w*h*h.transposed();  B += fact*h;
-#ifdef SPARSE_H
-	
-	ublas::noalias(*Ap) += w*ublas::outer_prod(H,H);
-	ublas::noalias(*Bp) += bfact*H;
-	
-#else
 
+	// doing A += w*h*h.transposed();  B += fact*h;
 
 #ifdef FASTER_THAN_SYR
-	  
+	
 	if(index_of_spots_parameters==0) {
 	  for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
 	    const double& hi = H(*i);
@@ -594,54 +572,16 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      (*Ap)(*i,*j) += whi*H(*j);
 	    }
 	  }
-	  
-	  
-
 	} else {
-	  blas::syr(w,ublas::project(H,ublas::range(0,index_of_spots_parameters)),boost::numeric::bindings::lower(*Ablockp));
-	  // specex::write_new_fits_image("Ab.fits",*Ablockp); exit(12);
+	  blas::syr(w,ublas::project(H,ublas::range(0,index_of_spots_parameters)),boost::numeric::bindings::lower(Ablock));
 	  
-	  // Ap->clear(); // DEBUG!!
-
 	  for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
 	    const double& hi = H(*i);
 	    double whi = w*hi;
-	    
-	    // this is correct but not faster than syr ...
-	    //ublas::noalias(ublas::matrix_row< harp::matrix_double >(*Ap,*i))+= whi*H;
-	    
-	    
-
-	    // this is bugged : it writes past index_of_spots_parameters
-	    //ublas::noalias(ublas::matrix_row< harp::matrix_double >(*Ap,*i))
-	    //+= whi*ublas::project(H,ublas::range(0,index_of_spots_parameters));
-
 	    (*Ap)(*i,*i) += whi*hi;
 	    for(vector<int>::const_iterator j=other_indices.begin();j!=i;j++) (*Ap)(*i,*j) += whi*H(*j);
 	    specex::axpy(whi,ublas::project(H,ublas::range(0,index_of_spots_parameters)),Arect[*i-index_of_spots_parameters]);
 	  }
-	  
-	  
-	  /*
-	  if(other_indices.size()>1) {
-	    for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
-	      cout << "DEBUG " << *i << " " << H(*i) << " " << w*H(*i)*H(*i) << endl;
-	    }
-	    specex::write_new_fits_image("A.fits",*Ap);
-	    harp::matrix_double A=*Ap;
-	    A.clear();
-	    specex::syr(w,H,A);
-	    for(int i=0;i<index_of_spots_parameters;i++)
-	      for(int j=0;j<A.size1();j++)	     
-	      //for(int j=0;j<index_of_spots_parameters;j++)
-		 A(j,i)=0;
-	    A -= (*Ap);
-	    specex::write_new_fits_image("diff.fits",A); exit(12);// DEBUG!!
-	    
-	  }
-	  */
-	  
-	  //specex::write_new_fits_image("A.fits",*Ap); exit(12);// DEBUG!!
 	}
 	specex::axpy(bfact,H,*Bp);
 		
@@ -649,26 +589,25 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	specex::syr(w,H,*Ap); //  this is still way too slow; this routine takes advantage of the zeros in h, its faster than sparse matrices
 	specex::axpy(bfact,H,*Bp); 	
 #endif
-	
-#endif
-      }
+ 
+      } // end of test on compute_ab
       
     } // end of loop on pix coord. i
   } // end of loop on pix coord. j
   
 #ifdef FASTER_THAN_SYR  
   if(compute_ab) {
-    SPECEX_INFO("rebuild A ...");
-    size_t n=Ablockp->size1();
+    //SPECEX_INFO("rebuild A ...");
+    size_t n=Ablock.size1();
     for(size_t j=0;j<n;j++)
       for(size_t i=j;i<n;i++)
-	(*Ap)(i,j) += (*Ablockp)(i,j);
+	(*Ap)(i,j) += Ablock(i,j);
     for(size_t s=0; s<spot_tmp_data.size(); s++) {
       int i = index_of_spots_parameters+s;
       for(size_t j=0;j<n;j++)
 	(*Ap)(i,j) += Arect[s](j);
     }
-    SPECEX_INFO("done");
+    //SPECEX_INFO("done");
   }
 #endif
 
@@ -1060,16 +999,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
  
   
   A_of_chunk.clear();
-#ifdef FASTER_THAN_SYR
-  Ablock_of_chunk.clear();
-#endif
   B_of_chunk.clear();
   for(int i=0;i<number_of_image_chuncks;i++) {
-    A_of_chunk.push_back(MAYBE_SPARSE_MATRIX(nparTot, nparTot));
-#ifdef FASTER_THAN_SYR
-    Ablock_of_chunk.push_back(MAYBE_SPARSE_MATRIX(index_of_spots_parameters,index_of_spots_parameters));
-#endif  
-    B_of_chunk.push_back(MAYBE_SPARSE_VECTOR(nparTot));
+    A_of_chunk.push_back(harp::matrix_double(nparTot, nparTot));
+    B_of_chunk.push_back(harp::vector_double(nparTot));
   }
 
 
