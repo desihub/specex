@@ -23,6 +23,7 @@ int main( int argc, char *argv[] ) {
   string input_psf_xml_filename="";
   string input_psf_fits_filename="";
   string output_image_fits_filename="";
+  string output_psf_fits_filename="";
   
   specex_set_verbose(true);
   
@@ -31,7 +32,8 @@ int main( int argc, char *argv[] ) {
     ( "help,h", "display usage information" )
     ( "in_xml", popts::value<string>( & input_psf_xml_filename ), "input PSF xml file name" )
     ( "in_fits", popts::value<string>( & input_psf_fits_filename ), "input PSF fits file name" )
-    ( "out", popts::value<string>( & output_image_fits_filename ), "output image fits file name" )
+    ( "out_fits_image", popts::value<string>( & output_image_fits_filename ), "output image fits file name" )
+    ( "out_fits_psf", popts::value<string>( & output_psf_fits_filename ), "output psf fits file name" )
     ;
   
   popts::variables_map vm;
@@ -39,7 +41,7 @@ int main( int argc, char *argv[] ) {
     popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
     popts::notify(vm);
     
-    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "in_xml" ) && ( ! vm.count( "in_fits" ) )  || ( ! vm.count( "out" ) )  ) ) {
+    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "in_xml" ) && ( ! vm.count( "in_fits" ) ) )  ||  ( ! vm.count( "out_fits_image") && ( ! vm.count( "out_fits_psf" ) ) ) ) {
       cerr << endl;
       cerr << desc << endl;
       return EXIT_FAILURE;
@@ -62,8 +64,9 @@ int main( int argc, char *argv[] ) {
     cout << "code only works with GAUSSHERMITE2PSF" << endl;
     return 0;
   }
-
-  specex::write_psf_fits(psf,"toto.fits");
+  
+  if(vm.count( "out_fits_psf" ))
+  specex::write_psf_fits(psf,output_psf_fits_filename);
   
 
   if(0){
@@ -80,55 +83,11 @@ int main( int argc, char *argv[] ) {
     return 0;
   }
   
-  /* 
-  // write an image of the psf at a precise location
-  write_psf_fits_image(psf,"psf-image.fits",400,2000,1,4);
   
-  {
-    specex::PSF_p ipsf(new specex::GaussHermitePSF());
-    // read psf in specter format
-    
-    read_psf_fits(ipsf,"test-psf-for-specter2.fits");
-    
-    write_psf_fits_image(ipsf,"psf-image-bis.fits",400,2000,1,4);
-  }
-
-  */
-  
-
   // now create a test image
   SPECEX_INFO("Generate an image with spots of flux=1 at each 50A starting at 3500A for each fiber addressed by PSF");
   
-  /* dump things
   
-  For fiber 20 at wavelength=4000 Angstroms:
-  
-  What is the CCD x,y position?
-  What is the reduced x', y' in the ranges [-1,1]?
-  What are the Legendre coefficients that contribute to GH(0,0)?
-  After summing those multiplied by Legendre polynomials evaluated at x' and y', what is the final coefficient for the GH(0,0) term?
-  
-  I'll compare to those numbers and then we'll continue from there...
-  */
-  if(0){
-    int bundle = 1;
-    int fiber = 20;
-    
-    specex::Trace& trace = psf->FiberTraces[fiber];
-    double wave = 4000;
-    double x_ccd = trace.X_vs_W.Value(wave);
-    double y_ccd = trace.Y_vs_W.Value(wave);
-    
-    specex::Legendre2DPol_p pol = psf->ParamsOfBundles[bundle].AllParPolXW[0];
-    
-    double rx = 2*(x_ccd-pol->xmin)/(pol->xmax-pol->xmin)-1;
-    double ry = 2*(y_ccd-pol->ymin)/(pol->ymax-pol->ymin)-1;
-    
-    SPECEX_INFO("wave x_ccd y_ccd " << wave << " " << x_ccd << " " << y_ccd);
-    SPECEX_INFO("reduced x and y " << rx << " " << ry);
-    
-  }
-
   
   SPECEX_INFO("create list of spots ...");
   
@@ -192,7 +151,7 @@ int main( int argc, char *argv[] ) {
   bool only_psf_core = false;
   bool only_positive = false;
 
-  if(0) {
+  if(output_image_fits_filename!="") {
     SPECEX_INFO("computing  image ...");  
     specex::parallelized_compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0);
     //specex::compute_model_image(img,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,12);
@@ -200,7 +159,7 @@ int main( int argc, char *argv[] ) {
     SPECEX_INFO("writing image ...");
     specex::write_new_fits_image(output_image_fits_filename,img);
   }else{
-    SPECEX_INFO("skipping full image");  
+    SPECEX_INFO("no full image");  
   }
   
   { // one spot
@@ -215,13 +174,19 @@ int main( int argc, char *argv[] ) {
     
     char filename[1000];
     
-    const specex::PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
+    specex::PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
+    
+    if(psf->HasParam("GHNSIG")) {
+      params_of_bundle.AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff.clear();
+      params_of_bundle.AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff(0)=1000; // don't want to cut off core
+      cout << "set GHNSIG to very large value" << endl;
+    }
+    
     harp::vector_double psf_params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
     
     double scal2    = psf_params[psf->ParamIndex("GH2-0-0")];
     cout << "norm of first  GH PSF = " << (1-scal2) << endl;
     cout << "norm of second GH PSF = " <<  scal2 << endl;
-    
     
     
     vector<string> names = psf->DefaultParamNames();
