@@ -379,7 +379,7 @@ harp::vector_double specex::GaussHermite2PSF::DefaultParams() const
   Params(index++) = 1.; // tail core size
   Params(index++) = 1.; // tail x scale
   Params(index++) = 1.; // tail y scale
-  Params(index++) = 2.6; // tail power law index
+  Params(index++) = 2.2; // tail power law index
 #endif
 
   return Params;
