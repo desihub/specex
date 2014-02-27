@@ -375,7 +375,7 @@ harp::vector_double specex::GaussHermite2PSF::DefaultParams() const
   
 #ifdef EXTERNAL_TAIL
   
-  Params(index++) = 0.01; // tail amplitude
+  Params(index++) = 0.; // tail amplitude
   Params(index++) = 1.; // tail core size
   Params(index++) = 1.; // tail x scale
   Params(index++) = 1.; // tail y scale
@@ -460,6 +460,8 @@ void specex::GaussHermite2PSF::Append(const specex::PSF_p other_p) {
   
 }
 
+
+
 //! Access to the current PSF, with user provided Params.
 double specex::GaussHermite2PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc, 
 					 const int IPix, const int JPix,
@@ -469,27 +471,28 @@ double specex::GaussHermite2PSF::PSFValueWithParamsXY(const double &Xc, const do
   
   if(PosDer) PosDer->clear();
   if(ParamDer) ParamDer->clear();
-  
-  //here is a hack
+
+  double val = 0;
+
+  if(with_core) {
+
+    //here is a hack
 #define NASTY_HACK_FOR_SPECTER
 #ifdef NASTY_HACK_FOR_SPECTER
 #warning nasty hack to get rid off asap (i am sure it will last forever)
-  double  orig_nsig=Params(2);
-  double& mod_nsig=const_cast<harp::vector_double &>(Params)(2);
-  double xPixCenter = floor(IPix+0.5);
-  double yPixCenter = floor(JPix+0.5);
-  if(square(Xc-xPixCenter)+square(Yc-yPixCenter)<square(orig_nsig))
-    mod_nsig=1000; // in inner core everywhere in the pixel
-  else
-    mod_nsig=0; // out of inner core everywhere in the pixel
+    harp::vector_double par = Params;
+    double xPixCenter = floor(IPix+0.5);
+    double yPixCenter = floor(JPix+0.5);
+    if(square((Xc-xPixCenter)/par(0))+square((Yc-yPixCenter)/par(1))<square(par(2)))
+      par(2)=1000; // in inner core everywhere in the pixel
+    else
+      par(2)=0; // out of inner core everywhere in the pixel
 #endif
+    
+    
+    val += PixValue(Xc,Yc,IPix, JPix, par, PosDer, ParamDer); 
+  }
   
-  double val = 0;
-  if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
-
-#ifdef NASTY_HACK_FOR_SPECTER 
-  mod_nsig=orig_nsig;
-#endif     
 
 #ifdef EXTERNAL_TAIL
 #ifdef INTEGRATING_TAIL
