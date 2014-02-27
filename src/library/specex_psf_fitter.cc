@@ -1695,7 +1695,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       }
 #ifdef CONTINUUM
       //SPECEX_WARNING("I set deg=0 to cont and tail");
-      //psf_params->ContinuumPol.deg = 0;
+      psf_params->ContinuumPol.deg = 1;
       psf_params->ContinuumPol.coeff.resize(psf_params->ContinuumPol.deg+1);
       psf_params->ContinuumPol.coeff.clear();
       psf_params->ContinuumPol.xmin = min_wave;
