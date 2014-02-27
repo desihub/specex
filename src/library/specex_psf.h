@@ -52,8 +52,8 @@ namespace specex {
     // those are polynomials of x_cdd and lambda to allow continuous variation in CCD and at the same time
     // and easy projection per fiber for subsequent use
     
-    std::vector<Legendre2DPol_p> AllParPolXW; // all the parameters of the PSF , varying with x_ccd and lambda
-    std::vector<Legendre2DPol_p> FitParPolXW; // subsamples of parameters that are fit
+    std::vector<Pol_p> AllParPolXW; // all the parameters of the PSF , varying with x_ccd and lambda
+    std::vector<Pol_p> FitParPolXW; // subsamples of parameters that are fit
     
 
     int bundle_id;

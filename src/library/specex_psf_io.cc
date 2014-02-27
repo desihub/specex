@@ -325,7 +325,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
       for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
 	  bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 	const specex::PSF_Params & params_of_bundle = bundle_it->second;
-	const specex::Legendre2DPol_p pol2d = params_of_bundle.AllParPolXW[gh200_index]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
+	const specex::Pol_p pol2d = params_of_bundle.AllParPolXW[gh200_index]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
       
 	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
 	  
@@ -368,7 +368,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
 	  bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 	const specex::PSF_Params & params_of_bundle = bundle_it->second;
 	
-	const specex::Legendre2DPol_p pol2d = params_of_bundle.AllParPolXW[p]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
+	const specex::Pol_p pol2d = params_of_bundle.AllParPolXW[p]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
 	
 
 	
@@ -716,7 +716,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
 	  bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 	const specex::PSF_Params & params_of_bundle = bundle_it->second;
 	
-	const specex::Legendre2DPol_p pol2d = params_of_bundle.AllParPolXW[p]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
+	const specex::Pol_p pol2d = params_of_bundle.AllParPolXW[p]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
 	
 
 	
@@ -1010,7 +1010,7 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
 	  bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 	const specex::PSF_Params & params_of_bundle = bundle_it->second;
 	
-	const specex::Legendre2DPol_p pol2d = params_of_bundle.AllParPolXW[p]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
+	const specex::Pol_p pol2d = params_of_bundle.AllParPolXW[p]; // this is the 2D polynomiald of x_ccd and wave for this param and bundle
 	
 
 	

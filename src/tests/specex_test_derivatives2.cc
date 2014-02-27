@@ -19,8 +19,8 @@ int main() {
   specex_set_verbose(true);
   
   //specex::PSF_p psf(new specex::HatHermitePSF(3));
-  specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
-  //specex::PSF_p psf(new specex::GaussHermitePSF(3));
+  //specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
+  specex::PSF_p psf(new specex::GaussHermitePSF(3));
   //specex::PSF_p psf(new specex::HatMoffatPSF(3));
   psf->AllocateDefaultParams();
   

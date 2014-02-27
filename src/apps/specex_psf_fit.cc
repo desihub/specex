@@ -359,12 +359,15 @@ int main ( int argc, char *argv[] ) {
 	// writing psf as xml
 	char filename[100];
 	
-	if(psf_model == "GAUSSHERMITE" || psf_model == "GAUSSHERMITE2") {
+	sprintf(filename,"psf-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	write_psf_xml(fitter.psf,filename);
+	
+	//if(psf_model == "GAUSSHERMITE" || psf_model == "GAUSSHERMITE2") {
+	if(psf_model == "GAUSSHERMITE2") {
 	  sprintf(filename,"psf-%08d-%03d-%03d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	  write_psf_fits(fitter.psf,filename);
 	}
-	sprintf(filename,"psf-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
-	write_psf_xml(fitter.psf,filename);
+	
 
       }
 

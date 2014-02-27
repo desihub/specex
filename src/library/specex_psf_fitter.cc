@@ -341,15 +341,15 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
       indices_of_fitpar_in_allpar.resize(npar_fixed_coord); 
 
-      const std::vector<Legendre2DPol_p>& AP=psf_params->AllParPolXW;
-      const std::vector<Legendre2DPol_p>& FP=psf_params->FitParPolXW;
+      const std::vector<Pol_p>& AP=psf_params->AllParPolXW;
+      const std::vector<Pol_p>& FP=psf_params->FitParPolXW;
 
       // assert(npar_fixed_coord == FP.size()); // ok
       
       size_t fk=0;
       for (size_t ak =0; ak < AP.size(); ++ak) {
-	const Legendre2DPol_p FPk = FP[fk];
-	const Legendre2DPol_p APk = AP[ak];
+	const Pol_p FPk = FP[fk];
+	const Pol_p APk = AP[ak];
 	if(APk==FPk) {
 	  indices_of_fitpar_in_allpar[fk]=int(ak);
 	  fk++; // change free param index for next iteration
@@ -659,8 +659,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       int fp=0; // fitted par. index
       for(int ap=0;ap<npar;ap++) {
 	
-	const specex::Legendre2DPol_p AP=psf_params->AllParPolXW[ap];
-	const specex::Legendre2DPol_p FP=psf_params->FitParPolXW[fp];
+	const specex::Pol_p AP=psf_params->AllParPolXW[ap];
+	const specex::Pol_p FP=psf_params->FitParPolXW[fp];
 	
 	if(AP==FP) { // only apply prior to fit parameters  
 	  
@@ -1625,6 +1625,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	if(spot->wavelength > max_wave ) max_wave = spot->wavelength;
 	
       }
+      // can happend when testing
+      if(max_x==min_x) max_x = min_x+1;
+      if(max_wave==min_wave) max_wave = min_wave+1;
+      
       
       // get max number of spots per fiber
       map<int,int> number_of_spots_per_fiber;
@@ -1666,14 +1670,27 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       if(int(param_names.size()) != npar) SPECEX_ERROR("Fatal inconsistency in number of parameters of PSF");
       
       for(int p=0;p<npar;p++) {
-	int degx=polynomial_degree_along_x;
+	int degx=0;
 	int degw=polynomial_degree_along_wave;
-	
 	const string& name = param_names[p];
+	
+	
+	if(name=="GHSIGX" || name=="GHSIGY") {
+	  degx=min(1,int(polynomial_degree_along_x));
+	}
 	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2" || name=="GHNSIG") {
 	  degx=0;
 	  degw=0;
 	}
+	
+	if(name=="GH-1-0" || name=="GH-0-1" || name=="GH-1-1" || name=="GH-2-0" || name=="GH-0-2") {
+	  degx=polynomial_degree_along_x;
+	} 
+	if(name.find("GH2")!=name.npos) {
+	  degx=min(1,int(polynomial_degree_along_x));
+	  degw=min(2,int(polynomial_degree_along_wave));
+	}
+	
 	if(name=="TAILAMP") {
 	  degx=0;
 	  degw=min(1,int(polynomial_degree_along_wave));
@@ -1682,12 +1699,12 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  degx=0;
 	  degw=0;
 	}
-	
-	specex::Legendre2DPol_p pol(new specex::Legendre2DPol(degx,min_x,max_x,degw,min_wave,max_wave));
+		
+	specex::Pol_p pol(new specex::Pol(degx,min_x,max_x,degw,min_wave,max_wave));
 	pol->name = param_names[p];
-	pol->coeff.clear();
+	pol->Fill(); // instead of this, can use prop of sparsepol
 	pol->coeff(0) = default_params(p);
-	//SPECEX_INFO("Coeff for par " << p << " = " << pol->coeff);
+	SPECEX_INFO("Init P" << p << " " << pol->name << " =" << pol->coeff(0) << ", degw=" << degw << " degx=" << degx);
 	
 	psf_params->AllParPolXW.push_back(pol);
 	
@@ -2045,8 +2062,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_psf        = true;
   fit_trace      = false;
   chi2_precision = 1;
-  include_signal_in_weight = true;  recompute_weight_in_fit  = false;
-  //include_signal_in_weight = false;  recompute_weight_in_fit  = true;
+  //include_signal_in_weight = true;  recompute_weight_in_fit  = false;
+  include_signal_in_weight = false;  recompute_weight_in_fit  = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }

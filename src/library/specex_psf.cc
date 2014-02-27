@@ -25,7 +25,7 @@ static double Wt[4][4]= {{1.00000000,  0.0       , 0.0       , 0.0       },
  
 
 // number of points (per coordinate) to integrate over a pixel.
-#define NPT 3
+#define NPT 4
 
 //#define INTEGRATING_TAIL
 
@@ -217,7 +217,7 @@ double specex::PSF::TailValueFW(const int fiber, const double& wave,
 int specex::PSF::BundleNFitPar(int bundle_id) const {
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& P=it->second.FitParPolXW;
+  const std::vector<Pol_p>& P=it->second.FitParPolXW;
   int n=0;
   for(size_t p=0;p<P.size();p++)
     n += P[p]->coeff.size();
@@ -226,7 +226,7 @@ int specex::PSF::BundleNFitPar(int bundle_id) const {
 int specex::PSF::BundleNAllPar(int bundle_id) const {
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& P=it->second.AllParPolXW;
+  const std::vector<Pol_p>& P=it->second.AllParPolXW;
   int n=0;
   for(size_t p=0;p<P.size();p++)
     n += P[p]->coeff.size();
@@ -268,7 +268,8 @@ void specex::PSF::AllocateDefaultParams() {
   PSF_Params pars;
   ParamsOfBundles[0] = pars;
   for(size_t p = 0; p<params.size(); p++) {
-    Legendre2DPol_p pol(new Legendre2DPol(0,0,1,0,0,1));
+    Pol_p pol(new Pol(0,0,1,0,0,1));
+    pol->Fill();
     pol->name = param_names[p];
     ParamsOfBundles[0].AllParPolXW.push_back(pol);
   }
@@ -402,7 +403,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW(const double &X, const double 
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& P=it->second.AllParPolXW;
+  const std::vector<Pol_p>& P=it->second.AllParPolXW;
   
   harp::vector_double params(P.size());
   for (size_t k =0; k < P.size(); ++k)
@@ -420,7 +421,7 @@ harp::vector_double specex::PSF::FitLocalParamsXW(const double &X, const double 
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& P=it->second.FitParPolXW;
+  const std::vector<Pol_p>& P=it->second.FitParPolXW;
   
   harp::vector_double params(P.size());
   for (size_t k =0; k < P.size(); ++k)
@@ -438,7 +439,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_AllBundleParams(const dou
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& P=it->second.AllParPolXW;
+  const std::vector<Pol_p>& P=it->second.AllParPolXW;
   
   harp::vector_double params(LocalNAllPar());
   
@@ -467,14 +468,14 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const dou
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& AP=it->second.AllParPolXW;
-  const std::vector<Legendre2DPol_p>& FP=it->second.FitParPolXW;
+  const std::vector<Pol_p>& AP=it->second.AllParPolXW;
+  const std::vector<Pol_p>& FP=it->second.FitParPolXW;
   
   // whe need to find which param is fixed and which is not
   size_t fk=0;
   int index=0;
   for (size_t ak =0; ak < AP.size(); ++ak) { // loop on all params
-    const Legendre2DPol_p APk = AP[ak];
+    const Pol_p APk = AP[ak];
     
     if((fk<FP.size()) && (APk==FP[fk])) { // this is a fit param because the addresses are the same
 
@@ -503,7 +504,7 @@ harp::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const dou
   
   std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
   if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Legendre2DPol_p>& P=it->second.FitParPolXW;
+  const std::vector<Pol_p>& P=it->second.FitParPolXW;
   
   harp::vector_double params(P.size());
   

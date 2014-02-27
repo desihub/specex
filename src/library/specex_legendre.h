@@ -62,6 +62,7 @@ class Legendre2DPol
  
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
+  void Fill();
   
   private :
 
@@ -80,7 +81,55 @@ class Legendre2DPol
 
 };
 BOOST_SERIALIZATION_SHARED_PTR(Legendre2DPol)
-typedef boost::shared_ptr < specex::Legendre2DPol > Legendre2DPol_p;
+
+
+
+class SparseLegendre2DPol
+{
+
+  friend class boost::serialization::access;
+
+ protected :
+  std::vector<int> non_zero_indices;
+  
+ public :
+  string name;
+  harp::vector_double coeff;
+  int xdeg,ydeg;
+  double xmin,xmax,ymin,ymax;
+  
+  void Add(int i,int j);
+  void Fill(); // this is equivalent to a std Legendre2DPol
+  void Clear(); // reset
+
+  SparseLegendre2DPol(int i_xdeg=0, const double& i_xmin=0, const double& i_xmax=0, 
+		      int i_ydeg=0, const double& i_ymin=0, const double& i_ymax=0);
+ 
+  harp::vector_double Monomials(const double &x,const double &y) const;
+  double Value(const double &x,const double &y) const;
+  
+  private :
+
+    template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+      ar & BOOST_SERIALIZATION_NVP(name);
+      ar & BOOST_SERIALIZATION_NVP(coeff);
+      ar & BOOST_SERIALIZATION_NVP(xdeg);
+      ar & BOOST_SERIALIZATION_NVP(ydeg);
+      ar & BOOST_SERIALIZATION_NVP(xmin);
+      ar & BOOST_SERIALIZATION_NVP(xmax);
+      ar & BOOST_SERIALIZATION_NVP(ymin);
+      ar & BOOST_SERIALIZATION_NVP(ymax);
+      ar & BOOST_SERIALIZATION_NVP(non_zero_indices);
+      return;
+    }
+
+};
+BOOST_SERIALIZATION_SHARED_PTR(SparseLegendre2DPol)
+
+// this if for convenience in the rest of the code
+typedef specex::SparseLegendre2DPol Pol;
+typedef boost::shared_ptr < specex::SparseLegendre2DPol > Pol_p;
 
 }
   

@@ -375,7 +375,7 @@ harp::vector_double specex::GaussHermite2PSF::DefaultParams() const
   
 #ifdef EXTERNAL_TAIL
   
-  Params(index++) = 0.; // tail amplitude
+  Params(index++) = 0.01; // tail amplitude
   Params(index++) = 1.; // tail core size
   Params(index++) = 1.; // tail x scale
   Params(index++) = 1.; // tail y scale

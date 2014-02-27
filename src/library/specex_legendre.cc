@@ -162,6 +162,10 @@ specex::Legendre2DPol::Legendre2DPol(int i_xdeg, const double& i_xmin, const dou
   ymin(i_ymin),
   ymax(i_ymax)
 {
+  Fill();
+}
+
+void specex::Legendre2DPol::Fill() {
   coeff.resize((xdeg+1)*(ydeg+1));
   coeff.clear();
 }
@@ -189,6 +193,72 @@ harp::vector_double specex::Legendre2DPol::Monomials(const double &x, const doub
 
 
 double specex::Legendre2DPol::Value(const double &x,const double &y) const {
+  return specex::dot(coeff,Monomials(x,y));
+}
+
+//============================
+
+specex::SparseLegendre2DPol::SparseLegendre2DPol(int i_xdeg, const double& i_xmin, const double& i_xmax,
+			     int i_ydeg, const double& i_ymin, const double& i_ymax
+			     ) : 
+  name("undefined"),
+  xdeg(i_xdeg),
+  xmin(i_xmin),
+  xmax(i_xmax),
+  ydeg(i_ydeg),
+  ymin(i_ymin),
+  ymax(i_ymax)
+{
+}
+
+void specex::SparseLegendre2DPol::Add(int i,int j) {
+  if(i<0 || i>xdeg || j<0 || j>ydeg) {SPECEX_ERROR("in SparseLegendre2DPol::Add not valid indices " << i << " " << j);}
+  
+  int index=i+j*(xdeg+1);
+  // checking
+  for(std::vector<int>::const_iterator k = non_zero_indices.begin(); k!=  non_zero_indices.end(); k++) {
+    if(*k == index) {
+      SPECEX_WARNING("in SparseLegendre2DPol::Add, indices " << i << " " << j << " already set");
+      return;
+    }
+  }
+  non_zero_indices.push_back(index);
+  coeff.resize(non_zero_indices.size());
+  coeff.clear();
+}
+ 
+void specex::SparseLegendre2DPol::Fill() {
+  non_zero_indices.clear();
+  for(int k=0;k<(xdeg+1)*(ydeg+1);k++) non_zero_indices.push_back(k);
+  coeff.resize(non_zero_indices.size());
+  coeff.clear();
+}
+
+void specex::SparseLegendre2DPol::Clear() {
+  non_zero_indices.clear();
+  coeff.resize(0);
+}
+
+
+harp::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, const double &y) const {
+  
+  // range is -1,1 if  xmin<x<xmax
+  double rx= 2*(x-xmin)/(xmax-xmin)-1;
+  double ry= 2*(y-ymin)/(ymax-ymin)-1;
+  
+  
+  harp::vector_double m(non_zero_indices.size());
+  int index=0;
+  for(std::vector<int>::const_iterator k = non_zero_indices.begin(); k!=  non_zero_indices.end(); k++, index++) {
+    int i = (*k)%(xdeg+1);
+    int j = (*k)/(xdeg+1);
+    m[index]=LegendrePol(i,rx)*LegendrePol(j,ry);
+  }
+  return m;
+}
+
+
+double specex::SparseLegendre2DPol::Value(const double &x,const double &y) const {
   return specex::dot(coeff,Monomials(x,y));
 }
 
