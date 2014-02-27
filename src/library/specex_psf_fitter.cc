@@ -98,9 +98,8 @@ int specex::PSF_Fitter::NPar(int nspots) const {
 
 double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
-
-
-  int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_bands;
+  
+  //int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_bands;
  
   
   //SPECEX_INFO("Begin parallelized ComputeChi2AB j range " << stamp.begin_j << " " << stamp.end_j);
