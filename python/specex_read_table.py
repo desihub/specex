@@ -29,10 +29,14 @@ for r in range(nrows) :
     line="%02d "%(r+1)
     line += "%s\t"%table.field("PARAM")[r]
     line += " [%d,%d]"%(table.field("WAVEMIN")[r],table.field("WAVEMAX")[r])
+    line += " NC=%d"%(table.field("NCOEFF")[r])
     
     coef = table.field("COEFF")[r]
     line += " %s"%str(coef.shape)
-    line += " %f ..."%coef[0]
+    line += " "
+    for i in range(15) :
+        line += "%f,"%coef[i]
+    line +="..."
     print line
 
 
