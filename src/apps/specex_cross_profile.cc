@@ -176,9 +176,14 @@ int main ( int argc, char *argv[] ) {
     os << "#end" << endl;
     
     vector<harp::vector_double> psf_params;
+    vector<harp::vector_double> psf_params_wo_tails;
+    int tail_amp_index = psf->ParamIndex("TAILAMP");
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p& spot = spots[s];
       psf_params.push_back(psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle));
+      harp::vector_double p = psf_params.back();
+      p(tail_amp_index)=0;
+      psf_params_wo_tails.push_back(p);
     }
 
     
@@ -223,12 +228,17 @@ int main ( int argc, char *argv[] ) {
       for(size_t s=0;s<spots.size();s++) {
 	specex::Spot_p& spot = spots[s];
 
-	bool in_core = fabs(j-spot->yc)<psf->hSizeY+1;
-	double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
-							  psf_params[s], 0, 0, in_core, 0);
+	bool in_core = (fabs(j-spot->yc)<(psf->hSizeY+1) && fabs(i-spot->xc)<(psf->hSizeX+1));
+	double val_s = spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
+							  psf_params[s], 0, 0, in_core, true);
+	double val_wo_tail = spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
+								    psf_params_wo_tails[s], 0, 0, in_core , false);
+	 
 	  
-	val += val;
-	val_core += val;
+	val += val_s;
+	val_core += val_wo_tail;
+	val_tail += (val_s-val_wo_tail);
+	  
       }
 	
       os << " " << data << " " << val << " " << val_core << " " << val_tail << " " << val_cont;
