@@ -38,6 +38,14 @@ namespace specex {
     
     void Append(const specex::PSF_p other);
     
+    // will be optimized. for now a hack for the tail at the boundary of core radius
+    virtual double PSFValueWithParamsXY(const double& X, const double &Y, 
+					const int IPix, const int JPix,
+					const harp::vector_double &Params,
+					harp::vector_double *PosDer, harp::vector_double *ParamDer,
+					bool with_core=true, bool with_tail=true) const;
+    
+
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {

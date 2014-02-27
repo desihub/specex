@@ -459,3 +459,52 @@ void specex::GaussHermite2PSF::Append(const specex::PSF_p other_p) {
   SPECEX_INFO("GaussHermite2PSF::Append successful");
   
 }
+
+//! Access to the current PSF, with user provided Params.
+double specex::GaussHermite2PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc, 
+					 const int IPix, const int JPix,
+					 const harp::vector_double &Params,
+					 harp::vector_double *PosDer, harp::vector_double *ParamDer,
+					 bool with_core, bool with_tail) const {
+  
+  if(PosDer) PosDer->clear();
+  if(ParamDer) ParamDer->clear();
+  
+  //here is a hack
+#define NASTY_HACK_FOR_SPECTER
+#ifdef NASTY_HACK_FOR_SPECTER
+#warning nasty hack to get rid off asap (i am sure it will last forever)
+  double  orig_nsig=Params(2);
+  double& mod_nsig=const_cast<harp::vector_double &>(Params)(2);
+  double xPixCenter = floor(IPix+0.5);
+  double yPixCenter = floor(JPix+0.5);
+  if(square(Xc-xPixCenter)+square(Yc-yPixCenter)<square(orig_nsig))
+    mod_nsig=1000; // in inner core everywhere in the pixel
+  else
+    mod_nsig=0; // out of inner core everywhere in the pixel
+#endif
+  
+  double val = 0;
+  if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
+
+#ifdef NASTY_HACK_FOR_SPECTER 
+  mod_nsig=orig_nsig;
+#endif     
+
+#ifdef EXTERNAL_TAIL
+#ifdef INTEGRATING_TAIL
+  if(with_tail && !with_core) {
+    double prof = TailProfile(IPix-Xc,JPix-Yc, Params, with_core);
+    if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
+    val += Params(psf_tail_amplitude_index)*prof;
+  }
+#else
+  if(with_tail) {
+    double prof = TailProfile(IPix-Xc,JPix-Yc, Params, with_core);
+    if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
+    val += Params(psf_tail_amplitude_index)*prof;
+  }
+#endif
+#endif
+  return val;
+}

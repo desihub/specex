@@ -176,12 +176,13 @@ int main( int argc, char *argv[] ) {
     
     specex::PSF_Params& params_of_bundle = psf->ParamsOfBundles.find(spot->fiber_bundle)->second;
     
+    /*
     if(psf->HasParam("GHNSIG")) {
       params_of_bundle.AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff.clear();
       params_of_bundle.AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff(0)=1000; // don't want to cut off core
       cout << "set GHNSIG to very large value" << endl;
     }
-    
+    */
     harp::vector_double psf_params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
     
     double scal2    = psf_params[psf->ParamIndex("GH2-0-0")];

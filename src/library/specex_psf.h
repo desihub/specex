@@ -282,7 +282,7 @@ public :
     //! Access to the current PSF, with user provided Params.
     
     // this is the fastest (no conversion fiber,wave -> x,y)
-    double PSFValueWithParamsXY(const double& X, const double &Y, 
+    virtual double PSFValueWithParamsXY(const double& X, const double &Y, 
 				const int IPix, const int JPix,
 				const harp::vector_double &Params,
 				harp::vector_double *PosDer, harp::vector_double *ParamDer,
