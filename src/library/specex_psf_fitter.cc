@@ -158,7 +158,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 
   
   
-  //#pragma omp parallel for 
+#pragma omp parallel for 
   for(band=0; band<number_of_image_bands; band++) {
     if(end_j(band)>begin_j(band)) {
        chi2_of_band(band) = ComputeChi2AB(compute_ab,begin_j(band),end_j(band),& A_of_band[band], & B_of_band[band],false);
