@@ -387,7 +387,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     else
       continuum_params = psf_params->ContinuumPol.coeff;
     
-    expfact_for_continuum=1./(2*M_PI*square(psf_params->continuum_sigma_x));
+    expfact_for_continuum=1./(sqrt(2*M_PI)*psf_params->continuum_sigma_x);
     
     x_of_trace_for_continuum.resize(psf_params->fiber_max-psf_params->fiber_min+1);
   }

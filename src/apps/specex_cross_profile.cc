@@ -212,7 +212,7 @@ int main ( int argc, char *argv[] ) {
 
 
 	const PSF_Params &params_of_bundle = it->second;
-	double expfact_for_continuum=1./(2*M_PI*square(params_of_bundle.continuum_sigma_x));
+	double expfact_for_continuum=1./(sqrt(2*M_PI)*params_of_bundle.continuum_sigma_x);
 
 	
 	for(int fiber = it->second.fiber_min ; fiber <= it->second.fiber_max; fiber ++) {

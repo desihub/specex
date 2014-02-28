@@ -184,7 +184,7 @@ int main ( int argc, char *argv[] ) {
     
 #ifdef CONTINUUM
     PSF_Params &params_of_bundle = psf->ParamsOfBundles.find(bundle)->second;
-    double expfact_for_continuum=1./(2*M_PI*square(params_of_bundle.continuum_sigma_x));
+    double expfact_for_continuum=1./(sqrt(2*M_PI)*params_of_bundle.continuum_sigma_x);
 #endif
     
     

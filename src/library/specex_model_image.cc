@@ -163,7 +163,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
 	  double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
 	  double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
 	  double continuum_flux = params_of_bundle.ContinuumPol.Value(w);
-	  double expfact_for_continuum=continuum_flux/(2*M_PI*square(params_of_bundle.continuum_sigma_x));
+	  double expfact_for_continuum=continuum_flux/(sqrt(2*M_PI)*params_of_bundle.continuum_sigma_x);
 	  if(expfact_for_continuum!=0) {
 	    for (int i=begin_i ; i <end_i; ++i) {    
 	      if(weight(i,j)<=0) continue;
