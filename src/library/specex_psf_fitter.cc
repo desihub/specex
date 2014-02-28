@@ -2115,7 +2115,35 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }
-    
+  
+  SPECEX_INFO("Compute in-core chi2");
+  SPECEX_INFO("=======================================");
+  
+  
+  fit_flux       = false;
+  fit_position   = false;
+  fit_psf        = false;
+  fit_trace      = false;
+#ifdef CONTINUUM
+  fit_continuum  = false;
+#endif
+#ifdef EXTERNAL_TAIL
+  fit_psf_tail   = false;
+#endif  
+
+  int saved_hsizex = psf->hSizeX;
+  int saved_hsizey = psf->hSizeY;
+  psf->hSizeX=2;
+  psf->hSizeY=2;
+  include_signal_in_weight = true;
+  ComputeWeigthImage(selected_spots,&npix);  
+  psf_params->ndata_in_core = npix;
+  InitTmpData(selected_spots);
+  psf_params->chi2_in_core = ParallelizedComputeChi2AB(false);
+  psf->hSizeX=saved_hsizex;
+  psf->hSizeY=saved_hsizey;
+
+ 
   SPECEX_INFO("Compute final chi2");
   SPECEX_INFO("=======================================");
   
@@ -2131,7 +2159,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_psf_tail   = false;
 #endif  
   include_signal_in_weight = true;
-  ComputeWeigthImage(selected_spots,&npix);  
+  ComputeWeigthImage(selected_spots,&npix); 
+  psf_params->ndata = npix; 
   InitTmpData(selected_spots);
   psf_params->chi2 = ParallelizedComputeChi2AB(false);
   return ok;

@@ -61,7 +61,9 @@ namespace specex {
     int fiber_max; // last fiber this set of params applies to
 
     double chi2; // fit results
+    double chi2_in_core; // fit results
     int ndata;
+    int ndata_in_core;
     int nparams;
     int fit_status; // 0=ok 1=cholesky error 2=no convergence 3=nan in fit
     int nspots_in_fit;
@@ -91,6 +93,8 @@ namespace specex {
       ar & BOOST_SERIALIZATION_NVP(fiber_max);
       ar & BOOST_SERIALIZATION_NVP(chi2);
       ar & BOOST_SERIALIZATION_NVP(ndata);
+      ar & BOOST_SERIALIZATION_NVP(chi2_in_core);
+      ar & BOOST_SERIALIZATION_NVP(ndata_in_core);
       ar & BOOST_SERIALIZATION_NVP(nparams);
       ar & BOOST_SERIALIZATION_NVP(fit_status);
       ar & BOOST_SERIALIZATION_NVP(nspots_in_fit);

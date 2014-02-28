@@ -564,6 +564,10 @@ void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& 
       double chi2pdf = 0;
       if(ndf>0) chi2pdf = params_of_bundle.chi2/ndf;
       
+      double chi2ndata_core = 0;
+      if(params_of_bundle.ndata_in_core>0)
+	chi2ndata_core = params_of_bundle.chi2_in_core/params_of_bundle.ndata_in_core;
+
       char key[20];
       char comment[800];
 
@@ -579,6 +583,10 @@ void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& 
       sprintf(key,"B%02dNPAR",params_of_bundle.bundle_id);
       sprintf(comment,"number of parameters in fit for fiber bundle %d",params_of_bundle.bundle_id);   
       harp::fits::key_write(fp,key,(long long int)params_of_bundle.nparams,comment);
+      
+      sprintf(key,"B%02dCCHI2",params_of_bundle.bundle_id);
+      sprintf(comment,"chi2/ndata for fiber bundle %d in 5x5 pix. core",params_of_bundle.bundle_id);
+      harp::fits::key_write(fp,key,chi2ndata_core,comment);
       
     }
   }
