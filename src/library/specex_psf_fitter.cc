@@ -158,7 +158,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 
   
   
-#pragma omp parallel for 
+  //#pragma omp parallel for 
   for(band=0; band<number_of_image_bands; band++) {
     if(end_j(band)>begin_j(band)) {
        chi2_of_band(band) = ComputeChi2AB(compute_ab,begin_j(band),end_j(band),& A_of_band[band], & B_of_band[band],false);
@@ -307,11 +307,13 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   vector<int> other_indices;
   harp::matrix_double Ablock;
   vector<harp::vector_double> Arect;
-  for(size_t s=0; s<spot_tmp_data.size(); s++) {
-    Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
-    Ablock.clear();
-    Arect.push_back(harp::vector_double(index_of_spots_parameters));
-    Arect.back().clear();    
+  if(compute_ab && fit_flux) {
+    for(size_t s=0; s<spot_tmp_data.size(); s++) {
+      Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
+      Ablock.clear();
+      Arect.push_back(harp::vector_double(index_of_spots_parameters));
+      Arect.back().clear();    
+    }
   }
 #endif
   //=============================================== 
@@ -597,7 +599,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	// doing A += w*h*h.transposed();  B += fact*h;
 
 #ifdef FASTER_THAN_SYR
-	
+	if(fit_flux) {
 	if(index_of_spots_parameters==0) {
 	  for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
 	    const double& hi = H(*i);
@@ -618,6 +620,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    specex::axpy(whi,ublas::project(H,ublas::range(0,index_of_spots_parameters)),Arect[*i-index_of_spots_parameters]);
 	  }
 	}
+	}else{
+	  specex::syr(w,H,*Ap);
+	}
 	specex::axpy(bfact,H,*Bp);
 		
 #else
@@ -631,7 +636,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   } // end of loop on pix coord. j
   
 #ifdef FASTER_THAN_SYR  
-  if(compute_ab) {
+  if(compute_ab && fit_flux) {
     //SPECEX_INFO("rebuild A ...");
     size_t n=Ablock.size1();
     for(size_t j=0;j<n;j++)
@@ -1669,28 +1674,28 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       if(int(default_params.size()) != npar) SPECEX_ERROR("Fatal inconsistency in number of parameters of PSF");
       if(int(param_names.size()) != npar) SPECEX_ERROR("Fatal inconsistency in number of parameters of PSF");
       
+      int npar_tot = 0;
       for(int p=0;p<npar;p++) {
+	const string& name = param_names[p];
+
+
 	int degx=0;
 	int degw=polynomial_degree_along_wave;
-	const string& name = param_names[p];
-	
 	
 	if(name=="GHSIGX" || name=="GHSIGY") {
-	  degx=min(1,int(polynomial_degree_along_x));
+	  degx=polynomial_degree_along_x;	  
 	}
 	if(name=="GHSIGX2" || name=="GHSIGY2" || name=="GHSCAL2" || name=="GHNSIG") {
 	  degx=0;
 	  degw=0;
 	}
-	
 	if(name=="GH-1-0" || name=="GH-0-1" || name=="GH-1-1" || name=="GH-2-0" || name=="GH-0-2") {
-	  degx=polynomial_degree_along_x;
+	  degx=(psf_params->fiber_max-psf_params->fiber_min); // number of fibers-1 (both are inc.)
 	} 
 	if(name.find("GH2")!=name.npos) {
-	  degx=min(1,int(polynomial_degree_along_x));
+	  degx=0;//min(1,int(polynomial_degree_along_x));
 	  degw=min(2,int(polynomial_degree_along_wave));
 	}
-	
 	if(name=="TAILAMP") {
 	  degx=0;
 	  degw=min(1,int(polynomial_degree_along_wave));
@@ -1699,16 +1704,59 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  degx=0;
 	  degw=0;
 	}
-		
-	specex::Pol_p pol(new specex::Pol(degx,min_x,max_x,degw,min_wave,max_wave));
-	pol->name = param_names[p];
-	pol->Fill(); // instead of this, can use prop of sparsepol
-	pol->coeff(0) = default_params(p);
-	SPECEX_INFO("Init P" << p << " " << pol->name << " =" << pol->coeff(0) << ", degw=" << degw << " degx=" << degx);
 	
+	{
+	  // loop on high order GH coefficients if exist
+	  char label[1000];
+	  for(int gh_i=0; gh_i<12; gh_i++) { // hard coded big number
+	    for(int gh_j=0; gh_j<12; gh_j++) { // hard coded big number
+	      if(gh_i+gh_j<=2) continue; // we leave upto second order as it
+	      
+	      sprintf(label,"GH-%d-%d",gh_i,gh_j);
+	      if(name==label) {
+		//SPECEX_INFO("reducing degw of " << name); 
+		degw=min(1,degw);
+	      }
+	    }
+	  }
+	}
+
+
+	specex::Pol_p pol(new specex::Pol(degx,min_x,max_x,degw,min_wave,max_wave));
+	pol->name = name;
+	
+	
+	// insert by hand
+	if(1) {
+	  for(int i=0;i<=degx;i++) { // x coordinate
+	    for(int j=0;j<=degw;j++) { // wave coordinate
+	      if(i==0) {
+		pol->Add(i,j); // full wavelength resolution
+	      }else if(i==1) {
+		if(j<2) pol->Add(i,j); // only first x * wavelength cross-term
+	      }else{
+		if(j==0) pol->Add(i,j); // only  x terms
+	      }
+	    }
+	  }
+	}else{
+	  pol->Fill();
+	}
+	
+	
+
+	pol->coeff(0) = default_params(p);
+	SPECEX_INFO("Init P" << p << " " << pol->name << " =" << pol->coeff(0) << ", degw=" << degw << " degx=" << degx << " ncoef=" << pol->coeff.size());
+
+	npar_tot += pol->coeff.size();
+
 	psf_params->AllParPolXW.push_back(pol);
 	
       }
+      SPECEX_INFO("Total number of PSF params = " << npar_tot);
+      
+      //exit(12); // debug
+
 #ifdef CONTINUUM
       //SPECEX_WARNING("I set deg=0 to cont and tail");
       psf_params->ContinuumPol.deg = 1;
