@@ -112,7 +112,7 @@ class PSF_Fitter {
   bool recompute_weight_in_fit;
   bool verbose;
   bool fatal;
-  
+  bool parallelized;
   double polynomial_degree_along_x;
   double polynomial_degree_along_wave;
   
@@ -143,6 +143,7 @@ class PSF_Fitter {
     scheduled_fit_of_continuum(false),
 #endif
     fatal(true),
+    parallelized(true),
     verbose(true),
     
       polynomial_degree_along_x(1),

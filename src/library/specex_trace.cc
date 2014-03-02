@@ -203,6 +203,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   }
   return true;
 }
+#warning check meaning of fibermask
+bool specex::Trace::Off() const { return mask==3;} // I am guessing here?
 
 
 /* 

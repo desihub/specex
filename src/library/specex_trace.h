@@ -45,6 +45,9 @@ namespace specex {
     
     bool Fit(std::vector<Spot_p> spots, bool set_xy_range = true);
     
+    bool Off() const;
+
+
     /*
       void write(std::ostream &os) const;
       bool read(std::istream &is);

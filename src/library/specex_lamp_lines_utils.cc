@@ -35,8 +35,8 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
       for(int fiber=max(spectro.number_of_fibers_per_bundle*fiber_bundle,fiber_min); fiber<min(spectro.number_of_fibers_per_bundle*(fiber_bundle+1),fiber_max+1); fiber++) {
 	
 	const specex::Trace& trace = traceset[fiber];
-	if(trace.mask>0) {
-	  SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
+	if(trace.Off()) {
+	  //SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
 	  continue;
 	}
 	specex::Spot_p spot(new specex::Spot());

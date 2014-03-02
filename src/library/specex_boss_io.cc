@@ -109,7 +109,7 @@ void specex::read_BOSS_traceset_in_fits(
   specex::read_fits_image(wave_vs_y_filename,fiber_mask_hdu_number,fibermask);
   for(int fiber=0;fiber<fibermask.n_cols();fiber++) {
     if(fibermask(fiber,0)>0) 
-      cout << "WARNING discarding fiber " << fiber << " with status " << fibermask(fiber,0) << endl;
+      cout << "WARNING fiber " << fiber << " has fibermask = " << fibermask(fiber,0) << endl;
   }
   //exit(12);
   
