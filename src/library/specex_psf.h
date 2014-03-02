@@ -187,7 +187,7 @@ public :
     double Xccd(int fiber, const double& wave) const;
     double Yccd(int fiber, const double& wave) const;
     
-
+    
     long long int arc_exposure_id;
     long long int mjd;
     long long int plate_id;

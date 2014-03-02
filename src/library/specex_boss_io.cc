@@ -100,9 +100,21 @@ void specex::read_BOSS_traceset_in_fits(
 					bool verbose
 					) {
   
-  if(verbose) cout << "INFO Spec2DTraceSet::ReadSDSS_FullSet_Fits starting" << endl;
-  if(verbose) cout << "INFO Reading " << wave_vs_y_filename << "[" << wave_vs_y_hdu_number << "]" << endl;
-  if(verbose) cout << "INFO Reading " << x_vs_y_filename << "[" << x_vs_y_hdu_number << "]" << endl;
+  if(verbose) cout << "INFO Spec2DTraceSet::ReadSDSS_FullSet_Fits starting" << endl;  
+
+  int fiber_mask_hdu_number = 4;
+  cout << "INFO Reading fiber mask in " << wave_vs_y_filename << "[" << wave_vs_y_hdu_number << "]" << endl;
+
+  image_data fibermask;
+  specex::read_fits_image(wave_vs_y_filename,fiber_mask_hdu_number,fibermask);
+  for(int fiber=0;fiber<fibermask.n_cols();fiber++) {
+    if(fibermask(fiber,0)>0) 
+      cout << "WARNING discarding fiber " << fiber << " with status " << fibermask(fiber,0) << endl;
+  }
+  //exit(12);
+  
+  if(verbose) cout << "INFO Reading wave vs y in  " << wave_vs_y_filename << "[" << wave_vs_y_hdu_number << "]" << endl;
+  if(verbose) cout << "INFO Reading x vs y in     " << x_vs_y_filename << "[" << x_vs_y_hdu_number << "]" << endl;
   
   
   std::vector<specex::Legendre1DPol> lW_vs_Y_pols = specex::read_BOSS_singleset_in_fits(wave_vs_y_filename,wave_vs_y_hdu_number,verbose);
@@ -113,9 +125,10 @@ void specex::read_BOSS_traceset_in_fits(
   traceset.resize(X_vs_Y_pols.size());
   for(int fiber=0;fiber<int(lW_vs_Y_pols.size());fiber++) {
     
+        
     specex::Trace& trace = traceset[fiber];
     trace.fiber = fiber;
-    
+    trace.mask = fibermask(fiber,0);
     // need to convert lW into W
     { 
       specex::Legendre1DPol& lW_vs_Y_pol = lW_vs_Y_pols[fiber];

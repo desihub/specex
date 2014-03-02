@@ -160,6 +160,9 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       
       if(params_of_bundle.ContinuumPol.coeff(0)!=0) {
 	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
+	  
+	  if(psf->GetTrace(fiber).mask>0) continue;
+	  
 	  double x = psf->GetTrace(fiber).X_vs_Y.Value(double(j));
 	  double w = psf->GetTrace(fiber).W_vs_Y.Value(double(j));
 	  double continuum_flux = params_of_bundle.ContinuumPol.Value(w);

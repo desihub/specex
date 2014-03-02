@@ -398,6 +398,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 #ifdef CONTINUUM
     if(has_continuum) {
       for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
+	if(psf->GetTrace(fiber).mask>0) continue;
 	x_of_trace_for_continuum(fiber-psf_params->fiber_min) = psf->GetTrace(fiber).X_vs_Y.Value(j);
 	continuum_monomials[fiber]=psf_params->ContinuumPol.Monomials(psf->GetTrace(fiber).W_vs_Y.Value(j));
       }
@@ -430,6 +431,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       if(has_continuum) {
 	double continuum_value=0;
 	for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
+	  if(psf->GetTrace(fiber).mask>0) continue;
 	  double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf_params->continuum_sigma_x));
 	  continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
 	  if(compute_ab && fit_continuum) {
@@ -913,6 +915,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 		
 	if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
 	
+	if(it->second.mask>0) continue; // not fitted
+
 	tmp_trace_x_parameter[it->first] = index;
 
 	{
@@ -1314,8 +1318,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     for(std::map<int,specex::Trace>::iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); ++it) {
 
       if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
-
-
+      if(it->second.mask>0) continue;
+      
       harp::vector_double& PX = it->second.X_vs_W.coeff;
       for(size_t k=0;k<PX.size();k++,index++)
 	PX(k)=Params(index);
@@ -1476,7 +1480,7 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
       it !=psf->FiberTraces.end(); ++it) {
     
     if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
-
+    if(it->second.mask>0) continue;
 
     specex::Trace& trace=it->second;
     
@@ -1690,7 +1694,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  degw=0;
 	}
 	if(name=="GH-1-0" || name=="GH-0-1" || name=="GH-1-1" || name=="GH-2-0" || name=="GH-0-2") {
-	  degx=(psf_params->fiber_max-psf_params->fiber_min); // number of fibers-1 (both are inc.)
+	  degx=number_of_fibers-1;
 	} 
 	if(name.find("GH2")!=name.npos) {
 	  degx=0;//min(1,int(polynomial_degree_along_x));
@@ -1832,12 +1836,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_trace      = false;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+    
   
   if(scheduled_fit_of_traces) {
 
 
     
-    // reduce trace degree in not enough spots to fit
+    // reduce trace degree if not enough spots to fit
     // --------------------------------------------  
     for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) 
       {
@@ -1847,9 +1852,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  if(spot->fiber==fiber) nspots++;
 	}
 	
-	//SPECEX_INFO("Fiber " << fiber << " nspots= " << nspots);
+	
 	
 	specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
+	if(trace.mask>0) continue;
+	
+	SPECEX_INFO("Fiber " << fiber << " nspots= " << nspots);
+
 	if(trace.X_vs_W.deg > (nspots-1) || trace.Y_vs_W.deg > (nspots-1) 
 	   || trace.W_vs_Y.deg > (nspots-1) || trace.X_vs_Y.deg > (nspots-1) ) {
 	  SPECEX_WARNING("Reducing degree of trace of fiber "<< fiber << " to match number of spots = " << nspots);
@@ -1857,7 +1866,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	}
       }
     
-
 
     SPECEX_INFO("Starting FitSeveralSpots TRACE");
     SPECEX_INFO("=======================================");
@@ -1876,8 +1884,37 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_trace      = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
+    
+    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
+    SPECEX_INFO("========================================================");
+    fit_flux       = true;
+    fit_position   = false;
+    fit_psf        = true;
+    fit_trace      = false;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+    
+    SPECEX_INFO("Starting FitSeveralSpots FLUX+TRACE ");
+    SPECEX_INFO("=======================================");
+    fit_flux       = true;
+    fit_position   = false;
+    fit_psf        = false;
+    fit_trace      = true;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
+      
   }
-
+  
+  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
+  SPECEX_INFO("========================================================");
+  fit_flux       = true;
+  fit_position   = false;
+  fit_psf        = true;
+  fit_trace      = false;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+      
+      
   if(psf->HasParam("GHNSIG")) {
     double inner_core_radius_n_sigma = 3;
     psf_params->AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff(0)=inner_core_radius_n_sigma;
@@ -2110,8 +2147,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_psf        = true;
   fit_trace      = false;
   chi2_precision = 1;
-  //include_signal_in_weight = true;  recompute_weight_in_fit  = false;
-  include_signal_in_weight = false;  recompute_weight_in_fit  = true;
+  include_signal_in_weight = true;  recompute_weight_in_fit  = false;
+  //include_signal_in_weight = false;  recompute_weight_in_fit  = true;
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   }

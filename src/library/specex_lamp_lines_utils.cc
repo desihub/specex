@@ -7,6 +7,7 @@
 #include "specex_trace.h"
 #include "specex_spectrograph.h"
 #include "specex_lamp_lines_utils.h"
+#include "specex_message.h"
 
 using namespace std;
 
@@ -16,7 +17,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
 				      const double& min_wavelength, const double& max_wavelength) {
   
   if(fiber_bundle<0 || fiber_bundle >= spectro.number_of_fiber_bundles_per_ccd) {
-    HARP_THROW("inproper fiber bundle id");
+    SPECEX_ERROR("inproper fiber bundle id");
   }
 
   spots.clear();
@@ -33,12 +34,17 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
       
       for(int fiber=max(spectro.number_of_fibers_per_bundle*fiber_bundle,fiber_min); fiber<min(spectro.number_of_fibers_per_bundle*(fiber_bundle+1),fiber_max+1); fiber++) {
 	
+	const specex::Trace& trace = traceset[fiber];
+	if(trace.mask>0) {
+	  SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
+	  continue;
+	}
 	specex::Spot_p spot(new specex::Spot());
 	spot->wavelength = wave;
 	spot->fiber = fiber;
 	spot->fiber_bundle = fiber_bundle;
-	spot->xc = traceset[fiber].X_vs_W.Value(spot->wavelength);
-	spot->yc = traceset[fiber].Y_vs_W.Value(spot->wavelength);
+	spot->xc = trace.X_vs_W.Value(spot->wavelength);
+	spot->yc = trace.Y_vs_W.Value(spot->wavelength);
 	
 	if(spot->yc<ymin) continue;
 	if(spot->yc>ymax) continue;

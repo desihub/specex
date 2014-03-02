@@ -26,6 +26,7 @@ namespace specex {
   public :
     
     int fiber; // this trace is for this fiber
+    int mask;
     Legendre1DPol X_vs_W; // maps x ccd coordinate as a function of wavelength
     Legendre1DPol Y_vs_W; // maps y ccd coordinate as a function of wavelength
     
@@ -56,6 +57,7 @@ namespace specex {
     template < class Archive >
       void serialize ( Archive & ar, const unsigned int version ) {
       ar & BOOST_SERIALIZATION_NVP(fiber);
+      ar & BOOST_SERIALIZATION_NVP(mask);
       ar & BOOST_SERIALIZATION_NVP(X_vs_W);
       ar & BOOST_SERIALIZATION_NVP(Y_vs_W);
       ar & BOOST_SERIALIZATION_NVP(W_vs_Y);

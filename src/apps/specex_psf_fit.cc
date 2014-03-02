@@ -288,6 +288,9 @@ int main ( int argc, char *argv[] ) {
 	psf->ParamsOfBundles[bundle].fiber_min = spectro->number_of_fibers_per_bundle*bundle;
 	psf->ParamsOfBundles[bundle].fiber_max = psf->ParamsOfBundles[bundle].fiber_min+spectro->number_of_fibers_per_bundle-1; // included
 	
+	// now check mask ?
+
+
 	if(psf->ParamsOfBundles[bundle].fiber_min < first_fiber) {
 	  psf->ParamsOfBundles[bundle].fiber_min = first_fiber;
 	  SPECEX_INFO("restricting fiber range first fiber = " << first_fiber);
@@ -309,9 +312,11 @@ int main ( int argc, char *argv[] ) {
       
       
       // loading arc lamp spots belonging to this bundle
-      // --------------------------------------------  
-      int ymin = 696+3; // range of usable r CCD coordinates, hard coded for now
-      int ymax = 3516-3; // range of usable r CCD coordinates, hard coded for now
+      // --------------------------------------------
+      int margin = psf->hSizeY;
+      int ymin = 696+margin; // range of usable CCD coordinates, hard coded for now
+      int ymax = 3516-margin; // range of usable CCD coordinates, hard coded for now
+      
       vector<Spot_p> spots;
       allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
@@ -349,24 +354,24 @@ int main ( int argc, char *argv[] ) {
 	// writing spots as xml
 
 	char filename[100];
-	sprintf(filename,"spots-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"spots-%s-%08d-%03d-%03d.xml",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	
 	std::ofstream os(filename);
 	boost::archive::xml_oarchive xml_oa ( os );
 	xml_oa << BOOST_SERIALIZATION_NVP(fitted_spots);
 	os.close();
-	SPECEX_INFO("wrote spots in " << "spots.xml");
+	SPECEX_INFO("wrote spots in " << filename);
       }
       {
 	// writing psf as xml
 	char filename[100];
 	
-	sprintf(filename,"psf-%08d-%03d-%03d.xml",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	sprintf(filename,"psf-%s-%08d-%03d-%03d.xml",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	write_psf_xml(fitter.psf,filename);
 	
 	//if(psf_model == "GAUSSHERMITE" || psf_model == "GAUSSHERMITE2") {
 	if(psf_model == "GAUSSHERMITE2") {
-	  sprintf(filename,"psf-%08d-%03d-%03d.fits",(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
+	  sprintf(filename,"psf-%s-%08d-%03d-%03d.fits",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
 	  write_psf_fits(fitter.psf,filename);
 	}
 	
