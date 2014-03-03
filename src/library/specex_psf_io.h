@@ -19,6 +19,11 @@ namespace specex {
   
   void read_psf_fits(specex::PSF_p& psf,  fitsfile* fp, int first_hdu=1);
   void read_psf_fits(specex::PSF_p& psf, const string& filename);
+
+
+  
+
+  void write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename);
   
 }
 

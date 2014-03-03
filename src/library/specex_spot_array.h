@@ -5,6 +5,7 @@
 #include <string>
 
 #include "specex_spot.h"
+#include "specex_psf.h"
 
 namespace specex {
   class SpotArray : public std::vector<Spot_p> {
@@ -23,6 +24,7 @@ namespace specex {
   SpotArray         merge_spot_arrays(  std::vector<SpotArray>& other);
   
   void write_spots_list(std::vector<Spot_p> spots, const std::string& filename);
+  void write_spots_list(std::vector<Spot_p> spots, const specex::PSF_p psf, const std::string& filename);
   
 }
 

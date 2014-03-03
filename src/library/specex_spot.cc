@@ -26,7 +26,6 @@ void specex::Spot::write_list_header(ostream& os)  const {
   os << "# ix : initial x coordinate" << endl;
   os << "# iy : initial y coordinate " << endl;
   os << "# iflux : initial flux " << endl;
-  os << "#end" << endl;
 }
 
 void specex::Spot::write_list_entry(ostream& os)  const {
@@ -43,7 +42,5 @@ void specex::Spot::write_list_entry(ostream& os)  const {
   os << initial_xc << " ";
   os << initial_yc << " ";
   os << initial_flux << " ";
-  os << endl;
-  
 }
 

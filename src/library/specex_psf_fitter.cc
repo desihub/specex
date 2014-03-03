@@ -1844,9 +1844,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
 
   ok = FitIndividualSpotFluxes(input_spots);
-  //std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms);
+  std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms);
   
-  
+  /*
   std::vector<specex::Spot_p> selected_spots;
   std::vector<specex::Spot_p> tmp_selected_spots = select_spots(input_spots,min_snr_non_linear_terms);
   // for this part of the fit, further select spots with no pixel with weight=0
@@ -1862,7 +1862,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     if(!haszeroweight) 
       selected_spots.push_back(spot);
   }
-  
+  */
   
     
   {
@@ -1901,6 +1901,21 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
   
+  
+  /* dump central values for all fibers */
+
+  for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) {
+    specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
+    double wave = (trace.X_vs_W.xmin+trace.X_vs_W.xmax)/2;
+    harp::vector_double params = psf->AllLocalParamsFW(fiber,wave,psf_params->bundle_id);
+    
+    SPECEX_INFO("fiber " << fiber << " wave " << wave << " PSF :" << params);
+
+  }
+  write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
+  write_psf_xml(psf,"psf-after-gaussian-fit.xml");
+  
+
   if(scheduled_fit_of_traces) {
     
     // reduce trace degree if not enough spots to fit
@@ -1949,6 +1964,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       if(fabs(spot->xc - spot->initial_xc)>3 || fabs(spot->yc - spot->initial_yc)>3)
 	n_large_offset++;
     }
+    
+    write_spots_xml(input_spots,"spots-after-trace-fit.xml");
+    
     if(n_large_offset>1) {
       SPECEX_WARNING(n_large_offset << " spots with large offsets, something went wrong, abandon fit of traces");
       // reset spots positions

@@ -12,7 +12,9 @@
 
 #include <specex_spot.h>
 #include <specex_spot_array.h>
+#include <specex_psf_io.h>
 #include <specex_message.h>
+#include <specex_serialization.h>
 
 using namespace std;
 using namespace specex;
@@ -24,6 +26,7 @@ int main ( int argc, char *argv[] ) {
   
   string spots_xml_filename="";
   string spots_list_filename="";
+  string psf_xml_filename="";
   
   
   // reading arguments
@@ -33,8 +36,9 @@ int main ( int argc, char *argv[] ) {
     ( "help,h", "display usage information" )
     ( "in", popts::value<string>( &spots_xml_filename ), "" )
     ( "out", popts::value<string>( &spots_list_filename ), "")
+    ( "psf_xml", popts::value<string>( &psf_xml_filename ), "")
     ;
-
+  
   popts::variables_map vm;
   popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
   popts::notify(vm);
@@ -63,7 +67,15 @@ int main ( int argc, char *argv[] ) {
     
     SPECEX_INFO("number of spots = " << spots.size());
     
-    write_spots_list(spots,spots_list_filename);
+    
+    specex::PSF_p psf;
+    if(psf_xml_filename!="") {
+      read_psf_xml(psf,psf_xml_filename);
+      write_spots_list(spots,psf,spots_list_filename);
+    }else{
+      write_spots_list(spots,spots_list_filename);
+    }
+    
     
 
   // ending

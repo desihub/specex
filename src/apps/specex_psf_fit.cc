@@ -333,7 +333,9 @@ int main ( int argc, char *argv[] ) {
       allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
-
+      
+      write_spots_xml(spots,"spots-init.xml");
+      
       
       //exit(12);
 
@@ -364,15 +366,10 @@ int main ( int argc, char *argv[] ) {
 
       {
 	// writing spots as xml
-
+	
 	char filename[100];
 	sprintf(filename,"spots-%s-%08d-%03d-%03d.xml",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
-	
-	std::ofstream os(filename);
-	boost::archive::xml_oarchive xml_oa ( os );
-	xml_oa << BOOST_SERIALIZATION_NVP(fitted_spots);
-	os.close();
-	SPECEX_INFO("wrote spots in " << filename);
+	write_spots_xml(fitted_spots,filename);
       }
       {
 	// writing psf as xml

@@ -1545,3 +1545,13 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
   
 
 }
+ 
+
+void specex::write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename) {
+  std::ofstream os(filename.c_str());
+  boost::archive::xml_oarchive xml_oa ( os );
+  xml_oa << BOOST_SERIALIZATION_NVP(spots);
+  os.close();
+  SPECEX_INFO("wrote spots in " << filename);
+}
+  
