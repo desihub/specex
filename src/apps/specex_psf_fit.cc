@@ -313,10 +313,22 @@ int main ( int argc, char *argv[] ) {
       
       // loading arc lamp spots belonging to this bundle
       // --------------------------------------------
-      int margin = psf->hSizeY;
-      int ymin = 696+margin; // range of usable CCD coordinates, hard coded for now
-      int ymax = 3516-margin; // range of usable CCD coordinates, hard coded for now
       
+      int ymin = 0; // range of usable CCD coordinates, hard coded for now
+      int ymax = 0; // range of usable CCD coordinates, hard coded for now
+      
+      if(psf->camera_id=="b1") {ymin=696; ymax = 3516;};
+      if(psf->camera_id=="b2") {ymin=696; ymax = 3516;};
+      if(psf->camera_id=="r1") {ymin=200; ymax = 3668;}; 
+      if(psf->camera_id=="r2") {ymin=200; ymax = 3668;};
+
+#warning "need to know where to get xy ccd range info"
+
+      int margin = psf->hSizeY;
+      ymin+=margin;
+      ymax-=margin;
+      
+
       vector<Spot_p> spots;
       allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
