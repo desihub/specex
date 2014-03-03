@@ -262,21 +262,19 @@ int main ( int argc, char *argv[] ) {
     if(output_fits_image_filename!="") {
       fitsfile * fp;  
       harp::fits::create ( fp, output_fits_image_filename );
+      
+      harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+      harp::fits::img_write ( fp, image.data );
+      harp::fits::key_write(fp,"WHAT","DATA","");
+      
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
       harp::fits::img_write ( fp, model.data );
-      harp::fits::key_write(fp,"WHAT","MODEL","");
+      harp::fits::key_write(fp,"EXTNAME","MODEL","");
   
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
       harp::fits::img_write ( fp, residual.data );
-      harp::fits::key_write(fp,"EXTNAME","RESALL","");
-  
-      residual = data_in_stamp; 
-      residual.data -= model.data;
-
-      harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
-      harp::fits::img_write ( fp, residual.data );
-      harp::fits::key_write(fp,"EXTNAME","RES","");
-  
+      harp::fits::key_write(fp,"EXTNAME","RESIDUAL","");
+        
       for(size_t i=0; i<residual.data.size() ;i++) {
 	if(variance.data(i)>0) residual.data(i) /= sqrt(variance.data(i));
       }
