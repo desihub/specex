@@ -66,6 +66,7 @@ namespace harp {
       size_t rows_;
       size_t cols_;
       specex::PSF_p actual_specex_psf;
+      std::map<int,int> bundle_; // bundles of fibers;
   };
   BOOST_SERIALIZATION_SHARED_PTR(specex_psf)
 
