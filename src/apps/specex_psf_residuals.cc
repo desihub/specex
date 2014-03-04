@@ -201,7 +201,14 @@ int main ( int argc, char *argv[] ) {
     // compute chi2 (image and core)
     // ---------------------------
     image_data residual = image; 
-    residual.data -= model.data;
+
+    // zero if no model
+    for(size_t i=0;i<residual.data.size();i++)
+      if(model.data(i)==0) 
+	residual.data(i)=0;
+      else
+	residual.data(i) -= model.data(i);
+    
     
     double chi2_image = 0;
     int ndata_image = 0;
