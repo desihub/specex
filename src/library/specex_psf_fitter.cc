@@ -1955,18 +1955,90 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     // refit flux and reselect because stamp maybe have zero weight (ex: psf-r1-00104769/bundle-23)
     // update coords of all spots
-    int n_large_offset=0;
-    for(size_t s=0;s<input_spots.size();s++) {
-      specex::Spot_p& spot= input_spots[s];
-      spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
-      spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
-
-      if(fabs(spot->xc - spot->initial_xc)>3 || fabs(spot->yc - spot->initial_yc)>3)
-	n_large_offset++;
+    
+    { // testing traces
+      harp::vector_double max_dx(psf_params->fiber_max-psf_params->fiber_min+1);
+      harp::vector_double max_dy(psf_params->fiber_max-psf_params->fiber_min+1);
+      vector<int> fibers_with_large_offsets;
+      map<int,bool> fiber_is_ok;
+      int i=0;
+      
+      for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++,i++) {
+	max_dx(i)=0;
+	max_dy(i)=0;
+	for(size_t s=0;s<input_spots.size();s++) {
+	  specex::Spot_p spot= input_spots[s];
+	  if(spot->fiber != fiber) continue;
+	  max_dx(i) =  max(max_dx(i),fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc));
+	  max_dy(i) =  max(max_dy(i),fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc));
+	}
+	if(max_dx(i)>2 || max_dy(i)>2) {
+	  SPECEX_WARNING("Large x y offset for fiber " << fiber << " = " << max_dx(i) << " " << max_dy(i) << " pix");
+	  fibers_with_large_offsets.push_back(fiber);
+	  fiber_is_ok[fiber]=false;
+	}else{
+	  fiber_is_ok[fiber]=true;
+	}
+	
+      }
+      if(fibers_with_large_offsets.size()>0) {
+	// try to fix this : use interpolation of other fibers : this assume fiber slit heads allow it, as for BOSS
+	for(size_t f=0;f<fibers_with_large_offsets.size();f++) {
+	  int bad_fiber   = fibers_with_large_offsets[f];
+	  int fiber1  = -1;
+	  int fiber2  = -1;
+	  
+	  if(bad_fiber==psf_params->fiber_min) {
+	    for(int fiber=bad_fiber+1;fiber<=psf_params->fiber_max;fiber++)
+	      if(fiber_is_ok[fiber]) { fiber1=fiber; break;}
+	  }else{
+	    for(int fiber=bad_fiber-1;fiber>=psf_params->fiber_min;fiber--)
+	      if(fiber_is_ok[fiber]) { fiber1=fiber; break;}
+	  }
+	  if(bad_fiber==psf_params->fiber_max) {
+	    for(int fiber=min(bad_fiber,fiber1)-1;fiber>=psf_params->fiber_min;fiber--)
+	      if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
+	  }else{
+	    for(int fiber=bad_fiber+1;fiber<=psf_params->fiber_max;fiber++)
+	      if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
+	  }
+	  if(fiber1==-1 || fiber2==-1) {
+	    SPECEX_ERROR("can't fix this, abort");
+	  }
+	  SPECEX_INFO("trying to fix bad fiber trace " << bad_fiber << " with " << fiber1 << " and " << fiber2);
+	  specex::Trace &bad_trace = psf->FiberTraces.find(bad_fiber)->second;
+	  const specex::Trace &trace1 = psf->FiberTraces.find(fiber1)->second;
+	  const specex::Trace &trace2 = psf->FiberTraces.find(fiber2)->second;
+	  bad_trace.X_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.X_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.X_vs_W.coeff;
+	  bad_trace.Y_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.Y_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.Y_vs_W.coeff;
+	  
+	}
+	/*
+	SPECEX_INFO("Starting FitSeveralSpots REFIT TRACES");
+	SPECEX_INFO("=======================================");
+	fit_flux       = false;
+	fit_position   = false;
+	fit_psf        = false;
+	fit_trace      = true;
+	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+	if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
+	*/
+	
+	scheduled_fit_of_traces = false;
+      }
+      
+    
+      for(size_t s=0;s<input_spots.size();s++) {
+	specex::Spot_p& spot= input_spots[s];
+	spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
+	spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
+      }
     }
     
     write_spots_xml(input_spots,"spots-after-trace-fit.xml");
+    //exit(12);
     
+    /*
     if(n_large_offset>1) {
       SPECEX_WARNING(n_large_offset << " spots with large offsets, something went wrong, abandon fit of traces");
       // reset spots positions
@@ -1979,7 +2051,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       
       scheduled_fit_of_traces = false;
     }
-
+    */
     
   }
   if(scheduled_fit_of_traces) {
