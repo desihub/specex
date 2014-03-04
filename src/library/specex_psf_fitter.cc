@@ -1957,23 +1957,18 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     // update coords of all spots
     
     { // testing traces
-      harp::vector_double max_dx(psf_params->fiber_max-psf_params->fiber_min+1);
-      harp::vector_double max_dy(psf_params->fiber_max-psf_params->fiber_min+1);
       vector<int> fibers_with_large_offsets;
-      map<int,bool> fiber_is_ok;
-      int i=0;
-      
-      for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++,i++) {
-	max_dx(i)=0;
-	max_dy(i)=0;
+      map<int,bool> fiber_is_ok;      
+      for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++) {
+	int nbad=0;
+	double delta=2; //pix
 	for(size_t s=0;s<input_spots.size();s++) {
 	  specex::Spot_p spot= input_spots[s];
 	  if(spot->fiber != fiber) continue;
-	  max_dx(i) =  max(max_dx(i),fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc));
-	  max_dy(i) =  max(max_dy(i),fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc));
+	  if(fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc)>delta || fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc)>delta) nbad++;
 	}
-	if(max_dx(i)>2 || max_dy(i)>2) {
-	  SPECEX_WARNING("Large x y offset for fiber " << fiber << " = " << max_dx(i) << " " << max_dy(i) << " pix");
+	if(nbad>2) {
+	  SPECEX_WARNING("Large x y offset for fiber " << fiber);
 	  fibers_with_large_offsets.push_back(fiber);
 	  fiber_is_ok[fiber]=false;
 	}else{
@@ -1999,7 +1994,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	    for(int fiber=min(bad_fiber,fiber1)-1;fiber>=psf_params->fiber_min;fiber--)
 	      if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
 	  }else{
-	    for(int fiber=bad_fiber+1;fiber<=psf_params->fiber_max;fiber++)
+	    for(int fiber=max(bad_fiber,fiber1)+1;fiber<=psf_params->fiber_max;fiber++)
 	      if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
 	  }
 	  if(fiber1==-1 || fiber2==-1) {
