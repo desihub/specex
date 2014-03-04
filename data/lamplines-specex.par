@@ -109,19 +109,23 @@ arclineid  7544.0443  3000.0  BLEND  NO_PSF "Ne I"
 arclineid  7635.106  10000.0  GOOD   NO_PSF "Ar I" DPF - noisy
 arclineid  7723.761   2000.0  BLEND  NO_PSF "Ar I"
 arclineid  7724.207   2000.0  BLEND  NO_PSF "Ar I"
-#arclineid  7943.180    800.0  GOOD   NO_PSF "Ne I"
+arclineid  7729  1.0  NEW   NEW "NO Idea"  to check
+arclineid  7937  1.0  NEW   NEW "NO Idea"  to check
+arclineid  7943.180    800.0  GOOD   NO_PSF "Ne I"
 arclineid  7948.176   2500.0  BLEND  NO_PSF "Ar I"
 arclineid  8006.157   1000.0  BLEND  NO_PSF "Ar I"
 arclineid  8014.786   2000.0  GOOD   NO_PSF "Ar I"
-arclineid  8061.5  1.0  NEW   NEW "NO Idea"  to check
+#arclineid  8061.5  1.0  NEW   NEW "NO Idea"  to check  NOT A LINE IN FACT
 arclineid  8082.5  1.0  NEW   NEW "NO Idea"  to check
 arclineid  8103.693   3000.0  GOOD   NO_PSF "Ar I"
 arclineid  8115.311  13000.0  BLEND  NO_PSF "Ar I"
-#arclineid  8118.549   4000.0  GOOD   NO_PSF "Ne I"
+arclineid  8118.549   4000.0  GOOD   NO_PSF "Ne I"
 arclineid  8128.911   1000.0  BLEND  NO_PSF "Ne I"
 arclineid  8136.406   1000.0  BLEND  NO_PSF "Ne I" # DPF - noisy
-arclineid  8264.522   3000.0  BLEND  NO_PSF "Ar I"
 arclineid  8248.5  1.0  NEW   NEW "NO Idea"  to check
+# arclineid  8264.522   3000.0  BLEND  NO_PSF "Ar I" I split it
+arclineid  8259.5  1.0  NEW   NEW "NO Idea"  to check
+arclineid  8266  1.0  NEW   NEW "NO Idea"  to check
 arclineid  8300.326   3000.0  GOOD   NO_PSF "Ne I"
 arclineid  8366.  1.0  NEW   NEW "NO Idea"  to check
 arclineid  8377.6065 22000.0  GOOD   YES_PSF "Ne I"
@@ -152,9 +156,9 @@ arclineid  8853.867   2000.0  GOOD   NO_PSF "Ne I"
 arclineid  8865.306   3000.0  BLEND  NO_PSF "Ne I"
 arclineid  8865.755   2000.0  BLEND  NO_PSF "Ne I"
 arclineid  8919.5007   700.0  GOOD   NO_PSF "Ne I"
-arclineid  8937 1.0  NEW   NEW "NO Idea"  to check
+#arclineid  8937 1.0  NEW   NEW "NO Idea"  to check    NOT A LINE !!
 arclineid  8988.5 1.0  NEW   NEW "NO Idea"  to check
-arclineid  9043 1.0  NEW   NEW "NO Idea"  to check
+#arclineid  9043 1.0  NEW   NEW "NO Idea"  to check    NOT A LINE !!
 arclineid  9122.9674  6000.0  GOOD   NO_PSF "Ar I"
 arclineid  9148.67    3000.0  BLEND  YES_PSF "Ne I"
 arclineid  9201.759    900.0  GOOD   NO_PSF "Ne I"
