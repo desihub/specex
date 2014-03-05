@@ -1967,13 +1967,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       map<int,bool> fiber_is_ok;      
       for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++) {
 	int nbad=0;
-	double delta=3; //pix
+	double delta=2; //pix
 	for(size_t s=0;s<input_spots.size();s++) {
 	  specex::Spot_p spot= input_spots[s];
 	  if(spot->fiber != fiber) continue;
 	  if(fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc)>delta || fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc)>delta) nbad++;
 	}
-	if(nbad>3) {
+	if(nbad>2) {
 	  SPECEX_WARNING("Large x y offset for fiber " << fiber);
 	  fibers_with_large_offsets.push_back(fiber);
 	  fiber_is_ok[fiber]=false;
@@ -1982,7 +1982,12 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	}
 	
       }
-      if(fibers_with_large_offsets.size()>0) {
+      
+      if(fibers_with_large_offsets.size()>=3) {
+	SPECEX_WARNING("There are more than 2 fibers with large offsets, this is not due to dead columns, so we continue");
+      }
+      
+      if(fibers_with_large_offsets.size()>0 && fibers_with_large_offsets.size()<3) {
 	// try to fix this : use interpolation of other fibers : this assume fiber slit heads allow it, as for BOSS
 	for(size_t f=0;f<fibers_with_large_offsets.size();f++) {
 	  int bad_fiber   = fibers_with_large_offsets[f];
@@ -2014,17 +2019,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  bad_trace.Y_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.Y_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.Y_vs_W.coeff;
 	  
 	}
-	/*
-	SPECEX_INFO("Starting FitSeveralSpots REFIT TRACES");
-	SPECEX_INFO("=======================================");
-	fit_flux       = false;
-	fit_position   = false;
-	fit_psf        = false;
-	fit_trace      = true;
-	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-	if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
-	*/
-	
 	scheduled_fit_of_traces = false;
       }
       
@@ -2037,22 +2031,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     
     write_spots_xml(input_spots,"spots-after-trace-fit.xml");
-    //exit(12);
     
-    /*
-    if(n_large_offset>1) {
-      SPECEX_WARNING(n_large_offset << " spots with large offsets, something went wrong, abandon fit of traces");
-      // reset spots positions
-      for(size_t s=0;s<input_spots.size();s++) {
-	specex::Spot_p& spot= input_spots[s];
-	spot->xc = spot->initial_xc;
-	spot->yc = spot->initial_yc;
-      }
-      FitTraces(input_spots); // this uses coordinates, not the CCD image
-      
-      scheduled_fit_of_traces = false;
-    }
-    */
     
   }
   if(scheduled_fit_of_traces) {
