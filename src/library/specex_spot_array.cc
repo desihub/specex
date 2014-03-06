@@ -105,8 +105,6 @@ void specex::write_spots_list(vector<Spot_p> spots, const PSF_p psf, const strin
   
   std::vector<std::string> pnames = psf->DefaultParamNames();
   
-  osl << "#end" << endl;  
-  
   for(size_t s=0;s<spots.size();s++) {
     Spot_p& spot = spots[s];
     

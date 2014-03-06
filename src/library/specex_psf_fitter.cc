@@ -19,6 +19,8 @@
 
 //#include <boost/archive/xml_oarchive.hpp>
 
+#define SIDE_BAND_WEIGHT_SCALE 10.
+
 using namespace std;
 
 void specex::PSF_Fitter::SelectFiberBundle(int bundle) {
@@ -205,7 +207,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     tmp.fiber          = spot->fiber;
     tmp.fiber_bundle   = spot->fiber_bundle;
         
-    if( (fit_psf || fit_psf_tail) && tmp.flux<0) tmp.flux =0; // more robust
+    if( (fit_psf || fit_psf_tail) && tmp.flux<0) tmp.flux = 0.; // more robust
     tmp.frozen_flux = tmp.flux;
     
     // stamp
@@ -240,7 +242,16 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
     
     specex::SpotTmpData &tmp = spot_tmp_data[s];
     
-    if(fit_flux) tmp.flux = Params(tmp.flux_parameter_index);
+    if(fit_flux) {
+      if(force_positive_flux) {
+	tmp.flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
+      }else{
+	tmp.flux = Params(tmp.flux_parameter_index);
+	if(tmp.flux<-100) {
+	  SPECEX_WARNING("Ng. flux fiber=" << tmp.fiber << " wave=" << tmp.wavelength << " x=" << tmp.x << " y=" << tmp.y << " flux=" << tmp.flux);
+	}
+      }
+    }
     if(fit_trace) {
       tmp.x = specex::dot(ublas::project(Params,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size())),tmp.trace_x_monomials);
       tmp.y = specex::dot(ublas::project(Params,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size())),tmp.trace_y_monomials);
@@ -413,8 +424,15 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     }
 #endif  
 
+    int i1_side_band=0;
+    int i2_side_band=0;
+    if(increase_weight_of_side_bands && recompute_weight_in_fit) {
+      i1_side_band=int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5));
+      i2_side_band=int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5));
+    }
+    
     for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
-      
+
       double w = 1;
       if(use_footprint) { 
 	w=footprint_weight(i,j); 
@@ -422,6 +440,14 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	w=weight(i,j);
       }
       if (w<=0) continue;
+
+      bool in_side_band = false;
+      if(increase_weight_of_side_bands && recompute_weight_in_fit) {
+	if(i<=i1_side_band || i>=i2_side_band) in_side_band = true;
+	
+      }
+      
+
 
       // w=1; // DEBUG
 
@@ -504,7 +530,12 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	  }
 	  
 	  if(fit_flux && in_core) {
-	    H(tmp.flux_parameter_index) += psfVal;
+
+	    if(force_positive_flux)
+	      H(tmp.flux_parameter_index) += tmp.flux*psfVal;
+	    else
+	      H(tmp.flux_parameter_index) += psfVal;
+
 #ifdef FASTER_THAN_SYR
 	    other_indices.push_back(tmp.flux_parameter_index);
 #endif
@@ -528,19 +559,25 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       } // end of loop on spots
       
       
-      
+      double wscale=1;
       if(recompute_weight_in_fit) {
 	w =  square(psf->readout_noise);
 	if(signal>0) {
 	   w += signal/psf->gain;
+	   w += square(psf->psf_error*signal);	   
 	}
-	w += square(psf->psf_error*signal);
 	w = 1./w;
+
+	// increase weight of side bands to avoid fiber to fiber degeneracy
+	if(increase_weight_of_side_bands && in_side_band) {
+	  w *= SIDE_BAND_WEIGHT_SCALE;
+	  wscale *= SIDE_BAND_WEIGHT_SCALE;
+	}
       }
       
-      double wscale=1;
+      
       if(corefootprint_weight_boost>0 && corefootprint.n_rows()>0 && corefootprint(i,j)>0) {
-	wscale = corefootprint_weight_boost;
+	wscale *= corefootprint_weight_boost;
 	w *= corefootprint_weight_boost;
       }
       
@@ -603,7 +640,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	double bfact = w*res;
 	if(recompute_weight_in_fit) {
-	  bfact += (1./wscale)*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
+	  if(signal>0)
+	    bfact += (1./wscale)*0.5*square(w*res)*(1/psf->gain+2*square(psf->psf_error)*signal);
 	}
 
 	// doing A += w*h*h.transposed();  B += fact*h;
@@ -660,6 +698,28 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     //SPECEX_INFO("done");
   }
 #endif
+  
+  /*
+  if(force_positive_flux) {
+    
+    double min_flux = 1.; // electrons
+    double w = 100; //
+    
+    for(size_t s=0;s<spot_tmp_data.size();s++) { // loop on tmp spots data
+      
+      const specex::SpotTmpData &tmp = spot_tmp_data[s];
+      
+      if(tmp.flux>min_flux) continue;
+      
+      double res = min_flux-tmp.flux;
+      chi2 += w*res*res;
+      if(compute_ab && fit_flux) {
+	(*Ap)(tmp.flux_parameter_index,tmp.flux_parameter_index) += w;
+	(*Bp)(tmp.flux_parameter_index) += w*res;
+      }
+    }
+  }
+  */
 
   // psf priors , only once
   if(fit_psf && !(psf->Priors.empty()) && begin_j == stamp.begin_j) {
@@ -776,34 +836,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       }
       
 
-      bool zero_weight_for_core = ((fit_psf_tail || fit_continuum) && !fit_flux && !fit_psf);
       
-      
-      if(zero_weight_for_core) {
-	
-	SPECEX_INFO("WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails or continuum)");
-	double saved_hsx = psf->hSizeX;
-	double saved_hsy = psf->hSizeY;
-	psf->hSizeX = min(12,psf->hSizeX);
-	psf->hSizeY = min(12,psf->hSizeY);
-	
-	for(size_t s=0;s<spots.size();s++) {
-	  Stamp spot_stamp(image);
-	  psf->StampLimits(spots[s]->xc,spots[s]->yc,spot_stamp.begin_i,spot_stamp.end_i,spot_stamp.begin_j,spot_stamp.end_j);
-	  spot_stamp.begin_i = max(0,spot_stamp.begin_i);
-	  spot_stamp.end_i   = min(spot_stamp.Parent_n_cols(),spot_stamp.end_i);
-	  spot_stamp.begin_j = max(0,spot_stamp.begin_j);
-	  spot_stamp.end_j   = min(spot_stamp.Parent_n_rows(),spot_stamp.end_j);
-	  //SPECEX_INFO("DEBUG " << spots[s]->xc << " " << spots[s]->yc << " " << spot_stamp.begin_i << " " << spot_stamp.end_i << " " << spot_stamp.begin_j << " " << spot_stamp.end_j);
-	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
-	    for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
-	      footprint_weight(i,j) = 0;
-	    }
-	  }
-	}
-	psf->hSizeX = saved_hsx;
-	psf->hSizeY = saved_hsy;
-      }
       
       //if(fit_psf_tail || fit_continuum) SPECEX_INFO("debug, writing toto.fits and exit"); write_new_fits_image("toto.fits",footprint_weight); exit(12);
       
@@ -821,8 +854,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  double var = square(psf->readout_noise);
 	  if(model_flux>0) { // else negative fluctuation
 	    var += model_flux/psf->gain;
+	    var += square(psf->psf_error*model_flux);
 	  }
-	  var += square(psf->psf_error*model_flux);
 	  
 	  footprint_weight(i,j) = 1./var;
 	  (*npix)++;
@@ -832,20 +865,60 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       
       
     }else{
-      SPECEX_INFO("WEIGHTS: Only footprint");
-      for(size_t s=0;s<spots.size();s++) {
-	specex::Spot_p& spot= spots[s];
-	Stamp spot_stamp(image);
-	SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
-	for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
+      SPECEX_INFO("WEIGHTS: inverse variance");
+      if(fit_psf_tail || fit_continuum) {
+	stamp = compute_stamp(image,psf,spots,0,0,psf_params->bundle_id);
+	for(int j=stamp.begin_j;j<stamp.end_j;j++) {
 	  int margin = min(MAX_X_MARGIN,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
-	  int begin_i = max(spot_stamp.begin_i, int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
-	  int end_i   = min(spot_stamp.end_i  , int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
+	  int begin_i = max(stamp.begin_i, int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
+	  int end_i   = min(stamp.end_i  , int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
 	  for(int i=begin_i;i<end_i;i++) {
 	    footprint_weight(i,j)=weight(i,j);
 	  }
 	}
+      }else{
+	for(size_t s=0;s<spots.size();s++) {
+	  specex::Spot_p& spot= spots[s];
+	  Stamp spot_stamp(image);
+	  SetStampLimitsFromPSF(spot_stamp,psf,spot->xc,spot->yc);
+	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
+	    int margin = min(MAX_X_MARGIN,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
+	    int begin_i = max(spot_stamp.begin_i, int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5))-margin);
+	    int end_i   = min(spot_stamp.end_i  , int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5))+margin+1);
+	    for(int i=begin_i;i<end_i;i++) {
+	      footprint_weight(i,j)=weight(i,j);
+	    }
+	  }
+	}
       }
+    }
+    bool zero_weight_for_core = ((fit_psf_tail || fit_continuum) && !fit_flux && !fit_psf);
+      
+      
+    if(zero_weight_for_core) {
+      
+      SPECEX_INFO("WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails or continuum)");
+      double saved_hsx = psf->hSizeX;
+      double saved_hsy = psf->hSizeY;
+      psf->hSizeX = min(12,psf->hSizeX);
+      psf->hSizeY = min(12,psf->hSizeY);
+      
+      for(size_t s=0;s<spots.size();s++) {
+	Stamp spot_stamp(image);
+	psf->StampLimits(spots[s]->xc,spots[s]->yc,spot_stamp.begin_i,spot_stamp.end_i,spot_stamp.begin_j,spot_stamp.end_j);
+	spot_stamp.begin_i = max(0,spot_stamp.begin_i);
+	spot_stamp.end_i   = min(spot_stamp.Parent_n_cols(),spot_stamp.end_i);
+	  spot_stamp.begin_j = max(0,spot_stamp.begin_j);
+	  spot_stamp.end_j   = min(spot_stamp.Parent_n_rows(),spot_stamp.end_j);
+	  //SPECEX_INFO("DEBUG " << spots[s]->xc << " " << spots[s]->yc << " " << spot_stamp.begin_i << " " << spot_stamp.end_i << " " << spot_stamp.begin_j << " " << spot_stamp.end_j);
+	  for(int j=spot_stamp.begin_j;j<spot_stamp.end_j;j++) {
+	    for(int i=spot_stamp.begin_i;i<spot_stamp.end_i;i++) {
+	      footprint_weight(i,j) = 0;
+	    }
+	  }
+      }
+      psf->hSizeX = saved_hsx;
+      psf->hSizeY = saved_hsy;
     }
     
     // mask out some regions with mis-understood lines
@@ -860,8 +933,39 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
     
     SPECEX_INFO("WEIGHTS: number of pixels in fit = " << *npix);
     
+    
+    if(increase_weight_of_side_bands) {
+      SPECEX_INFO("WEIGHTS: increase weight of side bands to avoid fiber to fiber degeneracy");
+      
+      int margin = min(MAX_X_MARGIN,psf->hSizeX); // 7 is half distance between center of ext. fibers of adjacent bundles
+      
+      
+      int npix_side_band = 0;
+      for(int j=stamp.begin_j;j<stamp.end_j;j++) {
+	int i1 = int(floor(psf->GetTrace(psf_params->fiber_min).X_vs_Y.Value(double(j))+0.5));
+	int begin1_i = max(stamp.begin_i,i1-margin);
+	int end1_i   = i1+1;
+	
+	int i2 = int(floor(psf->GetTrace(psf_params->fiber_max).X_vs_Y.Value(double(j))+0.5));
+	int begin2_i = i2;
+	int end2_i   = min(stamp.end_i,i2+margin+1);
+	
+	for(int i=begin1_i;i<end1_i;i++) {
+	  footprint_weight(i,j)*=SIDE_BAND_WEIGHT_SCALE;
+	  npix_side_band++;
+	}
+	for(int i=begin2_i;i<end2_i;i++) {
+	  footprint_weight(i,j)*=SIDE_BAND_WEIGHT_SCALE;
+	  npix_side_band++;
+	}
+      }
+      *npix += (SIDE_BAND_WEIGHT_SCALE-1)*npix_side_band; // artificial scaling to get meaningfull chi2
+    } // end of increase of weight
+    
   } // end of test on spot size
 
+
+  
 }
 
 
@@ -883,7 +987,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   int *npix = &npixels_memory_slot;
   if(n_pixels) npix = n_pixels;
   *niter=0;
-  int maxiter = 100; 
+  int maxiter = 30; 
   double oldChi2=1e30;
   if(*psfChi2<=0) *psfChi2 = 1e20;
   
@@ -1008,7 +1112,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
     if(fit_flux) {
       tmp.flux_parameter_index = index; 
-      Params(tmp.flux_parameter_index) = tmp.flux;
+      if(force_positive_flux) {
+	if(tmp.flux<=1) tmp.flux=1;
+	Params(tmp.flux_parameter_index) = log(tmp.flux);
+      }else{
+	Params(tmp.flux_parameter_index) = tmp.flux;
+      }
       index++; 
     }
     if(fit_position) {
@@ -1201,12 +1310,22 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }
     }
     if(use_brent) {
-      double brent_precision = 0.1;
+      double brent_precision = 0.01;
       
       if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots starting brent with precision = " << brent_precision << " ...");
      
       // need to use brent here
       BrentBox bbox(*this,B,spots);
+      
+      if(fit_flux && force_positive_flux) {
+	// force step for flux to be smaller than :
+	double max_step = log(100.);
+	for(size_t s=0;s<spot_tmp_data.size();s++) {
+	  SpotTmpData& tmp = spot_tmp_data[s];
+	  double step = fabs(B(tmp.flux_parameter_index));
+	  if(step>max_step) B *= (max_step/step);
+	}
+      }
       
       double min_step=-0.05;
       double max_step=1.05;
@@ -1378,8 +1497,13 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     specex::Spot_p& spot= spots[s];
     specex::SpotTmpData& tmp = spot_tmp_data[s];
     if(fit_flux) {
-      spot->flux = Params(tmp.flux_parameter_index); 
-      spot->eflux = sqrt(fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index));
+      if(force_positive_flux) {
+	spot->flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
+	spot->eflux = spot->flux*sqrt(fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index));
+      }else{
+	spot->flux = Params(tmp.flux_parameter_index); 
+	spot->eflux = sqrt(fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index));
+      }
     }
     if(fit_position) {
       spot->xc = Params(tmp.x_parameter_index);
@@ -1549,7 +1673,6 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
 bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& spots) {
   
   SPECEX_INFO("fitting independently the flux of each spot");
-  include_signal_in_weight = false;
   fit_flux                 = true;
   fit_position             = false;
   fit_psf                  = false;
@@ -1557,6 +1680,10 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   bool saved_verbose = verbose;
   verbose                  = false; // debug
   fatal                    = false;
+
+  bool saved_force_positive_flux = force_positive_flux;
+  force_positive_flux = false;
+
 #ifdef CONTINUUM
   fit_continuum  = false;
 #endif
@@ -1583,9 +1710,13 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
     if(int(s)%100==0 && s!=0) SPECEX_INFO("done " << s << "/" << spots.size() << " ...");
   }
   SPECEX_INFO("successful fit of each spot flux for " << nok << "/" << spots.size());
+
   verbose                  = saved_verbose; 
+  force_positive_flux      = saved_force_positive_flux;
+
   return true;
 }
+
 bool specex::PSF_Fitter::FitIndividualSpotPositions(std::vector<specex::Spot_p>& spots) {
   
   SPECEX_INFO("fitting independently the flux+position of each spot");
@@ -1621,21 +1752,40 @@ bool specex::PSF_Fitter::FitIndividualSpotPositions(std::vector<specex::Spot_p>&
 }
 
 
-std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise) {
+std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0) {
   
   std::vector<specex::Spot_p> selected_spots;
   
   for(size_t s=0;s<input_spots.size();s++) {
-    specex::Spot_p& spot = input_spots[s];
-    if(spot->eflux>0 && spot->flux/spot->eflux>minimum_signal_to_noise) {
-      spot->status=1;
-      selected_spots.push_back(spot);
-    }else{
+    specex::Spot_p spot = input_spots[s];
+    
+    if(spot->eflux<=0 || spot->flux/spot->eflux<minimum_signal_to_noise) {
       spot->status=0;
+      continue;
     }
+    
+    // now loop on all spots to get distance
+    if(min_wave_dist>0) {
+      double dist=1000;
+      for(size_t s2=0;s2<input_spots.size();s2++) {
+	if(s==s2) continue;
+	specex::Spot_p spot2 = input_spots[s2];
+	if(spot2->fiber != spot->fiber) continue;
+	  dist=min(dist,fabs(spot2->wavelength-spot->wavelength));
+      }
+      if(dist<min_wave_dist) {
+	spot->status=0;
+	continue;
+      }
+    }
+    
+    
+    spot->status=1;
+    selected_spots.push_back(spot);
+    
   }
   
-  SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise);
+  SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise << " and min dist = " << min_wave_dist << " A");
   return selected_spots;
 }
 
@@ -1655,8 +1805,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   int npix = 0;
   int niter = 0;
   double min_snr_non_linear_terms = 50;
-  double min_snr_linear_terms = 1;
-
+  double min_wave_dist_non_linear_terms = 4; // A 
+  
+  double min_snr_linear_terms = 3;
+  double min_wave_dist_linear_terms = 0; 
+  
+  
+  
   SPECEX_INFO("starting to fit PSF with " <<  input_spots.size() << " spots");
  
   if(init_psf) {
@@ -1848,9 +2003,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   psf->hSizeY=min(3,psf->hSizeY);
   
 
-
+  include_signal_in_weight = false;
   ok = FitIndividualSpotFluxes(input_spots);
-  std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms);
+  std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
   
   /*
   std::vector<specex::Spot_p> selected_spots;
@@ -1898,6 +2053,11 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
   */
   
+  force_positive_flux = true;
+  //force_positive_flux = false;
+  increase_weight_of_side_bands = false;
+  //increase_weight_of_side_bands = true;
+  
   SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
   SPECEX_INFO("========================================================");
   fit_flux       = true;
@@ -1912,11 +2072,15 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
   for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) {
     specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
-    double wave = (trace.X_vs_W.xmin+trace.X_vs_W.xmax)/2;
-    harp::vector_double params = psf->AllLocalParamsFW(fiber,wave,psf_params->bundle_id);
+    double w1 = trace.X_vs_W.xmin;
+    double w2 = (trace.X_vs_W.xmin+trace.X_vs_W.xmax)/2;
+    double w3 = trace.X_vs_W.xmax;
     
-    SPECEX_INFO("fiber " << fiber << " wave " << wave << " PSF :" << params);
-
+    SPECEX_INFO("fiber " << fiber 
+		<< " wave " << w1 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w1,psf_params->bundle_id),ublas::range(0,2)) 
+		<< " wave " << w2 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w2,psf_params->bundle_id),ublas::range(0,2))
+		<< " wave " << w3 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w3,psf_params->bundle_id),ublas::range(0,2)));
+    
   }
   write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
   write_psf_xml(psf,"psf-after-gaussian-fit.xml");
@@ -1959,9 +2123,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
     
     
-    // refit flux and reselect because stamp maybe have zero weight (ex: psf-r1-00104769/bundle-23)
-    // update coords of all spots
-    
+     
     { // testing traces
       vector<int> fibers_with_large_offsets;
       map<int,bool> fiber_is_ok;      
@@ -2031,11 +2193,21 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     
     write_spots_xml(input_spots,"spots-after-trace-fit.xml");
-    
-    
   }
   if(scheduled_fit_of_traces) {
     
+    for(size_t s=0;s<input_spots.size();s++) {
+      specex::Spot_p& spot= input_spots[s];
+      spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
+      spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
+    }
+    include_signal_in_weight = false;
+    ok = FitIndividualSpotFluxes(input_spots);
+    selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+  
+
+
+
     SPECEX_INFO("Starting FitSeveralSpots FLUX+TRACE ");
     SPECEX_INFO("=======================================");
     fit_flux       = true;
@@ -2044,7 +2216,16 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_trace      = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
-    
+  
+    for(size_t s=0;s<input_spots.size();s++) {
+      specex::Spot_p& spot= input_spots[s];
+      spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
+      spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
+    }
+    include_signal_in_weight = false;
+    ok = FitIndividualSpotFluxes(input_spots);
+    selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+  
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX+TRACE only gaussian terms");
     SPECEX_INFO("========================================================");
     fit_flux       = true;
@@ -2057,7 +2238,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
   
   if(psf->HasParam("GHNSIG")) {
-    double inner_core_radius_n_sigma = 3;
+    double inner_core_radius_n_sigma = 3.5;
     psf_params->AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff(0)=inner_core_radius_n_sigma;
     SPECEX_INFO("Setting PSF inner core radius to " << inner_core_radius_n_sigma);
   }
@@ -2068,53 +2249,14 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
     spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
   }
+  include_signal_in_weight = false;
   ok = FitIndividualSpotFluxes(input_spots);
   
-  // lower selection threshold because PSF is now linear in its parameters and hence fit is more robust
-  selected_spots = select_spots(input_spots,min_snr_linear_terms);
   
+  selected_spots = select_spots(input_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
   psf->hSizeX=saved_psf_hsizex;
   psf->hSizeY=saved_psf_hsizey;
-  
-  {
-    psf_params->FitParPolXW.clear();
-    for(int p=0;p<psf->LocalNAllPar();p++) {
-      const string& name = psf->ParamName(p);
-      ok = true;
-      ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHNSIG");
-      ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
-      ok &= (name!="RADIUS" && name!="SIGMA");
-      ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
-      if(ok)
-	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
-    }
-  }
-  if(psf_params->FitParPolXW.size()) {
 
-    if(0) {
-    SPECEX_INFO("Starting FitSeveralSpots PSF (hermite terms)");
-    SPECEX_INFO("=======================================");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    include_signal_in_weight = false;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
-    }
-    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (hermite terms)");
-    SPECEX_INFO("=======================================");
-    fit_flux       = true;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = false;
-    include_signal_in_weight = false;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  }
-  
-  selected_spots = select_spots(input_spots,min_snr_linear_terms);
-  
 #ifdef CONTINUUM
 #ifdef EXTERNAL_TAIL  
 
@@ -2138,19 +2280,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_trace      = false;
     fit_psf_tail   = scheduled_fit_of_psf_tail;
     fit_continuum  = scheduled_fit_of_continuum;
-    
-    include_signal_in_weight = true; 
-    
-    double saved_psf_error = psf->psf_error;
-    psf->psf_error = 1; // to deweight the core of the psf
-    
-    for(int i=0; i<2; i++) { 
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    }
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     fit_psf_tail   = false; // don't fit this anymore
     fit_continuum   = false; // don't fit this anymore
-    include_signal_in_weight = false; // restore previous state
-    psf->psf_error = saved_psf_error; // restore previous state
     {
       psf_params->FitParPolXW.clear();
       for(int p=0;p<psf->LocalNAllPar();p++) {
@@ -2165,122 +2297,129 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
       }
     }
-    
-    
   }
 #endif
 #endif
   
-  if(psf_params->FitParPolXW.size()) {
-  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis)");
-  SPECEX_INFO("=======================================");
-  fit_flux       = true;
-  fit_position   = false;
-  fit_psf        = true;
-  fit_trace      = false;
-  chi2_precision = 10;
-  include_signal_in_weight = true;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+  {
+    psf_params->FitParPolXW.clear();
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      const string& name = psf->ParamName(p);
+      ok = true;
+      ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHNSIG");
+      ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+      ok &= (name!="RADIUS" && name!="SIGMA");
+      ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+      if(ok)
+	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+    }
   }
-  SPECEX_INFO("Starting FitSeveralSpots FLUX (updated tails)");
-  SPECEX_INFO("=======================================");
-  fit_flux       = true;
-  fit_position   = false;
-  fit_psf        = false;
-  fit_trace      = false;
-  chi2_precision = 10;
-  include_signal_in_weight = true;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX");
-
-  selected_spots = select_spots(input_spots,min_snr_linear_terms);
   
+  fit_flux       = false;
+  fit_position   = false;
+  fit_trace      = false;
+  include_signal_in_weight = false;
+  
+  
+  for(int i=0;i<3;i++) {
+    fit_flux = true; fit_psf = false;
+    SPECEX_INFO("Starting FitSeveralSpots FLUX #" << i);
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+    fit_flux = false; fit_psf = true;
+    SPECEX_INFO("Starting FitSeveralSpots PSF #" << i);
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    fit_flux = true; fit_psf = true;
+    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << i);
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  }
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
 
 #ifdef CONTINUUM
 #ifdef EXTERNAL_TAIL  
 
   if(scheduled_fit_of_psf_tail || scheduled_fit_of_continuum) {
-
-    {
-      psf_params->FitParPolXW.clear();
-      for(int p=0;p<psf->LocalNAllPar();p++) {
-	const string& name = psf->ParamName(p);
-	ok = (name=="TAILAMP");
-	if(ok)
-	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
-      }
+    psf_params->FitParPolXW.clear();
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      const string& name = psf->ParamName(p);
+      ok = (name=="TAILAMP");
+      if(ok)
+	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
-    
-    SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
-    SPECEX_INFO("=======================================");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = false;
-    fit_psf_tail   = scheduled_fit_of_psf_tail;
-    fit_continuum  = scheduled_fit_of_continuum;
-    
-    include_signal_in_weight = true; 
-    
-    double saved_psf_error = psf->psf_error;
-    psf->psf_error = 1; // to deweight the core of the psf
-    
-    for(int i=0; i<2; i++) { 
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    }
-    fit_psf_tail   = false; // don't fit this anymore
-    fit_continuum  = false; // don't fit this anymore
-    include_signal_in_weight = false; // restore previous state
-    psf->psf_error = saved_psf_error; // restore previous state
-    {
-      psf_params->FitParPolXW.clear();
-      for(int p=0;p<psf->LocalNAllPar();p++) {
-	const string& name = psf->ParamName(p);
-	ok = true;
-	ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHNSIG");
-	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
-	ok &= (name!="RADIUS" && name!="SIGMA");
-	//ok &= (name!="RADIUS");
-	ok &= (name!="TAILAMP");
-	ok &= (name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
-	if(ok)
-	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
-      }
+  }
+  
+  SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
+  SPECEX_INFO("=======================================");
+  fit_flux       = false;
+  fit_position   = false;
+  fit_psf        = false;
+  fit_trace      = false;
+  fit_psf_tail   = scheduled_fit_of_psf_tail;
+  fit_continuum  = scheduled_fit_of_continuum;
+  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+  fit_psf_tail   = false; // don't fit this anymore
+  fit_continuum   = false; // don't fit this anymore
+  {
+    psf_params->FitParPolXW.clear();
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      const string& name = psf->ParamName(p);
+      ok = true;
+      ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHNSIG");
+      ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+      //ok &= (name!="RADIUS" && name!="SIGMA");
+      ok &= (name!="RADIUS");
+      ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+      if(ok)
+	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
   }
 #endif
 #endif
-
-  selected_spots = select_spots(input_spots,min_snr_linear_terms);
-  
-  if(psf_params->FitParPolXW.size()) {
-  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
-  SPECEX_INFO("=======================================");
-  fit_flux       = true;
-  fit_position   = false;
-  fit_psf        = true;
-  fit_trace      = false;
-  chi2_precision = 1;
-  
-  // try this :
-  include_signal_in_weight = false;  recompute_weight_in_fit  = true;
-  fatal=false;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  fatal=true;
-  if(!ok) {
-    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis bis)");
-    SPECEX_INFO("=======================================");
-    include_signal_in_weight = true;  recompute_weight_in_fit  = false;
+  for(int i=3;i<5;i++) {
+    fit_flux = true; fit_psf = false;
+    SPECEX_INFO("Starting FitSeveralSpots FLUX #" << i);
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+    fit_flux = false; fit_psf = true;
+    SPECEX_INFO("Starting FitSeveralSpots PSF #" << i);
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    fit_flux = true; fit_psf = true;
+    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << i);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   }
+  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
+  
+  if(1) {
+    include_signal_in_weight = true;
+    for(int i=0;i<4;i++) {
+      fit_flux = true; fit_psf = false;
+      SPECEX_INFO("Starting FitSeveralSpots FLUX(w) #" << i);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+      fit_flux = false; fit_psf = true;
+      SPECEX_INFO("Starting FitSeveralSpots PSF(w) #" << i);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    }
+  }
 
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+    
+  if(0) {
+    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX (bis bis bis)");
+    SPECEX_INFO("=======================================");
+    fit_flux       = true;
+    fit_position   = false;
+    fit_psf        = true;
+    fit_trace      = false;
+    chi2_precision = 10;
+    // try this :
+    include_signal_in_weight = false;  recompute_weight_in_fit  = true;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   }
   
   SPECEX_INFO("Compute in-core chi2");
   SPECEX_INFO("=======================================");
   
+  increase_weight_of_side_bands = false;
   
   fit_flux       = false;
   fit_position   = false;

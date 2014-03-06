@@ -19,8 +19,8 @@ int main() {
   specex_set_verbose(true);
   
   //specex::PSF_p psf(new specex::HatHermitePSF(3));
-  //specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
-  specex::PSF_p psf(new specex::GaussHermitePSF(3));
+  specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
+  //specex::PSF_p psf(new specex::GaussHermitePSF(3));
   //specex::PSF_p psf(new specex::HatMoffatPSF(3));
   psf->AllocateDefaultParams();
   
@@ -29,15 +29,16 @@ int main() {
   double x = 0;
   double y = 0;
   
-  int i=int(x)+1;
-  int j=int(y)+1.5;
+  int i=int(x)+3;
+  int j=int(y)+3;
 
   harp::vector_double P = psf->DefaultParams();
 
   // test for derivatives of sigma
   // for(size_t i=2;i<P.size();i++) P(i)=1;
   
-  //for(size_t i=3;i<min(35,int(P.size()));i++) P(i)=0.2;
+  for(size_t i=5;i<min(35,int(P.size()));i++) P(i)=0.2;
+  P(2)=3.;
   P(20)=0.5;
   
   cout << P << endl;

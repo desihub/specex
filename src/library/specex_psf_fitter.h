@@ -110,6 +110,8 @@ class PSF_Fitter {
   double chi2_precision;
   bool include_signal_in_weight;
   bool recompute_weight_in_fit;
+  bool force_positive_flux;
+  bool increase_weight_of_side_bands;
   bool verbose;
   bool fatal;
   bool parallelized;
@@ -133,6 +135,8 @@ class PSF_Fitter {
     chi2_precision(0.1),
     include_signal_in_weight(false),
     recompute_weight_in_fit(false),
+   force_positive_flux(false),
+   increase_weight_of_side_bands(false),
     scheduled_fit_of_traces(true),
 #ifdef EXTERNAL_TAIL
     fit_psf_tail(false),

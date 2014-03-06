@@ -174,7 +174,8 @@ int main ( int argc, char *argv[] ) {
     image_data image,weight;
     read_fits_images(arc_image_filename,image,weight);
     // weight is 0 or 1
-    for(int j=0;j<weight.Ny();j++) {
+    /*
+      for(int j=0;j<weight.Ny();j++) {
       for(int i=0;i<weight.Nx();i++) {
 	if(weight(i,j)>0)
 	  weight(i,j)=1;
@@ -182,6 +183,7 @@ int main ( int argc, char *argv[] ) {
 	  weight(i,j)=0;
       }
     }
+    */
     
     // init PSF
     // --------------------------------------------

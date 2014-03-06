@@ -186,14 +186,16 @@ int main ( int argc, char *argv[] ) {
       
       data_in_stamp.data(i) = image.data(i);
       
-      variance.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
-      if(flux>0) variance.data(i) += flux; // Poisson noise
-      
+      variance.data(i) = square(readout_noise);
+      if(flux>0)
+	variance.data(i) += (flux + square(psf_error*flux));
+	  
       // use data here for the variance : 
       flux = max(0.,image.data(i));
       
-      variance2.data(i) = square(readout_noise) + square(psf_error*flux); // readout and psf error
-      if(flux>0) variance2.data(i) += flux; // Poisson noise
+      variance2.data(i) = square(readout_noise);
+      if(flux>0) 
+	variance2.data(i) += (flux + square(psf_error*flux));
       
     } // end of loop on all pixels
     

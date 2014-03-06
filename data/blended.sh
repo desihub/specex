@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "looking for indicernable lines in list"
-dist=0.5 # angs
+dist=1. # angs
 
 ifile=lamplines-specex.par
 
