@@ -210,11 +210,30 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     if( (fit_psf || fit_psf_tail) && tmp.flux<0) tmp.flux = 0.; // more robust
     tmp.frozen_flux = tmp.flux;
     
+    
+
+
+
     // stamp
     tmp.stamp = Stamp(image);
     SetStampLimitsFromPSF(tmp.stamp,psf,tmp.x,tmp.y);
     tmp.stamp = tmp.stamp.Intersection(stamp);
-
+    
+    tmp.can_measure_flux = true;
+    if(spots.size()>1) {
+      // check whether we can rely on the flux measurement of this spot
+      int i_center = int(floor(tmp.x)+0.5);
+      int j_center = int(floor(tmp.y)+0.5);
+      int nbad=0;
+      for(int j=j_center-2;j<j_center+3;j++) {
+	for(int i=i_center-2;i<i_center+3;i++) {
+	  if(weight(i,j)==0) nbad++;
+	}
+      }
+      tmp.can_measure_flux = (nbad<=5); // can survive one dead column = 5pix, not more
+      if(!tmp.can_measure_flux) SPECEX_WARNING("cannot measure flux of spot " << s << " at x=" << tmp.x << " y=" << tmp.y << ", will attach it to a neighbour");
+    }
+    
     // psf parameters
     tmp.psf_all_params = psf->AllLocalParamsXW(tmp.x,tmp.wavelength,psf_params->bundle_id);
     
@@ -537,7 +556,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      H(tmp.flux_parameter_index) += psfVal;
 
 #ifdef FASTER_THAN_SYR
-	    other_indices.push_back(tmp.flux_parameter_index);
+	    if(tmp.can_measure_flux)
+	      other_indices.push_back(tmp.flux_parameter_index);
 #endif
 	  }
 	  if(fit_position) {
@@ -1000,8 +1020,23 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   npar_fixed_coord = psf_params->FitParPolXW.size();
   npar_varying_coord = psf->BundleNFitPar(psf_params->bundle_id);
+
   nparTot  = NPar(spots.size());
+
+  ComputeWeigthImage(spots,npix);
   
+  InitTmpData(spots);
+  int n_to_attach = 0;
+  for(size_t s=0;s<spot_tmp_data.size();s++) {
+    SpotTmpData& tmp = spot_tmp_data[s];
+    if(!tmp.can_measure_flux) n_to_attach++;
+  }
+  if(fit_flux)
+    nparTot -= n_to_attach;
+  
+  
+  
+
   if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots npar_fixed_coord   = " << npar_fixed_coord);
   if(verbose) SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots npar_varying_coord = " << npar_varying_coord);
 
@@ -1075,14 +1110,14 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
   // ----------------------------------------------------
   
-  ComputeWeigthImage(spots,npix);
+  //ComputeWeigthImage(spots,npix);
   
   
   
   
 
 
-  InitTmpData(spots);
+  //InitTmpData(spots);
   
   if(corefootprint_weight_boost>0) {
     corefootprint = image;
@@ -1111,14 +1146,17 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SpotTmpData& tmp = spot_tmp_data[s];
 
     if(fit_flux) {
-      tmp.flux_parameter_index = index; 
+      if(tmp.can_measure_flux) {
+	tmp.flux_parameter_index = index;
+	index++;  
+      
       if(force_positive_flux) {
 	if(tmp.flux<=1) tmp.flux=1;
 	Params(tmp.flux_parameter_index) = log(tmp.flux);
       }else{
 	Params(tmp.flux_parameter_index) = tmp.flux;
       }
-      index++; 
+      }
     }
     if(fit_position) {
       tmp.x_parameter_index = index; 
@@ -1150,6 +1188,36 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   }
   }
   
+  // now deal with spots for which we cannot measure fluxes
+
+  
+  if(n_to_attach>0) {
+    SPECEX_INFO("Need to attach " << n_to_attach << " spots");
+    for(size_t s=0;s<spot_tmp_data.size();s++) {
+      SpotTmpData& tmp = spot_tmp_data[s];
+      if(!tmp.can_measure_flux) {
+	// find a nice neighbour
+	SpotTmpData* neighbour = 0;
+	int fiber_diff = 100000;
+	for(size_t s2=0;s2<spot_tmp_data.size();s2++) {
+	  SpotTmpData& tmp2 = spot_tmp_data[s2];
+	  if(fabs(tmp2.wavelength - tmp.wavelength)>0.00000001) continue;
+	  if(!tmp2.can_measure_flux) continue;
+	  if(abs(tmp2.fiber-tmp.fiber)<fiber_diff) {
+	    fiber_diff = abs(tmp2.fiber-tmp.fiber);
+	  neighbour  = &tmp2;
+	  if(fiber_diff==1) break; // it's ok
+	  }
+	}
+	if(!neighbour) {
+	  SPECEX_ERROR("couldn't find a spot to attach to x=" << tmp.x << " y=" << tmp.y);
+	}
+	tmp.flux_parameter_index = neighbour->flux_parameter_index;
+	tmp.flux = neighbour->flux;
+      }
+    }
+  }
+
   
   if(verbose)
     SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots inc. signal in w=" << include_signal_in_weight << ", npix footprint = " << *npix);
@@ -1667,6 +1735,101 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
   }
   SPECEX_INFO("specex::PSF_Fitter::FitTraces ended nok = " << (*nok) << "/" << psf->FiberTraces.size());
  
+  // detect failed traces via interpolation
+  if(*nok>2) {
+
+    map<int,specex::Trace>::iterator it_begin = psf->FiberTraces.begin();
+    map<int,specex::Trace>::iterator it_end   = psf->FiberTraces.end();
+    map<int,specex::Trace>::iterator it_last  = it_end; it_last--;
+    
+    for(map<int,specex::Trace>::iterator it=it_begin;it!=it_end;it++) {
+      
+      if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
+      if(it->second.Off()) continue;
+      
+      
+      
+      map<int,specex::Trace>::iterator it1;
+      map<int,specex::Trace>::iterator it2;
+      
+      if(it==it_begin) {
+	it1 = it; it1++;
+	if(it1==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	while(it1->second.Off()) { 
+	  it1++;
+	  if(it1==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");	  
+	}
+	it2 = it1; it2++;
+	if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	while(it2->second.Off()) { 
+	  it2++;
+	  if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	}
+      } else if(it==it_last) {
+	it1 = it; it1--;
+	while(it1->second.Off()) {
+	  if(it1==it_begin) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	  it1--;
+	}
+	it2 = it1; it2--;
+	while(it2->second.Off()) {
+	  if(it2==it_begin) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	  it2--;
+	}
+      } else {
+	it1 = it; it1--;
+	while(it1->second.Off()) {
+	  if(it1==it_begin) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	  it1--;
+	}
+	it2 = it; it2++;
+	if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	while(it2->second.Off()) { 
+	  it2++;
+	  if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	}
+      }
+
+      
+      specex::Trace& trace=it->second;
+      specex::Trace& trace1=it1->second;
+      specex::Trace& trace2=it2->second;
+      double f = double(it->first);
+      double f1 = double(it1->first);
+      double f2 = double(it2->first);
+      
+
+      double wmin = min(min(trace.X_vs_W.xmin,trace1.X_vs_W.xmin),trace2.X_vs_W.xmin);
+      double wmax = max(max(trace.X_vs_W.xmax,trace1.X_vs_W.xmax),trace2.X_vs_W.xmax);
+      
+      double dx=0;
+      double dy=0;
+      for(double w=wmin; w<wmax; w+=10) {
+	double dxw=trace.X_vs_W.Value(w)-( (f2-f)*trace1.X_vs_W.Value(w) + (f-f1)*trace2.X_vs_W.Value(w) )/(f2-f1);
+	double dyw=trace.Y_vs_W.Value(w)-( (f2-f)*trace1.Y_vs_W.Value(w) + (f-f1)*trace2.Y_vs_W.Value(w) )/(f2-f1);
+	
+	if(fabs(dxw)>fabs(dx)) dx=dxw;
+	if(fabs(dyw)>fabs(dy)) dy=dxw;
+	
+      }
+      SPECEX_INFO("checking fiber " << it->first << " using " << it1->first << " and " << it2->first << " dx=" << dx << " dy=" << dy);
+      
+      if(fabs(dx)>2 || fabs(dy)>2) {
+	SPECEX_INFO("replacing trace of fiber " << it->first << " by interpolation");
+	SPECEX_WARNING("replacing trace of fiber " << it->first << " by interpolation");
+	trace.X_vs_W.deg  = min(trace1.X_vs_W.deg,trace2.X_vs_W.deg); trace.X_vs_W.coeff.resize(trace.X_vs_W.deg+1);
+	trace.X_vs_W.coeff = ((f2-f)/(f2-f1))*trace1.X_vs_W.coeff + ((f-f1)/(f2-f1))*trace2.X_vs_W.coeff;
+	trace.Y_vs_W.deg  = min(trace1.Y_vs_W.deg,trace2.Y_vs_W.deg); trace.Y_vs_W.coeff.resize(trace.Y_vs_W.deg+1);
+	trace.Y_vs_W.coeff = ((f2-f)/(f2-f1))*trace1.Y_vs_W.coeff + ((f-f1)/(f2-f1))*trace2.Y_vs_W.coeff;
+	trace.W_vs_Y = trace.X_vs_W.Invert(2); 
+	trace.X_vs_Y = composed_pol(trace.X_vs_W,trace.W_vs_Y);
+      }
+
+
+    } // end of loop on fibers
+  } // end of test
+
+  
   return true;
 }
 
@@ -1820,6 +1983,34 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     FitTraces(input_spots);
 
+    int number_of_fibers_with_dead_columns = 0;
+    
+    if(1) {
+      SPECEX_INFO("detecting dead columns in fiber traces ");
+      for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
+	  it !=psf->FiberTraces.end(); ++it) {
+	
+	if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
+	if(it->second.Off()) continue;
+	
+	specex::Trace& trace=it->second;
+	int begin_j = int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmin)));
+	int end_j   = int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmax)))+1;
+	int ndead=0;
+	for(int j=begin_j;j<end_j;j++) {
+	  int i_center = trace.X_vs_Y.Value(double(j));
+	  int begin_i = max(0,i_center-3);
+	  int end_i   = min(int(image.n_cols()),i_center+4);
+	  for(int i = begin_i ;i<end_i;i++) {
+	    if(weight(i,j)==0) ndead++;
+	  }
+	} 
+
+	SPECEX_INFO("fiber " << it->first << " ndead=" << ndead);
+	if(ndead>500) number_of_fibers_with_dead_columns++;
+      }
+      SPECEX_INFO("Number of fibers with dead columns = " << number_of_fibers_with_dead_columns);
+    }
     
     // here we need to count number of wavelength and spots per wavelength
     {
@@ -1897,6 +2088,11 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	}
 	if(name=="GH-1-0" || name=="GH-0-1" || name=="GH-1-1" || name=="GH-2-0" || name=="GH-0-2") {
 	  degx=number_of_fibers-1;
+	  if(number_of_fibers_with_dead_columns>0) {
+	    degx=max(0,degx-number_of_fibers_with_dead_columns);
+	    // remove one more degree for precaution (not well understool why it's needed)
+	    degx=max(0,degx-1);
+	  }
 	} 
 	if(name.find("GH2")!=name.npos) {
 	  degx=0;//min(1,int(polynomial_degree_along_x));
@@ -2326,6 +2522,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     SPECEX_INFO("Starting FitSeveralSpots FLUX #" << i);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+
+    //write_spots_xml(selected_spots,"spots-after-flux0.xml"); exit(12);
+    
     fit_flux = false; fit_psf = true;
     SPECEX_INFO("Starting FitSeveralSpots PSF #" << i);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);

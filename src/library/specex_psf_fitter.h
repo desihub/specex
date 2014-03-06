@@ -45,6 +45,8 @@ namespace specex {
 
 
     Stamp stamp;
+
+    bool can_measure_flux;
     
   };
 
