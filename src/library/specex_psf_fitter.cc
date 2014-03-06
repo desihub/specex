@@ -782,6 +782,10 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       if(zero_weight_for_core) {
 	
 	SPECEX_INFO("WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails or continuum)");
+	double saved_hsx = psf->hSizeX;
+	double saved_hsy = psf->hSizeY;
+	psf->hSizeX = min(12,psf->hSizeX);
+	psf->hSizeY = min(12,psf->hSizeY);
 	
 	for(size_t s=0;s<spots.size();s++) {
 	  Stamp spot_stamp(image);
@@ -797,6 +801,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	    }
 	  }
 	}
+	psf->hSizeX = saved_hsx;
+	psf->hSizeY = saved_hsy;
       }
       
       //if(fit_psf_tail || fit_continuum) SPECEX_INFO("debug, writing toto.fits and exit"); write_new_fits_image("toto.fits",footprint_weight); exit(12);
@@ -1804,7 +1810,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
 #ifdef CONTINUUM
       //SPECEX_WARNING("I set deg=0 to cont and tail");
-      psf_params->ContinuumPol.deg = 1;
+      psf_params->ContinuumPol.deg = 2;
       psf_params->ContinuumPol.coeff.resize(psf_params->ContinuumPol.deg+1);
       psf_params->ContinuumPol.coeff.clear();
       psf_params->ContinuumPol.xmin = min_wave;
@@ -1961,13 +1967,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       map<int,bool> fiber_is_ok;      
       for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++) {
 	int nbad=0;
-	double delta=2; //pix
+	double delta=3; //pix
 	for(size_t s=0;s<input_spots.size();s++) {
 	  specex::Spot_p spot= input_spots[s];
 	  if(spot->fiber != fiber) continue;
 	  if(fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc)>delta || fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc)>delta) nbad++;
 	}
-	if(nbad>2) {
+	if(nbad>3) {
 	  SPECEX_WARNING("Large x y offset for fiber " << fiber);
 	  fibers_with_large_offsets.push_back(fiber);
 	  fiber_is_ok[fiber]=false;

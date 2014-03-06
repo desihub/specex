@@ -324,7 +324,7 @@ int main ( int argc, char *argv[] ) {
 
 #warning "need to know where to get xy ccd range info"
 
-      int margin = psf->hSizeY;
+      int margin = 1; // we want to keep as much as possible to minimize extrapolation
       ymin+=margin;
       ymax-=margin;
       
