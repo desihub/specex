@@ -1210,7 +1210,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  }
 	}
 	if(!neighbour) {
-	  SPECEX_ERROR("couldn't find a spot to attach to x=" << tmp.x << " y=" << tmp.y);
+	  SPECEX_WARNING("couldn't find a spot to attach to x=" << tmp.x << " y=" << tmp.y << " erasing it");
+	  // erase this spot
+	  spot_tmp_data.erase(spot_tmp_data.begin()+s);
+	  continue;
 	}
 	tmp.flux_parameter_index = neighbour->flux_parameter_index;
 	tmp.flux = neighbour->flux;
@@ -1748,57 +1751,45 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
       if(it->second.Off()) continue;
       
       
-      
-      map<int,specex::Trace>::iterator it1;
-      map<int,specex::Trace>::iterator it2;
-      
-      if(it==it_begin) {
-	it1 = it; it1++;
-	if(it1==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	while(it1->second.Off()) { 
-	  it1++;
-	  if(it1==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");	  
+      int fiber = it->first;
+      int fiber1=-1;
+      int fiber2=-1;      
+      {
+	vector<int> others;
+	for(map<int,specex::Trace>::iterator it2=it_begin;it2!=it_end;it2++) {	
+	  if(it2->first < psf_params->fiber_min || it2->first > psf_params->fiber_max) continue;
+	  if(it2->second.Off()) continue;
+	  if(it2==it) continue;
+	  others.push_back(it2->first);
 	}
-	it2 = it1; it2++;
-	if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	while(it2->second.Off()) { 
-	  it2++;
-	  if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
+	int mdist=1000;
+	for(size_t f=0;f<others.size();f++) {
+	  int dist=abs(others[f]-fiber);
+	  if(dist<mdist) {
+	    fiber1=others[f];
+	    mdist=dist;
+	  }
 	}
-      } else if(it==it_last) {
-	it1 = it; it1--;
-	while(it1->second.Off()) {
-	  if(it1==it_begin) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	  it1--;
+	if(fiber1==-1) SPECEX_ERROR("could not find another valid fiber case #a, should not happen, for fiber " << fiber);
+	mdist=1000;
+	for(size_t f=0;f<others.size();f++) {
+	  if(others[f]==fiber1) continue;
+	  int dist=abs(others[f]-fiber);
+	  if(dist<mdist) {
+	    fiber2=others[f];
+	    mdist=dist;
+	  }
 	}
-	it2 = it1; it2--;
-	while(it2->second.Off()) {
-	  if(it2==it_begin) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	  it2--;
-	}
-      } else {
-	it1 = it; it1--;
-	while(it1->second.Off()) {
-	  if(it1==it_begin) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	  it1--;
-	}
-	it2 = it; it2++;
-	if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	while(it2->second.Off()) { 
-	  it2++;
-	  if(it2==it_end) SPECEX_ERROR("could not find another valid fiber, should not happen");
-	}
+	if(fiber2==-1) SPECEX_ERROR("could not find another valid fiber case #a, should not happen, for fiber " << fiber);
       }
-
-      
+            
       specex::Trace& trace=it->second;
-      specex::Trace& trace1=it1->second;
-      specex::Trace& trace2=it2->second;
-      double f = double(it->first);
-      double f1 = double(it1->first);
-      double f2 = double(it2->first);
+      specex::Trace& trace1=psf->FiberTraces.find(fiber1)->second;
+      specex::Trace& trace2=psf->FiberTraces.find(fiber2)->second;
+      double f =  double(fiber);
+      double f1 = double(fiber1);
+      double f2 = double(fiber2);
       
-
       double wmin = min(min(trace.X_vs_W.xmin,trace1.X_vs_W.xmin),trace2.X_vs_W.xmin);
       double wmax = max(max(trace.X_vs_W.xmax,trace1.X_vs_W.xmax),trace2.X_vs_W.xmax);
       
@@ -1812,7 +1803,7 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
 	if(fabs(dyw)>fabs(dy)) dy=dxw;
 	
       }
-      SPECEX_INFO("checking fiber " << it->first << " using " << it1->first << " and " << it2->first << " dx=" << dx << " dy=" << dy);
+      SPECEX_INFO("checking fiber " << it->first << " using " << fiber1 << " and " << fiber2 << " dx=" << dx << " dy=" << dy);
       
       if(fabs(dx)>2 || fabs(dy)>2) {
 	SPECEX_INFO("replacing trace of fiber " << it->first << " by interpolation");
