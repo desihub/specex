@@ -16,20 +16,27 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
   
   string file_type = props.get("type","");
   string path = props.get("path","");
-  double wavebin = props.get("wavebin",1);
-  double wavemin = props.get("wavemin",0);
-  double wavemax = props.get("wavemax",0);
+  
+  if( file_type == "xml")
+    read_psf_xml(actual_specex_psf,path);
+  else if( file_type == "fits")
+    read_psf_fits(actual_specex_psf,path);
+  
+  double wavebin = props.get("wavebin",1.);
+  double wavemin = props.get("wavemin",0.);
+  double wavemax = props.get("wavemax",0.);
+  fibermin_ = props.get("fibermin",0);
+  fibermax_ = props.get("fibermax",actual_specex_psf->FiberTraces.size()-1);
+  
+  cout << "INFO " << wavebin << " " << wavemin << " " << wavemax << " " << fibermin_ << " " << fibermax_ << endl;
   
 
   if(wavebin<=0) {
     HARP_THROW("unphysical wave bin");
   }
 
-  if( file_type == "xml")
-    read_psf_xml(actual_specex_psf,path);
-  else if( file_type == "fits")
-    read_psf_fits(actual_specex_psf,path);
   
+
   {
     // compute range of wavelength accessible for all fibers as defined by the measured arc lamp lines
     if(wavemin==0) {
@@ -45,14 +52,13 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
       }
     }
     
-    int nlambda = int((wavemax-wavemin)/wavebin);
+    int nlambda = int((wavemax-wavemin)/wavebin)+1; // included
     lambda_.resize(nlambda);
     for(int i=0;i<nlambda;i++)
       lambda_(i)=wavemin+wavebin*i;
   }
   cout << "INFO harp::specex_psf # lambda : " << lambda_.size() << " range : " << wavemin << " " << wavemax << endl;
   
-  nspec_ = actual_specex_psf->FiberTraces.size(); // assume this is the number of fibers
   rows_  = actual_specex_psf->ccd_image_n_rows;
   cols_  = actual_specex_psf->ccd_image_n_cols;
   
@@ -72,12 +78,13 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
 
 void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t & x_offset, size_t & y_offset, harp::matrix_double & patch ) const {
   
+  int fiber = fibermin_+spec_index; 
   
-  std::map<int,specex::Trace>::const_iterator it = actual_specex_psf->FiberTraces.find(int(spec_index));
+  std::map<int,specex::Trace>::const_iterator it = actual_specex_psf->FiberTraces.find(fiber);
   if(it==actual_specex_psf->FiberTraces.end()) HARP_THROW("specex_psf::response don't have PSF for this fiber/spec");
   if(lambda_index<0 || lambda_index>=lambda_.size()) HARP_THROW("specex_psf::response invalid lambda index");
   
-  int fiber = spec_index; // assume for now spec_index is fiber index , but this is not necessarily true
+  
   std::map<int,int>::const_iterator bundle_it = bundle_.find(fiber);
   if( bundle_it == bundle_.end()) HARP_THROW("specex_psf::response cannot find bundle of fiber");
   
@@ -101,6 +108,7 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   for(int j=0;j<ny;j++) {
     for(int i=0;i<nx;i++) {
       double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
+      if(val<0) val=0;
       patch(i,j) = val;
       sum += val;
     }
