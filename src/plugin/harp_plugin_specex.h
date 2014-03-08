@@ -21,7 +21,27 @@ namespace harp {
   class specex_psf : public psf {
 
     friend class boost::serialization::access;
+    
+  private :
 
+      template < class Archive >
+      void serialize ( Archive & ar, const unsigned int version ) {
+        ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(psf);
+        ar & BOOST_SERIALIZATION_NVP(fibermin_);
+        ar & BOOST_SERIALIZATION_NVP(fibermax_);
+        ar & BOOST_SERIALIZATION_NVP(lambda_);
+        ar & BOOST_SERIALIZATION_NVP(rows_);
+        ar & BOOST_SERIALIZATION_NVP(cols_);
+        return;
+      }
+
+      vector_double lambda_;
+      size_t fibermin_;
+      size_t fibermax_;
+      size_t rows_;
+      size_t cols_;
+      specex::PSF_p actual_specex_psf;
+      std::map<int,int> bundle_; // bundles of fibers;
     
     public :
 
@@ -35,7 +55,7 @@ namespace harp {
 
       boost::property_tree::ptree metadata ( ) const { return boost::property_tree::ptree(); }
 
-      size_t n_spec ( ) const { return nspec_; }
+      size_t n_spec ( ) const { return (fibermax_-fibermin_+1); }
 
       size_t n_lambda ( ) const { return lambda_.size(); }
       
@@ -49,24 +69,7 @@ namespace harp {
 
       size_t response_nnz_estimate ( ) const;
 
-    private :
-
-      template < class Archive >
-      void serialize ( Archive & ar, const unsigned int version ) {
-        ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(psf);
-        ar & BOOST_SERIALIZATION_NVP(nspec_);
-        ar & BOOST_SERIALIZATION_NVP(lambda_);
-        ar & BOOST_SERIALIZATION_NVP(rows_);
-        ar & BOOST_SERIALIZATION_NVP(cols_);
-        return;
-      }
-
-      vector_double lambda_;
-      size_t nspec_;
-      size_t rows_;
-      size_t cols_;
-      specex::PSF_p actual_specex_psf;
-      std::map<int,int> bundle_; // bundles of fibers;
+    
   };
   BOOST_SERIALIZATION_SHARED_PTR(specex_psf)
 
