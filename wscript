@@ -185,8 +185,8 @@ def check_packages(conf, pkg_list):
 
 
 def build(bld):
-    bld.add_subdirs( ['src/library', 'src/apps', 'src/tests'])
-    #bld.add_subdirs( ['src/library', 'src/plugin', 'src/apps', 'src/tests'])
+    #bld.add_subdirs( ['src/library', 'src/apps', 'src/tests'])
+    bld.add_subdirs( ['src/library', 'src/plugin', 'src/apps', 'src/tests'])
     gen_pkgconfig(bld)
 
 
