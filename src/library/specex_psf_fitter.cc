@@ -1007,7 +1007,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   int *npix = &npixels_memory_slot;
   if(n_pixels) npix = n_pixels;
   *niter=0;
-  int maxiter = 30; 
+  int maxiter = 100; 
   double oldChi2=1e30;
   if(*psfChi2<=0) *psfChi2 = 1e20;
   
