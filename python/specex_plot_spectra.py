@@ -6,6 +6,8 @@
 import pyfits,sys,json,pylab,string
 from math import *
 
+#pylab.ion() #??
+
 class dataset :
     
     def __init__(self,filename,fibers) :
@@ -105,5 +107,9 @@ for dset in datasets :
         else :
             pylab.plot(dset.wave,dset.spectra[fiber,:])
 
-pylab.show()
+pylab.show() # don't need cause "ion"
+
+import IPython
+#IPython.embed()
+
 
