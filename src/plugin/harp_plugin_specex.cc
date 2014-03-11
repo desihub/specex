@@ -133,7 +133,7 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
     return;
   }
   
-  double wave_step=0.1; //
+  double wave_step=0.2; //
   double sum = 0;
   double wanted_sum = 0;
   
@@ -142,9 +142,10 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
     const double &wave1 = lambda_(lambda_index-1);
     // do sum over [wave1,wave] weighted by linear weight from 0 to 1
     
+    wanted_sum += 0.5*(wave-wave1);
+    
     for(double w=wave;w>=wave1;w -= wave_step) { // start from wave
       double weight = (w-wave1)/(wave-wave1);
-      wanted_sum += weight;
       
       x_center = trace.X_vs_W.Value(w);
       y_center = trace.Y_vs_W.Value(w);
@@ -169,9 +170,10 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
     const double &wave2 = lambda_(lambda_index+1);
     // do sum over [wave,wave2] weighted by linear weight from 1 to 0
     
+    wanted_sum += 0.5*(wave2-wave);
+    
     for(double w=wave;w<=wave2;w += wave_step) { // start from wave
       double weight = (wave2-w)/(wave2-wave);
-      wanted_sum += weight;
       
       x_center = trace.X_vs_W.Value(w);
       y_center = trace.Y_vs_W.Value(w);
@@ -193,7 +195,7 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   }
   
   if(sum<=0) HARP_THROW("specex_psf::response sum is <=0");
-  patch *= (wanted_sum/sum)*wave_step;
+  patch *= (wanted_sum/sum);
   
 
 }
