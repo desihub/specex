@@ -35,9 +35,9 @@ class dataset :
             print "error"
             sys.exit(12)
 
-        self.errors=None
-        if False:
-            ivar=hdulist[1].data
+        self.errors=[]
+        ivar=hdulist[1].data
+        if ivar.shape==self.spectra.shape :
             self.errors=ivar
             for i in range(self.errors.shape[0]) :
                 for j in range(self.errors.shape[1]) :
@@ -102,8 +102,8 @@ for dset in datasets :
 
 for dset in datasets :
     for fiber in dset.fibers :
-        if dset.errors :
-            pylab.errorbar(dset.wave,dset.spectra[fiber,:],yerr=errors[fiber,:])
+        if len(dset.errors) :
+            pylab.errorbar(dset.wave,dset.spectra[fiber,:],yerr=dset.errors[fiber,:])
         else :
             pylab.plot(dset.wave,dset.spectra[fiber,:])
 
