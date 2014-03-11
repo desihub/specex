@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 
 
@@ -109,7 +109,7 @@ for dset in datasets :
 
 pylab.show() # don't need cause "ion"
 
-import IPython
+#import IPython
 #IPython.embed()
 
 
