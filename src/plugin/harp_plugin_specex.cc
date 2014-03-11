@@ -79,6 +79,29 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
   cout << "INFO harp::specex_psf This PSF is a " << actual_specex_psf->Name() << endl;
 }
 
+void harp::specex_psf::extent ( size_t spec_index, size_t lambda_index, size_t & x_offset, size_t & y_offset, size_t & n_x, size_t & n_y ) const {
+  
+  int fiber = fibermin_+spec_index; 
+  
+  std::map<int,specex::Trace>::const_iterator it = actual_specex_psf->FiberTraces.find(fiber);
+  if(it==actual_specex_psf->FiberTraces.end()) HARP_THROW("specex_psf::response don't have PSF for this fiber/spec");
+  if(lambda_index<0 || lambda_index>=lambda_.size()) HARP_THROW("specex_psf::response invalid lambda index");
+  const double &wave = lambda_(lambda_index);
+  
+  std::map<int,int>::const_iterator bundle_it = bundle_.find(fiber);
+  if( bundle_it == bundle_.end()) HARP_THROW("specex_psf::response cannot find bundle of fiber");
+  
+  const specex::Trace &trace = it->second;
+  double x_center = trace.X_vs_W.Value(wave);
+  double y_center = trace.Y_vs_W.Value(wave);
+  int x_pix_begin = int(floor(x_center))-actual_specex_psf->hSizeX;
+  int y_pix_begin = int(floor(y_center))-actual_specex_psf->hSizeY;
+  x_offset = x_pix_begin;
+  y_offset = y_pix_begin;
+  n_x=2*actual_specex_psf->hSizeX+1;
+  n_y=2*actual_specex_psf->hSizeY+1; 
+  return;
+}
 
 void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t & x_offset, size_t & y_offset, harp::matrix_double & patch ) const {
   
@@ -87,16 +110,16 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   std::map<int,specex::Trace>::const_iterator it = actual_specex_psf->FiberTraces.find(fiber);
   if(it==actual_specex_psf->FiberTraces.end()) HARP_THROW("specex_psf::response don't have PSF for this fiber/spec");
   if(lambda_index<0 || lambda_index>=lambda_.size()) HARP_THROW("specex_psf::response invalid lambda index");
-  
+  const double &wave = lambda_(lambda_index);
   
   std::map<int,int>::const_iterator bundle_it = bundle_.find(fiber);
   if( bundle_it == bundle_.end()) HARP_THROW("specex_psf::response cannot find bundle of fiber");
   
   const specex::Trace &trace = it->second;
-  double x_center = trace.X_vs_W.Value(lambda_(lambda_index));
-  double y_center = trace.Y_vs_W.Value(lambda_(lambda_index));
+  double x_center = trace.X_vs_W.Value(wave);
+  double y_center = trace.Y_vs_W.Value(wave);
 
-  const double &wave = lambda_(lambda_index);
+  
   
   harp::vector_double params = actual_specex_psf->AllLocalParamsFW(fiber,wave,bundle_it->second);
   
