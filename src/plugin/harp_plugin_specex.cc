@@ -100,8 +100,8 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   
   int nx=2*actual_specex_psf->hSizeX+1;
   int ny=2*actual_specex_psf->hSizeY+1;
-  int x_pix_begin = int(floor(x_center+0.5))-actual_specex_psf->hSizeX;
-  int y_pix_begin = int(floor(y_center+0.5))-actual_specex_psf->hSizeY;
+  int x_pix_begin = int(floor(x_center))-actual_specex_psf->hSizeX;
+  int y_pix_begin = int(floor(y_center))-actual_specex_psf->hSizeY;
   x_offset = x_pix_begin;
   y_offset = y_pix_begin;
 
