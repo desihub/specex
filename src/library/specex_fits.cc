@@ -94,7 +94,7 @@ void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_
   fitsfile * fp;  
   harp::fits::create ( fp, path );
   harp::fits::img_append < double > ( fp, n_rows, n_cols );
-  harp::fits::img_write ( fp, data );
+  harp::fits::img_write ( fp, data, false );
   harp::fits::close ( fp );
   
   
@@ -123,7 +123,7 @@ void specex::read_fits_image(std::string const & path, int hdu, image_data& img)
   
   img.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
 
-  harp::fits::img_read ( fp, img.data );
+  harp::fits::img_read ( fp, img.data , false);
   harp::fits::close ( fp ); 
   SPECEX_INFO("read one image in '" << path << "' hdu=" << hdu);
 }
@@ -140,11 +140,11 @@ void specex::read_fits_images(std::string const & path, image_data& img_in_hdu1,
   size_t nrows,ncols;
   harp::fits::img_dims ( fp, nrows, ncols );
   img_in_hdu1.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
-  harp::fits::img_read ( fp, img_in_hdu1.data );
+  harp::fits::img_read ( fp, img_in_hdu1.data, false );
   harp::fits::img_seek ( fp, 2);
   harp::fits::img_dims ( fp, nrows, ncols );
   img_in_hdu2.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
-  harp::fits::img_read ( fp, img_in_hdu2.data );
+  harp::fits::img_read ( fp, img_in_hdu2.data, false );
   harp::fits::close ( fp ); 
   SPECEX_INFO("read 2 images in '" << path << "'");
 }

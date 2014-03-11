@@ -1504,7 +1504,7 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
   // write image
   {
     harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
-    harp::fits::img_write ( fp, image.data );
+    harp::fits::img_write ( fp, image.data , false);
   }
   
   // write keywords

@@ -273,15 +273,15 @@ int main ( int argc, char *argv[] ) {
       harp::fits::create ( fp, output_fits_image_filename );
       
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
-      harp::fits::img_write ( fp, image.data );
+      harp::fits::img_write ( fp, image.data ,false);
       harp::fits::key_write(fp,"WHAT","DATA","");
       
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
-      harp::fits::img_write ( fp, model.data );
+      harp::fits::img_write ( fp, model.data ,false);
       harp::fits::key_write(fp,"EXTNAME","MODEL","");
   
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
-      harp::fits::img_write ( fp, residual.data );
+      harp::fits::img_write ( fp, residual.data ,false);
       harp::fits::key_write(fp,"EXTNAME","RESIDUAL","");
         
       for(size_t i=0; i<residual.data.size() ;i++) {
@@ -289,7 +289,7 @@ int main ( int argc, char *argv[] ) {
       }
     
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
-      harp::fits::img_write ( fp, residual.data );
+      harp::fits::img_write ( fp, residual.data ,false);
       harp::fits::key_write(fp,"EXTNAME","PULL","");
   
       harp::fits::close ( fp );

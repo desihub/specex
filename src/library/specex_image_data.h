@@ -34,8 +34,8 @@ namespace specex {
       if (i<0 || i>=cols_ || j<0 || j>=rows_)
 	HARP_THROW("Out of range");
 #endif
-      // return data[i+j*cols_]; // IMAGE DATA ARE FLIPPED!
-      return data[j+i*rows_]; // IMAGE DATA ARE FLIPPED!
+      return data[i+j*cols_]; // "STANDARD" PACKING (FITSIO)
+      // return data[j+i*rows_]; // "REVERSE" PACKING (HARP)
       
       
     }
@@ -46,8 +46,8 @@ namespace specex {
 	HARP_THROW("Out of range");
 #endif
       
-      //return data[i+j*cols_];// IMAGE DATA ARE FLIPPED!
-      return data[j+i*rows_]; // IMAGE DATA ARE FLIPPED!
+      return data[i+j*cols_];// "STANDARD" PACKING (FITSIO)
+      // return data[j+i*rows_]; // "REVERSE" PACKING (HARP)
       
     }
 

@@ -19,5 +19,6 @@ for element in $elements ; do
 
 done
 
-cat $tmp | sort -n -k 1 | grep -v "HgII" | awk '{if($2>100) print $0}'> lamplines.txt
+cat $tmp | sort -n -k 1 | awk '{if($2>50) print $0}'> lamplines.txt
+rm $tmp
 

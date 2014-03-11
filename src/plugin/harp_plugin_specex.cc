@@ -27,8 +27,10 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
   double wavemax = props.get("wavemax",0.);
   fibermin_ = props.get("fibermin",0);
   fibermax_ = props.get("fibermax",actual_specex_psf->FiberTraces.size()-1);
+  interpolation_ = (props.get("interpolation",0)==1);
   
-  cout << "INFO " << wavebin << " " << wavemin << " " << wavemax << " " << fibermin_ << " " << fibermax_ << endl;
+
+  cout << "INFO " << wavebin << " " << wavemin << " " << wavemax << " " << fibermin_ << " " << fibermax_ << " interpolate = " << interpolation_ << endl;
   
 
   if(wavebin<=0) {
@@ -100,27 +102,83 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   int ny=2*actual_specex_psf->hSizeY+1;
   int x_pix_begin = int(floor(x_center))-actual_specex_psf->hSizeX;
   int y_pix_begin = int(floor(y_center))-actual_specex_psf->hSizeY;
-
-  patch.resize(nx,ny);
-  patch.clear();
-
-  double sum = 0;
-  for(int j=0;j<ny;j++) {
-    for(int i=0;i<nx;i++) {
-      double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
-      if(val<0) val=0;
-      patch(i,j) = val;
-      sum += val;
-    }
-  }
-  if(sum<=0) HARP_THROW("specex_psf::response sum is <=0");
-  
-  
-  patch *= (1./sum);
-  
   x_offset = x_pix_begin;
   y_offset = y_pix_begin;
+
   
+  patch.resize(nx,ny);
+  patch.clear();
+  
+  if(!interpolation_) {
+    double sum = 0;
+    for(int j=0;j<ny;j++) {
+      for(int i=0;i<nx;i++) {
+	double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
+	if(val<0) val=0;
+	patch(i,j) = val;
+	sum += val;
+      }
+    }
+    if(sum<=0) HARP_THROW("specex_psf::response sum is <=0");
+    patch *= (1./sum);
+    return;
+  }
+  
+  double wave_step=0.1; //
+  double sum = 0;
+  double wanted_sum = 0;
+  
+  // interpolation 
+  if(lambda_index>0) {
+    const double &wave1 = lambda_(lambda_index-1);
+    // do sum over [wave1,wave] weighted by linear weight from 0 to 1
+    
+    for(double w=wave;w>=wave1;w -= wave_step) { // start from wave
+      double weight = (w-wave1)/(wave-wave1);
+      wanted_sum += weight;
+      
+      x_center = trace.X_vs_W.Value(w);
+      y_center = trace.Y_vs_W.Value(w);
+
+      for(int j=0;j<ny;j++) {
+	for(int i=0;i<nx;i++) {
+	  double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
+	  if(val<0) val=0;
+	  patch(i,j) += weight*val;
+	  sum += weight*val;
+	}
+      }
+      
+    }
+     
+  }
+  if(lambda_index<int(lambda_.size())-1) {
+    const double &wave2 = lambda_(lambda_index+1);
+    // do sum over [wave,wave2] weighted by linear weight from 1 to 0
+    
+    for(double w=wave;w<=wave2;w += wave_step) { // start from wave
+      double weight = (wave2-w)/(wave2-wave);
+      wanted_sum += weight;
+      
+      x_center = trace.X_vs_W.Value(w);
+      y_center = trace.Y_vs_W.Value(w);
+
+      for(int j=0;j<ny;j++) {
+	for(int i=0;i<nx;i++) {
+	  double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
+	  if(val<0) val=0;
+	  patch(i,j) += weight*val;
+	  sum += weight*val;
+	}
+      }
+      
+    }
+  }
+  
+  if(sum<=0) HARP_THROW("specex_psf::response sum is <=0");
+  patch *= (wanted_sum/sum)*wave_step;
+  
+
 }
 
 

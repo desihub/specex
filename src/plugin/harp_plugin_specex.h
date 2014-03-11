@@ -32,6 +32,7 @@ namespace harp {
         ar & BOOST_SERIALIZATION_NVP(lambda_);
         ar & BOOST_SERIALIZATION_NVP(rows_);
         ar & BOOST_SERIALIZATION_NVP(cols_);
+        ar & BOOST_SERIALIZATION_NVP(interpolation_);
         return;
       }
 
@@ -40,6 +41,7 @@ namespace harp {
       size_t fibermax_;
       size_t rows_;
       size_t cols_;
+      bool   interpolation_;
       specex::PSF_p actual_specex_psf;
       std::map<int,int> bundle_; // bundles of fibers;
     
