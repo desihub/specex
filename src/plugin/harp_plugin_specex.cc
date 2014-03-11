@@ -100,13 +100,18 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   
   int nx=2*actual_specex_psf->hSizeX+1;
   int ny=2*actual_specex_psf->hSizeY+1;
-  int x_pix_begin = int(floor(x_center))-actual_specex_psf->hSizeX;
-  int y_pix_begin = int(floor(y_center))-actual_specex_psf->hSizeY;
+  int x_pix_begin = int(floor(x_center+0.5))-actual_specex_psf->hSizeX;
+  int y_pix_begin = int(floor(y_center+0.5))-actual_specex_psf->hSizeY;
   x_offset = x_pix_begin;
   y_offset = y_pix_begin;
 
-  
+#define FLIPPED
+#ifdef FLIPPED
+  patch.resize(ny,nx);  
+#else
   patch.resize(nx,ny);
+#endif
+
   patch.clear();
   
   if(!interpolation_) {
@@ -115,7 +120,11 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
       for(int i=0;i<nx;i++) {
 	double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
 	if(val<0) val=0;
-	patch(i,j) = val;
+#ifdef FLIPPED
+	patch(j,i) = val;
+#else
+  	patch(i,j) = val;
+#endif
 	sum += val;
       }
     }
@@ -144,7 +153,11 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
 	for(int i=0;i<nx;i++) {
 	  double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
 	  if(val<0) val=0;
-	  patch(i,j) += weight*val;
+#ifdef FLIPPED
+	patch(j,i) += weight*val; 
+#else
+  	patch(i,j) += weight*val; 
+#endif
 	  sum += weight*val;
 	}
       }
@@ -167,7 +180,11 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
 	for(int i=0;i<nx;i++) {
 	  double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
 	  if(val<0) val=0;
-	  patch(i,j) += weight*val;
+#ifdef FLIPPED
+	patch(j,i) += weight*val; 
+#else
+  	patch(i,j) += weight*val;
+#endif
 	  sum += weight*val;
 	}
       }
