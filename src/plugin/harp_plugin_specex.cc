@@ -117,6 +117,15 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
   patch.clear();
   
   if(!interpolation_) {
+
+    double wavestep=0;
+    if(lambda_index==0) 
+      wavestep=lambda_(1)-lambda_(0);
+    else if (lambda_index==(int(lambda_.size())-1))
+      wavestep=lambda_(lambda_index)-lambda_(lambda_index-1);
+    else
+      wavestep=0.5*(lambda_(lambda_index+1)-lambda_(lambda_index-1));
+    
     double sum = 0;
     for(int j=0;j<ny;j++) {
       for(int i=0;i<nx;i++) {
@@ -131,7 +140,7 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
       }
     }
     if(sum<=0) HARP_THROW("specex_psf::response sum is <=0");
-    patch *= (1./sum);
+    patch *= (1./sum)*wavestep;
     return;
   }
   
