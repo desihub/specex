@@ -53,6 +53,8 @@ harp::specex_psf::specex_psf ( boost::property_tree::ptree const & props ) : har
 	wavemax=min(wavemax,it->second.Y_vs_W.xmax);
       }
     }
+
+    if(wavemin>=wavemax) HARP_THROW("error wavemin >= wavemax");
     
     int nlambda = int((wavemax-wavemin)/wavebin)+1; // included
     lambda_.resize(nlambda);
