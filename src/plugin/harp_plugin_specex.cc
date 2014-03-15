@@ -103,6 +103,8 @@ void harp::specex_psf::extent ( size_t spec_index, size_t lambda_index, size_t &
   return;
 }
 
+#define MINVAL 1.e-20
+
 void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t & x_offset, size_t & y_offset, harp::matrix_double & patch ) const {
   
   int fiber = fibermin_+spec_index; 
@@ -153,7 +155,7 @@ void harp::specex_psf::response ( size_t spec_index, size_t lambda_index, size_t
     for(int j=0;j<ny;j++) {
       for(int i=0;i<nx;i++) {
 	double val = actual_specex_psf->PSFValueWithParamsXY(x_center,y_center,x_pix_begin+i,y_pix_begin+j,params,0,0,true,true);
-	if(val<0) val=0;
+	if(val<MINVAL) val=MINVAL;
 #ifdef FLIPPED
 	patch(j,i) = val;
 #else
