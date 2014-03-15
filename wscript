@@ -49,7 +49,6 @@ def harp_pkgconfig(pkgpath):
     libdir=os.popen("harpconfig  --ldflags").read().strip().replace("-L","")
     prefix=libdir.replace("/lib","")
     libs=os.popen("harpconfig  --link").read().strip()
-    libs=libs+" -ldl"
     cppflags=os.popen("harpconfig --cppflags").read().strip()
     includedir=string.split(str(cppflags)," ")[0].replace("-I","")
 
