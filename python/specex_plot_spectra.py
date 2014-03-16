@@ -26,9 +26,11 @@ class dataset :
             self.wave =  hdulist[1].data[0]
         elif len(hdulist[2].data.shape)==1 :
             self.wave =  hdulist[2].data
-
+        elif len(hdulist[2].data.shape)==2 and hdulist[2].data.shape[0] == 1   :
+            self.wave =  hdulist[2].data[0]
+            
         if len(self.wave)==0 :
-            print "error"
+            print "error couldn't find wave data in file"
             sys.exit(12)
 
         if len(self.wave) != nwave :
