@@ -29,6 +29,13 @@ class Patch {
 typedef std::map<size_t,Patch> PatchMap;
 typedef std::map<size_t,Patch>::iterator PatchIterator;
 typedef std::map<size_t,Patch>::const_iterator PatchConstIterator;
+
+
+
+
+
+
+
 //////////////////////////////////////////
 size_t saved_npix;
 size_t saved_nparams;
@@ -38,13 +45,43 @@ harp::matrix_double A;
 harp::matrix_double AtNinv;
 harp::matrix_double Cinv;
 harp::vector_double Dinv;
+harp::vector_double Dhalfinv;
+harp::vector_double Dhalf;
 harp::matrix_double temp;
+harp::matrix_double temp2;
 harp::matrix_double W;
 harp::vector_double S;
 harp::matrix_double RC; 
 harp::vector_double AtNinvP;
 harp::vector_double Rf;
+
 //////////////////////////////////////////
+#define MINEIGENVAL 1.e-40
+
+void specex_eigen_compose (const harp::vector_double& D, const harp::matrix_double& W, harp::matrix_double & out ) {
+  out.clear();
+  ublas::noalias(temp2)=W;
+  for ( size_t i = 0; i < temp.size2(); ++i ) {
+    for ( size_t j = 0; j < temp.size1(); ++j ) {
+      temp2( j, i ) *= D[ i ];
+    }
+  }
+  boost::numeric::bindings::blas::gemm ( 1.0, temp2, boost::numeric::bindings::trans ( W ), 0.0, out );
+  return;
+}
+void specex_column_norm (const harp::matrix_double & mat,  harp::vector_double & S ) {
+  S.clear();
+  for ( size_t i = 0; i < mat.size2(); ++i ) {
+    for ( size_t j = 0; j < mat.size1(); ++j ) {
+      S[ j ] += mat( j, i );
+    }
+  }
+  // Invert
+  for ( size_t i = 0; i < S.size(); ++i ) {
+    S[i] = 1.0 / S[i];
+  }
+  return;
+}
 
 void extract(const harp::psf* psf, const specex::image_data& image, const specex::image_data& weight, double& rflux, double& invar, size_t spec_index, size_t lambda_index, PatchMap& patches) {
   
@@ -143,6 +180,9 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   size_t stamp_nrows = stamp.n_rows();
   size_t npix        = stamp_ncols*stamp_nrows;
   
+  if(npix<saved_npix) npix=saved_npix; // to avoid memory reallocation
+  if(nparams<saved_nparams) nparams=saved_nparams; // to avoid memory reallocation, ok because mineigenval
+  
   if(npix != saved_npix) {
     cout << "resizing npix" << endl;
     P.resize(npix);
@@ -152,9 +192,12 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
     cout << "resizing nparams" << endl;
     Cinv.resize(nparams,nparams);
     Dinv.resize(nparams);
+    Dhalfinv.resize(nparams);
+    Dhalf.resize(nparams);
     temp.resize(nparams,nparams);
-    // S
-    // Rc
+    temp2.resize(nparams,nparams);
+    S.resize(nparams);
+    RC.resize(nparams,nparams);
     AtNinvP.resize(nparams);
     Rf.resize(nparams);
     W.resize (nparams,nparams);
@@ -235,12 +278,14 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   }
 
 
-  for(size_t i=0;i<Dinv.size();i++)
-    if(Dinv(i)<1e-20) { 
+  for(size_t i=0;i<Dinv.size();i++) {
+    if(Dinv(i)<MINEIGENVAL) { 
       //cout << "fixing eigenval=" << Dinv(i) << endl; 
-      Dinv(i)=1.e-20; 
+      Dinv(i)=MINEIGENVAL; 
     }
-
+    Dhalfinv(i)=sqrt(Dinv(i));
+    Dhalf(i)=1/Dhalfinv(i);
+  }
   // cout << "Dinv = " << Dinv << endl;
 
   if(0) {
@@ -268,13 +313,9 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   }
 
   // computing S, Sij=1/sum_j Qij , where Q=W*Dinv^1/2*Wt
-  // Q is computed in harp::norm with the call harp::eigen_compose ( EIG_SQRT, Dinv, W, temp ) 
-  // then harp::column_norm ( temp, S ) is called
-  
-  harp::norm(Dinv,W,S); // need to open this
-  
-  
-  harp::eigen_compose(harp::EIG_INVSQRT,Dinv,W,RC ); // now it is W D^(1/2) Wt
+  specex_eigen_compose (Dhalfinv, W, temp );
+  specex_column_norm ( temp, S );
+  specex_eigen_compose(Dhalf,W,RC ); // now it is W D^(1/2) Wt
   harp::apply_norm(S,RC); // now it is S W D^(1/2) Wt 
   
   AtNinvP.clear();
