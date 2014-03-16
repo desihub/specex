@@ -29,11 +29,26 @@ class Patch {
 typedef std::map<size_t,Patch> PatchMap;
 typedef std::map<size_t,Patch>::iterator PatchIterator;
 typedef std::map<size_t,Patch>::const_iterator PatchConstIterator;
-
+//////////////////////////////////////////
+size_t saved_npix;
+size_t saved_nparams;
+harp::vector_double P;
+harp::vector_double Ninv;
+harp::matrix_double A;
+harp::matrix_double AtNinv;
+harp::matrix_double Cinv;
+harp::vector_double Dinv;
+harp::matrix_double temp;
+harp::matrix_double W;
+harp::vector_double S;
+harp::matrix_double RC; 
+harp::vector_double AtNinvP;
+harp::vector_double Rf;
+//////////////////////////////////////////
 
 void extract(const harp::psf* psf, const specex::image_data& image, const specex::image_data& weight, double& rflux, double& invar, size_t spec_index, size_t lambda_index, PatchMap& patches) {
   
-  SPECEX_INFO("Extracting fiber " << spec_index << " lambda " << lambda_index);
+  //SPECEX_INFO("Extracting fiber " << spec_index << " lambda " << lambda_index);
   
   // defining data stamp
   
@@ -59,8 +74,8 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   // book keeping
   std::map<size_t,size_t> used_patches;
   
-  int spec_margin = 2; // 20
-  int lambda_margin = 2; // 1000
+  int spec_margin = 20; // 20
+  int lambda_margin = 1000; // 1000
   
   size_t param_index = 0;
   //  load neighbouring patches( compute only if not in store)
@@ -94,7 +109,7 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
 
        if( patches.find(index) == patches.end()) {
 
-	 //SPECEX_INFO("Loading patch at " << index%nlambda << " "<<   index/nlambda);
+	 //SPECEX_INFO("Loading patch at lambda=" << other_lambda << " spec=" << other_spec);
 
 	 Patch patch;
 	 psf->response(other_spec,other_lambda,patch.x_offset,patch.y_offset,patch.h);
@@ -111,13 +126,13 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   // clear cache of unused patches to save memory
   PatchIterator it=patches.begin();
   while(it!=patches.end()) {
-    
     if( used_patches.find(it->first) == used_patches.end()) {
-      // SPECEX_INFO("Erasing patch at " << it->first%nlambda << " "<<   it->first/nlambda);
-      
+      //SPECEX_INFO("Erasing patch at " << it->first%nlambda << " "<<   it->first/nlambda);
       patches.erase(it);
+      it=patches.begin(); // better start from begining
+    }else{
+      it++;
     }
-    it++;
   }
   
   
@@ -128,9 +143,32 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   size_t stamp_nrows = stamp.n_rows();
   size_t npix        = stamp_ncols*stamp_nrows;
   
+  if(npix != saved_npix) {
+    cout << "resizing npix" << endl;
+    P.resize(npix);
+    Ninv.resize(npix);    
+  }
+  if(nparams != saved_nparams) {
+    cout << "resizing nparams" << endl;
+    Cinv.resize(nparams,nparams);
+    Dinv.resize(nparams);
+    temp.resize(nparams,nparams);
+    // S
+    // Rc
+    AtNinvP.resize(nparams);
+    Rf.resize(nparams);
+    W.resize (nparams,nparams);
+  }
+  if((npix != saved_npix) || (nparams != saved_nparams)) {
+    A.resize(npix,nparams);
+    AtNinv.resize(nparams,npix);
+  }
   
-  harp::vector_double P(npix); // the image
-  harp::vector_double Ninv(npix); // the noise diagonal matrix
+  saved_npix = npix;
+  saved_nparams = nparams;
+  
+  P.clear(); // the image
+  Ninv.clear();// the noise diagonal matrix
   
   int pixindex=0;
   for(int j=stamp.begin_j;j<stamp.end_j;j++) {
@@ -140,8 +178,7 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
     }
   }
   
-  harp::matrix_double A(npix,nparams); // P=A*f
-  A.clear();
+  A.clear(); // P=A*f
   
   for(PatchIterator it=patches.begin(); it!=patches.end();it++) {
     
@@ -163,13 +200,6 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
 	int ccd_y   = j+stamp.begin_j;
 
 	// the patch coordinates begins at x_offset y_offset
-	
-	//int x_offset = it->second.x_offset; // for gdb
-	//int y_offset = it->second.y_offset; // for gdb
-	//int patchnx = it->second.h.size2(); // for gdb
-	//int patchny = it->second.h.size1(); // for gdb
-	
-	
 	int patch_x = ccd_x-it->second.x_offset;
 	int patch_y = ccd_y-it->second.y_offset;
 
@@ -183,63 +213,74 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   
   // now brute force algebra
   
-  harp::matrix_double AtNinv(nparams,npix); // At*Ni
+  AtNinv.clear(); // At*Ni
   for ( size_t i = 0; i < nparams; ++i ) {
     for ( size_t j = 0; j < npix; ++j ) {
       AtNinv(i,j) = A(j,i)*Ninv(j);
     }
   }
   
-  harp::matrix_double Cinv(nparams,nparams);
+  Cinv.clear();
   blas::gemm(1,AtNinv,A,1,Cinv); // Cinv=At*Ni*A
   
-  // eigen decomposition
-  harp::vector_double Dinv;
-  harp::matrix_double W;
-  
-  // this routine is scary
-  // harp::eigen_decompose(Cinv,Dinv,W); // Cinv = Wt*Dinv*W
+  //specex::write_new_fits_image("Cinv.fits",Cinv);
 
-  cout << "Dinv = " << Dinv << endl;
-
+  // eigen decomposition  
+  // harp::eigen_decompose(Cinv,Dinv,W); // Cinv = W*Dinv*Wt
   {
+    ublas::noalias(temp)=Cinv;
+    int nfound;
+    boost::numeric::ublas::vector < int > support ( 2 * nparams);
+    boost::numeric::bindings::lapack::syevr ( 'V', 'A', boost::numeric::bindings::lower ( temp ), 0.0, 0.0, 0, 0, 0.0, nfound, Dinv, W, support );
+  }
+
+
+  for(size_t i=0;i<Dinv.size();i++)
+    if(Dinv(i)<1e-20) { 
+      //cout << "fixing eigenval=" << Dinv(i) << endl; 
+      Dinv(i)=1.e-20; 
+    }
+
+  // cout << "Dinv = " << Dinv << endl;
+
+  if(0) {
     // debug : is Cinv=Wt*Dinv*W or Cinv=W*Dinv*Wt ?
-    harp::matrix_double Dinvmat(nparams,nparams);
-    Dinvmat.clear();
+    harp::matrix_double Dinvmat(nparams,nparams); Dinvmat.clear();
     for(size_t i=0;i<nparams;i++) Dinvmat(i,i)=Dinv(i);
     {
-      harp::matrix_double DinvW(nparams,nparams);
+      harp::matrix_double DinvW(nparams,nparams); DinvW.clear();
       blas::gemm(1,Dinvmat,W,1,DinvW);
-      harp::matrix_double WtDinvW(nparams,nparams);
+      harp::matrix_double WtDinvW(nparams,nparams); WtDinvW.clear();
       blas::gemm(1,boost::numeric::bindings::trans(W),DinvW,1,WtDinvW);
       harp::matrix_double tmp = Cinv - WtDinvW; 
+      
       specex::write_new_fits_image("zero_WtDinvW.fits",tmp);
     }
     {
-      harp::matrix_double DinvWt(nparams,nparams);
+      harp::matrix_double DinvWt(nparams,nparams); DinvWt.clear();
       blas::gemm(1,Dinvmat,boost::numeric::bindings::trans(W),1,DinvWt);
-      harp::matrix_double WDinvWt(nparams,nparams);
-      blas::gemm(1,W,DinvWt,1,WDinvWt);
+      harp::matrix_double WDinvWt(nparams,nparams); WDinvWt.clear();
+      blas::gemm(1,W,DinvWt,1,WDinvWt); 
       harp::matrix_double tmp = Cinv - WDinvWt; 
-      specex::write_new_fits_image("zero_WDinvWt.fits",Cinv); // closer to zero but noisy !
+      specex::write_new_fits_image("zero_WDinvWt.fits",tmp); // this is the one
     }
     exit(12);
   }
 
-  // computing S, Sij=1/sum_j Qij , where Q=Wt*Dinv^1/2*W
+  // computing S, Sij=1/sum_j Qij , where Q=W*Dinv^1/2*Wt
   // Q is computed in harp::norm with the call harp::eigen_compose ( EIG_SQRT, Dinv, W, temp ) 
   // then harp::column_norm ( temp, S ) is called
-  harp::vector_double S;
-  harp::norm(Dinv,W,S);
   
-  harp::matrix_double& RC = Cinv; // we don't need Cinv anymore, we keep the memory
-  harp::eigen_compose(harp::EIG_INVSQRT,Dinv,W,RC ); // now it is Wt D^(1/2) W 
-  harp::apply_norm(S,RC); // now it is S Wt D^(1/2) W 
+  harp::norm(Dinv,W,S); // need to open this
   
-  harp::vector_double AtNinvP(nparams);
+  
+  harp::eigen_compose(harp::EIG_INVSQRT,Dinv,W,RC ); // now it is W D^(1/2) Wt
+  harp::apply_norm(S,RC); // now it is S W D^(1/2) Wt 
+  
+  AtNinvP.clear();
   blas::gemv(1,AtNinv,P,1,AtNinvP); // AtNinvP = AtNinv P
   
-  harp::vector_double Rf(nparams); // here we are, the reconvolved fluxes Rf 
+  Rf.clear(); // here we are, the reconvolved fluxes Rf 
   blas::gemv(1,RC,AtNinvP,1,Rf); // Rf = S Wt D^(1/2) W At Ninv P
   
   // collecting results
@@ -254,7 +295,9 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
 
 int main ( int argc, char *argv[] ) {
 
-  
+  saved_npix=0;
+  saved_nparams=0;
+
   string jsonpar = "";
   string outfilename = "toto.fits";
   
@@ -306,20 +349,43 @@ int main ( int argc, char *argv[] ) {
   size_t nspec   = psf->n_spec();
   size_t nlambda = psf->n_lambda();
   
-  specex::image_data rflux(nspec,nlambda);
-  specex::image_data invar(nspec,nlambda);
+  specex::image_data rflux(nlambda,nspec);
+  specex::image_data invar(nlambda,nspec);
 
   PatchMap patches;
   
   for(size_t s=0;s<nspec;s++) {
-    for(size_t l=0;l<nlambda;l++) {
-      extract(psf,image,weight,rflux(s,l),invar(s,l),s,l,patches);
-      SPECEX_INFO("spec " << s << " lambda " << l << " flux " <<  rflux(s,l) << " error " << 1./sqrt(invar(s,l)));
-      if(l>3) {cout << "EXIT FOR DEBUG" << endl; exit(12);}
+    if(s%2==0) {
+      for(int l=0;l<nlambda;l++) {
+	extract(psf,image,weight,rflux(l,s),invar(l,s),s,l,patches);
+	SPECEX_INFO("spec " << s << " lambda " << l << " flux " <<  rflux(l,s) << " error " << 1./sqrt(invar(l,s)));	
+      }
+    } else { // go the other way to minimize number of patches to reload
+      for(int l=nlambda-1;l>=0;l--) {
+	extract(psf,image,weight,rflux(l,s),invar(l,s),s,l,patches);
+	SPECEX_INFO("spec " << s << " lambda " << l << " flux " <<  rflux(l,s) << " error " << 1./sqrt(invar(l,s)));	
+      }
     }
   }
-  
-  
 
+  { // writing output
+
+    harp::vector_double lambda = psf->lambda();
+    specex::image_data wave(nlambda,1);
+    for(size_t i=0;i<nlambda;i++) wave.data(i)=lambda(i);
+    
+    fitsfile * fp;  
+    harp::fits::create ( fp, outfilename );
+    harp::fits::img_append < double > ( fp, rflux.n_rows(), rflux.n_cols() );
+    harp::fits::img_write ( fp, rflux.data ,false);
+    harp::fits::key_write(fp,"WHAT","RFLUX","");
+    harp::fits::img_append < double > ( fp, invar.n_rows(), invar.n_cols() );
+    harp::fits::img_write ( fp, invar.data ,false);
+    harp::fits::key_write(fp,"EXTNAME","IVAR","");
+    harp::fits::img_append < double > ( fp, 1, wave.n_cols() );
+    harp::fits::img_write ( fp, wave.data ,false);
+    harp::fits::key_write(fp,"EXTNAME","WAVELENGTH","");
+    harp::fits::close ( fp );
+  }
   return 0;
 }
