@@ -45,30 +45,21 @@ harp::matrix_double A;
 harp::matrix_double AtNinv;
 harp::matrix_double Cinv;
 harp::vector_double Dinv;
-harp::vector_double Dhalfinv;
-harp::vector_double Dhalf;
-harp::matrix_double temp;
-harp::matrix_double temp2;
+harp::vector_double Dquartinv;
+harp::vector_double Dquart;
+harp::matrix_double WDquartinv;
+harp::matrix_double WDquart;
+harp::matrix_double WDhalfinvWt;
+harp::matrix_double WDhalfWt;
 harp::matrix_double W;
+harp::matrix_double temp;
 harp::vector_double S;
-harp::matrix_double RC; 
 harp::vector_double AtNinvP;
 harp::vector_double Rf;
-
+boost::numeric::ublas::vector < int > support;
 //////////////////////////////////////////
 #define MINEIGENVAL 1.e-40
 
-void specex_eigen_compose (const harp::vector_double& D, const harp::matrix_double& W, harp::matrix_double & out ) {
-  out.clear();
-  ublas::noalias(temp2)=W;
-  for ( size_t i = 0; i < temp.size2(); ++i ) {
-    for ( size_t j = 0; j < temp.size1(); ++j ) {
-      temp2( j, i ) *= D[ i ];
-    }
-  }
-  boost::numeric::bindings::blas::gemm ( 1.0, temp2, boost::numeric::bindings::trans ( W ), 0.0, out );
-  return;
-}
 void specex_column_norm (const harp::matrix_double & mat,  harp::vector_double & S ) {
   S.clear();
   for ( size_t i = 0; i < mat.size2(); ++i ) {
@@ -82,13 +73,35 @@ void specex_column_norm (const harp::matrix_double & mat,  harp::vector_double &
   }
   return;
 }
+void specex_apply_norm_left(const harp::vector_double& v, harp::matrix_double & mat) {
+  for ( size_t i = 0; i < mat.size2(); ++i ) {
+    for ( size_t j = 0; j < mat.size1(); ++j ) {
+      mat( j, i ) *= v[j];
+    }
+  }
+  return;
+}
 
+void specex_apply_norm_right(const harp::vector_double& v, harp::matrix_double & mat) {
+  for ( size_t i = 0; i < mat.size2(); ++i ) {
+    for ( size_t j = 0; j < mat.size1(); ++j ) {
+      mat( i, j ) *= v[j];
+    }
+  }
+  return;
+}
+   
+  
 void extract(const harp::psf* psf, const specex::image_data& image, const specex::image_data& weight, double& rflux, double& invar, size_t spec_index, size_t lambda_index, PatchMap& patches) {
+  
+  double tstart;
+  double tstop;
+  double tstart1;
+  double tstop1;
   
   //SPECEX_INFO("Extracting fiber " << spec_index << " lambda " << lambda_index);
   
   // defining data stamp
-  
   size_t bx,by,nx,ny;
   psf->extent(spec_index,lambda_index,bx,by,nx,ny);
   
@@ -97,15 +110,9 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   stamp.begin_j=max(stamp.begin_j,int(by));
   stamp.end_i=min(stamp.end_i,int(bx+nx));
   stamp.end_j=min(stamp.end_j,int(by+ny));
-  
-  //cout << "stamp begin " << stamp.begin_i << " " << stamp.begin_j << endl;
-  //cout << "stamp end " << stamp.end_i << " " << stamp.end_j << endl;
-  
-  
   size_t nspec   = psf->n_spec();
   size_t nlambda = psf->n_lambda();
   
-
   // loading patches
 
   // book keeping
@@ -113,6 +120,8 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   
   int spec_margin = 20; // 20
   int lambda_margin = 1000; // 1000
+  
+  tstart = harp::wtime();
   
   size_t param_index = 0;
   //  load neighbouring patches( compute only if not in store)
@@ -125,16 +134,12 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
      specex::Stamp other_stamp; other_stamp.SetParent(stamp); // stamp in the coordinate system of the target stamp
      int dx = int(bx)-stamp.begin_i;
      int dy = int(by)-stamp.begin_j;
-     //cout << "begin: " << dx << " " << dy << endl;
      other_stamp.begin_i=max(other_stamp.begin_i,dx);
      other_stamp.begin_j=max(other_stamp.begin_j,dy);
-     //cout << "begin: " << other_stamp.begin_i << " " << other_stamp.begin_j << endl;
      dx = int(bx+nx)-stamp.begin_i;
      dy = int(by+ny)-stamp.begin_j;
-     //cout << "end: " << dx << " " << dy << endl;
      other_stamp.end_i=min(other_stamp.end_i,dx);
      other_stamp.end_j=min(other_stamp.end_j,dy);
-     //cout << "end: " << other_stamp.end_i << " " << other_stamp.end_j << endl;
      
      if(other_stamp.n_rows()>0 && other_stamp.n_cols()>0) {
        
@@ -171,6 +176,8 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
       it++;
     }
   }
+  tstop = harp::wtime();
+  cout << "load/unload patches : " << tstop-tstart << " s" << endl;
   
   
   
@@ -180,35 +187,36 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   size_t stamp_nrows = stamp.n_rows();
   size_t npix        = stamp_ncols*stamp_nrows;
   
-  if(npix<saved_npix) npix=saved_npix; // to avoid memory reallocation
-  if(nparams<saved_nparams) nparams=saved_nparams; // to avoid memory reallocation, ok because mineigenval
-  
-  if(npix != saved_npix) {
+    
+  if(npix > saved_npix) {
     cout << "resizing npix" << endl;
     P.resize(npix);
     Ninv.resize(npix);    
   }
-  if(nparams != saved_nparams) {
+  if(nparams > saved_nparams) {
     cout << "resizing nparams" << endl;
     Cinv.resize(nparams,nparams);
     Dinv.resize(nparams);
-    Dhalfinv.resize(nparams);
-    Dhalf.resize(nparams);
+    Dquartinv.resize(nparams);
+    Dquart.resize(nparams);
+    W.resize (nparams,nparams); 
+    WDquartinv.resize(nparams,nparams);
+    WDquart.resize(nparams,nparams);
+    WDhalfinvWt.resize(nparams,nparams);
+    WDhalfWt.resize(nparams,nparams);
     temp.resize(nparams,nparams);
-    temp2.resize(nparams,nparams);
     S.resize(nparams);
-    RC.resize(nparams,nparams);
     AtNinvP.resize(nparams);
     Rf.resize(nparams);
-    W.resize (nparams,nparams);
+    support.resize(2*nparams);
   }
-  if((npix != saved_npix) || (nparams != saved_nparams)) {
+  if((npix > saved_npix) || (nparams > saved_nparams)) {
     A.resize(npix,nparams);
     AtNinv.resize(nparams,npix);
   }
   
-  saved_npix = npix;
-  saved_nparams = nparams;
+  if(npix>saved_npix) saved_npix = npix;
+  if(nparams>saved_nparams) saved_nparams = nparams;
   
   P.clear(); // the image
   Ninv.clear();// the noise diagonal matrix
@@ -223,6 +231,8 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   
   A.clear(); // P=A*f
   
+  
+  tstart = harp::wtime();
   for(PatchIterator it=patches.begin(); it!=patches.end();it++) {
     
     size_t param_index = used_patches.find(it->first)->second;
@@ -253,9 +263,11 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
     }
 
   }  
-  
+  tstop = harp::wtime();
+  cout << "filling A : " << tstop-tstart << " s" << endl;
   // now brute force algebra
   
+  tstart = harp::wtime();
   AtNinv.clear(); // At*Ni
   for ( size_t i = 0; i < nparams; ++i ) {
     for ( size_t j = 0; j < npix; ++j ) {
@@ -270,66 +282,54 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
 
   // eigen decomposition  
   // harp::eigen_decompose(Cinv,Dinv,W); // Cinv = W*Dinv*Wt
+  tstart1=harp::wtime();
   {
     ublas::noalias(temp)=Cinv;
     int nfound;
-    boost::numeric::ublas::vector < int > support ( 2 * nparams);
     boost::numeric::bindings::lapack::syevr ( 'V', 'A', boost::numeric::bindings::lower ( temp ), 0.0, 0.0, 0, 0, 0.0, nfound, Dinv, W, support );
   }
-
+  tstop1=harp::wtime();
+  cout << "eigen decompose   : " << tstop1-tstart1 << " s " << endl;
+  
 
   for(size_t i=0;i<Dinv.size();i++) {
     if(Dinv(i)<MINEIGENVAL) { 
       //cout << "fixing eigenval=" << Dinv(i) << endl; 
       Dinv(i)=MINEIGENVAL; 
     }
-    Dhalfinv(i)=sqrt(Dinv(i));
-    Dhalf(i)=1/Dhalfinv(i);
+    Dquartinv(i)=sqrt(sqrt(Dinv(i)));
+    Dquart(i)=1/Dquartinv(i);
   }
-  // cout << "Dinv = " << Dinv << endl;
-
-  if(0) {
-    // debug : is Cinv=Wt*Dinv*W or Cinv=W*Dinv*Wt ?
-    harp::matrix_double Dinvmat(nparams,nparams); Dinvmat.clear();
-    for(size_t i=0;i<nparams;i++) Dinvmat(i,i)=Dinv(i);
-    {
-      harp::matrix_double DinvW(nparams,nparams); DinvW.clear();
-      blas::gemm(1,Dinvmat,W,1,DinvW);
-      harp::matrix_double WtDinvW(nparams,nparams); WtDinvW.clear();
-      blas::gemm(1,boost::numeric::bindings::trans(W),DinvW,1,WtDinvW);
-      harp::matrix_double tmp = Cinv - WtDinvW; 
-      
-      specex::write_new_fits_image("zero_WtDinvW.fits",tmp);
-    }
-    {
-      harp::matrix_double DinvWt(nparams,nparams); DinvWt.clear();
-      blas::gemm(1,Dinvmat,boost::numeric::bindings::trans(W),1,DinvWt);
-      harp::matrix_double WDinvWt(nparams,nparams); WDinvWt.clear();
-      blas::gemm(1,W,DinvWt,1,WDinvWt); 
-      harp::matrix_double tmp = Cinv - WDinvWt; 
-      specex::write_new_fits_image("zero_WDinvWt.fits",tmp); // this is the one
-    }
-    exit(12);
-  }
-
+  noalias(WDquartinv)=W;
+  specex_apply_norm_right(Dquartinv,WDquartinv); // WDquartinv
+  harp::matrix_double& WDquart=W; // just to remember what it is
+  specex_apply_norm_right(Dquart,WDquart); // WDquart
+  WDhalfWt.clear(); WDhalfinvWt.clear();
+  blas::gemm(1,WDquart,boost::numeric::bindings::trans(WDquart),1,WDhalfWt);
+  blas::gemm(1,WDquartinv,boost::numeric::bindings::trans(WDquartinv),1,WDhalfinvWt);
+  //blas::syrk(1,boost::numeric::bindings::trans(WDquart),1,WDhalfWt);
+  //blas::syrk(1,boost::numeric::bindings::trans(WDquartinv),1,WDhalfinvWt);
+  
   // computing S, Sij=1/sum_j Qij , where Q=W*Dinv^1/2*Wt
-  specex_eigen_compose (Dhalfinv, W, temp );
-  specex_column_norm ( temp, S );
-  specex_eigen_compose(Dhalf,W,RC ); // now it is W D^(1/2) Wt
-  harp::apply_norm(S,RC); // now it is S W D^(1/2) Wt 
+  specex_column_norm ( WDhalfinvWt, S );
+  
+  specex_apply_norm_left(S,WDhalfWt); // now it is S W D^(1/2) Wt 
+  harp::matrix_double& SWDhalfWt = WDhalfWt; // just to remember
   
   AtNinvP.clear();
   blas::gemv(1,AtNinv,P,1,AtNinvP); // AtNinvP = AtNinv P
   
   Rf.clear(); // here we are, the reconvolved fluxes Rf 
-  blas::gemv(1,RC,AtNinvP,1,Rf); // Rf = S Wt D^(1/2) W At Ninv P
+  blas::gemv(1,SWDhalfWt,AtNinvP,1,Rf); // Rf = S Wt D^(1/2) W At Ninv P
   
   // collecting results
   int index_of_target_param = used_patches.find(lambda_index+nlambda*spec_index)->second;
   
   rflux=Rf(index_of_target_param);
   invar=S(index_of_target_param); invar*=invar; // Ctilde=S^-2 and we want here Ctilde^-1=S^2
+  tstop = harp::wtime();
   
+  cout << "algebra   : " << tstop-tstart << " s " << endl;
   // we discard all the rest
 
 }
