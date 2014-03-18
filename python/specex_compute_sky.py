@@ -100,22 +100,20 @@ if skyfilename != "" :
     print "writing skymodel to",skyfilename
     R=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
 #convolvedsky=R.dot(deconvolvedsky) #error of byte swap I don't understand here 
-    convolvedsky=numpy.dot(R.todense(),deconvolvedsky)
-    convolvedskyinvar=numpy.zeros((1,nwave))
-    convolvedskyinvar[0,:]=numpy.diag(A).copy()
+    sky=numpy.dot(R.todense(),deconvolvedsky) 
+    skyinvar=numpy.zeros((1,nwave))
+    skyinvar[0,:]=numpy.diag(A).copy()
     if os.path.isfile(skyfilename) :
         os.unlink(skyfilename)
-    pyfits.HDUList([pyfits.PrimaryHDU(convolvedsky),pyfits.ImageHDU(convolvedskyinvar),pyfits.ImageHDU(wave)]).writeto(skyfilename)
+    pyfits.HDUList([pyfits.PrimaryHDU(sky),pyfits.ImageHDU(skyinvar),pyfits.ImageHDU(wave)]).writeto(skyfilename)
    
 
 print "subtracting sky to all fibers"
 for fiber in range(nfibers) :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
-    sky=numpy.dot(R.todense(),deconvolvedsky).copy()
-    # I would like to do the following, but it doesn't work :
-    # spectra[fiber,:] -= sky[0,:]
-    for i in range(nwave) :
-        spectra[fiber,i] -= sky[0,i]
+    skymat=numpy.dot(R.todense(),deconvolvedsky) # it is a numpy.matrix that has to be converted to a numpy.array
+    sky=numpy.squeeze(numpy.asarray(skymat))
+    spectra[fiber] -= sky
 print "done"
 
 print "writing result to",outfilename
