@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 
-import pyfits,sys,json,pylab,string,numpy,os
+import pyfits,sys,json,pylab,string,numpy,os,scipy,scipy.sparse,scipy.linalg
+from scipy.sparse.linalg import spsolve
 from math import *
 
-
 if len(sys.argv)<3 :
-    print sys.argv[0],"inspec.fits plPlugMapM.par outspec.fits"
+    print sys.argv[0],"inspec.fits plPlugMapM.par outspec.fits (sky.fit)"
     sys.exit(12);
 
 infilename=sys.argv[1]
 plplgmap=sys.argv[2]
 outfilename=sys.argv[3]
+skyfilename=""
+if(len(sys.argv)>3) :
+    skyfilename=sys.argv[4]
 
 # get spectrograph id, hardcoded for now, will be read in fits
 specid=1
@@ -34,8 +37,8 @@ for line in file.readlines() :
     if spectrographId != specid :
         continue
     fiberId=string.atoi(vals[25])
-    print line
-    print objType,spectrographId,fiberId
+    #print line
+    #print objType,spectrographId,fiberId
     myfiberid=fiberId-1
     if specid==2 :
         myfiberid-=500
@@ -49,15 +52,92 @@ hdulist=pyfits.open(infilename)
 spectra=hdulist[0].data
 invar=hdulist[1].data
 wave=hdulist[2].data
+Rdata=hdulist[3].data
 
 skyspectra=spectra[skyfibers,:]
 skyinvar=invar[skyfibers,:]
 
-if True :
-    #for i in skyfibers :
-    #    pylab.plot(wave,spectra[i,:])
-    #pylab.figure()
-    for i in range(skyspectra.shape[0]) :
-        pylab.plot(wave,skyspectra[i,:])
-    pylab.show()
+if False :
+    skyerrors=numpy.zeros(skyinvar.shape)
+    for i in range(skyinvar.shape[0]) :
+        for j in range(skyinvar.shape[1]) :
+            skyerrors[i,j]=1./sqrt(skyinvar[i,j])
+if False :
+    meansky=numpy.median(spectra, axis=0)
+    skyresiduals = skyspectra-meansky
 
+    if False :
+        for i in range(skyresiduals.shape[0]) :
+            pylab.errorbar(wave,skyresiduals[i,:],yerr=skyerrors[i,:])
+        pylab.show()
+
+nskyfibers=len(skyfibers)
+nfibers=Rdata.shape[0]
+d=Rdata.shape[1]/2
+nwave=Rdata.shape[2]
+offsets = range(d,-d-1,-1)
+
+print "solving for the mean deconvolved sky"
+print "filling A and B"
+
+Rcentral=None
+
+#A=scipy.sparse.dia_matrix((nwave,nwave)) # cant do that
+A=numpy.matrix(numpy.zeros((nwave,nwave))) # dense because additions of band matrices not implemented
+B=numpy.zeros((1,nwave))
+for fiber in skyfibers:
+    
+    R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
+    Ninv=scipy.sparse.dia_matrix((invar[fiber,:],[0]),(nwave,nwave))
+    tmp=invar[fiber,:]*spectra[fiber,:]
+    tmp2=R.transpose()*Ninv*R
+    A+=tmp2.todense()
+    B+=R.transpose().dot(tmp)
+
+#convert A to sparse for solving
+Ad=d*2
+Aoffsets = range(Ad,-Ad-1,-1)
+Adata =  numpy.zeros((len(Aoffsets),nwave))  
+for i in range(len(Aoffsets)) :
+    diagonal=numpy.diag(A,Aoffsets[i])
+    off=max(0,Aoffsets[i])
+    Adata[i,off:len(diagonal)+off]=diagonal
+As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
+
+print "done"
+
+print "solving"
+As = As.tocsr()
+deconvolvedsky=spsolve(As,B)
+print "deconvolvedsky",deconvolvedsky.shape
+print "done"
+
+if skyfilename != "" :
+    print "writing skymodel to",skyfilename
+    R=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
+#convolvedsky=R.dot(deconvolvedsky) #error of byte swap I don't understand here 
+    convolvedsky=numpy.dot(R.todense(),deconvolvedsky)
+    convolvedskyinvar=numpy.zeros((1,nwave))
+    convolvedskyinvar[0,:]=numpy.diag(A).copy()
+    if os.path.isfile(skyfilename) :
+        os.unlink(skyfilename)
+    pyfits.HDUList([pyfits.PrimaryHDU(convolvedsky),pyfits.ImageHDU(convolvedskyinvar),pyfits.ImageHDU(wave)]).writeto(skyfilename)
+   
+
+print "subtracting sky to all fibers"
+for fiber in range(nfibers) :
+    R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
+    sky=numpy.dot(R.todense(),deconvolvedsky).copy()
+    # cant do it properly !!!
+    # print sky.shape
+    # spectra[fiber,:] -= sky[0,:]
+    for i in range(nwave) :
+        spectra[fiber,i] -= sky[0,i]
+print "done"
+
+print "writing result to",outfilename
+if os.path.isfile(outfilename) :
+    os.unlink(outfilename)
+hdulist.writeto(outfilename)
+
+sys.exit(0)

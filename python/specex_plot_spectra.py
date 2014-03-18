@@ -101,10 +101,11 @@ for dset in datasets :
     print dset.filename,dset.fibers
 
 
+show_errors=True
 
 for dset in datasets :
     for fiber in dset.fibers :
-        if len(dset.errors) :
+        if show_errors and len(dset.errors) :
             pylab.errorbar(dset.wave,dset.spectra[fiber,:],yerr=dset.errors[fiber,:])
         else :
             pylab.plot(dset.wave,dset.spectra[fiber,:])

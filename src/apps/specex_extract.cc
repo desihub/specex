@@ -55,7 +55,7 @@ harp::matrix_double W;
 harp::matrix_double temp;
 harp::vector_double S;
 harp::vector_double AtNinvP;
-harp::vector_double Rf;
+harp::vector_double SinvRf;
 boost::numeric::ublas::vector < int > support;
 //////////////////////////////////////////
 #define MINEIGENVAL 1.e-40
@@ -65,6 +65,22 @@ void specex_column_norm (const harp::matrix_double & mat,  harp::vector_double &
   for ( size_t i = 0; i < mat.size2(); ++i ) {
     for ( size_t j = 0; j < mat.size1(); ++j ) {
       S[ j ] += mat( j, i );
+    }
+  }
+  // Invert
+  for ( size_t i = 0; i < S.size(); ++i ) {
+    S[i] = 1.0 / S[i];
+  }
+  return;
+}
+void specex_column_norm_lower (const harp::matrix_double & mat,  harp::vector_double & S ) {
+  S.clear();
+  for ( size_t i = 0; i < mat.size2(); ++i ) {
+    for ( size_t j = 0; j < mat.size1(); ++j ) {
+      if(j<i)
+	S[ j ] += mat( i, j );
+      else
+	S[ j ] += mat( j, i );
     }
   }
   // Invert
@@ -90,15 +106,23 @@ void specex_apply_norm_right(const harp::vector_double& v, harp::matrix_double &
   }
   return;
 }
+void specex_apply_norm(const harp::vector_double& n, harp::vector_double & v) {
+  for ( size_t i = 0; i < v.size(); ++i ) {
+    v[i] *= n[i];
+  }
+  return;
+}
    
   
 void extract(const harp::psf* psf, const specex::image_data& image, const specex::image_data& weight, double& rflux, double& invar, size_t spec_index, size_t lambda_index, PatchMap& patches) {
   
+  //#define TIMING
+#ifdef TIMING
   double tstart;
   double tstop;
   double tstart1;
   double tstop1;
-  
+#endif
   //SPECEX_INFO("Extracting fiber " << spec_index << " lambda " << lambda_index);
   
   // defining data stamp
@@ -120,8 +144,10 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   
   int spec_margin = 20; // 20
   int lambda_margin = 1000; // 1000
-  
+
+#ifdef TIMING  
   tstart = harp::wtime();
+#endif
   
   size_t param_index = 0;
   //  load neighbouring patches( compute only if not in store)
@@ -176,9 +202,11 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
       it++;
     }
   }
+  
+#ifdef TIMING
   tstop = harp::wtime();
   cout << "load/unload patches : " << tstop-tstart << " s" << endl;
-  
+#endif
   
   
   // fill A matrix (keep notations of spectroperf.)
@@ -207,7 +235,7 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
     temp.resize(nparams,nparams);
     S.resize(nparams);
     AtNinvP.resize(nparams);
-    Rf.resize(nparams);
+    SinvRf.resize(nparams);
     support.resize(2*nparams);
   }
   if((npix > saved_npix) || (nparams > saved_nparams)) {
@@ -231,8 +259,9 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   
   A.clear(); // P=A*f
   
-  
+#ifdef TIMING
   tstart = harp::wtime();
+#endif
   for(PatchIterator it=patches.begin(); it!=patches.end();it++) {
     
     size_t param_index = used_patches.find(it->first)->second;
@@ -262,12 +291,25 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
       }
     }
 
-  }  
+  } 
+
+#ifdef TIMING 
   tstop = harp::wtime();
   cout << "filling A : " << tstop-tstart << " s" << endl;
-  // now brute force algebra
+#endif
   
+  // now brute force algebra
+
+
+#ifdef TIMING   
   tstart = harp::wtime();
+#endif
+
+  // computing AtNinv and Cinv
+#ifdef TIMING   
+  tstart1 = harp::wtime();
+#endif
+  
   AtNinv.clear(); // At*Ni
   for ( size_t i = 0; i < nparams; ++i ) {
     for ( size_t j = 0; j < npix; ++j ) {
@@ -275,23 +317,30 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
     }
   }
   
-  Cinv.clear();
-  blas::gemm(1,AtNinv,A,1,Cinv); // Cinv=At*Ni*A
+  blas::gemm(1,AtNinv,A,0,Cinv); // Cinv=At*Ni*A
+#ifdef TIMING   
+  tstop1 = harp::wtime();
+  cout << "filling Cinv   : " << tstop1-tstart1 << " s " << endl;
+#endif  
   
-  //specex::write_new_fits_image("Cinv.fits",Cinv);
-
   // eigen decomposition  
-  // harp::eigen_decompose(Cinv,Dinv,W); // Cinv = W*Dinv*Wt
+#ifdef TIMING  
   tstart1=harp::wtime();
+#endif
   {
     ublas::noalias(temp)=Cinv;
     int nfound;
     boost::numeric::bindings::lapack::syevr ( 'V', 'A', boost::numeric::bindings::lower ( temp ), 0.0, 0.0, 0, 0, 0.0, nfound, Dinv, W, support );
   }
+#ifdef TIMING
   tstop1=harp::wtime();
   cout << "eigen decompose   : " << tstop1-tstart1 << " s " << endl;
+#endif
   
-
+  // eigen composition  
+#ifdef TIMING  
+  tstart1=harp::wtime();
+#endif
   for(size_t i=0;i<Dinv.size();i++) {
     if(Dinv(i)<MINEIGENVAL) { 
       //cout << "fixing eigenval=" << Dinv(i) << endl; 
@@ -304,32 +353,37 @@ void extract(const harp::psf* psf, const specex::image_data& image, const specex
   specex_apply_norm_right(Dquartinv,WDquartinv); // WDquartinv
   harp::matrix_double& WDquart=W; // just to remember what it is
   specex_apply_norm_right(Dquart,WDquart); // WDquart
-  WDhalfWt.clear(); WDhalfinvWt.clear();
-  blas::gemm(1,WDquart,boost::numeric::bindings::trans(WDquart),1,WDhalfWt);
-  blas::gemm(1,WDquartinv,boost::numeric::bindings::trans(WDquartinv),1,WDhalfinvWt);
-  //blas::syrk(1,boost::numeric::bindings::trans(WDquart),1,WDhalfWt);
-  //blas::syrk(1,boost::numeric::bindings::trans(WDquartinv),1,WDhalfinvWt);
   
+  //blas::gemm(1,WDquart,boost::numeric::bindings::trans(WDquart),0,WDhalfWt);
+  //blas::gemm(1,WDquartinv,boost::numeric::bindings::trans(WDquartinv),1,WDhalfinvWt);
+  blas::syrk(1,WDquart,0,boost::numeric::bindings::lower(WDhalfWt));
+  blas::syrk(1,WDquartinv,0,boost::numeric::bindings::lower(WDhalfinvWt));
+
+#ifdef TIMING
+  tstop1=harp::wtime();
+  cout << "eigen compose   : " << tstop1-tstart1 << " s " << endl;
+#endif
+
   // computing S, Sij=1/sum_j Qij , where Q=W*Dinv^1/2*Wt
-  specex_column_norm ( WDhalfinvWt, S );
+  specex_column_norm_lower ( WDhalfinvWt, S );
+    
+  blas::gemv(1,AtNinv,P,0,AtNinvP); // AtNinvP = AtNinv P
   
-  specex_apply_norm_left(S,WDhalfWt); // now it is S W D^(1/2) Wt 
-  harp::matrix_double& SWDhalfWt = WDhalfWt; // just to remember
-  
-  AtNinvP.clear();
-  blas::gemv(1,AtNinv,P,1,AtNinvP); // AtNinvP = AtNinv P
-  
-  Rf.clear(); // here we are, the reconvolved fluxes Rf 
-  blas::gemv(1,SWDhalfWt,AtNinvP,1,Rf); // Rf = S Wt D^(1/2) W At Ninv P
+  // in fact I care about one line here, so I could go faster :
+  blas::symv(1,boost::numeric::bindings::lower(WDhalfWt),AtNinvP,0,SinvRf); // SinvRf = Wt D^(1/2) W At Ninv P
   
   // collecting results
   int index_of_target_param = used_patches.find(lambda_index+nlambda*spec_index)->second;
   
-  rflux=Rf(index_of_target_param);
+  rflux=S(index_of_target_param)*SinvRf(index_of_target_param);
   invar=S(index_of_target_param); invar*=invar; // Ctilde=S^-2 and we want here Ctilde^-1=S^2
-  tstop = harp::wtime();
-  
+
+#ifdef TIMING
+  tstop = harp::wtime();  
   cout << "algebra   : " << tstop-tstart << " s " << endl;
+#endif
+
+
   // we discard all the rest
 
 }
