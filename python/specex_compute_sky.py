@@ -57,20 +57,6 @@ Rdata=hdulist[3].data
 skyspectra=spectra[skyfibers,:]
 skyinvar=invar[skyfibers,:]
 
-if False :
-    skyerrors=numpy.zeros(skyinvar.shape)
-    for i in range(skyinvar.shape[0]) :
-        for j in range(skyinvar.shape[1]) :
-            skyerrors[i,j]=1./sqrt(skyinvar[i,j])
-if False :
-    meansky=numpy.median(spectra, axis=0)
-    skyresiduals = skyspectra-meansky
-
-    if False :
-        for i in range(skyresiduals.shape[0]) :
-            pylab.errorbar(wave,skyresiduals[i,:],yerr=skyerrors[i,:])
-        pylab.show()
-
 nskyfibers=len(skyfibers)
 nfibers=Rdata.shape[0]
 d=Rdata.shape[1]/2
@@ -80,9 +66,7 @@ offsets = range(d,-d-1,-1)
 print "solving for the mean deconvolved sky"
 print "filling A and B"
 
-Rcentral=None
-
-#A=scipy.sparse.dia_matrix((nwave,nwave)) # cant do that
+#A=scipy.sparse.dia_matrix((nwave,nwave)) # 
 A=numpy.matrix(numpy.zeros((nwave,nwave))) # dense because additions of band matrices not implemented
 B=numpy.zeros((1,nwave))
 for fiber in skyfibers:
@@ -128,8 +112,7 @@ print "subtracting sky to all fibers"
 for fiber in range(nfibers) :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
     sky=numpy.dot(R.todense(),deconvolvedsky).copy()
-    # cant do it properly !!!
-    # print sky.shape
+    # I would like to do the following, but it doesn't work :
     # spectra[fiber,:] -= sky[0,:]
     for i in range(nwave) :
         spectra[fiber,i] -= sky[0,i]
