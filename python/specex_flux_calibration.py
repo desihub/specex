@@ -27,6 +27,9 @@ def convert_air_to_vacuum(air_wave) :
 
 # returns a spectrum based on model parameters
 def specex_read_kurucz(modelfilename, spec_parameters, target_wave) :
+
+    print "reading kurucz spectra in",modelfilename
+    
     hdulist=pyfits.open(modelfilename)
 
     table=hdulist[1].data
@@ -39,7 +42,7 @@ def specex_read_kurucz(modelfilename, spec_parameters, target_wave) :
     # find corresponding models
     spec=0
     for fiber in spec_parameters :
-        print fiber,spec_parameters[fiber]
+        #print fiber,spec_parameters[fiber]
         tmp=numpy.where(table.field("MODEL")==spec_parameters[fiber]["MODEL"])[0]
         if len(tmp)!=1 :
             print "error in specex_read_kurucz cannot find model",par["MODEL"]
@@ -47,7 +50,7 @@ def specex_read_kurucz(modelfilename, spec_parameters, target_wave) :
         spec_indices.append(tmp[0])
         spec+=1
         
-    print spec_indices
+    print "kurucz spectra used = ",spec_indices
     
     n_target_wave=len(target_wave)
     
@@ -65,6 +68,7 @@ def specex_read_kurucz(modelfilename, spec_parameters, target_wave) :
 
     # need to duplicate here for each spectrum
     model_wave=numpy.zeros((len(spec_indices),len(model_wave_at_redshift0)))
+    
     # apply redshift (I should in principle convert energy flux as well here, but I think it's going to be hard to match BOSS norm anyway)
     spec=0
     for fiber in spec_parameters :
@@ -79,12 +83,17 @@ def specex_read_kurucz(modelfilename, spec_parameters, target_wave) :
         # keep only data in wave range of interest    
         wavemin=target_wave[0]-(target_wave[1]-target_wave[0])
         wavemax=target_wave[-1]+(target_wave[-1]-target_wave[-2])
+        waveindexmin=n_model_wave
+        waveindexmax=0
         for spec in range(model_wave.shape[0]) :
-            waveindexmin=numpy.where(model_wave[spec]>wavemin)[0][0]-1
-            waveindexmax=numpy.where(model_wave[spec]>wavemax)[0][0]
-            model_wave[spec] = model_wave[spec,waveindexmin:waveindexmax] # bug here : ValueError: could not broadcast input array from shape (40012) into shape (160000)
-            model_flux[spec] = model_flux[spec,waveindexmin:waveindexmax]
+            waveindexmin=min(waveindexmin,numpy.where(model_wave[spec]>wavemin)[0][0]-1)
+            waveindexmax=max(waveindexmax,numpy.where(model_wave[spec]>wavemax)[0][0]+2)
+        model_wave = model_wave[:,waveindexmin:waveindexmax]
+        model_flux = model_flux[:,waveindexmin:waveindexmax]
     
+    #print model_flux.shape
+    #print model_wave[0,:20]
+    #print model_flux[0,:20]    
     #print target_wave[0],target_wave[-1]
     #print wavemin,wavemax
     #print waveindexmin,waveindexmax,len(model_wave),len(model_air_wave)
@@ -95,34 +104,35 @@ def specex_read_kurucz(modelfilename, spec_parameters, target_wave) :
     model_flux *= 5.034135e7*model_wave
     
     # now integrate models in bins
-    # compute bounds of bins (ok for any monotonous binning)
-    
+
+    # compute bounds of bins (ok for any monotonous binning)    
     wavebinbounds=numpy.zeros((target_wave.shape[0]+1))
     wavebinbounds[1:-1]=(target_wave[:-1]+target_wave[1:])/2
     wavebinbounds[0]=target_wave[0]-0.5*(target_wave[1]-target_wave[0])
     wavebinbounds[-1]=target_wave[-1]+0.5*(target_wave[-1]-target_wave[-2])
-    #print target_wave[0:10],target_wave[-10:-1]
-    #print wavebinbounds[0:10],wavebinbounds[-10:-1]
     
-    # quite slow (few seconds), there must be a faster version of this
+    # mean in bins, quite slow (few seconds), there must be a faster version of this
     flux=numpy.zeros((len(spec_indices),n_target_wave))
-    for w in range(n_target_wave):
-        indices=numpy.intersect1d(numpy.where(model_wave>wavebinbounds[w])[0],numpy.where(model_wave<wavebinbounds[w+1])[0])
-        flux[:,w]=numpy.mean(model_flux[:,indices],1)
-        
-    
+    for s in range(model_wave.shape[0]) :
+        i1=numpy.where(model_wave[s]>wavebinbounds[0])[0][0]
+        for w in range(n_target_wave):
+            i2=numpy.where(model_wave[s]>wavebinbounds[w+1])[0][0]
+            flux[s,w]=numpy.mean(model_flux[s,i1:i2])
+            #print w,i1,i2,wavebinbounds[w],wavebinbounds[w+1]
+            i1=i2
     
     return flux
 
 
 def get_kurucz_parameters(spfluxcalibfilename,starfibers) :
+    print "reading kurucz parameters in",spfluxcalibfilename
     calibhdulist=pyfits.open(spfluxcalibfilename)
     table=calibhdulist[2].data
     columns=calibhdulist[2].columns
     modelparams={}
     for fiber in starfibers :
         row=numpy.where(table.field("FIBERID")==fiber+1)[0][0]
-        print fiber,row
+        #print fiber,row
         dico={}
         for k in columns.names :
             dico[k]=table.field(k)[row]
@@ -193,6 +203,8 @@ modelparams = get_kurucz_parameters(spfluxcalibfilename,starfibers)
 
 models=specex_read_kurucz(modelfilename,modelparams,wave)
 
+if os.path.isfile("models.fits") :
+    os.unlink("models.fits")
 pyfits.HDUList([pyfits.PrimaryHDU(models),pyfits.ImageHDU(models),pyfits.ImageHDU(wave)]).writeto("models.fits")
 
 sys.exit(0)
