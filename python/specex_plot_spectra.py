@@ -22,7 +22,7 @@ class dataset :
         (nspec,nwave) = self.spectra.shape
 
         self.wave=[]
-        if hdulist[1].data.shape[0] == 1 :
+        if len(hdulist)==2 :
             self.wave =  hdulist[1].data[0]
         elif len(hdulist[2].data.shape)==1 :
             self.wave =  hdulist[2].data
@@ -43,8 +43,10 @@ class dataset :
             self.errors=ivar
             for i in range(self.errors.shape[0]) :
                 for j in range(self.errors.shape[1]) :
-                    self.errors[i,j]=1./sqrt(ivar[i,j])
-
+                    if ivar[i,j]>0 :
+                        self.errors[i,j]=1./sqrt(ivar[i,j])
+                    else :
+                        self.errors[i,j]=0
 
 if len(sys.argv)<3 :
     print sys.argv[0],"spec.fits fiber1 fiber2 fiber3:fiber4 spec2.fits fiber5 fiber6 ..."
