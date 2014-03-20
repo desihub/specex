@@ -111,8 +111,7 @@ if skyfilename != "" :
 print "subtracting sky to all fibers"
 for fiber in range(nfibers) :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
-    skymat=numpy.dot(R.todense(),deconvolvedsky) # it is a numpy.matrix that has to be converted to a numpy.array
-    sky=numpy.squeeze(numpy.asarray(skymat))
+    sky=numpy.dot(R.toarray(),deconvolvedsky) # it is a numpy.matrix that has to be converted to a numpy.array
     spectra[fiber] -= sky
 print "done"
 
