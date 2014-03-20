@@ -27,7 +27,7 @@ if os.path.isfile(outfilename) :
 
 hdulist.writeto(outfilename)
 
-if not median_flatfilename == "" :
+if not meanflatfilename == "" :
     median_flat_array=numpy.zeros(spectra.shape)
     median_flat_array[0]=median_flat
     median_flat_invar=numpy.ones(spectra.shape)
