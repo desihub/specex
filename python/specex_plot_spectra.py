@@ -10,7 +10,7 @@ from math import *
 
 class dataset :
     
-    def __init__(self,filename,fibers) :
+    def __init__(self,filename,fibers=None) :
         
         self.filename = filename
         self.fibers = fibers
@@ -20,6 +20,11 @@ class dataset :
 
         self.spectra=hdulist[0].data
         (nspec,nwave) = self.spectra.shape
+
+        if len(fibers)==0 :
+            fibers=range(nspec)
+
+        self.fibers = fibers
 
         self.wave=[]
         if len(hdulist)==2 :
@@ -48,18 +53,33 @@ class dataset :
                     else :
                         self.errors[i,j]=0
 
-if len(sys.argv)<3 :
-    print sys.argv[0],"spec.fits fiber1 fiber2 fiber3:fiber4 spec2.fits fiber5 fiber6 ..."
+def usage() :
+    print sys.argv[0],"spec.fits fiber1 fiber2 fiber3:fiber4 spec2.fits fiber5 fiber6 ... (-e)"
     sys.exit(12);
 
+if len(sys.argv)<2 :
+    usage()
 
+specfilenames=[]
 datasets=[]
 
 filename=""
 fibers=[]
 
+show_errors=False
+
 for arg in sys.argv[1:] :
     
+    if arg[0]=='-' :
+        if arg=="-e" :
+            show_errors=True
+            continue
+        elif arg=="-h" :
+            usage()
+        else :
+            print "unknown option:",arg
+            usage()
+
     isfiber=False
     try :
         i=string.atoi(arg[0])
@@ -67,22 +87,10 @@ for arg in sys.argv[1:] :
     except :
         pass
     
-    
-    
-
-    if isfiber and filename=="" :
-        print "arg error" 
-        sys.exit(12)
-    
     if not isfiber :
         
-        if filename != "" :
-            toto=dataset(filename,fibers)
-            datasets.append(toto)
-            fibers=[]
-
-        filename = arg
-
+        specfilenames.append(arg)
+        
     else :
         
         vals=string.split(arg,":")
@@ -93,19 +101,15 @@ for arg in sys.argv[1:] :
             fiber2=string.atoi(vals[1])
             for fiber in range(fiber1,fiber2) :
                 fibers.append(fiber)
-        
+    
 
-toto=dataset(filename,fibers)
-datasets.append(toto)
+for filename in specfilenames :
+    toto=dataset(filename,fibers)
+    datasets.append(toto)
 
 
 for dset in datasets :
     print dset.filename,dset.fibers
-
-
-show_errors=True
-
-for dset in datasets :
     for fiber in dset.fibers :
         if show_errors and len(dset.errors) :
             pylab.errorbar(dset.wave,dset.spectra[fiber,:],yerr=dset.errors[fiber,:])

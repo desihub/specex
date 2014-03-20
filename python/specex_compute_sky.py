@@ -103,9 +103,7 @@ if skyfilename != "" :
     sky=numpy.dot(R.todense(),deconvolvedsky) 
     skyinvar=numpy.zeros((1,nwave))
     skyinvar[0,:]=numpy.diag(A).copy()
-    if os.path.isfile(skyfilename) :
-        os.unlink(skyfilename)
-    pyfits.HDUList([pyfits.PrimaryHDU(sky),pyfits.ImageHDU(skyinvar),pyfits.ImageHDU(wave)]).writeto(skyfilename)
+    pyfits.HDUList([pyfits.PrimaryHDU(sky),pyfits.ImageHDU(skyinvar),pyfits.ImageHDU(wave)]).writeto(skyfilename,clobber=True)
    
 
 print "subtracting sky to all fibers"
@@ -116,8 +114,6 @@ for fiber in range(nfibers) :
 print "done"
 
 print "writing result to",outfilename
-if os.path.isfile(outfilename) :
-    os.unlink(outfilename)
-hdulist.writeto(outfilename)
+hdulist.writeto(outfilename,clobber=True)
 
 sys.exit(0)

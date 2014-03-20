@@ -8,9 +8,10 @@
 
 import pyfits,sys,json,pylab,string,numpy,os,scipy,scipy.sparse,scipy.linalg
 from scipy.sparse.linalg import spsolve
+import scipy.interpolate
 from math import *
 
-
+hc = 1.986438e-8 # in units of (ergs.A)^{-1} (hc=2*pi* hbar*c=2*pi*197.326 eV nm = 6.28318*197.326*1.60218e-12*10)
 
 
 # convert air to vacuum, this is IDL routine airtovac for instance :
@@ -289,7 +290,7 @@ def compute_ab_mags(wave,flux,filter_filenames) :
     
     band=0
     for filename in filter_filenames :
-        print "reading",filename
+        #print "reading",filename
 
         fwave=[]
         ftrans=[]
@@ -313,7 +314,7 @@ def compute_ab_mags(wave,flux,filter_filenames) :
         
         fwave=numpy.array(fwave)
         ftrans=numpy.array(ftrans)
-        print band,len(wave),len(fwave),len(ftrans)
+        #print band,len(wave),len(fwave),len(ftrans)
         filter_transmissions[band]=numpy.interp(wave,fwave,ftrans)
         band+=1
     
@@ -340,7 +341,10 @@ def compute_ab_mags(wave,flux,filter_filenames) :
     # AB_ref = (5.034135e7*lambda) * 2.99792458 * 10**(18-48.6/2.5) / lambda**2 (with lambda in A)
     # AB_ref = 5.479558e6/lambda photons/cm2/s/A , with lambda in A
 
-    ab_spectrum = 5.479558e6/wave
+    # because we use hc in other places to convert back to ergs we use a global variable hc = 1.986438e-8 (ergs.A)^{-1}
+    # (we use the speed of light only here)
+        
+    ab_spectrum = 2.99792458 * 10**(18-48.6/2.5)/hc/wave
 
     # compute integrated AB flux
     integrated_ab_flux=numpy.zeros((nbands))
@@ -358,6 +362,42 @@ def compute_ab_mags(wave,flux,filter_filenames) :
     return ab_mags
 
 
+def evaluate_relative_noise(x,y,step) :
+    knots=x[0]+step/2+step*numpy.arange(int((x[-1]-x[0])/step))
+    func=scipy.interpolate.splrep(x,y,task=-1,t=knots)
+    smooth=scipy.interpolate.splev(x,func,der=0)
+    diff=y/smooth-1
+    rms=numpy.std(diff)
+    return rms
+
+
+def specex_clip(x,y,iw,step,nsig=3,replace=False,verbose=False) :
+    knots=x[0]+step/2+step*numpy.arange(int((x[-1]-x[0])/step))
+    
+    w=iw
+    if w==None :
+        w=numpy.ones(y.shape)
+    
+    saved_rms=0
+    for loop in range(10) : 
+        func=scipy.interpolate.splrep(x,y,w=w,task=-1,t=knots)
+        smooth=scipy.interpolate.splev(x,func,der=0)
+        diff=y-smooth
+        rms=numpy.std(diff[numpy.where(w>0)[0]])
+        if verbose :
+            print loop,rms
+        if(rms==saved_rms) :
+            break
+        saved_rms=rms
+        indices=numpy.where(numpy.absolute(diff)>nsig*rms)[0]
+        w[indices]=0
+        if(replace) :
+            y[indices]=smooth[indices]
+
+    if not iw==None :
+        iw=w
+
+
 # main
 
 # test
@@ -372,9 +412,11 @@ if False :
     sys.exit(12)
 
 
+    
+
 
 if len(sys.argv)<6 :
-    print sys.argv[0],"inspec.fits plPlugMapM.par spFluxCalib.fits spFrame.fits outspec.fits"
+    print sys.argv[0],"inspec.fits plPlugMapM.par spFluxCalib.fits spFrame.fits outspec.fits (throughput.fits)"
     sys.exit(12);
 
 infilename=sys.argv[1]
@@ -382,6 +424,10 @@ plplgmap=sys.argv[2]
 spfluxcalibfilename=sys.argv[3]
 spframefilename=sys.argv[4]
 outfilename=sys.argv[5]
+throughputfilename=""
+if len(sys.argv)>6 :
+    throughputfilename=sys.argv[6]
+
 specexdatadir=""
 
 try :
@@ -441,7 +487,7 @@ wave=hdulist[2].data
 Rdata=hdulist[3].data
 
 #print "DEBUG: do only few stars"
-#starfibers = starfibers[0:10]
+#starfibers = starfibers[0:5]
 
 nstarfibers=len(starfibers)
 nfibers=Rdata.shape[0]
@@ -461,16 +507,27 @@ spframe_params = read_spframe(spframefilename)
 for spec in range(nstarfibers) :
     fiber=starfibers[spec]
     ebv[spec]=spframe_params[fiber]["SFD_EBV"]
-    measured_ab_mags[spec]=spframe_params[fiber]["MAG"]
-    #calibfluxes=spframe_params[fiber]["CALIBFLUX"]
-    #for b in range(5) :
-    #    measured_ab_mags[spec,b]=22.5-2.5*log10(calibfluxes[b]) # THIS IS GUESSED FROM spflux_v5.pro !!!!!!!!!!!!!!!
+    
+    # MAG is not what we are interested in : 
+    # david: "The MAG values in those files are from the FIBER2FLUXes.
+    # Specifically, FIBER2FLUX is the SDSS-calibrated (not exactly AB) of a 2 arc sec
+    # diameter aperture placed on the SDSS image after convolving
+    # it to 2 arc sec seeing.
+    # CALIBFLUX gives the AB-calibrated PSF fluxes for point sources.
+    # It's actually ~2.1X the fiber fluxes with an AB correction.  This reduces
+    # to PSF fluxes for point sources, and carries along extended objects
+    # with the same calibrations.
+    #
+    #measured_ab_mags[spec]=spframe_params[fiber]["MAG"] 
+    calibfluxes=spframe_params[fiber]["CALIBFLUX"]
+    for b in range(5) :
+        measured_ab_mags[spec,b]=22.5-2.5*log10(calibfluxes[b]) # formula from spflux_v5.pro
     
 
 # load model spectra at native resolution to compute ab mags and compare with measured_ab_mags,
 unbinned_wave,unbinned_model_fluxes=specex_read_kurucz(modelfilename,model_params,None)
 
-print unbinned_wave.shape
+#print unbinned_wave.shape
 
 # apply extinction to models
 for spec in range(nstarfibers) :
@@ -481,65 +538,224 @@ model_ab_mags = numpy.zeros((nstarfibers,5))
 for spec in range(nstarfibers) :
     model_ab_mags[spec] = compute_ab_mags(unbinned_wave[spec],unbinned_model_fluxes[spec],imaging_filters)
 
-print model_ab_mags
+print "model AB mags in r =",model_ab_mags[:,2]
 
 # compute scale to apply to models
 # as in spflux_v5, used only band 2(of id) = 'r' = band 2(of python) ????? to define the norm 
 scale_to_apply_to_models = numpy.zeros((nstarfibers))
 scale_to_apply_to_models[:] = 10**(-0.4*(measured_ab_mags[:,2]-model_ab_mags[:,2]))
  
-print scale_to_apply_to_models
+print "scale to apply to models =",scale_to_apply_to_models
 
 # now compute model flux at the wavelength of our data
 # fluxes are redshifted and resampled but not dust extinguised nor flux calibrated
-unused,model_fluxes=specex_read_kurucz(modelfilename,model_params,wave)
+unused,model_photon_fluxes=specex_read_kurucz(modelfilename,model_params,wave)
 
 # apply extinction to models
 for spec in range(nstarfibers) :
-    model_fluxes[spec] *= 10.**(-(3.1 * ebv[spec] / 2.5) * odonnell_dust_extinction(wave,3.1) )
+    model_photon_fluxes[spec] *= 10.**(-(3.1 * ebv[spec] / 2.5) * odonnell_dust_extinction(wave,3.1) )
 
 # apply pre-computed scale to models
 for spec in range(nstarfibers) :
-    model_fluxes[spec] *=  scale_to_apply_to_models[spec]
+    model_photon_fluxes[spec] *=  scale_to_apply_to_models[spec]
 
 # models are in electrons/s/cm2/A
 # data are electrons/A
 # so the ratio data/model is in cm2*s
 
-if False :
-    if os.path.isfile("models.fits") :
-        os.unlink("models.fits")
-    pyfits.HDUList([pyfits.PrimaryHDU(model_fluxes),pyfits.ImageHDU(numpy.zeros(model_fluxes.shape)),pyfits.ImageHDU(wave)]).writeto("models.fits")
+
 
 # now we dump the ratio data/model to see how it goes, this is only for monitoring
 
 # first convolve models to data resolution
-convolved_model_fluxes=numpy.zeros(model_fluxes.shape)
+convolved_model_photon_fluxes=numpy.zeros(model_photon_fluxes.shape)
 for spec in range(nstarfibers) :
     fiber=starfibers[spec]
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
-    convolved_model_fluxes[spec]=numpy.dot(R.todense(),model_fluxes[spec])
-
-# compute the ratio
-calib_flux=numpy.zeros(model_fluxes.shape)
-calib_flux_invar=numpy.zeros(convolved_model_fluxes.shape)
-for spec in range(nstarfibers) :
-    fiber=starfibers[spec]
-    calib_flux[spec]=spectra[fiber]/convolved_model_fluxes[spec]
-    calib_flux_invar[spec]=invar[fiber]*convolved_model_fluxes[spec]*convolved_model_fluxes[spec]
-
-# apply a scaling with exposure time and telescope aperture (approximatly) to compute throughput
-telescope_aperture=3.1415*( ((2.5e2)/2)**2 - ((1e2)/2)**2 ) # cm2
-exptime=900. #s
-calib_flux /= (telescope_aperture*exptime) # s cm2 -> 1
-calib_flux_invar *= (telescope_aperture*exptime)**2
+    convolved_model_photon_fluxes[spec]=numpy.dot(R.todense(),model_photon_fluxes[spec])
 
 if True :
-    ofilename="throughput.fits"
-    if os.path.isfile(ofilename) :
-        os.unlink(ofilename)
-    pyfits.HDUList([pyfits.PrimaryHDU(calib_flux),pyfits.ImageHDU(calib_flux_invar),pyfits.ImageHDU(wave)]).writeto(ofilename)
+    pyfits.HDUList([pyfits.PrimaryHDU(convolved_model_photon_fluxes),pyfits.ImageHDU(numpy.zeros(convolved_model_photon_fluxes.shape)),pyfits.ImageHDU(wave)]).writeto("models.fits",clobber=True)
+
+# compute the ratio
+# calib_from_phot_to_elec is the conversion factor from photons/cm2/s/A to electrons/A
+# its unit is cm2*s
+calib_from_phot_to_elec=numpy.zeros(convolved_model_photon_fluxes.shape)
+calib_from_phot_to_elec_invar=numpy.zeros(convolved_model_photon_fluxes.shape)
+calib_from_phot_to_elec[:]=spectra[starfibers[:]]/convolved_model_photon_fluxes[:]
+calib_from_phot_to_elec_invar[:]=invar[starfibers[:]]*(convolved_model_photon_fluxes[:])**2
+
+# now we start the fitting procedure :
+
+# 1) median of calib_from_phot_to_elec   
+median_calib_from_phot_to_elec=numpy.median(calib_from_phot_to_elec,axis=0)
+
+# 2.1) iterative clipping with spline fit of calib_from_phot_to_elec 
+# due to incorrect line models (either the model, or the redshift, or worse = the resolution)
+if True :
+    print "iterative clipping"
+    wstep=5.
+    for spec in range(nstarfibers) :
+        specex_clip(wave,calib_from_phot_to_elec[spec],calib_from_phot_to_elec_invar[spec],wstep,3,False,True)
+        
+        if False :
+            mean=numpy.median(calib_from_phot_to_elec[spec])
+            saved_rms=0
+            for loop in range(10) :
+                func=scipy.interpolate.splrep(wave,calib_from_phot_to_elec[spec],w=calib_from_phot_to_elec_invar[spec],task=-1,t=knots)
+                smooth_calib_from_phot_to_elec=scipy.interpolate.splev(wave,func,der=0)
+                diff=calib_from_phot_to_elec[spec]-smooth_calib_from_phot_to_elec
+                rms=numpy.std(diff[numpy.where(calib_from_phot_to_elec_invar[spec]>0)[0]])
+                print "spec=",spec,"rms/mean=",rms/mean
+                if(rms==saved_rms) :
+                    break
+                saved_rms=rms
+                calib_from_phot_to_elec_invar[spec,numpy.where(numpy.absolute(diff)>3*rms)[0]]=0
+
+    print "done"
+    #median_calib_from_phot_to_elec=numpy.median(smooth_calib_from_phot_to_elec,axis=0)
+
+# 2.2) compute an achromatic offset of the ratio of each star to the median
+# this will absorb at zeroth order differences of fiber aperture corrections
+# probably due primarily to mis-alignements (themselves due to uncertainties
+# in the plate production + atmospheric differential refraction)
+# model is calib_from_phot_to_elec = corr*median_calib_from_phot_to_elec
+# fit is corr = (sum_i w_i calib_from_phot_to_elec_i median_calib_from_phot_to_elec_i)/(sum_i w_i median_calib_from_phot_to_elec_i**2)
+fiber_aperture_correction=numpy.zeros((nstarfibers))
+for spec in range(nstarfibers) :
+    wmc = numpy.dot(calib_from_phot_to_elec_invar[spec]*calib_from_phot_to_elec[spec],median_calib_from_phot_to_elec)
+    wcc = numpy.dot(calib_from_phot_to_elec_invar[spec]*median_calib_from_phot_to_elec,median_calib_from_phot_to_elec)
+    fiber_aperture_correction[spec]=wmc/wcc
+    
+print "fiber aperture corrections     =",fiber_aperture_correction
+print "fiber aperture corrections rms =",numpy.std(fiber_aperture_correction)
+# 3) apply achromatic offset
+for spec in range(nstarfibers) :
+    calib_from_phot_to_elec[spec]/=fiber_aperture_correction[spec]
+    calib_from_phot_to_elec_invar[spec]*=(fiber_aperture_correction[spec])**2
+
+# 4) refit median
+# this is one way to get the calibration we will record it, but also test other methods
+# need to do the median only on data with invar>0
+median_calib_from_phot_to_elec=numpy.ma.median(numpy.ma.array(calib_from_phot_to_elec,mask=(calib_from_phot_to_elec_invar==0)),axis=0)
+#median_calib_from_phot_to_elec=numpy.median(calib_from_phot_to_elec,axis=0)
+
+if False :
+    for spec in range(nstarfibers) :
+        pylab.plot(wave,calib_from_phot_to_elec[spec],color='r')
+        indices=numpy.where(calib_from_phot_to_elec_invar[spec]>0)[0]
+        pylab.plot(wave[indices],calib_from_phot_to_elec[spec,indices],color='k')
+    pylab.plot(wave,median_calib_from_phot_to_elec, color='b')
+    pylab.show()    
+
+# 5) direct fit
+
+# 5.1) apply achromatic offset to models (inverse of applying it to data)
+for spec in range(nstarfibers) :
+    model_photon_fluxes[spec]*=fiber_aperture_correction[spec]
+
+# 5.2) fit
+# compare data to  R*calib*model = R*diag(model)*calib
+print "filling A and B"
+A=numpy.matrix(numpy.zeros((nwave,nwave))) # dense because additions of band matrices not implemented
+B=numpy.zeros((1,nwave))
+for spec in range(nstarfibers) :
+    fiber=starfibers[spec]
+    R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave)) # resolution matrix
+    M=scipy.sparse.dia_matrix((model_photon_fluxes[spec,:],[0]),(nwave,nwave)) # model in the form of a diagonal matrix
+    Ninv=scipy.sparse.dia_matrix((invar[fiber,:],[0]),(nwave,nwave)) # inverse variance in the form of a diagonal matrix
+    RM=R*M
+    NinvD=invar[fiber,:]*spectra[fiber,:]
+    tmp2=RM.transpose()*Ninv*RM
+    A+=tmp2.todense()
+    B+=RM.transpose().dot(NinvD)
 
 
-sys.exit(0)
+#pyfits.HDUList([pyfits.PrimaryHDU(A)]).writeto("A.fits",clobber=True)
+#sys.exit(0)
+
+
+#convert A to sparse for solving
+Ad=d*2
+Aoffsets = range(Ad,-Ad-1,-1)
+Adata =  numpy.zeros((len(Aoffsets),nwave))  
+for i in range(len(Aoffsets)) :
+    diagonal=numpy.diag(A,Aoffsets[i])
+    off=max(0,Aoffsets[i])
+    Adata[i,off:len(diagonal)+off]=diagonal
+As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
+
+print "done"
+print "solving"
+As = As.tocsr()
+deconvolved_calib_from_phot_to_elec=spsolve(As,B)
+print "done"
+
+# 5.3) reconvolve at resolution of central fiber for display
+Rcentral=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
+convolved_calib_from_phot_to_elec=numpy.dot(Rcentral.toarray(),deconvolved_calib_from_phot_to_elec)
+
+
+#6) last method, simple fit in convolved space
+
+# 6.1) apply achromatic offset to models (inverse of applying it to data)
+for spec in range(nstarfibers) :
+    convolved_model_photon_fluxes[spec]*=fiber_aperture_correction[spec]
+
+
+# 6.2) fit
+A=numpy.zeros((nwave)) # it's diagonal
+B=numpy.zeros((nwave))
+for spec in range(nstarfibers) :
+    fiber=starfibers[spec]
+    A += convolved_model_photon_fluxes[spec]*convolved_model_photon_fluxes[spec]*invar[fiber]
+    B += convolved_model_photon_fluxes[spec]*spectra[fiber]*invar[fiber]
+
+convolved_calib_from_phot_to_elec_bis=B/A
+
+specex_clip(wave,median_calib_from_phot_to_elec,None,3,3,True,True)
+specex_clip(wave,convolved_calib_from_phot_to_elec,None,3,3,True,True)
+specex_clip(wave,convolved_calib_from_phot_to_elec_bis,None,3,3,True,True)
+
+
+
+
+if throughputfilename != "" :
+    # apply a scaling with exposure time and telescope aperture (approximatly) to compute throughput
+    telescope_aperture=3.1415*( ((2.5e2)/2)**2 - ((1.5e2)/2)**2 ) # cm2
+    exptime=900. #s
+    throughput=numpy.zeros((3,median_calib_from_phot_to_elec.shape[0]))
+    throughput[0]=(1./(telescope_aperture*exptime))*median_calib_from_phot_to_elec # s cm2 -> 1
+    throughput[1]=(1./(telescope_aperture*exptime))*convolved_calib_from_phot_to_elec # s cm2 -> 1
+    throughput[2]=(1./(telescope_aperture*exptime))*convolved_calib_from_phot_to_elec_bis # s cm2 -> 1
+    pyfits.HDUList([pyfits.PrimaryHDU(throughput),pyfits.ImageHDU(numpy.zeros(throughput.shape)),pyfits.ImageHDU(wave)]).writeto(throughputfilename,clobber=True)
+
+print median_calib_from_phot_to_elec.shape
+print convolved_calib_from_phot_to_elec.shape
+print convolved_calib_from_phot_to_elec_bis.shape
+
+print "method 1 rms (median)    = ",evaluate_relative_noise(wave,median_calib_from_phot_to_elec,5)
+print "method 2 rms (dec. fit)  = ",evaluate_relative_noise(wave,convolved_calib_from_phot_to_elec,5)
+print "method 3 rms (conv. fit) = ",evaluate_relative_noise(wave,convolved_calib_from_phot_to_elec_bis,5)
+
+# apply calibration to data
+# here I choose the most robust = median
+calib_from_phot_to_elec = median_calib_from_phot_to_elec
+
+# we want ergs/cm2/s/A not photons/cm2/s/A so we have to multiply back the calibration
+# (photons/energy) = lambda/(2*pi*hbar*c) , with 2*pi* hbar*c = 2* pi * 197.326 eV nm = 6.28318*197.326*1.60218e-12*10 = 1.986438e-8 = 1/5.034135e7 ergs.A 
+#calib_from_elec_to_phot = 1./calib_from_phot_to_elec  # unit is photons/cm2/s/electron
+calib_from_elec_to_ergs = hc/wave/calib_from_phot_to_elec  # unit is ergs/cm2/s/electron
+
+# add 1.e17 , this is a choice of norm
+calib_from_elec_to_ergs *= 1e17
+
+# data : electron/A  -> 10^-17 ergs/cm2/s/A
+
+spectra[:] *= calib_from_elec_to_ergs
+invar[:]   /= calib_from_elec_to_ergs**2
+
+
+print "writing result to",outfilename
+hdulist.writeto(outfilename,clobber=True)
 
