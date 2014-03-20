@@ -38,7 +38,7 @@ if not median_flatfilename == "" :
     if os.path.isfile(median_flatfilename) :
         os.unlink(median_flatfilename)
 
-    pyfits.HDUList([hdu0,hdu1,hdu2]).writeto(median_flatfilename)
+    pyfits.HDUList([hdu0,hdu1,hdu2]).writeto(meanflatfilename)
 
 if False :
     pylab.plot(wave,median_flat)
