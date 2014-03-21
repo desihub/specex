@@ -370,7 +370,7 @@ def evaluate_relative_noise(x,y,step) :
     rms=numpy.std(diff)
     return rms
 
-
+"""
 def specex_clip(x,y,iw,step,nsig=3,replace=False,verbose=False) :
     knots=x[0]+step/2+step*numpy.arange(int((x[-1]-x[0])/step))
     
@@ -396,7 +396,7 @@ def specex_clip(x,y,iw,step,nsig=3,replace=False,verbose=False) :
 
     if not iw==None :
         iw=w
-
+"""
 
 # main
 
@@ -596,21 +596,19 @@ if True :
     print "iterative clipping"
     wstep=5.
     for spec in range(nstarfibers) :
-        specex_clip(wave,calib_from_phot_to_elec[spec],calib_from_phot_to_elec_invar[spec],wstep,3,False,True)
-        
-        if False :
-            mean=numpy.median(calib_from_phot_to_elec[spec])
-            saved_rms=0
-            for loop in range(10) :
-                func=scipy.interpolate.splrep(wave,calib_from_phot_to_elec[spec],w=calib_from_phot_to_elec_invar[spec],task=-1,t=knots)
-                smooth_calib_from_phot_to_elec=scipy.interpolate.splev(wave,func,der=0)
-                diff=calib_from_phot_to_elec[spec]-smooth_calib_from_phot_to_elec
-                rms=numpy.std(diff[numpy.where(calib_from_phot_to_elec_invar[spec]>0)[0]])
-                print "spec=",spec,"rms/mean=",rms/mean
-                if(rms==saved_rms) :
-                    break
-                saved_rms=rms
-                calib_from_phot_to_elec_invar[spec,numpy.where(numpy.absolute(diff)>3*rms)[0]]=0
+        mean=numpy.median(calib_from_phot_to_elec[spec])
+        knots=wave[0]+wstep/2+wstep*numpy.arange(int((wave[-1]-wave[0])/wstep))
+        saved_rms=0
+        for loop in range(10) :
+            func=scipy.interpolate.splrep(wave,calib_from_phot_to_elec[spec],w=calib_from_phot_to_elec_invar[spec],task=-1,t=knots)
+            smooth_calib_from_phot_to_elec=scipy.interpolate.splev(wave,func,der=0)
+            diff=calib_from_phot_to_elec[spec]-smooth_calib_from_phot_to_elec
+            rms=numpy.std(diff[numpy.where(calib_from_phot_to_elec_invar[spec]>0)[0]])
+            print "spec=",spec,"rms/mean=",rms/mean
+            if(rms==saved_rms) :
+                break
+            saved_rms=rms
+            calib_from_phot_to_elec_invar[spec,numpy.where(numpy.absolute(diff)>3*rms)[0]]=0
 
     print "done"
     #median_calib_from_phot_to_elec=numpy.median(smooth_calib_from_phot_to_elec,axis=0)
@@ -734,12 +732,12 @@ for loop in range(50) :
     # collect outliers
     wave_indices=[]
     for spec in range(nstarfibers) :
-        indices=numpy.where(dchi2[spec]>5*chi2pdf)[0]
+        indices=numpy.where(dchi2[spec]>4*chi2pdf)[0]
         wave_indices=numpy.union1d(wave_indices,indices)
     wave_indices = wave_indices.astype(int)
     #print wave_indices
     
-    print "number of waves with 5 sigma outliers=",len(wave_indices)
+    print "number of waves with 4 sigma outliers=",len(wave_indices)
     if len(wave_indices)==0 :
         break
     
