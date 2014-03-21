@@ -487,7 +487,7 @@ wave=hdulist[2].data
 Rdata=hdulist[3].data
 
 #print "DEBUG: do only few stars"
-#starfibers = starfibers[0:5]
+#starfibers = starfibers[1:5]
 
 nstarfibers=len(starfibers)
 nfibers=Rdata.shape[0]
@@ -649,51 +649,44 @@ if False :
     pylab.show()    
 
 # 5) direct fit
-
 # 5.1) apply achromatic offset to models (inverse of applying it to data)
-for spec in range(nstarfibers) :
-    model_photon_fluxes[spec]*=fiber_aperture_correction[spec]
+# for spec in range(nstarfibers) :
+#     model_photon_fluxes[spec]*=fiber_aperture_correction[spec]
 
 # 5.2) fit
 # compare data to  R*calib*model = R*diag(model)*calib
-print "filling A and B"
-A=numpy.matrix(numpy.zeros((nwave,nwave))) # dense because additions of band matrices not implemented
-B=numpy.zeros((1,nwave))
-for spec in range(nstarfibers) :
-    fiber=starfibers[spec]
-    R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave)) # resolution matrix
-    M=scipy.sparse.dia_matrix((model_photon_fluxes[spec,:],[0]),(nwave,nwave)) # model in the form of a diagonal matrix
-    Ninv=scipy.sparse.dia_matrix((invar[fiber,:],[0]),(nwave,nwave)) # inverse variance in the form of a diagonal matrix
-    RM=R*M
-    NinvD=invar[fiber,:]*spectra[fiber,:]
-    tmp2=RM.transpose()*Ninv*RM
-    A+=tmp2.todense()
-    B+=RM.transpose().dot(NinvD)
-
-
-#pyfits.HDUList([pyfits.PrimaryHDU(A)]).writeto("A.fits",clobber=True)
-#sys.exit(0)
-
+# print "filling A and B"
+# A=numpy.matrix(numpy.zeros((nwave,nwave))) # dense because additions of band matrices not implemented
+# B=numpy.zeros((1,nwave))
+# for spec in range(nstarfibers) :
+#     fiber=starfibers[spec]
+#     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave)) # resolution matrix
+#     M=scipy.sparse.dia_matrix((model_photon_fluxes[spec,:],[0]),(nwave,nwave)) # model in the form of a diagonal matrix
+#     Ninv=scipy.sparse.dia_matrix((invar[fiber,:],[0]),(nwave,nwave)) # inverse variance in the form of a diagonal matrix
+#     RM=R*M
+#     NinvD=invar[fiber,:]*spectra[fiber,:]
+#     tmp2=RM.transpose()*Ninv*RM
+#     A+=tmp2.todense()
+#     B+=RM.transpose().dot(NinvD)
 
 #convert A to sparse for solving
-Ad=d*2
-Aoffsets = range(Ad,-Ad-1,-1)
-Adata =  numpy.zeros((len(Aoffsets),nwave))  
-for i in range(len(Aoffsets)) :
-    diagonal=numpy.diag(A,Aoffsets[i])
-    off=max(0,Aoffsets[i])
-    Adata[i,off:len(diagonal)+off]=diagonal
-As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
-
-print "done"
-print "solving"
-As = As.tocsr()
-deconvolved_calib_from_phot_to_elec=spsolve(As,B)
-print "done"
+# Ad=d*2
+# Aoffsets = range(Ad,-Ad-1,-1)
+# Adata =  numpy.zeros((len(Aoffsets),nwave))  
+# for i in range(len(Aoffsets)) :
+#     diagonal=numpy.diag(A,Aoffsets[i])
+#     off=max(0,Aoffsets[i])
+#     Adata[i,off:len(diagonal)+off]=diagonal
+# As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
+# print "done"
+# print "solving"
+# As = As.tocsr()
+# deconvolved_calib_from_phot_to_elec=spsolve(As,B)
+# print "done"
 
 # 5.3) reconvolve at resolution of central fiber for display
-Rcentral=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
-convolved_calib_from_phot_to_elec=numpy.dot(Rcentral.toarray(),deconvolved_calib_from_phot_to_elec)
+# Rcentral=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
+# convolved_calib_from_phot_to_elec=numpy.dot(Rcentral.toarray(),deconvolved_calib_from_phot_to_elec)
 
 
 #6) last method, simple fit in convolved space
@@ -704,21 +697,78 @@ for spec in range(nstarfibers) :
 
 
 # 6.2) fit
+# compare data to (R*model)*calib 
+# iterative fit with clipping
+
+# copy inverse variance of star data to modify it in the clipping
+starinvar=numpy.zeros( convolved_model_photon_fluxes.shape)
+for spec in range(nstarfibers) :
+    fiber=starfibers[spec]
+    starinvar[spec]=invar[fiber]
+
+
+
+    
+# fit
 A=numpy.zeros((nwave)) # it's diagonal
 B=numpy.zeros((nwave))
 for spec in range(nstarfibers) :
     fiber=starfibers[spec]
-    A += convolved_model_photon_fluxes[spec]*convolved_model_photon_fluxes[spec]*invar[fiber]
-    B += convolved_model_photon_fluxes[spec]*spectra[fiber]*invar[fiber]
+    A += convolved_model_photon_fluxes[spec]*convolved_model_photon_fluxes[spec]*starinvar[spec]
+    B += convolved_model_photon_fluxes[spec]*spectra[fiber]*starinvar[spec]
 
-convolved_calib_from_phot_to_elec_bis=B/A
+convolved_calib_from_phot_to_elec=B/A
 
-specex_clip(wave,median_calib_from_phot_to_elec,None,3,3,True,True)
-specex_clip(wave,convolved_calib_from_phot_to_elec,None,3,3,True,True)
-specex_clip(wave,convolved_calib_from_phot_to_elec_bis,None,3,3,True,True)
+dchi2=numpy.zeros( convolved_model_photon_fluxes.shape)
+ndata=0
+for spec in range(nstarfibers) :
+    fiber=starfibers[spec]
+    dchi2[spec]=starinvar[spec]*(spectra[fiber]-convolved_calib_from_phot_to_elec*convolved_model_photon_fluxes[spec])**2
+    ndata+=len(numpy.where(starinvar[spec]>0)[0])
 
+chi2pdf=numpy.sum(dchi2)/(ndata-nwave)
+print "chi2pdf=",chi2pdf
 
+for loop in range(50) :
 
+    # collect outliers
+    wave_indices=[]
+    for spec in range(nstarfibers) :
+        indices=numpy.where(dchi2[spec]>5*chi2pdf)[0]
+        wave_indices=numpy.union1d(wave_indices,indices)
+    wave_indices = wave_indices.astype(int)
+    #print wave_indices
+    
+    print "number of waves with 5 sigma outliers=",len(wave_indices)
+    if len(wave_indices)==0 :
+        break
+    
+    # rm largest outlier
+    for w in wave_indices :
+        spec=numpy.argmax(dchi2[:,w])
+        #print "max outlier at w=",w,"is spec",spec
+        starinvar[spec,w]=0
+        ndata -= 1
+    
+    # refit only those wavelength
+    A[wave_indices]*=0
+    B[wave_indices]*=0
+    for spec in range(nstarfibers) :
+        fiber=starfibers[spec]
+        A[wave_indices] += convolved_model_photon_fluxes[spec,wave_indices]*convolved_model_photon_fluxes[spec,wave_indices]*starinvar[spec,wave_indices]
+        B[wave_indices] += convolved_model_photon_fluxes[spec,wave_indices]*spectra[fiber,wave_indices]*starinvar[spec,wave_indices]
+    
+    convolved_calib_from_phot_to_elec[wave_indices]=B[wave_indices]/A[wave_indices]
+    
+    # recompute chi2pdf
+    for spec in range(nstarfibers) :
+        fiber=starfibers[spec]
+        dchi2[spec,wave_indices]=starinvar[spec,wave_indices]*(spectra[fiber,wave_indices]-convolved_calib_from_phot_to_elec[wave_indices]*convolved_model_photon_fluxes[spec,wave_indices])**2
+        
+    chi2pdf=numpy.sum(dchi2)/(ndata-nwave)
+    print "loop",loop,"chi2pdf=",chi2pdf
+    
+calib_from_phot_to_elec_variance = 1/A
 
 if throughputfilename != "" :
     # apply a scaling with exposure time and telescope aperture (approximatly) to compute throughput
@@ -727,34 +777,36 @@ if throughputfilename != "" :
     throughput=numpy.zeros((3,median_calib_from_phot_to_elec.shape[0]))
     throughput[0]=(1./(telescope_aperture*exptime))*median_calib_from_phot_to_elec # s cm2 -> 1
     throughput[1]=(1./(telescope_aperture*exptime))*convolved_calib_from_phot_to_elec # s cm2 -> 1
-    throughput[2]=(1./(telescope_aperture*exptime))*convolved_calib_from_phot_to_elec_bis # s cm2 -> 1
     pyfits.HDUList([pyfits.PrimaryHDU(throughput),pyfits.ImageHDU(numpy.zeros(throughput.shape)),pyfits.ImageHDU(wave)]).writeto(throughputfilename,clobber=True)
 
-print median_calib_from_phot_to_elec.shape
-print convolved_calib_from_phot_to_elec.shape
-print convolved_calib_from_phot_to_elec_bis.shape
-
 print "method 1 rms (median)    = ",evaluate_relative_noise(wave,median_calib_from_phot_to_elec,5)
-print "method 2 rms (dec. fit)  = ",evaluate_relative_noise(wave,convolved_calib_from_phot_to_elec,5)
-print "method 3 rms (conv. fit) = ",evaluate_relative_noise(wave,convolved_calib_from_phot_to_elec_bis,5)
+print "method 2 rms (conv. fit)  = ",evaluate_relative_noise(wave,convolved_calib_from_phot_to_elec,5)
 
 # apply calibration to data
 # here I choose the most robust = median
-calib_from_phot_to_elec = median_calib_from_phot_to_elec
+calib_from_phot_to_elec = convolved_calib_from_phot_to_elec
+
 
 # we want ergs/cm2/s/A not photons/cm2/s/A so we have to multiply back the calibration
 # (photons/energy) = lambda/(2*pi*hbar*c) , with 2*pi* hbar*c = 2* pi * 197.326 eV nm = 6.28318*197.326*1.60218e-12*10 = 1.986438e-8 = 1/5.034135e7 ergs.A 
 #calib_from_elec_to_phot = 1./calib_from_phot_to_elec  # unit is photons/cm2/s/electron
 calib_from_elec_to_ergs = hc/wave/calib_from_phot_to_elec  # unit is ergs/cm2/s/electron
 
+calib_from_elec_to_ergs_variance = (hc/wave)**2*calib_from_phot_to_elec_variance/calib_from_phot_to_elec**4
+
+
 # add 1.e17 , this is a choice of norm
 calib_from_elec_to_ergs *= 1e17
+
+calib_from_elec_to_ergs_variance *= (1e17)**2 
 
 # data : electron/A  -> 10^-17 ergs/cm2/s/A
 
 spectra[:] *= calib_from_elec_to_ergs
 invar[:]   /= calib_from_elec_to_ergs**2
 
+# add noise of calibration
+invar[:] = 1/( 1/invar[:] + (spectra[:]/calib_from_elec_to_ergs)**2 * calib_from_elec_to_ergs_variance )
 
 print "writing result to",outfilename
 hdulist.writeto(outfilename,clobber=True)
