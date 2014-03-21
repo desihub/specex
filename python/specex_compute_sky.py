@@ -78,39 +78,62 @@ for fiber in skyfibers:
     A+=tmp2.todense()
     B+=R.transpose().dot(tmp)
 
+# no need to resparse matrix
 #convert A to sparse for solving
-Ad=d*2
-Aoffsets = range(Ad,-Ad-1,-1)
-Adata =  numpy.zeros((len(Aoffsets),nwave))  
-for i in range(len(Aoffsets)) :
-    diagonal=numpy.diag(A,Aoffsets[i])
-    off=max(0,Aoffsets[i])
-    Adata[i,off:len(diagonal)+off]=diagonal
-As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
+#Ad=d*2
+#Aoffsets = range(Ad,-Ad-1,-1)
+#Adata =  numpy.zeros((len(Aoffsets),nwave))  
+#for i in range(len(Aoffsets)) :
+#    diagonal=numpy.diag(A,Aoffsets[i])
+#    off=max(0,Aoffsets[i])
+#    Adata[i,off:len(diagonal)+off]=diagonal
+#As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
 
 print "done"
 
 print "solving"
-As = As.tocsr()
-deconvolvedsky=spsolve(As,B)
+#As = As.tocsr()
+#deconvolvedsky=spsolve(As,B)
+#print numpy.asarray(A).shape,B.shape
+# we need the inverse anyway
+Ainv=scipy.linalg.inv(A)
+#deconvolvedsky=scipy.linalg.solve(A,B[0])
+deconvolvedsky=numpy.dot(Ainv,B[0])
 print "deconvolvedsky",deconvolvedsky.shape
 print "done"
 
+# compute only once the sky variance because expensive and in any case approximate because we only keep the diagonal
+# most conservative is to evaluate it at the highest resolution (most variance)
+# also the *mean* sky statistical uncertainty is negligible wrt to the Poisson noise of the subtracted sky of each
+# fiber that is already included in the invar of each spectrum
+# last point, the sky error is certainly dominated by sky variations in field of view that we have neglected 
+R=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
+Rt=R.transpose()
+sky=numpy.dot(R.toarray(),deconvolvedsky)
+print "computing covmat" 
+skycovmat=Rt.dot(Rt.dot(Ainv).transpose())
+skyvar=numpy.diag(skycovmat)
+print "done" 
+
 if skyfilename != "" :
-    print "writing skymodel to",skyfilename
-    R=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
-#convolvedsky=R.dot(deconvolvedsky) #error of byte swap I don't understand here 
-    sky=numpy.dot(R.todense(),deconvolvedsky) 
-    skyinvar=numpy.zeros((1,nwave))
-    skyinvar[0,:]=numpy.diag(A).copy()
-    pyfits.HDUList([pyfits.PrimaryHDU(sky),pyfits.ImageHDU(skyinvar),pyfits.ImageHDU(wave)]).writeto(skyfilename,clobber=True)
-   
+    print "writing skymodel to",skyfilename  
+    skyinvar=1/numpy.diag(skycovmat)
+    sky_array=numpy.zeros((1,sky.shape[0]))
+    sky_array[0]=sky
+    skyinvar_array=numpy.zeros((1,skyinvar.shape[0]))
+    skyinvar_array[0]=skyinvar    
+    pyfits.HDUList([pyfits.PrimaryHDU(sky_array),pyfits.ImageHDU(skyinvar_array),pyfits.ImageHDU(wave)]).writeto(skyfilename,clobber=True)
+    pyfits.HDUList([pyfits.PrimaryHDU(skycovmat)]).writeto("skycovmat.fits",clobber=True)
 
 print "subtracting sky to all fibers"
 for fiber in range(nfibers) :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
+    Rt=R.transpose()
     sky=numpy.dot(R.toarray(),deconvolvedsky) # it is a numpy.matrix that has to be converted to a numpy.array
+    
     spectra[fiber] -= sky
+    invar[fiber] = 1/( 1/invar[fiber] + skyvar )
+
 print "done"
 
 print "writing result to",outfilename
