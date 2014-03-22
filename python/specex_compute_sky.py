@@ -107,7 +107,7 @@ if skyfilename != "" :
     skyinvar_array=numpy.zeros((1,skyinvar.shape[0]))
     skyinvar_array[0]=skyinvar    
     pyfits.HDUList([pyfits.PrimaryHDU(sky_array),pyfits.ImageHDU(skyinvar_array),pyfits.ImageHDU(wave)]).writeto(skyfilename,clobber=True)
-    pyfits.HDUList([pyfits.PrimaryHDU(skycovmat)]).writeto("skycovmat.fits",clobber=True)
+    #pyfits.HDUList([pyfits.PrimaryHDU(skycovmat)]).writeto("skycovmat.fits",clobber=True)
 
 print "subtracting sky to all fibers"
 for fiber in range(nfibers) :
