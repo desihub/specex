@@ -4,6 +4,9 @@ import pyfits,sys,json,pylab,string,numpy,os,scipy,scipy.sparse,scipy.linalg
 from scipy.sparse.linalg import spsolve
 from math import *
 
+from specex_cholesky import *
+
+
 if len(sys.argv)<3 :
     print sys.argv[0],"inspec.fits plPlugMapM.par outspec.fits (sky.fit)"
     sys.exit(12);
@@ -66,7 +69,6 @@ offsets = range(d,-d-1,-1)
 print "solving for the mean deconvolved sky"
 print "filling A and B"
 
-#A=scipy.sparse.dia_matrix((nwave,nwave)) # 
 A=numpy.matrix(numpy.zeros((nwave,nwave))) # dense because additions of band matrices not implemented
 B=numpy.zeros((1,nwave))
 for fiber in skyfibers:
@@ -78,28 +80,10 @@ for fiber in skyfibers:
     A+=tmp2.todense()
     B+=R.transpose().dot(tmp)
 
-# no need to resparse matrix
-#convert A to sparse for solving
-#Ad=d*2
-#Aoffsets = range(Ad,-Ad-1,-1)
-#Adata =  numpy.zeros((len(Aoffsets),nwave))  
-#for i in range(len(Aoffsets)) :
-#    diagonal=numpy.diag(A,Aoffsets[i])
-#    off=max(0,Aoffsets[i])
-#    Adata[i,off:len(diagonal)+off]=diagonal
-#As=scipy.sparse.dia_matrix( (Adata,Aoffsets), shape=(nwave,nwave))
-
 print "done"
 
 print "solving"
-#As = As.tocsr()
-#deconvolvedsky=spsolve(As,B)
-#print numpy.asarray(A).shape,B.shape
-# we need the inverse anyway
-Ainv=scipy.linalg.inv(A)
-#deconvolvedsky=scipy.linalg.solve(A,B[0])
-deconvolvedsky=numpy.dot(Ainv,B[0])
-print "deconvolvedsky",deconvolvedsky.shape
+deconvolvedsky,dskycovmat=cholesky_solve_and_invert(A,B[0])
 print "done"
 
 # compute only once the sky variance because expensive and in any case approximate because we only keep the diagonal
@@ -111,7 +95,7 @@ R=scipy.sparse.dia_matrix((Rdata[nfibers/2],offsets),(nwave,nwave))
 Rt=R.transpose()
 sky=numpy.dot(R.toarray(),deconvolvedsky)
 print "computing covmat" 
-skycovmat=Rt.dot(Rt.dot(Ainv).transpose())
+skycovmat=Rt.dot(Rt.dot(dskycovmat).transpose())
 skyvar=numpy.diag(skycovmat)
 print "done" 
 
