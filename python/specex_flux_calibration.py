@@ -574,8 +574,7 @@ for spec in range(nstarfibers) :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
     convolved_model_photon_fluxes[spec]=numpy.dot(R.todense(),model_photon_fluxes[spec])
 
-if True :
-    pyfits.HDUList([pyfits.PrimaryHDU(convolved_model_photon_fluxes),pyfits.ImageHDU(numpy.zeros(convolved_model_photon_fluxes.shape)),pyfits.ImageHDU(wave)]).writeto("models.fits",clobber=True)
+#pyfits.HDUList([pyfits.PrimaryHDU(convolved_model_photon_fluxes),pyfits.ImageHDU(numpy.zeros(convolved_model_photon_fluxes.shape)),pyfits.ImageHDU(wave)]).writeto("models.fits",clobber=True)
 
 # compute the ratio
 # calib_from_phot_to_elec is the conversion factor from photons/cm2/s/A to electrons/A
