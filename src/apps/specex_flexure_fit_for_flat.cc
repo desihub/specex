@@ -189,25 +189,30 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
       // precompute things
       std::map<int,double> wave_of_fiber;
       std::map<int,double> xcenter_of_fiber;
+      std::map<int,double> xcenter_of_fiber_ref;
       std::map<int,harp::vector_double> psf_params_of_fiber;
       std::map<int,harp::vector_double> dxmonomials_of_fiber;
       
       for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
 	const specex::Trace& trace = psf->GetTrace(fiber);
 	if(trace.Off()) continue; 
-	wave_of_fiber[fiber]        = trace.W_vs_Y.Value(j);
-	xcenter_of_fiber[fiber]     = trace.X_vs_W.Value(wave_of_fiber[fiber]);
-	xcenter_of_fiber[fiber]     += dxpol.Value(xcenter_of_fiber[fiber],wave_of_fiber[fiber]);
-	psf_params_of_fiber[fiber]  = psf->AllLocalParamsXW(xcenter_of_fiber[fiber],wave_of_fiber[fiber],params_of_bundle.bundle_id);
+	double &w = wave_of_fiber[fiber];
+	double &x = xcenter_of_fiber[fiber];	
+	w = trace.W_vs_Y.Value(j);
+	x = trace.X_vs_W.Value(w);
+	xcenter_of_fiber_ref[fiber] = x; // this is a fixed coordinate to define range of pixels
+	double dx = dxpol.Value(x,w);
+	x += dx;
+	psf_params_of_fiber[fiber]  = psf->AllLocalParamsXW(x,w,params_of_bundle.bundle_id);
 	if(fit_dx)
-	  dxmonomials_of_fiber[fiber] = dxpol.Monomials(xcenter_of_fiber[fiber],wave_of_fiber[fiber]);
+	  dxmonomials_of_fiber[fiber] = dxpol.Monomials(x,w);
 	
 	if(compute_segments) {
 	  Segment segment;
 	  segment.fiber=fiber;
 	  segment.j=j;
-	  segment.begin_i = max(0,int(floor(xcenter_of_fiber[fiber]))-hsizex);
-	  segment.end_i   = min(int(image.n_cols()),int(floor(xcenter_of_fiber[fiber]))+hsizex+1);
+	  segment.begin_i = max(0,int(floor(x))-hsizex);
+	  segment.end_i   = min(int(image.n_cols()),int(floor(x))+hsizex+1);
 	  segments[segment.index()]=segment;
 	}
       }
@@ -230,19 +235,19 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
 	  if(trace.Off()) continue; 
 	  flux_index++;
 	    
-	  const double& xcenter = xcenter_of_fiber[fiber];
-	  int begin_i = max(0,int(floor(xcenter))-hsizex);
-	  int end_i   = min(int(image.n_cols()),int(floor(xcenter))+hsizex+1);
+	  int i_center = int(floor(xcenter_of_fiber_ref[fiber]));	  
+	  int begin_i = max(0,i_center-hsizex);
+	  int end_i   = min(int(image.n_cols()),i_center+hsizex+1);
 	  if(i<begin_i || i>=end_i) continue;
 	  
 	  // compute profile
-	  
+	  const double& x  = xcenter_of_fiber[fiber]; // this is the fitted coordinate
 	  double prof = 0;
 	  if(fit_dx) {
 	    pos_der.clear();
-	    prof = psf->PSFValueWithParamsXY(xcenter,double(j),i,j,psf_params_of_fiber[fiber],&pos_der,NULL,true,true);
+	    prof = psf->PSFValueWithParamsXY(x,double(j),i,j,psf_params_of_fiber[fiber],&pos_der,NULL,true,true);
 	  }else{
-	    prof = psf->PSFValueWithParamsXY(xcenter,double(j),i,j,psf_params_of_fiber[fiber],NULL,NULL,true,true);
+	    prof = psf->PSFValueWithParamsXY(x,double(j),i,j,psf_params_of_fiber[fiber],NULL,NULL,true,true);
 	  }
 	  //cout << "prof = " << prof << endl;
 	  
@@ -424,9 +429,10 @@ int main ( int argc, char *argv[] ) {
   for(int iter=0;iter<nmaxiter;iter++) {
     
     bool fit_flux = (iter%2==0); 
-    bool fit_dx   = !fit_flux;
+    bool fit_dx   = (iter%2==1);
     
-    SPECEX_INFO("fill matrix iter #" <<iter);
+
+    SPECEX_INFO("fill matrix iter #" <<iter << " flux=" << int(fit_flux) << " dx=" << int(fit_dx));
     
     double previous_chi2 = computechi2ab(fit_flux,fit_dx);
     
@@ -448,6 +454,8 @@ int main ( int argc, char *argv[] ) {
     double chi2  = computechi2ab(false,false);
     double dchi2 =  previous_chi2-chi2;
     
+    bool has_just_robustified = false;
+
     SPECEX_INFO("chi2= " << chi2 << " dchi2= " << dchi2);
     if(dchi2<0) {
       SPECEX_WARNING("neg. dchi2, rewinding ");
@@ -458,13 +466,16 @@ int main ( int argc, char *argv[] ) {
       else {
 	robustify();
 	need_robustification=false;
+	has_just_robustified =true;
       }
     }
-    if(iter==2) robustify();
+    if(iter==2) {
+      robustify();
+      has_just_robustified =true;
+    }
     
     
-    
-    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<10)  {
+    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<10 && !has_just_robustified)  {
       if(!need_robustification) 
 	break;
       else{
