@@ -380,19 +380,17 @@ int main ( int argc, char *argv[] ) {
       ok = fitter.FitIndividualSpotFluxes(selected_spots);
       
     }
-    int nbad=0;
-    vector<specex::Spot_p>::iterator it=spots.begin();
-    while(it!=spots.end()) {
     
-      if((*it)->flux<=0) { 
-	SPECEX_WARNING("discarding sky line at fiber " << (*it)->fiber << " " << (*it)->wavelength);
-	it = spots.erase(it);	
-	nbad++;
-      }else{
-	it++;
+    vector<specex::Spot_p> tmp_spots;
+    for(size_t s=0;s<spots.size();s++) {
+      if(spots[s]->flux<=0) { 
+	SPECEX_WARNING("discarding sky line at fiber " <<  spots[s]->fiber << " " << spots[s]->wavelength);
+	continue;
       }
+      tmp_spots.push_back(spots[s]);
     }
-    SPECEX_INFO("using " << spots.size() << " sky lines, " << nbad << " discarded");
+    SPECEX_INFO("using " << tmp_spots.size() << " sky lines, " << spots.size()-tmp_spots.size() << " discarded");  
+    spots = tmp_spots;
     
   }
 
