@@ -442,6 +442,9 @@ int main ( int argc, char *argv[] ) {
     double dchi2 =  previous_chi2-chi2;
     
     SPECEX_INFO("chi2= " << chi2 << " dchi2= " << dchi2);
+
+    bool has_just_robustified = false;
+
     if(dchi2<0) {
       SPECEX_WARNING("neg. dchi2, rewinding ");
       if(fit_dx) {
@@ -462,11 +465,13 @@ int main ( int argc, char *argv[] ) {
     }
     
     if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<0.1) {
-      if(!need_robustification) 
-	break;
-      else{
+      if(!need_robustification) {
+	if(!has_just_robustified)
+	  break;
+      }else{
 	robustify();
 	need_robustification=false;
+	has_just_robustified=true;
       }
     }
     previous_chi2 = chi2;
