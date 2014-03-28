@@ -35,7 +35,7 @@ specex::image_data image,weight;
 specex::Legendre2DPol dxpol;
 std::vector<int> rows;
 harp::vector_double flux;
-int degx,degw,nrows,nfibers,npardx,npar;
+int nfibers,npardx,npar;
 harp::matrix_double A;
 harp::vector_double B;
 int hsizex;
@@ -78,11 +78,15 @@ bool compute_segments;
 void robustify() {
   SPECEX_INFO("robustify");
   
-  std::map<int,double> chi2pdf_of_row;
+  std::map<int,double> mean_chi2pdf_of_row;
+  std::map<int,double> rms_chi2pdf_of_row;
   std::map<int,int> n_segments_of_row;
   
+  int nrows = rows.size();
+
   for(int jj=0;jj<nrows;jj++) {
-    chi2pdf_of_row[rows[jj]]=0.;
+    mean_chi2pdf_of_row[rows[jj]]=0.;
+    rms_chi2pdf_of_row[rows[jj]]=0.;
     n_segments_of_row[rows[jj]]=0;
   }
     
@@ -92,23 +96,24 @@ void robustify() {
     if(seg.npix>1) {
       seg.chi2/=(seg.npix-1);
       seg.flux/=seg.weight;
-      chi2pdf_of_row.find(seg.j)->second += seg.chi2;
+      mean_chi2pdf_of_row.find(seg.j)->second += seg.chi2;
+      rms_chi2pdf_of_row.find(seg.j)->second += (seg.chi2*seg.chi2);
       n_segments_of_row.find(seg.j)->second ++;
     }
   }
   for(int jj=0;jj<nrows;jj++) {
-    int n=n_segments_of_row.find(rows[jj])->second;
-    if(n>0)
-      chi2pdf_of_row.find(rows[jj])->second /= n;
-    cout << "j=" << rows[jj] << " chi2pdf=" << chi2pdf_of_row.find(rows[jj])->second << endl;
+    int j=rows[jj];
+    int n=n_segments_of_row.find(j)->second;
+    if(n>0) {
+      mean_chi2pdf_of_row.find(j)->second /= n;
+      rms_chi2pdf_of_row.find(j)->second = sqrt(rms_chi2pdf_of_row.find(j)->second / n - mean_chi2pdf_of_row.find(j)->second * mean_chi2pdf_of_row.find(j)->second);
+    }
+    cout << "j=" << j << " mean chi2pdf=" << mean_chi2pdf_of_row.find(j)->second << " rms = " << rms_chi2pdf_of_row.find(j)->second << endl;
   }
   
-  for(std::map<int,Segment>::iterator it=segments.begin(); it!=segments.end(); it++) {
-    Segment &seg=it->second;
-    seg.chi2/=chi2pdf_of_row.find(seg.j)->second;
-  }
   
-  if(1) {
+  
+  if(0) {
     ofstream os("seg.list");
     os << "# fiber :" << endl;
     os << "# j :" << endl;
@@ -129,7 +134,8 @@ void robustify() {
   
   for(std::map<int,Segment>::iterator it=segments.begin(); it!=segments.end(); it++) {
     Segment &seg=it->second;
-    if(seg.chi2>5) {
+    if(seg.chi2>mean_chi2pdf_of_row.find(seg.j)->second+5*rms_chi2pdf_of_row.find(seg.j)->second) {
+      SPECEX_INFO("discarding fiber " << seg.fiber << " j " << seg.j);
       for(int i=seg.begin_i;i<seg.end_i;i++)
 	weight(i,seg.j)=0;
     }
@@ -141,12 +147,15 @@ void robustify() {
 
 
 double computechi2ab(bool fit_flux, bool fit_dx) {
+  
+  int degx = dxpol.xdeg;
+  int degw = dxpol.ydeg;
+  int nrows = rows.size();
+  
   npardx = 0;
   npar   = 0;
   if(fit_dx) { npardx=(degx+1)*(degw+1); npar += npardx;}
   if(fit_flux) { npar += nrows*nfibers;}
-  cout << "npardx=" << npardx << endl;
-  cout << "npar  =" << npar << endl;
   
   harp::vector_double H;
   harp::vector_double pos_der;
@@ -307,7 +316,7 @@ int main ( int argc, char *argv[] ) {
   string input_psf_xml_filename = "";
   string output_psf_xml_filename = "";
   string output_psf_fits_filename = "";
-  
+  string output_list_filename = "";
   string spectrograph_name = "BOSS";
   
 
@@ -321,6 +330,7 @@ int main ( int argc, char *argv[] ) {
     ( "psf", popts::value<string>( &input_psf_xml_filename ), "input psf xml filename" )
     ( "xml", popts::value<string>( &output_psf_xml_filename), "output psf xml filename" )
     ( "fits", popts::value<string>( &output_psf_fits_filename), "output psf fits filename" )
+    ( "list", popts::value<string>( &output_list_filename), "output list of corrections for some wave/fibers" )
     ;
 
   popts::variables_map vm;
@@ -364,21 +374,16 @@ int main ( int argc, char *argv[] ) {
   
   read_fits_images(input_flat_image_filename,image,weight);
   
-  // allocation of the correction we want to fit
-  // --------------------------------------------
   
-  // parameters :
-  degx=2;
-  degw=2;
-  nrows=10; // number of rows of the ccd we are going to look at
-  hsizex=4;
-
-  dxpol=specex::Legendre2DPol(degx,0,image.n_cols(),degw,0,image.n_rows());
+  
+  
   
   
   // count fibers and define y range
   int jmin=image.n_rows();
   int jmax=0;
+  double wmin=1e7;
+  double wmax=0;
   nfibers = 0;
   for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
     for(int fiber=bundle_it->second.fiber_min; fiber<=bundle_it->second.fiber_max; fiber++) {
@@ -387,10 +392,21 @@ int main ( int argc, char *argv[] ) {
       nfibers++; 
       jmin=min(jmin,int(trace.Y_vs_W.Value(trace.Y_vs_W.xmin)));
       jmax=max(jmax,int(trace.Y_vs_W.Value(trace.Y_vs_W.xmax)));
+      wmin=min(wmin,trace.Y_vs_W.xmin);
+      wmax=max(wmax,trace.Y_vs_W.xmax);
+      
     }
   }
   cout << "ymin ymax = " << jmin << " " << jmax << endl;
 
+  // allocation of the correction we want to fit
+  // --------------------------------------------
+  
+  dxpol=specex::Legendre2DPol(1,0,image.n_cols(),1,wmin,wmax);
+
+  // parameters :
+  int nrows=15; // number of rows of the ccd we are going to look at
+  hsizex=4;
   
   rows.resize(nrows);
   for(int i=0;i<nrows;i++) {
@@ -402,8 +418,8 @@ int main ( int argc, char *argv[] ) {
   
   
   flux.resize(nrows*nfibers); flux.clear();
-  
-  compute_segments=false;
+  bool need_robustification=true;
+  compute_segments=true;
   int nmaxiter=20;
   for(int iter=0;iter<nmaxiter;iter++) {
     
@@ -428,11 +444,6 @@ int main ( int argc, char *argv[] ) {
     int saved_npar   = npar;
     
     SPECEX_INFO("compute chi2 iter #" <<iter);
-
-    if(iter==2) 
-      compute_segments = true;
-    else
-      compute_segments = false;
     
     double chi2  = computechi2ab(false,false);
     double dchi2 =  previous_chi2-chi2;
@@ -442,30 +453,40 @@ int main ( int argc, char *argv[] ) {
       SPECEX_WARNING("neg. dchi2, rewinding ");
       if(fit_dx) ublas::noalias(dxpol.coeff) -= ublas::project(B,ublas::range(0,saved_npardx));
       if(fit_flux) ublas::noalias(flux)      -= ublas::project(B,ublas::range(saved_npardx,saved_npar));
-    }
-
-    if(compute_segments) {robustify();}
-    
-    if(fit_dx) {
-      
-      for(int fiber = 0; fiber<500; fiber+=100) {
-	const specex::Trace& trace = psf->GetTrace(fiber);
-	for(double y=500; y<4000;y+=1000) {
-	  double wave = trace.W_vs_Y.Value(y);
-	  double dx=dxpol.Value(trace.X_vs_W.Value(wave),wave);
-	  SPECEX_INFO("delta_x(fiber=" << fiber << ",wave=" << wave << ")=" << dx);
-	}
+      if(!need_robustification) 
+	break;
+      else {
+	robustify();
+	need_robustification=false;
       }
     }
-    if(iter>=3 && fabs(previous_chi2-chi2)<10) break;
+    if(iter==2) robustify();
+    
+    
+    
+    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<10)  {
+      if(!need_robustification) 
+	break;
+      else{
+	robustify();
+	need_robustification=false;
+      }
+    }
 
     previous_chi2 = chi2;
 
   } // end of loop on iterations
   
   
-  // now apply thoses shifts to the PSF
-
+  // now apply thoses shifts to the PSF and dump a correction file
+  ofstream *os=0;
+  if(output_list_filename != "") {    
+    os = new ofstream(output_list_filename.c_str());
+    *os << "# fiber : " << endl;
+    *os << "# wave : " << endl;
+    *os << "# dx : " << endl;
+    *os << "#end " << endl;
+  }
   for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
     for(int fiber=bundle_it->second.fiber_min; fiber<=bundle_it->second.fiber_max; fiber++) {
       specex::Trace& trace = psf->GetTrace(fiber);
@@ -476,21 +497,25 @@ int main ( int argc, char *argv[] ) {
       harp::vector_double wave(nwave);
       harp::vector_double x(nwave);
       harp::vector_double y(nwave);
-      cout << "fiber #" << fiber;
+      
       for(int i=0;i<nwave;i++) {
 	wave(i) = wmin+(i*(wmax-wmin))/(nwave-1);
 	x(i)    = trace.X_vs_W.Value(wave(i));
+	y(i)   = trace.Y_vs_W.Value(wave(i));
 	double dx = dxpol.Value(x(i),wave(i));
-	cout << " " << dx;
-	x(i)   += dx;
-	y(i)    = trace.Y_vs_W.Value(wave(i));
+	x(i)   += dx;	
+	
+	if(os) *os << fiber << " " << wave(i) << " " << dx << endl;
       }
-      cout << endl;
+     
       trace.X_vs_W.Fit(wave,x,0,false);
       trace.X_vs_Y.Fit(y,x,0,false);
     }
   }
-
+  if(os) {
+    os->close();
+    SPECEX_INFO("wrote " << output_list_filename);
+  }
   // write PSF
   if(output_psf_xml_filename !="")
     write_psf_xml(psf, output_psf_xml_filename);

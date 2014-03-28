@@ -30,6 +30,7 @@ static double LegendrePol(const int Degree, const double &X)
     }
 }
 
+
 specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const double& i_xmax) : 
   name("undefined"),
   deg(i_deg),
