@@ -22,21 +22,6 @@ median_flat=numpy.median(spectra, axis=0)
 spectra /= median_flat
 invar *= median_flat*median_flat
 
-# we don't want to do any smoothing at all because there are sharp jumps due to dead columns
-# + feature of pixel size in the middle of the CCD
-# but currently , with specter extractions, anticorrelations between adjacent pixels not
-# reflected in the noise
-# we apply a smoothing kernel [0.25,0.5,0.25]
-
-kernel=numpy.array([0.25,0.5,0.25])
-for fiber in range(spectra.shape[0]) :
-    toto=numpy.convolve(spectra[fiber],kernel,mode="same")
-    # fix bundaries
-    toto[0]=numpy.dot(spectra[fiber][:2],kernel[1:])/numpy.sum(kernel[1:])
-    toto[-1]=numpy.dot(spectra[fiber][-2:],kernel[:2])/numpy.sum(kernel[:2])
-    spectra[fiber]=toto
-
-
 hdulist.writeto(outfilename,clobber=True)
 
 if not meanflatfilename == "" :
