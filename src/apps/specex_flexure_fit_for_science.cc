@@ -39,9 +39,42 @@ specex::Legendre2DPol dxpol;
 specex::Legendre2DPol dypol;
 harp::matrix_double A;
 harp::vector_double B;
+harp::vector_double chi2pdf_of_spots;
 
+void robustify() {
+  SPECEX_INFO("robustify");
 
+  if(chi2pdf_of_spots.size() != spots.size()) SPECEX_ERROR("spots and chi2pdf_of_spots don't have same size");
 
+  double mean_chi2pdf=0;
+  double rms_chi2pdf=0;
+  int nspots=0;
+  for(size_t s=0;s<spots.size();s++) {
+    if(chi2pdf_of_spots(s)>0) {
+      mean_chi2pdf += chi2pdf_of_spots(s);
+      rms_chi2pdf += chi2pdf_of_spots(s)*chi2pdf_of_spots(s);
+      nspots++;
+    }
+  }
+  if(nspots==0)  SPECEX_ERROR("0 spots with pos. chi2pdf");
+  mean_chi2pdf/=nspots;
+  rms_chi2pdf=sqrt(rms_chi2pdf/nspots-mean_chi2pdf);
+  SPECEX_INFO("mean chi2/ndf = " << mean_chi2pdf << " rms=" << rms_chi2pdf);
+  double nsig=5;
+  
+  
+  vector<specex::Spot_p> tmp_spots;
+  for(size_t s=0;s<spots.size();s++) {
+    if(chi2pdf_of_spots(s)>mean_chi2pdf+nsig*rms_chi2pdf) { 
+      SPECEX_INFO("discarding sky line at fiber " << spots[s]->fiber << " " << spots[s]->wavelength << " because chi2pdf=" << chi2pdf_of_spots(s));
+      continue;
+    }
+    tmp_spots.push_back(spots[s]);
+  }
+
+  SPECEX_INFO("keeping " << tmp_spots.size() << " sky lines, " << spots.size()-tmp_spots.size() << " discarded");  
+  spots = tmp_spots;
+}
 
 double computechi2ab(bool fit_flux, bool fit_dx) {
   
@@ -50,9 +83,6 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
   int npar   = 0;
   if(fit_dx) { npardx=dxpol.coeff.size(); npardy=dypol.coeff.size(); npar += (npardx+npardy);}
   if(fit_flux) { npar += spots.size();}
-  cout << "npardx=" << npardx << endl;
-  cout << "npardy=" << npardy << endl;
-  cout << "npar  =" << npar << endl;
   
   harp::vector_double H;
   harp::vector_double pos_der;
@@ -66,10 +96,13 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
   
   double chi2=0;
   
+  if(chi2pdf_of_spots.size() != spots.size()) chi2pdf_of_spots.resize(spots.size());
   for(size_t s=0;s<spots.size();s++) {
     
     specex::Spot_p spot = spots[s];
-    
+    double& spot_chi2 = chi2pdf_of_spots(s);
+    spot_chi2=0;
+
     int begin_i = max(0,int(floor(spot->xc))-psf->hSizeX);
     int end_i   = min(int(image.n_cols()),int(floor(spot->xc))+psf->hSizeX+1);
     int begin_j = max(0,int(floor(spot->yc))-psf->hSizeY);
@@ -85,7 +118,7 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
     double x = spot->xc+dxpol.Value(spot->xc,spot->wavelength);
     double y = spot->yc+dypol.Value(spot->xc,spot->wavelength);
     
-
+    int npix=0;
     for(int j=begin_j;j<end_j;j++) {
       for(int i=begin_i;i<end_i;i++) {
 	double w=weight(i,j);
@@ -108,8 +141,13 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
 	    ublas::noalias(ublas::project(H,ublas::range(npardx,npardx+npardy))) += (pos_der(1) * spot->flux)*dy_monomials;
 	  } 
 	}
+	
+	double dchi2 = w*res*res;
+	chi2 += dchi2;
+	spot_chi2 += dchi2;
+	npix++;
+	
 
-	chi2 += w*res*res;
 	if(fit_dx || fit_flux) {
 	  specex::syr(w,H,A);
 	  specex::axpy(w*res,H,B);
@@ -118,6 +156,11 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
       } // end of loop on i
     } // end of loop on j
     
+    if(npix>1) {
+      spot_chi2 /= (npix-1);
+    }else{
+      spot_chi2=0;
+    }
 
   } // end of loop on spot
   
@@ -364,7 +407,7 @@ int main ( int argc, char *argv[] ) {
   int npardx=dxpol.coeff.size();
   int npardy=dypol.coeff.size();
   
-  
+  bool need_robustification = true;
   for(int iter=0;iter<nmaxiter;iter++) {
     
     bool fit_flux = (iter%2==0); 
@@ -412,10 +455,22 @@ int main ( int argc, char *argv[] ) {
 	  spots[s]->flux -= B(first_flux+s);
 	}
       }
+      if(!need_robustification) 
+	break;
+      else {
+	robustify();
+	need_robustification=false;
+      }
     }
     
-    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<0.1) break;
-    
+    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<0.1) {
+      if(!need_robustification) 
+	break;
+      else{
+	robustify();
+	need_robustification=false;
+      }
+    }
     previous_chi2 = chi2;
     
   } // end of loop on iterations
