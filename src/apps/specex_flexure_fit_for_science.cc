@@ -31,6 +31,104 @@ namespace popts = boost::program_options;
 #include <fenv.h>
 
 
+
+specex::PSF_p psf;
+specex::image_data image,weight;
+vector<specex::Spot_p> spots;
+specex::Legendre2DPol dxpol;
+specex::Legendre2DPol dypol;
+harp::matrix_double A;
+harp::vector_double B;
+
+
+
+
+double computechi2ab(bool fit_flux, bool fit_dx) {
+  
+  int npardx = 0;
+  int npardy = 0;
+  int npar   = 0;
+  if(fit_dx) { npardx=dxpol.coeff.size(); npardy=dypol.coeff.size(); npar += (npardx+npardy);}
+  if(fit_flux) { npar += spots.size();}
+  cout << "npardx=" << npardx << endl;
+  cout << "npardy=" << npardy << endl;
+  cout << "npar  =" << npar << endl;
+  
+  harp::vector_double H;
+  harp::vector_double pos_der;
+  
+  if(fit_dx || fit_flux) {
+    A.resize(npar,npar); A.clear();
+    B.resize(npar); B.clear();
+    H.resize(npar); 
+    pos_der.resize(2);
+  }
+  
+  double chi2=0;
+  
+  for(size_t s=0;s<spots.size();s++) {
+    
+    specex::Spot_p spot = spots[s];
+    
+    int begin_i = max(0,int(floor(spot->xc))-psf->hSizeX);
+    int end_i   = min(int(image.n_cols()),int(floor(spot->xc))+psf->hSizeX+1);
+    int begin_j = max(0,int(floor(spot->yc))-psf->hSizeY);
+    int end_j   = min(int(image.n_rows()),int(floor(spot->yc))+psf->hSizeY+1);
+    
+    harp::vector_double psf_params   = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+    harp::vector_double dx_monomials,dy_monomials;
+    if(fit_dx) {
+      dx_monomials = dxpol.Monomials(spot->xc,spot->wavelength);
+      dy_monomials = dypol.Monomials(spot->xc,spot->wavelength);
+    }
+
+    double x = spot->xc+dxpol.Value(spot->xc,spot->wavelength);
+    double y = spot->yc+dypol.Value(spot->xc,spot->wavelength);
+    
+
+    for(int j=begin_j;j<end_j;j++) {
+      for(int i=begin_i;i<end_i;i++) {
+	double w=weight(i,j);
+	if(w==0) continue;
+	double res = image(i,j);
+	if(fit_dx || fit_flux) H.clear();
+	
+	double prof = 0;
+	if(fit_dx) {
+	  pos_der.clear();
+	  prof = psf->PSFValueWithParamsXY(x,y,i,j,psf_params,&pos_der,NULL,true,true);
+	}else{
+	  prof = psf->PSFValueWithParamsXY(x,y,i,j,psf_params,NULL,NULL,true,true);
+	}
+	if(prof) {
+	  res -= spot->flux*prof;
+	  if(fit_flux) H(npardx+s) += prof;
+	  if(fit_dx) {
+	    ublas::noalias(ublas::project(H,ublas::range(0,npardx))) += (pos_der(0) * spot->flux)*dx_monomials;
+	    ublas::noalias(ublas::project(H,ublas::range(npardx,npardx+npardy))) += (pos_der(1) * spot->flux)*dy_monomials;
+	  } 
+	}
+
+	chi2 += w*res*res;
+	if(fit_dx || fit_flux) {
+	  specex::syr(w,H,A);
+	  specex::axpy(w*res,H,B);
+	}
+
+      } // end of loop on i
+    } // end of loop on j
+    
+
+  } // end of loop on spot
+  
+  return chi2;
+}
+
+
+
+
+
+
 int main ( int argc, char *argv[] ) {
   
   // to crash when NaN
@@ -45,6 +143,7 @@ int main ( int argc, char *argv[] ) {
   string plugmap_filename = "";
   string output_psf_xml_filename = "";
   string output_psf_fits_filename = "";
+  string output_list_filename = "";
   
   string spectrograph_name = "BOSS";
   
@@ -61,6 +160,7 @@ int main ( int argc, char *argv[] ) {
     ( "lines", popts::value<string>( &input_skyline_filename ), "input sky line filename (skylines.dat)" )
     ( "xml", popts::value<string>( &output_psf_xml_filename), "output psf xml filename" )
     ( "fits", popts::value<string>( &output_psf_fits_filename), "output psf fits filename" )
+    ( "list", popts::value<string>( &output_list_filename), "output list of corrections for some wave/fibers" )
     ;
 
   popts::variables_map vm;
@@ -87,7 +187,6 @@ int main ( int argc, char *argv[] ) {
 
   // read PSF
   // --------------------------------------------
-  specex::PSF_p psf;
   {
     std::ifstream is(input_psf_xml_filename.c_str());
     boost::archive::xml_iarchive xml_ia ( is );
@@ -133,7 +232,6 @@ int main ( int argc, char *argv[] ) {
   vector<int> sky_fibers;
   {
     ifstream file (plugmap_filename.c_str());
-    double wave;
     while(!file.eof()){
       std::string str;
       std::getline(file, str);
@@ -141,7 +239,6 @@ int main ( int argc, char *argv[] ) {
       if(str.find("SKY")==str.npos) continue;
       //cout << str << endl;
       std::stringstream ss(str);
-      int count=0;
       string token;
       for(int c=0;c<24;c++) { 
 	if(!(ss >> token)) SPECEX_ERROR("Error in reading " <<plugmap_filename);
@@ -165,12 +262,15 @@ int main ( int argc, char *argv[] ) {
 
   // allocate spots
   // --------------------------------------------
-  vector<specex::Spot_p> spots;
+  spots.clear();
 
   //for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
   //const specex::PSF_Params& params_of_bundle = bundle_it->second;
     // for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
-
+  
+  double wavemin=1e7;
+  double wavemax=0;
+  
   for(size_t f=0;f<sky_fibers.size();f++) {
     int fiber = sky_fibers[f];
     
@@ -189,7 +289,10 @@ int main ( int argc, char *argv[] ) {
     
     double wmin = trace.X_vs_W.xmin;
     double wmax = trace.X_vs_W.xmax;
+    wavemin = min(wmin,wavemin);
+    wavemax = max(wmax,wavemax);
     
+
     for(size_t w=0;w<sky_lines.size();w++) {
       
       if(sky_lines[w]<wmin || sky_lines[w]>wmax) continue;
@@ -212,32 +315,157 @@ int main ( int argc, char *argv[] ) {
   
   // read image
   // --------------------------------------------
-  specex::image_data image,weight;
   read_fits_images(input_science_image_filename,image,weight);
   
-  // load fitter
-  // --------------------------------------------
-  specex::PSF_Fitter fitter(psf,image,weight);
-  fitter.include_signal_in_weight = false;
   
-  bool ok = true;
-  
-  for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
-    const specex::PSF_Params& params_of_bundle = bundle_it->second;
-    vector<specex::Spot_p> selected_spots;
-    for(size_t s=0;s<spots.size();s++) {
-      if (spots[s]->fiber_bundle == params_of_bundle.bundle_id)
-	selected_spots.push_back(spots[s]);
-    }
-    if(selected_spots.size()==0) continue;
+  {
+    specex::PSF_Fitter fitter(psf,image,weight);
+    fitter.include_signal_in_weight = false;
     
-    fitter.SelectFiberBundle(params_of_bundle.bundle_id); 
-    ok = fitter.FitIndividualSpotFluxes(selected_spots);
+    bool ok = true;
+    
+    for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+      const specex::PSF_Params& params_of_bundle = bundle_it->second;
+      vector<specex::Spot_p> selected_spots;
+      for(size_t s=0;s<spots.size();s++) {
+	if (spots[s]->fiber_bundle == params_of_bundle.bundle_id)
+	  selected_spots.push_back(spots[s]);
+      }
+      if(selected_spots.size()==0) continue;
+      
+      fitter.SelectFiberBundle(params_of_bundle.bundle_id); 
+      ok = fitter.FitIndividualSpotFluxes(selected_spots);
+      
+    }
+    int nbad=0;
+    vector<specex::Spot_p>::iterator it=spots.begin();
+    while(it!=spots.end()) {
+    
+      if((*it)->flux<=0) { 
+	SPECEX_WARNING("discarding sky line at fiber " << (*it)->fiber << " " << (*it)->wavelength);
+	it = spots.erase(it);	
+	nbad++;
+      }else{
+	it++;
+      }
+    }
+    SPECEX_INFO("using " << spots.size() << " sky lines, " << nbad << " discarded");
     
   }
-  
-  return 0;
 
+  // allocate polynomials
+  dxpol=specex::Legendre2DPol(1,0,image.n_cols(),1,wavemin,wavemax);
+  dypol=specex::Legendre2DPol(1,0,image.n_cols(),1,wavemin,wavemax);
+  
+
+
+  // start actual fit
+  int nmaxiter=20;
+  int npardx=dxpol.coeff.size();
+  int npardy=dypol.coeff.size();
+  
+  
+  for(int iter=0;iter<nmaxiter;iter++) {
+    
+    bool fit_flux = (iter%2==0); 
+    bool fit_dx   = !fit_flux;
+
+    int npar = 0;
+    if(fit_dx) npar += (npardx+npardy);
+    if(fit_flux) npar += spots.size();
+    
+    SPECEX_INFO("fill matrix iter #" <<iter);    
+    double previous_chi2 = computechi2ab(fit_flux,fit_dx);
+    for(int p=0;p<npar;p++)
+      if(A(p,p)==0) A(p,p)=1.e-12;
+    
+    SPECEX_INFO("solving iter #" <<iter);
+    int status = specex::cholesky_solve(A,B);
+    if(status!=0) SPECEX_ERROR("cholesky solve failed with status " << status);
+    SPECEX_INFO("solving done");
+    
+    int first_flux=0;
+    if(fit_dx) {
+      ublas::noalias(dxpol.coeff) += ublas::project(B,ublas::range(0,npardx));
+      ublas::noalias(dypol.coeff) += ublas::project(B,ublas::range(npardx,npardx+npardy));
+      first_flux = npardx+npardy;
+    }
+    if(fit_flux) {
+      for(size_t s=0;s<spots.size();s++) {
+	spots[s]->flux += B(first_flux+s);
+      }
+     }
+    
+    SPECEX_INFO("compute chi2 iter #" <<iter);
+    double chi2  = computechi2ab(false,false);
+    double dchi2 =  previous_chi2-chi2;
+    
+    SPECEX_INFO("chi2= " << chi2 << " dchi2= " << dchi2);
+    if(dchi2<0) {
+      SPECEX_WARNING("neg. dchi2, rewinding ");
+      if(fit_dx) {
+	ublas::noalias(dxpol.coeff) -= ublas::project(B,ublas::range(0,npardx));
+	ublas::noalias(dypol.coeff) -= ublas::project(B,ublas::range(npardx,npardx+npardy));
+      }
+      if(fit_flux) {
+	for(size_t s=0;s<spots.size();s++) {
+	  spots[s]->flux -= B(first_flux+s);
+	}
+      }
+    }
+    
+    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<0.1) break;
+    
+    previous_chi2 = chi2;
+    
+  } // end of loop on iterations
+  
+  // now apply thoses shifts to the PSF and dump a correction file
+
+  ofstream *os=0;
+  if(output_list_filename != "") {    
+    os = new ofstream(output_list_filename.c_str());
+    *os << "# fiber : " << endl;
+    *os << "# wave : " << endl;
+    *os << "# dx : " << endl;
+    *os << "# dy : " << endl;
+    *os << "#end " << endl;
+  }
+  for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+    for(int fiber=bundle_it->second.fiber_min; fiber<=bundle_it->second.fiber_max; fiber++) {
+      specex::Trace& trace = psf->GetTrace(fiber);
+      
+      double wmin=trace.X_vs_W.xmin;
+      double wmax=trace.X_vs_W.xmax;
+      int nwave=(trace.X_vs_W.deg+1)*2;
+      harp::vector_double wave(nwave);
+      harp::vector_double x(nwave);
+      harp::vector_double y(nwave);
+      
+      for(int i=0;i<nwave;i++) {
+	wave(i) = wmin+(i*(wmax-wmin))/(nwave-1);
+	x(i)    = trace.X_vs_W.Value(wave(i));
+	y(i)    = trace.Y_vs_W.Value(wave(i));
+	double dx = dxpol.Value(x(i),wave(i));
+	double dy = dypol.Value(x(i),wave(i));
+	x(i)   += dx;
+	y(i)   += dy;
+	
+	if(os) *os << fiber << " " << wave(i) << " " << dx << " " << dy << endl;
+	
+      }    
+      trace.X_vs_W.Fit(wave,x,0,false);
+      trace.X_vs_Y.Fit(y,x,0,false);
+      trace.Y_vs_W.Fit(wave,y,0,false);
+      trace.W_vs_Y.Fit(y,wave,0,false);
+    }
+  }
+  if(os) {
+    os->close();
+    SPECEX_INFO("wrote " << output_list_filename);
+  }
+  
+  
   // write PSF
   psf->hSizeX = saved_hsizex;
   psf->hSizeY = saved_hsizey;
