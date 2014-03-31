@@ -12,10 +12,17 @@ import scipy.interpolate
 from math import *
 from specex_air_to_vacuum import *
 from specex_dust_extinction import *
+from specex_cholesky import *
 
 hc = 1.986438e-8 # in units of (ergs.A)^{-1} (hc=2*pi* hbar*c=2*pi*197.326 eV nm = 6.28318*197.326*1.60218e-12*10)
 
-
+def rebin(wave,spec,width) :
+    n1=wave.shape[0]
+    n2=int((wave[-1]-wave[0])/width)
+    n2=n1/(n1/n2)
+    owave    = wave[0:n1-n1%n2].reshape((n2,n1/n2)).mean(-1)
+    ospec    = spec[:,0:n1-n1%n2].reshape((spec.shape[0],n2,n1/n2)).mean(-1)
+    return owave,ospec
 
 # returns a spectrum based on model parameters for each fiber
 # spec_parameters is a dictionnary of of dictionnaries (primary key is the fiber)
@@ -139,14 +146,17 @@ def specex_read_kurucz(modelfilename, spec_parameters, target_wave=None) :
     return target_wave,flux
 
 # read spFluxcalib fits image
-def get_kurucz_parameters(spfluxcalibfilename,starfibers) :
+def get_kurucz_parameters(spfluxcalibfilename,starfibers,specid) :
     print "reading kurucz parameters in",spfluxcalibfilename
     hdulist=pyfits.open(spfluxcalibfilename)
     table=hdulist[2].data
     columns=hdulist[2].columns
     modelparams={}
     for fiber in starfibers :
-        row=numpy.where(table.field("FIBERID")==fiber+1)[0][0]
+        bossfiber=fiber+1
+        if specid==2 :
+            bossfiber += 500
+        row=numpy.where(table.field("FIBERID")==bossfiber)[0][0]
         #print fiber,row
         dico={}
         for k in columns.names :
@@ -346,7 +356,12 @@ for band in ["u","g","r","i","z"] :
     imaging_filters.append(filename)
 
 # get spectrograph id, hardcoded for now, will be read in fits
-specid=1
+
+camera=pyfits.open(infilename)[0].header["CAMERAS"]
+
+specid=string.atoi(camera[1])
+print camera,specid
+
 
 # find  fibers with std stars
 starfibers=[]
@@ -393,7 +408,7 @@ nwave=Rdata.shape[2]
 offsets = range(d,-d-1,-1)
 
 # read kurucz model parameters for each fiber
-model_params   = get_kurucz_parameters(spfluxcalibfilename,starfibers)
+model_params   = get_kurucz_parameters(spfluxcalibfilename,starfibers,specid)
 
 
 # read ebv and calibrated ab magnitudes, I know in advance there are 5 bands
@@ -403,6 +418,8 @@ measured_ab_mags = numpy.zeros((nstarfibers,5))
 spframe_params = read_spframe(spframefilename)
 for spec in range(nstarfibers) :
     fiber=starfibers[spec]
+    if specid==2 :
+       fiber += 500
     ebv[spec]=spframe_params[fiber]["SFD_EBV"]
     
     # MAG is not what we are interested in : 
@@ -471,7 +488,7 @@ for spec in range(nstarfibers) :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
     convolved_model_photon_fluxes[spec]=numpy.dot(R.todense(),model_photon_fluxes[spec])
 
-#pyfits.HDUList([pyfits.PrimaryHDU(convolved_model_photon_fluxes),pyfits.ImageHDU(numpy.zeros(convolved_model_photon_fluxes.shape)),pyfits.ImageHDU(wave)]).writeto("models.fits",clobber=True)
+pyfits.HDUList([pyfits.PrimaryHDU(convolved_model_photon_fluxes),pyfits.ImageHDU(numpy.zeros(convolved_model_photon_fluxes.shape)),pyfits.ImageHDU(wave)]).writeto("models.fits",clobber=True)
 
 # compute the ratio
 # calib_from_phot_to_elec is the conversion factor from photons/cm2/s/A to electrons/A
@@ -480,6 +497,8 @@ calib_from_phot_to_elec=numpy.zeros(convolved_model_photon_fluxes.shape)
 calib_from_phot_to_elec_invar=numpy.zeros(convolved_model_photon_fluxes.shape)
 calib_from_phot_to_elec[:]=spectra[starfibers[:]]/convolved_model_photon_fluxes[:]
 calib_from_phot_to_elec_invar[:]=invar[starfibers[:]]*(convolved_model_photon_fluxes[:])**2
+
+
 
 # now we start the fitting procedure :
 
@@ -509,24 +528,58 @@ if True :
     print "done"
     #median_calib_from_phot_to_elec=numpy.median(smooth_calib_from_phot_to_elec,axis=0)
 
-# 2.2) compute an achromatic offset of the ratio of each star to the median
+# 2.2) compute a chromatic offset of the ratio of each star to the median
 # this will absorb at zeroth order differences of fiber aperture corrections
 # probably due primarily to mis-alignements (themselves due to uncertainties
 # in the plate production + atmospheric differential refraction)
 # model is calib_from_phot_to_elec = corr*median_calib_from_phot_to_elec
-# fit is corr = (sum_i w_i calib_from_phot_to_elec_i median_calib_from_phot_to_elec_i)/(sum_i w_i median_calib_from_phot_to_elec_i**2)
-fiber_aperture_correction=numpy.zeros((nstarfibers))
+print "2.2) compute a chromatic offset of the ratio of each star to the median"
+meanwave=numpy.mean(wave)
+der=numpy.zeros((2,wave.shape[0]))
+der[0]=numpy.ones(wave.shape[0])
+der[1]=(wave-meanwave)/1000.
+fiber_aperture_correction=numpy.zeros((nstarfibers,2))
 for spec in range(nstarfibers) :
-    wmc = numpy.dot(calib_from_phot_to_elec_invar[spec]*calib_from_phot_to_elec[spec],median_calib_from_phot_to_elec)
-    wcc = numpy.dot(calib_from_phot_to_elec_invar[spec]*median_calib_from_phot_to_elec,median_calib_from_phot_to_elec)
-    fiber_aperture_correction[spec]=wmc/wcc
+    A=numpy.zeros((2,2))
+    B=numpy.zeros((2))
+    specder=der.copy()
+    specder[0]*=median_calib_from_phot_to_elec
+    specder[1]*=median_calib_from_phot_to_elec
+    weight=calib_from_phot_to_elec_invar[spec]
+    A[0,0]=numpy.sum(weight*specder[0]*specder[0])
+    A[0,1]=numpy.sum(weight*specder[0]*specder[1])
+    A[1,0]=A[0,1]
+    A[1,1]=numpy.sum(weight*specder[1]*specder[1])
+    B[0]=numpy.sum(weight*specder[0]*calib_from_phot_to_elec[spec])
+    B[1]=numpy.sum(weight*specder[1]*calib_from_phot_to_elec[spec])
+    V,C=cholesky_solve_and_invert(A,B)
+    fiber_aperture_correction[spec]=V;
     
+    #wmc = numpy.dot(calib_from_phot_to_elec_invar[spec]*calib_from_phot_to_elec[spec],median_calib_from_phot_to_elec)
+    #wcc = numpy.dot(calib_from_phot_to_elec_invar[spec]*median_calib_from_phot_to_elec,median_calib_from_phot_to_elec)
+    #fiber_aperture_correction[spec]=wmc/wcc
+#sys.exit(12)
+
 print "fiber aperture corrections     =",fiber_aperture_correction
 print "fiber aperture corrections rms =",numpy.std(fiber_aperture_correction)
-# 3) apply achromatic offset
+
+if False :
+    
+    
+    toto=calib_from_phot_to_elec[:]/median_calib_from_phot_to_elec
+    owave,tutu=rebin(wave,toto,100)
+    pylab.figure("uncorrected_calib_offsets")
+    for spec in range(nstarfibers) :
+        pylab.plot(owave,tutu[spec])
+    pylab.xlabel('Wavelength ($\AA$)')
+    
+    
+
+# 3) apply chromatic offset
 for spec in range(nstarfibers) :
-    calib_from_phot_to_elec[spec]/=fiber_aperture_correction[spec]
-    calib_from_phot_to_elec_invar[spec]*=(fiber_aperture_correction[spec])**2
+    corr = der[0]*fiber_aperture_correction[spec,0]+der[1]*fiber_aperture_correction[spec,1]
+    calib_from_phot_to_elec[spec]/=corr
+    calib_from_phot_to_elec_invar[spec]*=(corr)**2
 
 # 4) refit median
 # this is one way to get the calibration we will record it, but also test other methods
@@ -541,6 +594,21 @@ if False :
         pylab.plot(wave[indices],calib_from_phot_to_elec[spec,indices],color='k')
     pylab.plot(wave,median_calib_from_phot_to_elec, color='b')
     pylab.show()    
+
+if False :
+    
+    
+    toto=calib_from_phot_to_elec[:]/median_calib_from_phot_to_elec
+    owave,tata=rebin(wave,toto,100)
+    pylab.figure("corrected_calib_offsets")
+    for spec in range(nstarfibers) :
+        pylab.plot(owave,tata[spec])
+    pylab.xlabel('Wavelength ($\AA$)')
+    
+    pylab.show()    
+
+
+
 
 # 5) direct fit
 # 5.1) apply achromatic offset to models (inverse of applying it to data)
@@ -587,7 +655,8 @@ if False :
 
 # 6.1) apply achromatic offset to models (inverse of applying it to data)
 for spec in range(nstarfibers) :
-    convolved_model_photon_fluxes[spec]*=fiber_aperture_correction[spec]
+    corr = der[0]*fiber_aperture_correction[spec,0]+der[1]*fiber_aperture_correction[spec,1]
+    convolved_model_photon_fluxes[spec]*=corr
 
 
 # 6.2) fit
