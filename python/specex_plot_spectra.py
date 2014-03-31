@@ -3,7 +3,7 @@
 
 
 
-import pyfits,sys,json,pylab,string
+import pyfits,sys,json,pylab,string,numpy
 from math import *
 
 #pylab.ion() #??
@@ -67,6 +67,7 @@ filename=""
 fibers=[]
 
 show_errors=False
+show_log=False
 
 for arg in sys.argv[1:] :
     
@@ -113,6 +114,8 @@ for dset in datasets :
     for fiber in dset.fibers :
         if show_errors and len(dset.errors) :
             pylab.errorbar(dset.wave,dset.spectra[fiber,:],yerr=dset.errors[fiber,:])
+        elif show_log :
+            pylab.plot(dset.wave,numpy.log(dset.spectra[fiber,:]))
         else :
             pylab.plot(dset.wave,dset.spectra[fiber,:])
 
