@@ -26,24 +26,11 @@ class dataset :
 
         self.fibers = fibers
 
-        self.wave=[]
-        if len(hdulist)==2 :
-            self.wave =  hdulist[1].data[0]
-        elif len(hdulist[2].data.shape)==1 :
-            self.wave =  hdulist[2].data
-        elif len(hdulist[2].data.shape)==2 and hdulist[2].data.shape[0] == 1   :
-            self.wave =  hdulist[2].data[0]
-            
-        if len(self.wave)==0 :
-            print "error couldn't find wave data in file"
-            sys.exit(12)
-
-        if len(self.wave) != nwave :
-            print "error"
-            sys.exit(12)
+        self.wave=hdulist["WAVELENGTH"].data
+        
 
         self.errors=[]
-        ivar=hdulist[1].data
+        ivar=hdulist["IVAR"].data
         if ivar.shape==self.spectra.shape :
             self.errors=ivar
             for i in range(self.errors.shape[0]) :
@@ -52,6 +39,12 @@ class dataset :
                         self.errors[i,j]=1./sqrt(ivar[i,j])
                     else :
                         self.errors[i,j]=0
+                    
+    def get_wave(self,fiber) :
+        if len(self.wave.shape)==1 :
+            return self.wave
+        else :
+            return self.wave[fiber]
 
 def usage() :
     print sys.argv[0],"spec.fits fiber1 fiber2 fiber3:fiber4 spec2.fits fiber5 fiber6 ... (-e)"
@@ -113,11 +106,11 @@ for dset in datasets :
     print dset.filename,dset.fibers
     for fiber in dset.fibers :
         if show_errors and len(dset.errors) :
-            pylab.errorbar(dset.wave,dset.spectra[fiber,:],yerr=dset.errors[fiber,:])
+            pylab.errorbar(dset.get_wave(fiber),dset.spectra[fiber,:],yerr=dset.errors[fiber,:])
         elif show_log :
-            pylab.plot(dset.wave,numpy.log(dset.spectra[fiber,:]))
+            pylab.plot(dset.get_wave(fiber),numpy.log(dset.spectra[fiber,:]))
         else :
-            pylab.plot(dset.wave,dset.spectra[fiber,:])
+            pylab.plot(dset.get_wave(fiber),dset.spectra[fiber,:])
 
 pylab.show() # don't need cause "ion"
 
