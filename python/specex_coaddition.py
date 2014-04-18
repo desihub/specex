@@ -113,7 +113,7 @@ def compute_derivatives() :
     
     # ----------------------------------------------------------------------     
 
-def fit_model(verbose=True) :
+def fit_model(verbose=True,covar=False) :
     if verbose :
         print "filling A B ... "
     npar=output_wave.shape[0]
@@ -136,22 +136,30 @@ def fit_model(verbose=True) :
             #print "der.shape",der.shape
             B[oi:oi+2] += (input_invars[s][i]*input_fluxes[s][i])*der[:]
             A[oi:oi+2,oi:oi+2] += input_invars[s][i]*numpy.outer(der,der)
-
-    if verbose :
-        print "conversion to band matrix ..."
-    d=3
-    offsets = range(d,-d-1,-1)
-    data =  numpy.zeros((len(offsets),npar))  
-    for i in range(len(offsets)) :
-        diagonal=numpy.diag(A,offsets[i])
-        off=max(0,offsets[i])
-        data[i,off:len(diagonal)+off]=diagonal
-    As=scipy.sparse.dia_matrix((data,offsets),shape=(npar,npar))
-    As = As.tocsr()
-    if verbose :
-        print "solve ..."
+    
     global output_flux
-    output_flux=scipy.sparse.linalg.spsolve(As,B)
+    global covmat
+
+    if not covar : 
+        if verbose :
+            print "conversion to band matrix ..."
+        d=3
+        offsets = range(d,-d-1,-1)
+        data =  numpy.zeros((len(offsets),npar))  
+        for i in range(len(offsets)) :
+            diagonal=numpy.diag(A,offsets[i])
+            off=max(0,offsets[i])
+            data[i,off:len(diagonal)+off]=diagonal
+        As=scipy.sparse.dia_matrix((data,offsets),shape=(npar,npar))
+        As = As.tocsr()
+        if verbose :
+            print "solve sparse ..."     
+        output_flux=scipy.sparse.linalg.spsolve(As,B)
+    else :
+        if verbose :
+            print "solve and invert with cholesky ..."  
+        output_flux,covmat=cholesky_solve_and_invert(A,B)
+    
     if verbose :
         print "done"
 
@@ -329,9 +337,12 @@ for fiber in fibers :
         print "loop %d chi2pdf=%f nout=%d/%d"%(loop,chi2pdf,nout,ndata) 
         if nout==0 :
             break
-        
+    
+    # compute_covariance
+    fit_model(verbose=True,covar=True)
+    
     output_invar=numpy.zeros((output_wave.shape[0]))
-    if covmat :
+    if not covmat==None :
         for i in range(output_wave.shape[0]) :
             output_invar[i]=1/covmat[i,i]
         
@@ -358,7 +369,46 @@ for fiber in range(nfibers) :
     flux[fiber,:nw]=output_fluxes[fiber]
     invar[fiber,:nw]=output_invars[fiber]
 
-pyfits.HDUList([pyfits.PrimaryHDU(flux),pyfits.ImageHDU(invar,name="IVAR"),pyfits.ImageHDU(wave,name="WAVELENGTH")]).writeto(output_filename,clobber=True)
+first_filename=sys.argv[2]
+print "copying header from",first_filename
+first_hdulist=pyfits.open(first_filename);
+input_header=first_hdulist[0].header
+
+output_hdulist=pyfits.HDUList([pyfits.PrimaryHDU(flux),pyfits.ImageHDU(invar,name="IVAR"),pyfits.ImageHDU(wave,name="WAVELENGTH")])
+
+
+print input_header
+print input_header["TELESCOP"]
+output_header=output_hdulist[0].header
+print output_header
+
+# copy header of first hdulist
+for k in input_header.keys() :
+   output_header.update(k,input_header[k],"from %s"%first_filename)
+   
+
+keys=["CAMERAS","EXPOSURE","MJD","AZ","ALT"]
+
+for c in range(2,len(sys.argv)) :
+    index=c-2
+    filename=sys.argv[c]
+    hdulist=pyfits.open(filename)
+    header=hdulist[0].header
+    output_header.update("FILE%d"%index,filename,"used in coadd")
+    
+    for k in  keys :
+        tk=k
+        if len(tk)>7 :
+            tk=k[:7]
+        nk="%s%d"%(tk,index)
+        output_header.update(nk,header[k],"%s key of FILE%d"%(k,index))
+
+    hdulist.close()   
+    
+
+
+output_hdulist.writeto(output_filename,clobber=True)
+
 print "wrote",output_filename
 
 sys.exit(0)
