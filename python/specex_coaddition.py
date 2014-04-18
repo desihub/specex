@@ -281,7 +281,8 @@ output_filename=sys.argv[1]
 
 
 
-fibers=[178,179]
+#fibers=[178,179]
+fibers=numpy.arange(500)
 output_waves=[]
 output_fluxes=[]
 output_invars=[]
@@ -370,17 +371,11 @@ for fiber in range(nfibers) :
     invar[fiber,:nw]=output_invars[fiber]
 
 first_filename=sys.argv[2]
-print "copying header from",first_filename
 first_hdulist=pyfits.open(first_filename);
 input_header=first_hdulist[0].header
 
 output_hdulist=pyfits.HDUList([pyfits.PrimaryHDU(flux),pyfits.ImageHDU(invar,name="IVAR"),pyfits.ImageHDU(wave,name="WAVELENGTH")])
-
-
-print input_header
-print input_header["TELESCOP"]
 output_header=output_hdulist[0].header
-print output_header
 
 # copy header of first hdulist
 for k in input_header.keys() :
