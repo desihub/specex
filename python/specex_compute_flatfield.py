@@ -22,6 +22,42 @@ median_flat=numpy.median(spectra, axis=0)
 spectra /= median_flat
 invar *= median_flat*median_flat
 
+# remove outliers due to cosmics
+wstep=50
+knots=wave[0]+wstep/2+wstep*numpy.arange(int((wave[-1]-wave[0])/wstep))
+wstep=200
+loose_knots=wave[0]+wstep/2+wstep*numpy.arange(int((wave[-1]-wave[0])/wstep))
+for fiber in range(spectra.shape[0]) :
+    spec=spectra[fiber]
+    specivar=invar[fiber]
+    indices=numpy.where((spec<0)|(spec>1.5))[0]
+    specivar[indices]=0
+    for loop in range(100) :
+        tck = scipy.interpolate.splrep(wave,spec,task=-1,t=knots,w=specivar)
+        mod = scipy.interpolate.splev(wave,tck,der=0)
+        res = spec-mod
+        rms = numpy.std(res[numpy.where(specivar>0)[0]])
+        # detect 5 sigma outliers of fit and set ivar=0
+        indices=numpy.where((res**2>(5*rms)**2)&(specivar>0))[0]
+        print "fiber %d iter %d rms %f outliers %d"%(fiber,loop,rms,len(indices))
+        if len(indices)==0 :
+            break
+        specivar[indices]=0
+        
+    # replace by interpolation
+    tck = scipy.interpolate.splrep(wave,spec,task=-1,t=loose_knots,w=specivar)
+    mod = scipy.interpolate.splev(wave,tck,der=0)
+    indices=numpy.where(specivar>0)
+    meaninvar=numpy.mean(specivar[indices])
+    indices=numpy.where(specivar==0)
+    if len(indices)>0 :
+        spec[indices]=mod[indices]
+        specivar[indices]=meaninvar
+    
+    spectra[fiber]=spec
+    invar[fiber]=specivar
+    
+    
 hdulist.writeto(outfilename,clobber=True)
 
 if not meanflatfilename == "" :
