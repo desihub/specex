@@ -1,8 +1,5 @@
 #!/usr/bin/env python
 
-
-
-
 import pyfits,sys,json,pylab,string,numpy
 from math import *
 
@@ -26,12 +23,28 @@ class dataset :
 
         self.fibers = fibers
 
-        self.wave=hdulist["WAVELENGTH"].data
+        try :
+            self.wave=hdulist["WAVELENGTH"].data
+        except :
+            for hdu in range(1,len(hdulist)) :
+                data=hdulist[hdu].data
+                if len(data.shape) == 1 :
+                    self.wave=hdulist[hdu].data
+                    break
         
-
+        
+        ivar=None
+        try :
+            ivar=hdulist["IVAR"].data
+        except :
+            for hdu in range(1,len(hdulist)) :
+                data=hdulist[hdu].data
+                if len(data.shape) == 2 :
+                    ivar=hdulist[hdu].data
+                    break
+        
         self.errors=[]
-        ivar=hdulist["IVAR"].data
-        if ivar.shape==self.spectra.shape :
+        if ivar!=None and ivar.shape==self.spectra.shape :
             self.errors=ivar
             for i in range(self.errors.shape[0]) :
                 for j in range(self.errors.shape[1]) :
