@@ -281,12 +281,24 @@ output_filename=sys.argv[1]
 
 
 
-#fibers=[178,179]
+#fibers=[10]
 fibers=numpy.arange(500)
 output_waves=[]
 output_fluxes=[]
 output_invars=[]
 
+#corrected_wave=[]
+corrected_fluxes=[]
+corrected_invars=[]
+print "allocate corrected fluxes and variance"
+for c in range(2,len(sys.argv)) :
+        filename=sys.argv[c]
+        print "reading",filename
+        hdulist=pyfits.open(filename);
+        #corrected_wave.append(hdulist[2].data.copy())
+        corrected_fluxes.append(hdulist[0].data.copy())
+        corrected_invars.append(hdulist[1].data.copy())
+        hdulist.close()
 
 for fiber in fibers :
     print "Adding spectra of fiber",fiber
@@ -307,6 +319,8 @@ for fiber in fibers :
     
     for c in range(2,len(sys.argv)) :
         filename=sys.argv[c]
+        print "fiber #",fiber,"reading",filename
+        sys.stdout.flush()
         hdulist=pyfits.open(filename);
         band=hdulist[0].header["CAMERAS"][0]
         print band,filename
@@ -315,7 +329,8 @@ for fiber in fibers :
         input_fluxes.append(hdulist[0].data[fiber,:])
         input_invars.append(hdulist[1].data[fiber,:])
         hdulist.close()
-    
+        
+        
     nspec=len(input_waves)
     # first create a merged list of wave
     iwave=numpy.zeros((0))
@@ -324,9 +339,18 @@ for fiber in fibers :
     print iwave.shape,iwave[0],iwave[-1]
 
     
+    print "fiber #",fiber,"define output wave"
+    sys.stdout.flush()
+
+    set_output_wave()
+
+    print "fiber #",fiber,"compute derivatives"
+    sys.stdout.flush()
     
-    set_output_wave()    
     compute_derivatives()
+    
+    print "fiber #",fiber,"iterative fit"
+    sys.stdout.flush()
     
     # now we are going to fit the data assuming the model is a piece-wise spectral density
     # this computes output_flux
@@ -335,11 +359,15 @@ for fiber in fibers :
         update_model_per_spec()
         fit_calibration(verbose=False)
         chi2pdf,nout,ndata=outlier_clipping(nsig=5.,wave_bin=200.)
-        print "loop %d chi2pdf=%f nout=%d/%d"%(loop,chi2pdf,nout,ndata) 
+        print "loop %d chi2pdf=%f nout=%d/%d"%(loop,chi2pdf,nout,ndata)
+        sys.stdout.flush()
         if nout==0 :
             break
     
     # compute_covariance
+    print "fiber #",fiber,"compute covariance"
+    sys.stdout.flush()
+    
     fit_model(verbose=True,covar=True)
     
     output_invar=numpy.zeros((output_wave.shape[0]))
@@ -350,10 +378,38 @@ for fiber in fibers :
     output_waves.append(output_wave)
     output_fluxes.append(output_flux)
     output_invars.append(output_invar)
+
+    print "fiber #",fiber,"update corrected fluxes"
+    nspec=len(input_waves)
+    for s in range(nspec) :
+        nw=input_waves[s].shape[0]
+        for i in range(nw) :
+            cder=calibration_derivatives[s][i]
+            calibcorrection=(1+cder.dot(calib_coeffs[s])) # normally applied to model
+            corrected_fluxes[s][fiber,i]=input_fluxes[s][i]/calibcorrection
+            corrected_invars[s][fiber,i]=input_invars[s][i]*(calibcorrection*calibcorrection)
     
+    
+print "writing output"
+sys.stdout.flush()
 
 
-# saving results
+for c in range(2,len(sys.argv)) :
+        ifilename=sys.argv[c]
+        ofilename=string.replace(ifilename,"spXvfsc","spXvfscc")
+        print "reading",ifilename
+        sys.stdout.flush()
+        hdulist=pyfits.open(ifilename);
+        s=c-2
+        hdulist[0].data=corrected_fluxes[s]
+        hdulist[1].data=corrected_invars[s]
+        #hdulist[2].data=corrected_wave[s]
+        
+        hdulist.writeto(ofilename,clobber=True)
+        print "wrote",ofilename
+        sys.stdout.flush()
+
+# saving coadded results
 nfibers=len(fibers)
 # we cannot keep a single wavelenght, but we need to keep the same wavelength range
 nwave=0
@@ -379,8 +435,10 @@ output_header=output_hdulist[0].header
 
 # copy header of first hdulist
 for k in input_header.keys() :
-   output_header.update(k,input_header[k],"from %s"%first_filename)
-   
+    try :
+        output_header.update(k,input_header[k],"from %s"%first_filename)
+    except :
+        pass
 
 keys=["CAMERAS","EXPOSURE","MJD","AZ","ALT"]
 
@@ -389,14 +447,14 @@ for c in range(2,len(sys.argv)) :
     filename=sys.argv[c]
     hdulist=pyfits.open(filename)
     header=hdulist[0].header
-    output_header.update("FILE%d"%index,filename,"used in coadd")
+    output_header.update("FILE%02d"%index,filename,"used in coadd")
     
     for k in  keys :
         tk=k
-        if len(tk)>7 :
-            tk=k[:7]
-        nk="%s%d"%(tk,index)
-        output_header.update(nk,header[k],"%s key of FILE%d"%(k,index))
+        if len(tk)>6 :
+            tk=k[:6]
+        nk="%s%02d"%(tk,index)
+        output_header.update(nk,header[k],"%s key of FILE%02d"%(k,index))
 
     hdulist.close()   
     
