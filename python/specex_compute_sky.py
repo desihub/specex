@@ -19,7 +19,8 @@ if(len(sys.argv)>3) :
     skyfilename=sys.argv[4]
 
 # get spectrograph id, hardcoded for now, will be read in fits
-specid=1
+camera=pyfits.open(infilename)[0].header["CAMERAS"]
+specid=string.atoi(camera[1])
 
 # find sky fibers 
 skyfibers=[]
