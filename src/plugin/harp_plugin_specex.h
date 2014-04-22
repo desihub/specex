@@ -1,10 +1,18 @@
 // @COPYRIGHT@
 
 // To get the usual type definitions from HARP...
-#include <harp.hpp>
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 // This header must be included by external plugins
-#include <harp/plugin.hpp>
+#ifdef USE_MPI
+#  include <harp/mpi_plugin.hpp>
+#else
+#  include <harp/plugin.hpp>
+#endif
 
 
 #include <iostream>

@@ -86,7 +86,10 @@ def options(opt):
                    default=openmp, 
                    dest='openmp', 
                    help='enable OpenMP support [default=%s]'%str(openmp)) 
-
+    opt.add_option("--static",
+                   action="store_true",
+                   dest='static',
+                   help="build static library")
     opt.add_option('--autogen-harp-pkgconfig',
                    action='store', 
                    default=False, 
@@ -130,14 +133,13 @@ def configure(conf):
     if conf.options.harp_pkgconfig_dir :
         harp_pkgconfig(conf.options.harp_pkgconfig_dir)
     
-    
+    if conf.options.static:
+        conf.env['static'] = True
+    else:
+        conf.env['static'] = False
 
     #conf.check_cc(lib='z', msg='Checking for zlib')    
-    conf.check_packages(requirements)
-
-    if conf.options.openmp :
-        conf.env['LINKFLAGS_HARP'].append('-fopenmp')
-    
+    conf.check_packages(requirements)    
 
     conf.write_config_header("config.h")
 
