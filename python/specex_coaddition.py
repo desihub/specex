@@ -43,23 +43,12 @@ def compute_model_invar(invar,calibderivatives) :
     nexpo=flux.shape[0]
     nwave=flux.shape[1]
         
-    a = numpy.zeros(nwave)
-    b = numpy.zeros(nwave)    
-        
     calibcorr=numpy.ones((nexpo,nwave))
     calt=calibderivatives.transpose()
     for expo in range(nexpo) :
         calibcorr[expo,:] += calt[:].dot(calibcoeff[expo])
-        #print calibcorr[expo]
-    
-    a = numpy.sum(invar*calibcorr**2,axis=0)
-    return 1/a
-        
-    
-    #print "done compute mean model"
-    #sys.stdout.flush()  
-    
-    return model
+
+    return numpy.sum(invar*calibcorr**2,axis=0)
 
 def fit_calibration(wave,flux,invar,model,calibcoeff,calibderivatives,verbose=True) :
     
@@ -308,7 +297,7 @@ for band in bands :
         calibmodel=calibrated_model_flux[band][:,fiber,:]
         calibderivatives=calibration_derivatives[band]
 
-        for loop in range(20) :
+        for loop in range(50) :
                         
             # compute model
             model = compute_model(flux=flux,invar=invar,calibcoeff=calibcoeff,calibderivatives=calibderivatives)
@@ -337,7 +326,7 @@ for band in bands :
         sys.stdout.flush()
     
         
-if False :
+if True :
     print "write recalibrated data"
     
     for band in bands :
