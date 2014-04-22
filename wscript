@@ -136,7 +136,7 @@ def configure(conf):
     if conf.options.static:
         conf.env['static'] = True
     else:
-        conv.env['static'] = False
+        conf.env['static'] = False
 
     #conf.check_cc(lib='z', msg='Checking for zlib')    
     conf.check_packages(requirements)    
