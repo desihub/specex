@@ -4,6 +4,11 @@
 import wafutils
 
 def build( bld ):
+    syslibs = []
+    if bld.env['static']:
+        syslibs = ['m', 'z', 'gomp']
+    else:
+        syslibs = ['m', 'z']
     sources = bld.path.ant_glob('*.cc', excl=[])    
     for src in sources:
         target = str(src).replace('.cc', '')
@@ -11,7 +16,7 @@ def build( bld ):
                     source = src,
                     target = target,
                     includes = ['.', '../library'],
-                    lib = ['m', 'z'],
+                    lib = syslibs,
                     uselib = ['HARP'],
                     use = ['specex'],
                     vnum = wafutils.get_version_number() )                          
