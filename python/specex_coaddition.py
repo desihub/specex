@@ -187,7 +187,7 @@ input_filename={}
 plateid=None
 mjd=None
 
-for c in range(2,len(sys.argv)) :
+for c in range(1,len(sys.argv)) :
     filename=sys.argv[c]
     print "inspecting",filename
     hdulist=pyfits.open(filename)
@@ -253,7 +253,7 @@ sys.stdout.flush()
 for band in bands :
     n[band]=0
 
-for c in range(2,len(sys.argv)) :
+for c in range(1,len(sys.argv)) :
     filename=sys.argv[c]
     print "loading",filename
     hdulist=pyfits.open(filename)
