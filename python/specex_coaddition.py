@@ -393,6 +393,9 @@ if True :
         # add some keys
         output_header=output_hdulist[0].header
         output_header.update("NCOEF",ncoef,"number of recalib. coefficients")
+        odico={}
+        for k in output_header.keys() :
+            odico[k]=output_header[k]
         
         first=True
         index=-1
@@ -402,10 +405,11 @@ if True :
             input_header=hdulist[0].header
             if first :
                 for k in input_header.keys() :
-                    try :
-                        output_header.update(k,input_header[k],"from %s"%ifilename)
-                    except :
-                        pass
+                    if not odico.has_key(k) :
+                        try :
+                            output_header.update(k,input_header[k],"from %s"%ifilename)
+                        except :
+                            pass
             first=False
             output_header.update("FILE%02d"%index,filename,"used in coadd")
             for k in ["EXPOSURE","MJD","AZ","ALT"] :

@@ -334,11 +334,12 @@ if True :
     ifilename=input_filename["b1"]
     hdulist=pyfits.open(ifilename);
     input_header=hdulist[0].header 
-
-    
+    odico={}
+    for k in output_header.keys() :
+        odico[k]=output_header[k]
        
     for k in input_header.keys() :
-        if not output_header.has_key(k) :
+        if not odico.has_key(k) :
             try :                
                 output_header.update(k,input_header[k],"from %s"%ifilename)
             except :
