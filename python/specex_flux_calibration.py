@@ -397,6 +397,11 @@ spectra=hdulist[0].data
 invar=hdulist[1].data
 wave=hdulist[2].data
 Rdata=hdulist[3].data
+mask=hdulist["FMASK"].data
+
+starfibers=numpy.intersect1d(starfibers,numpy.where(mask==0)[0])
+print "std stars fibers (after masking)=",starfibers
+
 
 #print "DEBUG: do only few stars"
 #starfibers = starfibers[1:5]
@@ -765,11 +770,13 @@ calib_from_elec_to_ergs_variance *= (1e17)**2
 
 # data : electron/A  -> 10^-17 ergs/cm2/s/A
 
-spectra[:] *= calib_from_elec_to_ergs
-invar[:]   /= calib_from_elec_to_ergs**2
+valid_fibers=numpy.where(mask==0)[0]
+
+spectra[valid_fibers] *= calib_from_elec_to_ergs
+invar[valid_fibers]   /= calib_from_elec_to_ergs**2
 
 # add noise of calibration
-invar[:] = 1/( 1/invar[:] + (spectra[:]/calib_from_elec_to_ergs)**2 * calib_from_elec_to_ergs_variance )
+invar[valid_fibers] = 1/( 1/invar[valid_fibers] + (spectra[valid_fibers]/calib_from_elec_to_ergs)**2 * calib_from_elec_to_ergs_variance )
 
 print "writing result to",outfilename
 hdulist.writeto(outfilename,clobber=True)

@@ -18,7 +18,9 @@ hdulist=pyfits.open(infilename)
 spectra=hdulist[0].data
 invar=hdulist[1].data
 wave   =hdulist[2].data
-median_flat=numpy.median(spectra, axis=0)
+mask=hdulist["FMASK"].data
+valid_fibers=numpy.where(mask==0)[0]
+median_flat=numpy.median(spectra[valid_fibers,:], axis=0)
 spectra /= median_flat
 invar *= median_flat*median_flat
 
@@ -27,7 +29,7 @@ wstep=50
 knots=wave[0]+wstep/2+wstep*numpy.arange(int((wave[-1]-wave[0])/wstep))
 wstep=200
 loose_knots=wave[0]+wstep/2+wstep*numpy.arange(int((wave[-1]-wave[0])/wstep))
-for fiber in range(spectra.shape[0]) :
+for fiber in valid_fibers :
     spec=spectra[fiber]
     specivar=invar[fiber]
     indices=numpy.where((spec<0)|(spec>1.5))[0]

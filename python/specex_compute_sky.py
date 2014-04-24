@@ -57,6 +57,11 @@ spectra=hdulist[0].data
 invar=hdulist[1].data
 wave=hdulist[2].data
 Rdata=hdulist[3].data
+mask=hdulist["FMASK"].data
+
+
+skyfibers=numpy.intersect1d(skyfibers,numpy.where(mask==0)[0])
+print "skyfibers (after masking)=",skyfibers
 
 skyspectra=spectra[skyfibers,:]
 skyinvar=invar[skyfibers,:]
@@ -111,7 +116,8 @@ if skyfilename != "" :
     #pyfits.HDUList([pyfits.PrimaryHDU(skycovmat)]).writeto("skycovmat.fits",clobber=True)
 
 print "subtracting sky to all fibers"
-for fiber in range(nfibers) :
+valid_fibers=numpy.where(mask==0)[0]
+for fiber in valid_fibers :
     R=scipy.sparse.dia_matrix((Rdata[fiber],offsets),(nwave,nwave))
     Rt=R.transpose()
     sky=numpy.dot(R.toarray(),deconvolvedsky) # it is a numpy.matrix that has to be converted to a numpy.array

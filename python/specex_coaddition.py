@@ -260,6 +260,15 @@ for c in range(1,len(sys.argv)) :
     band=hdulist[0].header["CAMERAS"]
     input_flux[band][n[band]]=hdulist[0].data.copy()
     input_invar[band][n[band]]=hdulist[1].data.copy()
+
+    mask=hdulist["FMASK"].data
+    badfibers=numpy.where(mask>0)[0]
+    if badfibers.shape[0]>0 :
+        print "bad fibers for band ",band,"=",badfibers
+        input_flux[band][n[band]][badfibers,:]=0
+        input_invar[band][n[band]][badfibers,:]=0
+        
+    
     hdulist.close()
     n[band] += 1
 print "done loading data"
@@ -292,6 +301,11 @@ for band in bands :
         wave=input_wave[band]
         flux=input_flux[band][:,fiber]
         invar=input_invar[band][:,fiber]
+
+        if numpy.mean(invar) == 0 :
+            print "ignoring band %s fiber %d with null weight"%(band,fiber)
+            continue
+        
         #model=model_flux[band][fiber]
         calibcoeff=model_calibcoeff[band][:,fiber,:]
         calibmodel=calibrated_model_flux[band][:,fiber,:]
@@ -339,7 +353,10 @@ if True :
         expo=-1
         for ifilename in input_filename[band] :
             expo+=1
-            ofilename=string.replace(ifilename,"spXvfsc","spXvfscc")
+            ofilename=string.replace(ifilename,"fsc","fscc")
+            if ofilename==ifilename :
+                print "error in file naming, need to fix this"
+                sys.exit(12)
             print ifilename,"->",ofilename
             sys.stdout.flush()
             

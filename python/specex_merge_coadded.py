@@ -193,6 +193,14 @@ for spectro in range(1,3) :
         
         flux_b_original=input_flux["b%d"%spectro][fiber,b_operlap_indices]
         invar_b_original=input_invar["b%d"%spectro][fiber,b_operlap_indices]
+
+        if numpy.sum(invar_b_original)==0 :
+            print "ignore NULL fiber",fiber
+            input_flux["b%d"%spectro][fiber]=0
+            input_invar["b%d"%spectro][fiber]=0
+            input_flux["r%d"%spectro][fiber]=0
+            input_invar["r%d"%spectro][fiber]=0
+            continue
         
         tck=scipy.interpolate.splrep(owave_b,flux_b_original,w=invar_b_original,task=-1,t=knots,k=1)
         flux_b=scipy.interpolate.splev(knots,tck,der=0)
@@ -201,7 +209,15 @@ for spectro in range(1,3) :
         
         flux_r_original=input_flux["r%d"%spectro][fiber,r_operlap_indices]
         invar_r_original=input_invar["r%d"%spectro][fiber,r_operlap_indices]
-        
+
+        if numpy.sum(invar_r_original)==0 :
+            print "ignore NULL fiber",fiber
+            input_flux["b%d"%spectro][fiber]=0
+            input_invar["b%d"%spectro][fiber]=0
+            input_flux["r%d"%spectro][fiber]=0
+            input_invar["r%d"%spectro][fiber]=0
+            continue
+
         tck=scipy.interpolate.splrep(owave_r,flux_r_original,w=invar_r_original,task=-1,t=knots,k=1)
         flux_r=scipy.interpolate.splev(knots,tck,der=0)
         tck=scipy.interpolate.splrep(owave_r,invar_r_original,w=invar_r_original,task=-1,t=knots,k=1)
