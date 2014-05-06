@@ -1466,7 +1466,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
     // some sanity checks flux == nan is really bad
     for (unsigned k=0; k < nparTot; ++k) {
-      if (isnan(Params(k))) {
+      if (std::isnan(Params(k))) {
 	if(fatal) {
 	  SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots one parameter read nan");
 	} else {
