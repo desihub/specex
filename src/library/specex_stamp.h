@@ -1,7 +1,12 @@
 #ifndef SPECEX_STAMP__H
 #define SPECEX_STAMP__H
 
-#include "harp.hpp"
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
+
 //#include "specex_psf.h"
 #include <iostream>
 

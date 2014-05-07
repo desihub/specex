@@ -2,7 +2,11 @@
 #include <cstdio>
 #include <string>
 
-#include <harp.hpp>
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 #include <specex_image_data.h>
 #include <specex_linalg.h>

@@ -3,9 +3,11 @@
 #include <assert.h>
 #include <ctime>
 
-
-
-#include "harp.hpp"
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 #include "specex_hermite.h"
 #include "specex_gauss_hermite_psf.h"

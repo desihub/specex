@@ -3,7 +3,11 @@
 
 #define CHECK_BOUNDS
 
-#include <harp.hpp>
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 namespace specex {
   class image_data : public harp::image {

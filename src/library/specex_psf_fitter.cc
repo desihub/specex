@@ -1,7 +1,11 @@
 #include <assert.h>
 #include <time.h>
 
-#include "harp.hpp"
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 //#include "specex_base_analytic_psf.h"
 #include "specex_psf_fitter.h"
@@ -1466,7 +1470,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
     // some sanity checks flux == nan is really bad
     for (unsigned k=0; k < nparTot; ++k) {
-      if (isnan(Params(k))) {
+      if (std::isnan(Params(k))) {
 	if(fatal) {
 	  SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots one parameter read nan");
 	} else {

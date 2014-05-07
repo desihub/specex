@@ -1,5 +1,8 @@
 // @COPYRIGHT@
 
+#ifndef HARP_PLUGIN_SPECEX_H
+#define HARP_PLUGIN_SPECEX_H
+
 // To get the usual type definitions from HARP...
 #ifdef USE_MPI
 #  include <harp_mpi.hpp>
@@ -7,18 +10,11 @@
 #  include <harp.hpp>
 #endif
 
-// This header must be included by external plugins
-#ifdef USE_MPI
-#  include <harp/mpi_plugin.hpp>
-#else
-#  include <harp/plugin.hpp>
-#endif
-
+#include <specex_psf.h>
+#include <specex_psf_io.h>
+#include <specex_serialization.h>
 
 #include <iostream>
-
-
-#include <specex_psf.h>
 
 
 namespace harp {
@@ -41,6 +37,8 @@ namespace harp {
         ar & BOOST_SERIALIZATION_NVP(rows_);
         ar & BOOST_SERIALIZATION_NVP(cols_);
         ar & BOOST_SERIALIZATION_NVP(interpolation_);
+        //ar & BOOST_SERIALIZATION_NVP(actual_specex_psf);
+        ar & BOOST_SERIALIZATION_NVP(bundle_);
         return;
       }
 
@@ -96,4 +94,8 @@ namespace harp {
 extern "C" {
   void initialize ( void * registry );
 }
+
+
+#endif
+
 
