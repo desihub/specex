@@ -1,5 +1,11 @@
+
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
+
 #include <specex_hermite.h>
-#include <harp.hpp>
 
 // probabilists Hermite polynomial
 

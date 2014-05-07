@@ -5,7 +5,11 @@
 #include <string>
 #include <map>
 
-#include "harp.hpp"
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 #include "specex_psf.h"
 #include "specex_spot.h"

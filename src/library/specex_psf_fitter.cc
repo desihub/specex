@@ -1,7 +1,11 @@
 #include <assert.h>
 #include <time.h>
 
-#include "harp.hpp"
+#ifdef USE_MPI
+#  include <harp_mpi.hpp>
+#else
+#  include <harp.hpp>
+#endif
 
 //#include "specex_base_analytic_psf.h"
 #include "specex_psf_fitter.h"
