@@ -2,7 +2,7 @@
 #include <fstream>
 #include <ctime>
 
-#include "harp.hpp"
+#include <harp.hpp>
 
 #include "specex_message.h"
 #include "specex_psf.h"

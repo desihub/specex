@@ -3,11 +3,7 @@
 #include <assert.h>
 #include <ctime>
 
-#ifdef USE_MPI
-#  include <harp_mpi.hpp>
-#else
-#  include <harp.hpp>
-#endif
+#include <harp.hpp>
 
 #include "specex_hermite.h"
 #include "specex_hat_hermite_psf.h"

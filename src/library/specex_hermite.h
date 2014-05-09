@@ -1,11 +1,7 @@
 #ifndef SPECEX_HERMITE__H
 #define SPECEX_HERMITE__H
 
-#ifdef USE_MPI
-#  include <harp_mpi.hpp>
-#else
-#  include <harp.hpp>
-#endif
+#include <harp.hpp>
 
 namespace specex {
   double HermitePol(const int Degree, const double &x);

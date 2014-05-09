@@ -4,11 +4,7 @@
 #include <vector>
 #include <string>
 
-#ifdef USE_MPI
-#  include <harp_mpi.hpp>
-#else
-#  include <harp.hpp>
-#endif
+#include <harp.hpp>
 
 //#include "spec2dpsf.h"
 

@@ -5,11 +5,7 @@
 #include <string>
 #include <sstream>
 
-#ifdef USE_MPI
-#  include <harp_mpi.hpp>
-#else
-#  include <harp.hpp>
-#endif
+#include <harp.hpp>
 
 void specex_set_verbose(bool yesorno);
 void specex_set_dump_core(bool yesorno);

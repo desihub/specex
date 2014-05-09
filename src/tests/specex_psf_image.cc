@@ -6,7 +6,7 @@
 #include <boost/archive/xml_oarchive.hpp>
 #include <boost/archive/xml_iarchive.hpp>
 
-#include "harp.hpp"
+#include <harp.hpp>
 
 #include "specex_message.h"
 #include "specex_fits.h"

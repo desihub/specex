@@ -1,12 +1,4 @@
 
-// This header must be included by external plugins.
-// This must come *BEFORE* the main HARP include.
-#ifdef USE_MPI
-#  include <harp/mpi_plugin.hpp>
-#else
-#  include <harp/plugin.hpp>
-#endif
-
 #include <harp_plugin_specex.h>
 
 

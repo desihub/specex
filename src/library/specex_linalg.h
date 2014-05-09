@@ -1,11 +1,7 @@
 #ifndef SPECEX_LINALG__H
 #define SPECEX_LINALG__H
 
-#ifdef USE_MPI
-#  include <harp_mpi.hpp>
-#else
-#  include <harp.hpp>
-#endif
+#include <harp.hpp>
 
 #include <boost/numeric/ublas/io.hpp>
 #include <cmath>
