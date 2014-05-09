@@ -3,11 +3,7 @@
 #include <string>
 #include <sstream>
 
-#ifdef USE_MPI
-#  include <harp_mpi.hpp>
-#else
-#  include <harp.hpp>
-#endif
+#include <harp.hpp>
 
 #include <specex_image_data.h>
 #include <specex_fits.h>

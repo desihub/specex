@@ -52,20 +52,12 @@ specex_stamp.o \
 specex_trace.o \
 specex_vector_utils.o
 
-MPIOBJS = $(patsubst %.o,%_mpi.o,$(OBJS))
-
 LIBS = libspecex.$(PLUG_EXT)
-ifneq "x$(MPICXX)" "x"
-  LIBS += libspecex_mpi.$(PLUG_EXT)
-endif
 
 all : $(LIBS)
 
 libspecex.$(PLUG_EXT) : $(OBJS)
 	$(CXX) $(PLUG_LINK) -o $@ $(OBJS)
-
-libspecex_mpi.$(PLUG_EXT) : $(MPIOBJS)
-	$(MPICXX) $(PLUG_LINK) -o $@ $(MPIOBJS)
 
 install : all
 	@mkdir -p "$(SPECEX_PREFIX)/lib"; \
@@ -80,10 +72,5 @@ clean :
 
 %.o : %.cc $(HEADERS)
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
-
-%_mpi.o : %.cc $(HEADERS)
-	$(MPICXX) $(CXXFLAGS) -o $@ -c $<
-
-
 
 

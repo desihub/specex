@@ -4,7 +4,7 @@
 
 #include <boost/program_options.hpp>
 
-#include "harp.hpp"
+#include <harp.hpp>
 
 #include "specex_message.h"
 #include "specex_fits.h"
