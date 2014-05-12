@@ -52,12 +52,13 @@ specex_stamp.o \
 specex_trace.o \
 specex_vector_utils.o
 
-LIBS = libspecex.$(PLUG_EXT)
+LIBS = libspecex.a
 
 all : $(LIBS)
 
-libspecex.$(PLUG_EXT) : $(OBJS)
-	$(CXX) $(PLUG_LINK) -o $@ $(OBJS)
+libspecex.a : $(OBJS)
+	ar cru $@ $(OBJS)
+	ranlib $@
 
 install : all
 	@mkdir -p "$(SPECEX_PREFIX)/lib"; \
