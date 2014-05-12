@@ -24,5 +24,5 @@ clean :
 
 
 % : %.cc
-	$(CXX) $(CXXFLAGS) -I../library -o $@ $< ../library/libspecex.$(PLUG_EXT) $(LINK)
+	$(CXX) $(CXXFLAGS) -I../library -o $@ $< ../library/libspecex.a $(LINK)
 
