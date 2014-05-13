@@ -19,6 +19,7 @@
 #include <specex_psf_fitter.h>
 #include <specex_psf_io.h>
 #include <specex_serialization.h>
+#include <specex_brent.h>
 
 using namespace std;
 
@@ -41,10 +42,65 @@ harp::matrix_double A;
 harp::vector_double B;
 harp::vector_double chi2pdf_of_spots;
 
+struct BrentBox { // handler to data and params needed to compute chi2 in brent routine
+  bool fit_dx,fit_flux;
+  double chi2_0;
+  BrentBox(bool i_fit_dx,bool i_fit_flux, const double& i_chi2_0) :
+    fit_dx(i_fit_dx),
+    fit_flux(i_fit_flux),
+    chi2_0(i_chi2_0)
+  {}
+};
+
+double computechi2ab(bool fit_flux, bool fit_dx);
+double compute_chi2_for_a_given_step(const double &current_step, BrentBox* bbox) {
+
+  int npardx = 0;
+  int npardy = 0;
+  int first_flux=0;
+  if(bbox->fit_dx) { 
+    npardx=dxpol.coeff.size(); 
+    npardy=dypol.coeff.size(); 
+    first_flux = npardx+npardy;
+  }
+  
+  
+  
+
+  harp::vector_double sB=current_step*B;
+  if(bbox->fit_dx) {
+    ublas::noalias(dxpol.coeff) += ublas::project(sB,ublas::range(0,npardx));
+    ublas::noalias(dypol.coeff) += ublas::project(sB,ublas::range(npardx,npardx+npardy));
+  }
+  if(bbox->fit_flux) {
+    for(size_t s=0;s<spots.size();s++) {
+      spots[s]->flux += sB(first_flux+s);
+    }
+  }
+
+  double chi2=computechi2ab(false,false);
+  SPECEX_INFO("brent step = " << current_step << " chi2= " << chi2 << " dchi2=" << bbox->chi2_0-chi2);
+  // rewind
+  if(bbox->fit_dx) {
+    ublas::noalias(dxpol.coeff) -= ublas::project(sB,ublas::range(0,npardx));
+    ublas::noalias(dypol.coeff) -= ublas::project(sB,ublas::range(npardx,npardx+npardy));
+  }
+  if(bbox->fit_flux) {
+    for(size_t s=0;s<spots.size();s++) {
+      spots[s]->flux -= sB(first_flux+s);
+    }
+  }
+
+  return chi2;
+  
+}
+
 void robustify() {
   SPECEX_INFO("robustify");
 
   if(chi2pdf_of_spots.size() != spots.size()) SPECEX_ERROR("spots and chi2pdf_of_spots don't have same size");
+
+  int n_discarded=0;
 
   double mean_chi2pdf=0;
   double rms_chi2pdf=0;
@@ -62,18 +118,21 @@ void robustify() {
   SPECEX_INFO("mean chi2/ndf = " << mean_chi2pdf << " rms=" << rms_chi2pdf);
   double nsig=5;
   
-  
+    
   vector<specex::Spot_p> tmp_spots;
   for(size_t s=0;s<spots.size();s++) {
-    if(chi2pdf_of_spots(s)>mean_chi2pdf+nsig*rms_chi2pdf) { 
-      SPECEX_INFO("discarding sky line at fiber " << spots[s]->fiber << " " << spots[s]->wavelength << " because chi2pdf=" << chi2pdf_of_spots(s));
+    if(chi2pdf_of_spots(s)>mean_chi2pdf+nsig*rms_chi2pdf || spots[s]->flux<=0) { 
+      SPECEX_INFO("discarding sky line at fiber " << spots[s]->fiber << " " << spots[s]->wavelength << " because chi2pdf=" << chi2pdf_of_spots(s) << " flux=" << spots[s]->flux);
       continue;
     }
     tmp_spots.push_back(spots[s]);
   }
-
-  SPECEX_INFO("keeping " << tmp_spots.size() << " sky lines, " << spots.size()-tmp_spots.size() << " discarded");  
+  n_discarded = spots.size()-tmp_spots.size();
   spots = tmp_spots;
+  
+
+  SPECEX_INFO("keeping " << spots.size() << " sky lines, " << n_discarded << " discarded");  
+  
 }
 
 double computechi2ab(bool fit_flux, bool fit_dx) {
@@ -187,7 +246,7 @@ int main ( int argc, char *argv[] ) {
   string output_psf_xml_filename = "";
   string output_psf_fits_filename = "";
   string output_list_filename = "";
-  
+  string output_residual_fits_image_filename = "";
   string spectrograph_name = "BOSS";
   
 
@@ -204,6 +263,7 @@ int main ( int argc, char *argv[] ) {
     ( "xml", popts::value<string>( &output_psf_xml_filename), "output psf xml filename" )
     ( "fits", popts::value<string>( &output_psf_fits_filename), "output psf fits filename" )
     ( "list", popts::value<string>( &output_list_filename), "output list of corrections for some wave/fibers" )
+    ( "res", popts::value<string>( &output_residual_fits_image_filename), "output residuals for monitoring" )
     ;
 
   popts::variables_map vm;
@@ -236,6 +296,29 @@ int main ( int argc, char *argv[] ) {
     xml_ia >> BOOST_SERIALIZATION_NVP(psf);
     is.close();
   }
+  // modify PSF params to get accurate position derivatives
+  // first copy params to restore them afterwards
+  std::map<int,specex::PSF_Params> saved_ParamsOfBundles = psf->ParamsOfBundles;
+  for(std::map<int,specex::PSF_Params>::iterator it=psf->ParamsOfBundles.begin(); it !=psf->ParamsOfBundles.end(); ++it) {
+    specex::PSF_Params& psf_params = it->second;
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      const string& name = psf->ParamName(p);
+      if(0)
+      if(name=="TAILAMP") {
+	SPECEX_INFO("Set TAILAMP to 0");
+	// set it to 0, we don't want to bother with tails here
+	psf_params.AllParPolXW[p]->coeff *= 0;
+      }
+      if(name=="GHNSIG") {
+	SPECEX_INFO("Set GHNSIG to 100000");
+	psf_params.AllParPolXW[p]->coeff(0) = 100000;
+	for(size_t i=1;i<psf_params.AllParPolXW[p]->coeff.size();i++)
+	  psf_params.AllParPolXW[p]->coeff(i)=0;
+      }
+    }
+  }
+      
+
   int saved_hsizex = psf->hSizeX;
   int saved_hsizey = psf->hSizeY;
   psf->hSizeX=3;
@@ -272,14 +355,25 @@ int main ( int argc, char *argv[] ) {
   SPECEX_INFO("Spectrograph number #" << spectro_id);
   SPECEX_INFO("Reading PlugMap in " << plugmap_filename);
   
-  vector<int> sky_fibers;
+  vector<int> selected_fibers;
   {
     ifstream file (plugmap_filename.c_str());
     while(!file.eof()){
       std::string str;
       std::getline(file, str);
       if(str.find("PLUGMAPOBJ")==str.npos) continue;
-      if(str.find("SKY")==str.npos) continue;
+      bool is_obj = (str.find("OBJECT")!=str.npos);
+      if(!is_obj) continue; // not a fiber with a target
+      
+      bool is_sky = (str.find("SKY")!=str.npos);
+      //bool is_star = (str.find("SPECTROPHOTO_STD")!=str.npos);
+      bool is_gal = (str.find("GALAXY")!=str.npos);
+      bool is_qso = (str.find("QSO")!=str.npos);
+      
+      //if(!is_sky) continue; // only on sky fibers
+      
+      if((!is_sky) && (!is_gal) && (!is_qso)) continue; 
+      
       //cout << str << endl;
       std::stringstream ss(str);
       string token;
@@ -292,13 +386,13 @@ int main ( int argc, char *argv[] ) {
       if(spectro != spectro_id) continue;
       int fiber = boss_fiber_id-1;
       if(spectro_id==2) fiber -= 500;
-      sky_fibers.push_back(fiber);
+      selected_fibers.push_back(fiber);
     }
     file.close();
   }
   SPECEX_INFO("done");
-  cout << "Using sky fibers ";
-  for(size_t f=0;f<sky_fibers.size();f++) cout << " " << sky_fibers[f];
+  cout << "Using fibers ";
+  for(size_t f=0;f<selected_fibers.size();f++) cout << " " << selected_fibers[f];
   cout << endl;
   
  
@@ -314,19 +408,31 @@ int main ( int argc, char *argv[] ) {
   double wavemin=1e7;
   double wavemax=0;
   
-  for(size_t f=0;f<sky_fibers.size();f++) {
-    int fiber = sky_fibers[f];
+  for(size_t f=0;f<selected_fibers.size();f++) {
+    int fiber = selected_fibers[f];
     
+    const specex::PSF_Params* bundle_params = 0;
     int bundle = -1;
     for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
       if(bundle_it->second.fiber_min<=fiber && bundle_it->second.fiber_max>=fiber){
 	bundle = bundle_it->second.bundle_id;
+	bundle_params = &(bundle_it->second);
 	break;
       }
     }
     if(bundle==-1) SPECEX_ERROR("Coudn't find bundle of fiber " << fiber);
     
-    
+    // check chi2
+    if(bundle_params->ndata_in_core<=0) {
+      SPECEX_WARNING("Bundle of fiber " << fiber << " has ndata_in_core=" << bundle_params->ndata_in_core);
+      continue;
+    }
+    if(bundle_params->chi2_in_core/bundle_params->ndata_in_core > 20) {
+      SPECEX_WARNING("Discard fiber " << fiber << " with bundle with core chi2/ndata = " << bundle_params->chi2_in_core/bundle_params->ndata_in_core);
+      continue;
+    }
+   
+
     const specex::Trace& trace = psf->GetTrace(fiber);
     if(trace.Off()) continue;
     
@@ -395,35 +501,44 @@ int main ( int argc, char *argv[] ) {
   }
 
   // allocate polynomials
-  dxpol=specex::Legendre2DPol(1,0,image.n_cols(),1,wavemin,wavemax);
-  dypol=specex::Legendre2DPol(1,0,image.n_cols(),1,wavemin,wavemax);
+  dxpol=specex::Legendre2DPol(2,0,image.n_cols(),2,wavemin,wavemax);
+  dypol=specex::Legendre2DPol(2,0,image.n_cols(),2,wavemin,wavemax);
   
 
 
   // start actual fit
+
+  double min_dchi2=max(0.1,0.0001*spots.size()*((2*psf->hSizeX+1)*(2*psf->hSizeY+1)));
+  SPECEX_INFO("Min delta chi2 = " << min_dchi2 );
+  
+  
+
   int nmaxiter=20;
   int npardx=dxpol.coeff.size();
   int npardy=dypol.coeff.size();
   
   bool need_robustification = true;
+  bool fit_flux = false;
+  bool fit_dx = false;
   for(int iter=0;iter<nmaxiter;iter++) {
     
-    bool fit_flux = (iter%2==0); 
-    bool fit_dx   = !fit_flux;
+    fit_flux = (iter%2==0); 
+    fit_dx   = (!fit_flux);
+   
 
     int npar = 0;
     if(fit_dx) npar += (npardx+npardy);
     if(fit_flux) npar += spots.size();
     
-    SPECEX_INFO("fill matrix iter #" <<iter);    
+    //SPECEX_INFO("fill matrix iter #" <<iter);    
     double previous_chi2 = computechi2ab(fit_flux,fit_dx);
     for(int p=0;p<npar;p++)
       if(A(p,p)==0) A(p,p)=1.e-12;
     
-    SPECEX_INFO("solving iter #" <<iter);
+    //SPECEX_INFO("solving iter #" <<iter);
     int status = specex::cholesky_solve(A,B);
     if(status!=0) SPECEX_ERROR("cholesky solve failed with status " << status);
-    SPECEX_INFO("solving done");
+    //SPECEX_INFO("solving done");
     
     int first_flux=0;
     if(fit_dx) {
@@ -437,11 +552,78 @@ int main ( int argc, char *argv[] ) {
       }
      }
     
-    SPECEX_INFO("compute chi2 iter #" <<iter);
+    //SPECEX_INFO("compute chi2 iter #" <<iter);
     double chi2  = computechi2ab(false,false);
     double dchi2 =  previous_chi2-chi2;
     
-    SPECEX_INFO("chi2= " << chi2 << " dchi2= " << dchi2);
+    SPECEX_INFO("#" << iter << " chi2= " << chi2 << " dchi2= " << dchi2 << " fit_dx=" << fit_dx << " fit_flux=" << fit_flux << " nspots=" << spots.size());
+
+    if(dchi2<0 && fabs(dchi2)>0.5*min_dchi2) {
+      SPECEX_INFO("STARTING BRENT");
+      // rewinding
+      if(fit_dx) {
+	ublas::noalias(dxpol.coeff) -= ublas::project(B,ublas::range(0,npardx));
+	ublas::noalias(dypol.coeff) -= ublas::project(B,ublas::range(npardx,npardx+npardy));
+      }
+      if(fit_flux) {
+	for(size_t s=0;s<spots.size();s++) {
+	  spots[s]->flux -= B(first_flux+s);
+	}
+      }
+      
+      double min_step=-0.05;
+      double max_step=1.05;
+      double prefered_step=1;
+      int status=0;
+      double best_chi2=0;
+      double brent_precision = 0.01;
+      
+      BrentBox bbox(fit_dx,fit_flux,previous_chi2);
+      
+      
+      double best_step = brent((AnalyticFunction*)(compute_chi2_for_a_given_step),
+			       min_step,prefered_step,max_step,
+			       brent_precision,&bbox,best_chi2,status,100);
+
+      dchi2=previous_chi2-best_chi2;
+      chi2=best_chi2;
+      SPECEX_INFO("#" << iter << "(bis) chi2= " << chi2 << " dchi2= " << dchi2 << " fit_dx=" << fit_dx << " fit_flux=" << fit_flux << " nspots=" << spots.size());
+      
+      /*
+      if(0) {
+      int brent_loop=0;
+      while(dchi2<0 && brent_loop<3) {
+	
+	max_step=best_step*0.5;
+	prefered_step=best_step*0.25;
+
+	SPECEX_INFO("RESTART BRENT WITH SMALLER STEP");
+	best_step = brent((AnalyticFunction*)(compute_chi2_for_a_given_step),
+				 min_step,prefered_step,max_step,
+				 brent_precision,&bbox,best_chi2,status,100);
+	dchi2=previous_chi2-best_chi2;
+	chi2=best_chi2;
+	
+	brent_loop++;
+	
+      }
+      }
+      */
+      
+      // apply this
+      B *= best_step;
+
+      if(fit_dx) {
+	ublas::noalias(dxpol.coeff) += ublas::project(B,ublas::range(0,npardx));
+	ublas::noalias(dypol.coeff) += ublas::project(B,ublas::range(npardx,npardx+npardy));
+      }
+      if(fit_flux) {
+	for(size_t s=0;s<spots.size();s++) {
+	  spots[s]->flux += B(first_flux+s);
+	}
+      }
+    }
+    
 
     bool has_just_robustified = false;
 
@@ -456,6 +638,7 @@ int main ( int argc, char *argv[] ) {
 	  spots[s]->flux -= B(first_flux+s);
 	}
       }
+      
       if(!need_robustification) 
 	break;
       else {
@@ -464,7 +647,7 @@ int main ( int argc, char *argv[] ) {
       }
     }
     
-    if(iter>=3 && fit_dx && fabs(previous_chi2-chi2)<0.1) {
+    if(iter>=3 && fit_dx && fabs(dchi2)<min_dchi2) {
       if(!need_robustification) {
 	if(!has_just_robustified)
 	  break;
@@ -472,6 +655,7 @@ int main ( int argc, char *argv[] ) {
 	robustify();
 	need_robustification=false;
 	has_just_robustified=true;
+	previous_chi2 = 1e12;
       }
     }
     previous_chi2 = chi2;
@@ -485,16 +669,27 @@ int main ( int argc, char *argv[] ) {
     os = new ofstream(output_list_filename.c_str());
     *os << "# fiber : " << endl;
     *os << "# wave : " << endl;
+    *os << "# x : " << endl;
+    *os << "# y : " << endl;
     *os << "# dx : " << endl;
     *os << "# dy : " << endl;
     *os << "#end " << endl;
+  }
+  
+  double wmin=1e12;
+  double wmax=0;
+  for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+    for(int fiber=bundle_it->second.fiber_min; fiber<=bundle_it->second.fiber_max; fiber++) {
+      specex::Trace& trace = psf->GetTrace(fiber);
+      
+      wmin=min(wmin,trace.X_vs_W.xmin);
+      wmax=max(wmax,trace.X_vs_W.xmax);
+    }
   }
   for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
     for(int fiber=bundle_it->second.fiber_min; fiber<=bundle_it->second.fiber_max; fiber++) {
       specex::Trace& trace = psf->GetTrace(fiber);
       
-      double wmin=trace.X_vs_W.xmin;
-      double wmax=trace.X_vs_W.xmax;
       int nwave=(trace.X_vs_W.deg+1)*2;
       harp::vector_double wave(nwave);
       harp::vector_double x(nwave);
@@ -509,7 +704,7 @@ int main ( int argc, char *argv[] ) {
 	x(i)   += dx;
 	y(i)   += dy;
 	
-	if(os) *os << fiber << " " << wave(i) << " " << dx << " " << dy << endl;
+	if(os) *os << fiber << " " << wave(i) << " " << x(i) << " " << y(i) << " " << dx << " " << dy << endl;
 	
       }    
       trace.X_vs_W.Fit(wave,x,0,false);
@@ -527,6 +722,7 @@ int main ( int argc, char *argv[] ) {
   // write PSF
   psf->hSizeX = saved_hsizex;
   psf->hSizeY = saved_hsizey;
+  psf->ParamsOfBundles = saved_ParamsOfBundles;
   
   if(output_psf_xml_filename !="")
     write_psf_xml(psf, output_psf_xml_filename);
@@ -534,4 +730,77 @@ int main ( int argc, char *argv[] ) {
     write_psf_fits(psf,output_psf_fits_filename);
   }
  
+
+  
+
+  // try to save residuals
+  
+
+  if(output_residual_fits_image_filename != "") {
+    SPECEX_INFO("computing residuals");
+    specex::image_data model=image;
+    model.data *= 0;
+    
+    psf->hSizeX = 3;
+    psf->hSizeY = 3;
+    for(size_t s=0;s<spots.size();s++) {
+      specex::Spot_p spot = spots[s];
+      int begin_i = max(0,int(floor(spot->xc))-psf->hSizeX);
+      int end_i   = min(int(image.n_cols()),int(floor(spot->xc))+psf->hSizeX+1);
+      int begin_j = max(0,int(floor(spot->yc))-psf->hSizeY);
+      int end_j   = min(int(image.n_rows()),int(floor(spot->yc))+psf->hSizeY+1); 
+      harp::vector_double psf_params   = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
+      double x = spot->xc+dxpol.Value(spot->xc,spot->wavelength);
+      double y = spot->yc+dypol.Value(spot->xc,spot->wavelength);
+      for(int j=begin_j;j<end_j;j++) {
+	for(int i=begin_i;i<end_i;i++) {
+	  double w=weight(i,j);
+	  if(w==0) continue;
+	  double prof = psf->PSFValueWithParamsXY(x,y,i,j,psf_params,NULL,NULL,true,false); // no tail
+	  model(i,j) += spot->flux*prof;
+	}
+      }
+    }
+    specex::image_data residuals=image;
+    
+    for(size_t i=0;i<residuals.data.size();i++) {
+      if(fabs(model.data(i))>0) 
+	residuals.data(i)=image.data(i)-model.data(i);
+      else
+	residuals.data(i)=0;
+    }
+    
+    specex::image_data pull=residuals;
+    
+    for(size_t i=0;i<residuals.data.size();i++) {
+      if(fabs(residuals.data(i))>0)
+	pull.data(i)=residuals.data(i)*sqrt(weight.data(i));
+    }
+    
+    fitsfile * fp;  
+    harp::fits::create ( fp, output_residual_fits_image_filename);
+      
+    harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+    harp::fits::img_write ( fp, image.data ,false);
+    harp::fits::key_write(fp,"WHAT","DATA","");
+    
+    harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+    harp::fits::img_write ( fp, model.data ,false);
+    harp::fits::key_write(fp,"EXTNAME","MODEL","");
+    
+    harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+    harp::fits::img_write ( fp, residuals.data ,false);
+    harp::fits::key_write(fp,"EXTNAME","RESIDUAL","");
+    
+    harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
+    harp::fits::img_write ( fp, pull.data ,false);
+    harp::fits::key_write(fp,"EXTNAME","PULL","");
+    
+    harp::fits::close ( fp );
+    SPECEX_INFO("wrote residuals in " << output_residual_fits_image_filename);
+    
+  }
+  
+ 
+
 }
