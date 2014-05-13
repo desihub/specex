@@ -19,8 +19,8 @@ clean :
 	@rm -f $(PLUGS) *.o *~
 
 
-harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o ../library/libspecex.$(PLUG_EXT)
-	$(CXX) $(PLUG_FLAGS) $(PLUG_LINK) -o $@ $< ../library/libspecex.$(PLUG_EXT) $(LINK)
+harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o ../library/libspecex.a
+	$(CXX) $(PLUG_FLAGS) $(PLUG_LINK) -o $@ $< ../library/libspecex.a $(LINK)
 
 harp_plugin_specex.o : harp_plugin_specex.cc $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(PLUG_FLAGS) -I../library -o $@ -c $<
