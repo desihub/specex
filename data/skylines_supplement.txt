@@ -1,0 +1,25 @@
+From 
+Title: Night-sky spectral atlas of OH emission lines in the near-infrared
+Authors: Rousselot, P., Lidman, C., Cuby, J.-G., Moreels, G., & Monnet, G.
+Journal: Astronomy and Astrophysics, v.354, p.1134-1150 (2000)
+Bibliographic Code: 2000A&A...354.1134R
+
+Vacuum high intensity OH lines (Fig 3. of the paper)
+
+brightest is a blend of  (can't use this one)
+10014.086 (vacuum)
+10015.555 (vacuum)
+10016.731 (vacuum) 
+
+interesting lines to add :
+10085.231 (vacuum)
+10126.784 (vacuum)
+10174.488 (vacuum)
+
+
+conversion to air (using Table 3 of the paper, checked with specex_air_to_vacuum)
+10082.467  (air)
+10124.009  (air)
+10171.700  (air)
+
+
