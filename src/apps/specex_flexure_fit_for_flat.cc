@@ -143,7 +143,7 @@ void robustify() {
   
 }
 
-
+double max_chi2ndata_core = 20;
 
 
 double computechi2ab(bool fit_flux, bool fit_dx) {
@@ -178,6 +178,16 @@ double computechi2ab(bool fit_flux, bool fit_dx) {
     
     const specex::PSF_Params& params_of_bundle = bundle_it->second;
     
+    // check chi2
+    if(params_of_bundle.ndata_in_core<=0) {
+      //SPECEX_WARNING("Bundle  has ndata_in_core=" << params_of_bundle.ndata_in_core);
+      continue;
+    }
+    if(params_of_bundle.chi2_in_core/params_of_bundle.ndata_in_core > max_chi2ndata_core) {
+      //SPECEX_WARNING("Discard bundle with core chi2/ndata = " << params_of_bundle.chi2_in_core/params_of_bundle.ndata_in_core);
+      continue;
+    }
+
     if(params_of_bundle.bundle_id%5==0) cout << "doing bundle " << params_of_bundle.bundle_id << endl;
     
     for(int jj=0;jj<nrows;jj++) {
@@ -369,7 +379,27 @@ int main ( int argc, char *argv[] ) {
     xml_ia >> BOOST_SERIALIZATION_NVP(psf);
     is.close();
   }
-
+  // modify PSF params to get accurate position derivatives
+  // first copy params to restore them afterwards
+  std::map<int,specex::PSF_Params> saved_ParamsOfBundles = psf->ParamsOfBundles;
+  for(std::map<int,specex::PSF_Params>::iterator it=psf->ParamsOfBundles.begin(); it !=psf->ParamsOfBundles.end(); ++it) {
+    specex::PSF_Params& psf_params = it->second;
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      const string& name = psf->ParamName(p);
+      if(0)
+      if(name=="TAILAMP") {
+	SPECEX_INFO("Set TAILAMP to 0");
+	// set it to 0, we don't want to bother with tails here
+	psf_params.AllParPolXW[p]->coeff *= 0;
+      }
+      if(name=="GHNSIG") {
+	SPECEX_INFO("Set GHNSIG to 100000");
+	psf_params.AllParPolXW[p]->coeff(0) = 100000;
+	for(size_t i=1;i<psf_params.AllParPolXW[p]->coeff.size();i++)
+	  psf_params.AllParPolXW[p]->coeff(i)=0;
+      }
+    }
+  }
   
   
 
@@ -391,6 +421,22 @@ int main ( int argc, char *argv[] ) {
   double wmax=0;
   nfibers = 0;
   for(std::map<int,specex::PSF_Params>::iterator bundle_it = psf->ParamsOfBundles.begin(); bundle_it != psf->ParamsOfBundles.end(); bundle_it++) {
+
+
+    const specex::PSF_Params* bundle_params = &(bundle_it->second);
+    
+    // check chi2
+    if(bundle_params->ndata_in_core<=0) {
+      SPECEX_WARNING("Bundle has ndata_in_core=" << bundle_params->ndata_in_core);
+      continue;
+    }
+    if(bundle_params->chi2_in_core/bundle_params->ndata_in_core > max_chi2ndata_core) {
+      SPECEX_WARNING("Discard bundle with core chi2/ndata = " << bundle_params->chi2_in_core/bundle_params->ndata_in_core);
+      continue;
+    }
+   
+    
+
     for(int fiber=bundle_it->second.fiber_min; fiber<=bundle_it->second.fiber_max; fiber++) {
       const specex::Trace& trace = psf->GetTrace(fiber);
       if(trace.Off()) continue; 
@@ -527,6 +573,9 @@ int main ( int argc, char *argv[] ) {
     os->close();
     SPECEX_INFO("wrote " << output_list_filename);
   }
+
+  psf->ParamsOfBundles = saved_ParamsOfBundles;
+
   // write PSF
   if(output_psf_xml_filename !="")
     write_psf_xml(psf, output_psf_xml_filename);
