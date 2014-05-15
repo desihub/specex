@@ -3,7 +3,19 @@ Title: Night-sky spectral atlas of OH emission lines in the near-infrared
 Authors: Rousselot, P., Lidman, C., Cuby, J.-G., Moreels, G., & Monnet, G.
 Journal: Astronomy and Astrophysics, v.354, p.1134-1150 (2000)
 Bibliographic Code: 2000A&A...354.1134R
+And 
+Title: Night-Sky High-Resolution Spectral Atlas of OH and O2 Emission Lines for Echelle Spectrograph Wavelength Calibration
+Authors: Osterbrock, D. E., Fulbright, J. P., Martel, A. R., Keane, M. J., Trager, S. C., &
+Basri, G., ,
+Journal: Publications of the Astronomical Society of the Pacific, v.108, p.277
+Bibliographic Code: 1996PASP..108..277O
+And
+Title: Night-Sky High-Resolution Spectral Atlas of OH Emission Lines for Echelle Spectrograph Wavelength Calibration. II.
+Authors: Osterbrock, D. E.; Fulbright, J. P.; Bida, T. A.
+Bibliographic Code: 1997PASP..109..614O
 
+2000A&A...354.1134R
+----------------------------------------------------------------------------
 Vacuum high intensity OH lines (Fig 3. of the paper)
 
 brightest is a blend of  (can't use this one)
@@ -21,5 +33,18 @@ conversion to air (using Table 3 of the paper, checked with specex_air_to_vacuum
 10082.467  (air)
 10124.009  (air)
 10171.700  (air)
+----------------------------------------------------------------------------
 
 
+1996PASP..108..277O
+----------------------------------------------------------------------------
+8885.850 (already in skylines.dat)
+8958.084 ((8958.246+8957.922)/2. only 0.3A diff. of two lines)
+----------------------------------------------------------------------------
+
+1997PASP..109..614O
+----------------------------------------------------------------------------
+9375.961 8-4 Q1(1.5)
+9439.650 8-4 P1(2.5)
+9476.830 8-4 P1e(3.5)+P1f(3.5)
+----------------------------------------------------------------------------
