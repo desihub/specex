@@ -381,19 +381,14 @@ int main ( int argc, char *argv[] ) {
   }
   // modify PSF params to get accurate position derivatives
   // first copy params to restore them afterwards
-  std::map<int,specex::PSF_Params> saved_ParamsOfBundles = psf->ParamsOfBundles;
+  std::map<int,double> GHNSIG_values;
   for(std::map<int,specex::PSF_Params>::iterator it=psf->ParamsOfBundles.begin(); it !=psf->ParamsOfBundles.end(); ++it) {
     specex::PSF_Params& psf_params = it->second;
     for(int p=0;p<psf->LocalNAllPar();p++) {
       const string& name = psf->ParamName(p);
-      if(0)
-      if(name=="TAILAMP") {
-	SPECEX_INFO("Set TAILAMP to 0");
-	// set it to 0, we don't want to bother with tails here
-	psf_params.AllParPolXW[p]->coeff *= 0;
-      }
       if(name=="GHNSIG") {
 	SPECEX_INFO("Set GHNSIG to 100000");
+	GHNSIG_values[it->first]=psf_params.AllParPolXW[p]->coeff(0);
 	psf_params.AllParPolXW[p]->coeff(0) = 100000;
 	for(size_t i=1;i<psf_params.AllParPolXW[p]->coeff.size();i++)
 	  psf_params.AllParPolXW[p]->coeff(i)=0;
@@ -574,8 +569,16 @@ int main ( int argc, char *argv[] ) {
     SPECEX_INFO("wrote " << output_list_filename);
   }
 
-  psf->ParamsOfBundles = saved_ParamsOfBundles;
-
+  for(std::map<int,specex::PSF_Params>::iterator it=psf->ParamsOfBundles.begin(); it !=psf->ParamsOfBundles.end(); ++it) {
+    specex::PSF_Params& psf_params = it->second;
+    for(int p=0;p<psf->LocalNAllPar();p++) {
+      const string& name = psf->ParamName(p);
+      if(name=="GHNSIG") {
+	psf_params.AllParPolXW[p]->coeff(0) = GHNSIG_values.find(it->first)->second;
+      }
+    }
+  }
+  
   // write PSF
   if(output_psf_xml_filename !="")
     write_psf_xml(psf, output_psf_xml_filename);
