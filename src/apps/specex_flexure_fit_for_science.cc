@@ -74,65 +74,7 @@ struct BrentBox { // handler to data and params needed to compute chi2 in brent 
 };
 
 double computechi2ab(vector<specex::SpotC_p> spots_to_fit, bool fit_flux, bool fit_cont, bool fit_dx);
-double compute_chi2_for_a_given_step(const double &current_step, BrentBox* bbox) {
-
-  int npardx = 0;
-  int npardy = 0;
-  int first_flux=0;
-  int first_cont=0;
-  int npar = 0;
-  if(bbox->fit_dx) { 
-    npardx=dxpol.coeff.size(); 
-    npardy=dypol.coeff.size(); 
-    npar += (npardx+npardy);
-  }
-  if(bbox->fit_flux) {
-    first_flux = npar;
-    npar += bbox->spots_to_fit.size();
-  }
-  if(bbox->fit_cont) {
-    first_cont = npar;
-    npar += bbox->spots_to_fit.size();
-  }
-    
-
-  harp::vector_double sB=current_step*B;
-  if(bbox->fit_dx) {
-    ublas::noalias(dxpol.coeff) += ublas::project(sB,ublas::range(0,npardx));
-    ublas::noalias(dypol.coeff) += ublas::project(sB,ublas::range(npardx,npardx+npardy));
-  }
-  if(bbox->fit_flux) {
-    for(size_t s=0;s<bbox->spots_to_fit.size();s++) {
-      bbox->spots_to_fit[s]->flux += sB(first_flux+s);
-    }
-  }
-  if(bbox->fit_cont) {
-    for(size_t s=0;s<bbox->spots_to_fit.size();s++) {
-      bbox->spots_to_fit[s]->cont += sB(first_cont+s);
-    }
-  }
-
-  double chi2=computechi2ab(bbox->spots_to_fit,false,false,false);
-  SPECEX_INFO("brent step = " << current_step << " chi2= " << chi2 << " dchi2=" << bbox->chi2_0-chi2);
-  // rewind
-  if(bbox->fit_dx) {
-    ublas::noalias(dxpol.coeff) -= ublas::project(sB,ublas::range(0,npardx));
-    ublas::noalias(dypol.coeff) -= ublas::project(sB,ublas::range(npardx,npardx+npardy));
-  }
-  if(bbox->fit_flux) {
-    for(size_t s=0;s<bbox->spots_to_fit.size();s++) {
-      bbox->spots_to_fit[s]->flux -= sB(first_flux+s);
-    }
-  }
-  if(bbox->fit_cont) {
-    for(size_t s=0;s<bbox->spots_to_fit.size();s++) {
-      bbox->spots_to_fit[s]->cont -= sB(first_cont+s);
-    }
-  }
-
-  return chi2;
-  
-}
+double compute_chi2_for_a_given_step(const double &current_step, BrentBox* bbox);
 
 void robustify(vector<specex::SpotC_p>& spots) {
   SPECEX_INFO("robustify");
