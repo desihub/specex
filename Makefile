@@ -5,7 +5,6 @@ endif
 # get the variables from harpconfig
 
 export CXX := $(shell harpconfig --cxx)
-export MPICXX := $(shell harpconfig --mpicxx)
 
 export CXXFLAGS := $(shell harpconfig --cxxflags --cppflags) -I. -Wuninitialized -Wunused-value -Wunused-variable
 
@@ -14,7 +13,7 @@ export PLUG_LINK := $(shell harpconfig --pluglink)
 export PLUG_EXT := $(shell harpconfig --plugext)
 
 export LINK := $(shell harpconfig --link)
-export MPILINK := $(shell harpconfig --mpilink)
+
 
 # descend to src directory
 
