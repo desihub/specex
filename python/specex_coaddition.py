@@ -86,7 +86,8 @@ def fit_calibration(wave,flux,invar,model,calibcoeff,calibderivatives,verbose=Tr
         
         # new calib corrections :
         calibcoeff[expo] += cholesky_solve(A,B)
-    
+        
+            
     
     
     # center this
@@ -297,7 +298,7 @@ for band in bands :
     fibers=numpy.arange(input_flux[band].shape[1])
     
     for fiber in fibers :
-
+        
         wave=input_wave[band]
         flux=input_flux[band][:,fiber]
         invar=input_invar[band][:,fiber]
@@ -311,26 +312,39 @@ for band in bands :
         calibmodel=calibrated_model_flux[band][:,fiber,:]
         calibderivatives=calibration_derivatives[band]
 
-        for loop in range(50) :
-                        
-            # compute model
-            model = compute_model(flux=flux,invar=invar,calibcoeff=calibcoeff,calibderivatives=calibderivatives)
+        try :
+            for loop in range(50) :
+
+                # compute model
+                model = compute_model(flux=flux,invar=invar,calibcoeff=calibcoeff,calibderivatives=calibderivatives)
+
+                # outlier rejection
+                chi2pdf,nout=outlier_clipping(wave=wave,flux=flux,invar=invar,model=model,calibcoeff=calibcoeff,calibderivatives=calibderivatives,calibmodel=calibmodel,nsig=4.,wave_bin=500.)
+
+                # fit calibration
+                calibcoeff=fit_calibration(wave=wave,flux=flux,invar=invar,model=model,calibcoeff=calibcoeff,calibderivatives=calibderivatives,verbose=True)
+
+                line = "#%d %s f=%03d chi2pdf=%4.3f nout=%03d coef="%(loop,band,fiber,chi2pdf,nout)
+                for expo in range(nexpo) :
+                    line += " %f"%calibcoeff[expo,0]
+
+                print line
+
+
+                if nout==0 :
+                    break
+
+            model_flux[band][fiber]=model
+            model_invar[band][fiber]=compute_model_invar(invar=invar,calibderivatives=calibderivatives)
+            model_calibcoeff[band][:,fiber,:]=calibcoeff
             
-            # outlier rejection
-            chi2pdf,nout=outlier_clipping(wave=wave,flux=flux,invar=invar,model=model,calibcoeff=calibcoeff,calibderivatives=calibderivatives,calibmodel=calibmodel,nsig=4.,wave_bin=500.)
-            
-            # fit calibration
-            calibcoeff=fit_calibration(wave=wave,flux=flux,invar=invar,model=model,calibcoeff=calibcoeff,calibderivatives=calibderivatives,verbose=True)
-                        
-            line = "#%d %s f=%03d chi2pdf=%4.3f nout=%03d coef="%(loop,band,fiber,chi2pdf,nout)
-            for expo in range(nexpo) :
-                line += " %f"%calibcoeff[expo,0]
-            
-            print line
-            
-            
-            if nout==0 :
-                break
+        except :
+            print "failure",sys.exc_info()[0]
+            model*=0
+            model_flux[band][fiber]=model
+            model_invar[band][fiber]=model
+            calibcoeff*=0
+            model_calibcoeff[band][:,fiber,:]=calibcoeff
         
 
         model_flux[band][fiber]=model

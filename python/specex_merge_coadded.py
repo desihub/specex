@@ -63,8 +63,8 @@ def compute_interpolation_derivatives(wave_data,wave_model) :
 
 
 
-if len(sys.argv)<5 :
-    print sys.argv[0],"coadd-b1-xxxx-xxxxx.fits coadd-b2-xxxx-xxxxx.fits coadd-r1-xxxx-xxxxx.fits coadd-r2-xxxx-xxxxx.fits"
+if len(sys.argv)<6 :
+    print sys.argv[0],"spPlate.fits coadd-b1-xxxx-xxxxx.fits coadd-b2-xxxx-xxxxx.fits coadd-r1-xxxx-xxxxx.fits coadd-r2-xxxx-xxxxx.fits"
     sys.exit(12);
 
 
@@ -80,7 +80,9 @@ input_filename={}
 plateid=None
 mjd=None
 
-for c in range(1,len(sys.argv)) :
+
+
+for c in range(2,len(sys.argv)) :
     filename=sys.argv[c]
     print "inspecting",filename
     hdulist=pyfits.open(filename)
@@ -337,11 +339,14 @@ invar[:nfibers1,nb:]=input_invar["r1"][:,r_indices]
 flux[nfibers1:,nb:]=input_flux["r2"][:,r_indices]
 invar[nfibers1:,nb:]=input_invar["r2"][:,r_indices]
 
+plate=pyfits.open(sys.argv[1])
+table=plate["PLUGMAP"]
+
 # write file
 
 ofilename = "coadd-merged-%s-%s.fits"%(str(plateid),str(mjd))
 output_hdulist=pyfits.HDUList([pyfits.PrimaryHDU(flux),pyfits.ImageHDU(invar,name="IVAR"),\
-                                   pyfits.ImageHDU(wave,name="WAVELENGTH")]) #,pyfits.ImageHDU(R,name="RESOLUTION")])
+                                   pyfits.ImageHDU(wave,name="WAVELENGTH"),table]) #,pyfits.ImageHDU(R,name="RESOLUTION")])
 
 # add some keys
 output_header=output_hdulist[0].header

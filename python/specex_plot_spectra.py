@@ -131,6 +131,11 @@ for dset in datasets :
         else :
             pylab.plot(dset.get_wave(fiber),dset.spectra[fiber,:],color=color)
 
+pylab.xlim([9300,9600])
+pylab.ylim([-100,2000])
+
+
+
 pylab.show() # don't need cause "ion"
 
 #import IPython
