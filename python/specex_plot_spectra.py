@@ -117,13 +117,19 @@ for filename in specfilenames :
 
 for dset in datasets :
     print dset.filename,dset.fibers
+
+    if dset.filename==datasets[-1].filename :
+        color="r"
+    else :
+        color="Gray"
+        
     for fiber in dset.fibers :
         if show_errors and len(dset.errors) :
-            pylab.errorbar(dset.get_wave(fiber),dset.spectra[fiber,:],yerr=dset.errors[fiber,:])
+            pylab.errorbar(dset.get_wave(fiber),dset.spectra[fiber,:],yerr=dset.errors[fiber,:],color=color)
         elif show_log :
-            pylab.plot(dset.get_wave(fiber),numpy.log(dset.spectra[fiber,:]))
+            pylab.plot(dset.get_wave(fiber),numpy.log(dset.spectra[fiber,:]),color=color)
         else :
-            pylab.plot(dset.get_wave(fiber),dset.spectra[fiber,:])
+            pylab.plot(dset.get_wave(fiber),dset.spectra[fiber,:],color=color)
 
 pylab.show() # don't need cause "ion"
 
