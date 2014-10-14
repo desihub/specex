@@ -32,7 +32,7 @@ namespace harp {
         ar & BOOST_SERIALIZATION_NVP(rows_);
         ar & BOOST_SERIALIZATION_NVP(cols_);
         ar & BOOST_SERIALIZATION_NVP(interpolation_);
-        //ar & BOOST_SERIALIZATION_NVP(actual_specex_psf);
+        ar & BOOST_SERIALIZATION_NVP(actual_specex_psf);
         ar & BOOST_SERIALIZATION_NVP(bundle_);
         return;
       }
