@@ -7,7 +7,6 @@
 namespace specex {
 
   class TraceSet;
-
   
   void read_DESI_traceset_in_fits(
 				  TraceSet& traceset,
@@ -15,6 +14,10 @@ namespace specex {
 				  int x_vs_wave_hdu_number, 
 				  int y_vs_wave_hdu_number
 				  );
+  void read_DESI_keywords(
+			  const std::string& arc_image_filename, 
+			  std::map<std::string,std::string>& infos
+			  );
 };
 
 #endif

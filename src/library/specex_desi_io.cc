@@ -2,12 +2,11 @@
 
 #include <harp.hpp>
 
+#include "specex_psf.h"
 #include "specex_trace.h"
-
-//#include "specex_fits.h"
 #include "specex_desi_io.h"
-//#include "specex_spectrograph.h"
 #include "specex_message.h"
+
 
 
 using namespace std;
@@ -114,4 +113,18 @@ void specex::read_DESI_traceset_in_fits(
   }
   
   SPECEX_INFO("done reading traceset");
+}
+
+void specex::read_DESI_keywords(const std::string& arc_image_filename, std::map<std::string,std::string>& infos) {
+  
+  fitsfile * fp= 0;
+  harp::fits::open_read (fp,arc_image_filename);
+  harp::fits::img_seek ( fp, 2);
+  infos.clear();
+  string keys[]={"RDNOISE"};
+  for(int k=0;k<1;k++) {
+    harp::fits::key_read (fp,keys[k],infos[keys[k]]);
+  }
+
+  harp::fits::close(fp);
 }
