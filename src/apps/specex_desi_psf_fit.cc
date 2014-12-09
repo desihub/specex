@@ -168,15 +168,16 @@ int main ( int argc, char *argv[] ) {
     // define spectrograph (this should be improved)
     // --------------------------------------------
     TraceSet traceset;
+    map<string,string> image_infos;
     Spectrograph *spectro = 0;
     if(spectrograph_name == "BOSS") {
-      spectro = new BOSS_Spectrograph();
+      SPECEX_ERROR("do not deal with BOSS here");
     }else if(spectrograph_name == "DESI"){
       spectro = new DESI_Spectrograph();
       /* read traces in arc file */
       read_DESI_traceset_in_fits(traceset,arc_image_filename,5,6);
       spectro->AutoConfigure(traceset);
- 
+      read_DESI_keywords(arc_image_filename,image_infos);
     }else{
       SPECEX_ERROR("unknown spectrograph");
     }
@@ -238,11 +239,6 @@ int main ( int argc, char *argv[] ) {
     
         
     
-
-    
-    map<string,string> image_infos;
-    
-        
     psf->FiberTraces.clear();
     
     
@@ -270,7 +266,13 @@ int main ( int argc, char *argv[] ) {
 
     // compute mean readout noise
     fitter.psf->readout_noise = 2;
-    if(image_infos.find("RDNOISE0") != image_infos.end()) fitter.psf->readout_noise = atof(image_infos["RDNOISE0"].c_str());
+    if(image_infos.find("RDNOISE") != image_infos.end()) {
+      fitter.psf->readout_noise = atof(image_infos["RDNOISE"].c_str());
+      if(fitter.psf->readout_noise<=0) {
+	SPECEX_ERROR("Absurd RDNOISE read in header = " << fitter.psf->readout_noise );
+      }
+      SPECEX_INFO("Using RDNOISE from image header = " << fitter.psf->readout_noise );
+    }
     
     
     for(int j=0;j<weight.Ny();j++) {
