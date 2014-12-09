@@ -2536,17 +2536,19 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       if(ok)
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
+  
+    
+    SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
+    SPECEX_INFO("=======================================");
+    fit_flux       = false;
+    fit_position   = false;
+    fit_psf        = false;
+    fit_trace      = false;
+    fit_psf_tail   = scheduled_fit_of_psf_tail;
+    fit_continuum  = scheduled_fit_of_continuum;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   }
   
-  SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
-  SPECEX_INFO("=======================================");
-  fit_flux       = false;
-  fit_position   = false;
-  fit_psf        = false;
-  fit_trace      = false;
-  fit_psf_tail   = scheduled_fit_of_psf_tail;
-  fit_continuum  = scheduled_fit_of_continuum;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   fit_psf_tail   = false; // don't fit this anymore
   fit_continuum   = false; // don't fit this anymore
   {
