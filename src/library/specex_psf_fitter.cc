@@ -131,12 +131,17 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   {
     int ref_fiber=(psf_params->fiber_min + psf_params->fiber_max)/2;
     while(psf->FiberTraces.find(ref_fiber)==psf->FiberTraces.end()) {ref_fiber++;} // we check we don't choose a missing one
+    
     vector<int> spots_j;
     for(size_t s=0;s<spot_tmp_data.size();s++) {
       const specex::SpotTmpData &tmp = spot_tmp_data[s];
       if(tmp.fiber != ref_fiber) continue;
-      if(tmp.y>0 && tmp.y<image.n_rows())
-	spots_j.push_back(int(tmp.y));
+      if((tmp.y<0) || (tmp.y>=image.n_rows()))
+	SPECEX_ERROR("Spot is outside of image ??? y=" << tmp.y);
+      spots_j.push_back(int(tmp.y));
+    }
+    if(spots_j.empty()) {
+      SPECEX_ERROR("No spots for ref fiber");
     }
     std::sort(spots_j.begin(),spots_j.end());
     
@@ -204,6 +209,11 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     tmp.flux = spot->flux;
     tmp.x    = psf->Xccd(spot->fiber,spot->wavelength);
     tmp.y    = psf->Yccd(spot->fiber,spot->wavelength);
+
+    if ((tmp.y<0 || tmp.y>image.n_rows()) || (tmp.x<0 || tmp.x>image.n_cols())) {
+      SPECEX_ERROR("spot outside image ? x=" << tmp.x << " y=" << tmp.y);
+    }
+
     tmp.wavelength     = spot->wavelength;
     tmp.fiber          = spot->fiber;
     tmp.fiber_bundle   = spot->fiber_bundle;
@@ -2270,9 +2280,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 		<< " wave " << w3 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w3,psf_params->bundle_id),ublas::range(0,2)));
     
   }
-  write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
-  write_psf_xml(psf,"psf-after-gaussian-fit.xml");
-  
+  if(write_tmp_results) {
+    write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
+    write_psf_xml(psf,"psf-after-gaussian-fit.xml");
+  }
 
   if(scheduled_fit_of_traces) {
     
@@ -2380,7 +2391,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       }
     }
     
-    write_spots_xml(input_spots,"spots-after-trace-fit.xml");
+    if(write_tmp_results)
+      write_spots_xml(input_spots,"spots-after-trace-fit.xml");
   }
   if(scheduled_fit_of_traces) {
     

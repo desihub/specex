@@ -107,7 +107,7 @@ class PSF_Fitter {
   bool fit_continuum;
   bool scheduled_fit_of_continuum;
 #endif
-
+  bool write_tmp_results;
 
   double chi2_precision;
   bool include_signal_in_weight;
@@ -148,6 +148,7 @@ class PSF_Fitter {
     fit_continuum(false),
     scheduled_fit_of_continuum(false),
 #endif
+    write_tmp_results(false),
     fatal(true),
     parallelized(true),
     verbose(true),

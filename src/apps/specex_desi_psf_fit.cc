@@ -87,7 +87,9 @@ int main ( int argc, char *argv[] ) {
   
   string output_xml_filename="";
   string output_fits_filename="";
+  string output_spots_filename="";
   
+  bool write_tmp_results = false;
 
   if(getenv("SPECEXDATA"))
     lamp_lines_filename = string(getenv("SPECEXDATA"))+"/lamplines-specex.par";
@@ -107,7 +109,7 @@ int main ( int argc, char *argv[] ) {
     ( "psfmodel", popts::value<string>( &psf_model ), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode" )
-    ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $IDLSPEC2D_DIR/opfiles/lamplines.par)" )
+    ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/opfiles/lamplines.par)" )
     ( "core", "dump core files when harp exception is thrown" )
     ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
     ("gauss_hermite_deg2",  popts::value<int>( &gauss_hermite_deg2 ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
@@ -125,6 +127,7 @@ int main ( int argc, char *argv[] ) {
     ( "no_trace_fit", "do not fit traces")
     ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
     ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
+    ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
 
@@ -142,6 +145,14 @@ int main ( int argc, char *argv[] ) {
       cerr << argv[0] << " -v" << endl;
       return EXIT_FAILURE;
     }
+
+    if(lamp_lines_filename == "") {
+      cerr << endl;
+      cerr << "missing lamp_lines_filename either define env. variable SPECEXDATA or use option --lamplines" << endl;
+      return EXIT_FAILURE;
+    }
+
+
   }catch(std::exception e) {
     cerr << "error in arguments" << endl;
     cerr << endl;
@@ -354,8 +365,8 @@ int main ( int argc, char *argv[] ) {
       allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
-      
-      write_spots_xml(spots,"spots-init.xml");
+      if(write_tmp_results)
+	write_spots_xml(spots,"spots-init.xml");
       
       
       //exit(12);
@@ -385,28 +396,8 @@ int main ( int argc, char *argv[] ) {
 	fitted_spots.push_back(spots[s]);
       }
 
-      {
-	// writing spots as xml
-	
-	char filename[100];
-	sprintf(filename,"spots-%s-%08d-%03d-%03d.xml",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
-	write_spots_xml(fitted_spots,filename);
-      }
-      {
-	// writing psf as xml
-	char filename[100];
-	
-	sprintf(filename,"psf-%s-%08d-%03d-%03d.xml",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
-	write_psf_xml(fitter.psf,filename);
-	
-	//if(psf_model == "GAUSSHERMITE" || psf_model == "GAUSSHERMITE2") {
-	if(psf_model == "GAUSSHERMITE2") {
-	  sprintf(filename,"psf-%s-%08d-%03d-%03d.fits",psf->camera_id.c_str(),(int)psf->arc_exposure_id,first_fitted_fiber,last_fitted_fiber);
-	  write_psf_fits(fitter.psf,filename);
-	}
-	
 
-      }
+      
 
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
@@ -420,6 +411,8 @@ int main ( int argc, char *argv[] ) {
       write_psf_xml(fitter.psf,output_xml_filename);
     if(output_fits_filename != "")
       write_psf_fits(fitter.psf,output_fits_filename);
+    if(output_spots_filename != "")
+      write_spots_xml(fitted_spots,output_spots_filename);
     
 
 
