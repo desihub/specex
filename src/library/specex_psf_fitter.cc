@@ -127,7 +127,15 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   // choosing bins
   harp::vector_double begin_j(number_of_image_bands);
   harp::vector_double end_j(number_of_image_bands);
+  
   int band = 0;
+  for(band=0; band<number_of_image_bands; band++) {
+    begin_j(band)=0;
+    end_j(band)=0;
+  }
+  
+
+  band = 0;
   {
     int ref_fiber=(psf_params->fiber_min + psf_params->fiber_max)/2;
     while(psf->FiberTraces.find(ref_fiber)==psf->FiberTraces.end()) {ref_fiber++;} // we check we don't choose a missing one
@@ -149,25 +157,34 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     //for(vector<int>::const_iterator j=spots_j.begin();j!=spots_j.end();j++) {
     //cout << " " << *j;
     //}
-    
+
+    //SPECEX_INFO("stamp begin " << stamp.begin_j << " end " << stamp.end_j);
+
     band = 0;
     int nspots_per_band = spots_j.size()/number_of_image_bands;
     vector<int>::const_iterator j=spots_j.begin();
     begin_j(0) = stamp.begin_j;
     int nspots=0;
     for(vector<int>::const_iterator j=spots_j.begin();j!=spots_j.end();j++) {
-      nspots++;
-      if(nspots>=nspots_per_band) {
-	end_j(band) = min(stamp.end_j,(*j)+psf->hSizeY+2);
-	band++;
-	if(band>=number_of_image_bands) break;
+      if(band>0 && nspots==0) 
 	begin_j(band) = end_j(band-1);
+      
+      end_j(band) = min(stamp.end_j,(*j)+psf->hSizeY+2);      
+      nspots++;
+      if(nspots>=nspots_per_band) {	
+	band++;
 	nspots=0;
+	if(band>=number_of_image_bands) break;	
       }
     }
-    end_j(number_of_image_bands-1) = stamp.end_j;
     
-    // for(band=0; band<number_of_image_bands; band++) SPECEX_INFO("band " << band << " [" << begin_j(band) << ":" << end_j(band) << "]");
+    // set last to bound of stamp
+    for(band=number_of_image_bands-1;band>=0;band--)
+      if(end_j(band)!=0) {end_j(band)=stamp.end_j; break;}
+    
+    //for(band=0; band<number_of_image_bands; band++) 
+    //SPECEX_INFO("band " << band << " [" << begin_j(band) << ":" << end_j(band) << "]");
+    
     
   }
 
