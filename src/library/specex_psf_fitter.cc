@@ -135,7 +135,8 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     for(size_t s=0;s<spot_tmp_data.size();s++) {
       const specex::SpotTmpData &tmp = spot_tmp_data[s];
       if(tmp.fiber != ref_fiber) continue;
-      spots_j.push_back(int(tmp.y));
+      if(tmp.y>0 && tmp.y<image.n_rows())
+	spots_j.push_back(int(tmp.y));
     }
     std::sort(spots_j.begin(),spots_j.end());
     

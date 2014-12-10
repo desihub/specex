@@ -342,12 +342,13 @@ int main ( int argc, char *argv[] ) {
       if(psf->camera_id=="r1") {ymin=200; ymax = 3668;}; 
       if(psf->camera_id=="r2") {ymin=200; ymax = 3668;};
 
-#warning "need to know where to get xy ccd range info"
-
+      
       int margin = 1; // we want to keep as much as possible to minimize extrapolation
       ymin+=margin;
       ymax-=margin;
       
+
+      SPECEX_INFO("valid y(=rows) range = " << ymin << " " << ymax);
 
       vector<Spot_p> spots;
       allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
