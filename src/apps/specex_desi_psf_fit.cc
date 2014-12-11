@@ -90,7 +90,9 @@ int main ( int argc, char *argv[] ) {
   string output_spots_filename="";
   
   bool write_tmp_results = false;
-
+  int flux_hdu=1;
+  int ivar_hdu=2;
+  
   if(getenv("SPECEXDATA"))
     lamp_lines_filename = string(getenv("SPECEXDATA"))+"/lamplines-specex.par";
    
@@ -100,6 +102,8 @@ int main ( int argc, char *argv[] ) {
   desc.add_options()
     ( "help,h", "display usage information" )
     ( "arc,a", popts::value<string>( &arc_image_filename ), "arc pre-reduced fits image file name (mandatory), ex:  sdProc-b1-00108382.fits" )
+    ( "flux-hdu", popts::value<int>( &flux_hdu ), " flux hdu in input arc fits")
+    ( "ivar-hdu", popts::value<int>( &ivar_hdu ), " ivar hdu in input arc fits")
     ( "first_bundle", popts::value<int>( &first_fiber_bundle ), "first fiber bundle to fit")
     ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
     ( "first_fiber", popts::value<int>( &first_fiber ), "first fiber (must be in bundle)")
@@ -209,8 +213,8 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------
     image_data image,weight;
     //read_fits_images(arc_image_filename,image,weight);
-    read_fits_image(arc_image_filename,2,image);
-    read_fits_image(arc_image_filename,3,weight);
+    read_fits_image(arc_image_filename,flux_hdu,image);
+    read_fits_image(arc_image_filename,ivar_hdu,weight);
     
     SPECEX_INFO("image  size = " << image.n_cols() << "x" << image.n_rows());
     SPECEX_INFO("weight size = " << weight.n_cols() << "x" << weight.n_rows());

@@ -4,6 +4,7 @@
 #define CHECK_BOUNDS
 
 #include <harp.hpp>
+#include <specex_message.h>
 
 namespace specex {
   class image_data : public harp::image {
@@ -32,7 +33,7 @@ namespace specex {
     inline double& operator()(const int i, const int j) {
 #ifdef CHECK_BOUNDS
       if (i<0 || i>=cols_ || j<0 || j>=rows_)
-	HARP_THROW("Out of range");
+	SPECEX_ERROR("Out of range");
 #endif
       return data[i+j*cols_]; // "STANDARD" PACKING (FITSIO)
       // return data[j+i*rows_]; // "REVERSE" PACKING (HARP)
@@ -43,7 +44,7 @@ namespace specex {
     inline const double& operator()(const int i, const int j) const {
 #ifdef CHECK_BOUNDS
       if (i<0 || i>=cols_ || j<0 || j>=rows_)
-	HARP_THROW("Out of range");
+	SPECEX_ERROR("Out of range");
 #endif
       
       return data[i+j*cols_];// "STANDARD" PACKING (FITSIO)

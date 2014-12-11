@@ -39,6 +39,12 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
 	  //SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
 	  continue;
 	}
+	
+	if(wave<trace.X_vs_W.xmin || wave>trace.X_vs_W.xmax) 
+	  continue;
+	if(wave<trace.Y_vs_W.xmin || wave>trace.Y_vs_W.xmax) 
+	  continue;
+	
 	specex::Spot_p spot(new specex::Spot());
 	spot->wavelength = wave;
 	spot->fiber = fiber;

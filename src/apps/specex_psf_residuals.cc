@@ -48,6 +48,8 @@ int main ( int argc, char *argv[] ) {
   string output_fits_image_filename="";  
   double psf_error=0;
   double readout_noise=2;
+  int flux_hdu=1;
+  int ivar_hdu=2;
   
   // reading arguments
   // --------------------------------------------
@@ -60,6 +62,8 @@ int main ( int argc, char *argv[] ) {
     ( "out", popts::value<string>( &output_fits_image_filename ), " output fits image file name")
     ( "readout-noise", popts::value<double>( &readout_noise ), " readout noise for pull")
     ( "psf-error", popts::value<double>( &psf_error ), " psf relative error for pull")
+    ( "flux-hdu", popts::value<int>( &flux_hdu ), " flux hdu in input fits")
+    ( "ivar-hdu", popts::value<int>( &ivar_hdu ), " ivar hdu in input fits")
     ( "verbose,v", "turn on verbose mode" )
     ( "core", "dump core files when harp exception is thrown" )
     ;
@@ -98,7 +102,11 @@ int main ( int argc, char *argv[] ) {
     // open image
     // --------------------------------------------
     image_data image,weight;
-    read_fits_images(input_fits_image_filename,image,weight);
+    //read_fits_images(input_fits_image_filename,image,weight);
+    read_fits_image(input_fits_image_filename,flux_hdu,image);
+    read_fits_image(input_fits_image_filename,ivar_hdu,weight);
+     
+
     // weight is 0 or 1
     for(int j=0;j<weight.Ny();j++) {
       for(int i=0;i<weight.Nx();i++) {
