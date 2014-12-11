@@ -29,7 +29,8 @@ int main( int argc, char *argv[] ) {
   string output_fits_filename="";
   
   specex_set_verbose(true);
-
+  specex_set_dump_core(true);
+  
   if(argc<3) usage(argv[0]);
   
   
