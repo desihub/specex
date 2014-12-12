@@ -190,7 +190,7 @@ harp::vector_double coeffs_from_trace_x_vs_w(const double& wavemin, const double
       const specex::Trace &trace = psf.FiberTraces.find(fiber)->second;
       specex::Legendre1DPol pol1d(ncoeff-1,wavemin,wavemax);
       for(int w=0;w<ncoeff;w++) {
-	values[w] = trace.X_vs_W.Value(wave[w]);
+      	values[w] = trace.X_vs_W.Value(wave[w]);
       }
       pol1d.Fit(wave,values,0,false);
       for(int w = 0; w < ncoeff ; w++) {
@@ -199,6 +199,27 @@ harp::vector_double coeffs_from_trace_x_vs_w(const double& wavemin, const double
     }
   }
   return coeff;
+}
+harp::vector_double coeffs_from_trace_x_vs_w(const specex::PSF& psf, int ncoeff, int NFIBERS) {
+  
+ harp::vector_double coeff(ncoeff*NFIBERS);
+ coeff.clear();
+ int fiber_index=0;
+ for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
+     bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
+   const specex::PSF_Params & params_of_bundle = bundle_it->second;
+   for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
+     const specex::Trace &trace = psf.FiberTraces.find(fiber)->second;
+     int n=trace.X_vs_W.coeff.size();
+     if(n>ncoeff) {
+       SPECEX_ERROR("ncoeff in trace X_vs_W=" << n << ">" << ncoeff);
+     }
+     for(int w = 0; w < n ; w++) {
+       coeff(fiber_index*ncoeff+w) = trace.X_vs_W.coeff(w);
+     }
+   }
+ }
+ return coeff;
 }
 
 harp::vector_double coeffs_from_trace_y_vs_w(const double& wavemin, const double& wavemax, const specex::PSF& psf, int ncoeff_max, int NFIBERS, int delta_deg, int& ncoeff) {
@@ -235,6 +256,28 @@ harp::vector_double coeffs_from_trace_y_vs_w(const double& wavemin, const double
     }
   }
   return coeff;
+}
+
+harp::vector_double coeffs_from_trace_y_vs_w(const specex::PSF& psf, int ncoeff, int NFIBERS) {
+  
+ harp::vector_double coeff(ncoeff*NFIBERS);
+ coeff.clear();
+ int fiber_index=0;
+ for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
+     bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
+   const specex::PSF_Params & params_of_bundle = bundle_it->second;
+   for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
+     const specex::Trace &trace = psf.FiberTraces.find(fiber)->second;
+     int n=trace.Y_vs_W.coeff.size();
+     if(n>ncoeff) {
+       SPECEX_ERROR("ncoeff in trace Y_vs_W=" << n << ">" << ncoeff);
+     }
+     for(int w = 0; w < n ; w++) {
+       coeff(fiber_index*ncoeff+w) = trace.Y_vs_W.coeff(w);
+     }
+   }
+ }
+ return coeff;
 }
 
 #ifdef CONTINUUM
@@ -321,7 +364,8 @@ harp::vector_double coeffs_from_pold2d(int param_index, const double& wavemin, c
 
 
 void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& psf, fitsfile* fp, int first_hdu) {
-   
+  SPECEX_INFO("write_gauss_hermite_two_psf_fits_version_2");
+  
   ////////////////////////////
   string PSFVER = "2";
   ////////////////////////////
@@ -390,9 +434,11 @@ void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& 
       ncoeff_max=max(ncoeff_max,int(psf.FiberTraces.find(fiber)->second.Y_vs_W.coeff.size()));
     }
   }
+  
   int delta_deg = 1; // increase degree of legendre polynomials to minimize mapping errors
   ncoeff_max += delta_deg; 
-  cout << "ncoeff_max = " << ncoeff_max << endl;
+  SPECEX_INFO("ncoeff_max = " << ncoeff_max);
+  
   
   
 
@@ -992,7 +1038,9 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
 
 
 void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu) {
-   
+  
+  SPECEX_INFO("write_gauss_hermite_psf_fits_version_2");
+  
   ////////////////////////////
   string PSFVER = "2";
   ////////////////////////////
@@ -1050,8 +1098,21 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
       ncoeff=max(ncoeff,bundle_it->second.AllParPolXW[p]->ydeg+1);
     }
   }
+  int delta_deg = 1; // increase degree of legendre polynomials to minimize mapping errors
+  ncoeff += delta_deg; 
   
-
+  // add traces
+  for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
+      bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
+    const specex::PSF_Params & params_of_bundle = bundle_it->second;
+    for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
+      ncoeff=max(ncoeff,int(psf.FiberTraces.find(fiber)->second.X_vs_W.coeff.size()));
+      ncoeff=max(ncoeff,int(psf.FiberTraces.find(fiber)->second.Y_vs_W.coeff.size()));
+    }
+  }
+  // no need to add degree for traces because same mapping
+  
+  SPECEX_INFO("ncoeff = " << ncoeff);
   
 
   specex::FitsTable table;

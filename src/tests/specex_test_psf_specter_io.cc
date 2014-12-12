@@ -109,6 +109,9 @@ int main( int argc, char *argv[] ) {
       double min_wave = 3600; //wave_step*int(max(3500.,trace_wave_min)/wave_step+1);
       
       SPECEX_INFO("bundle " << bundle_it->first << " fiber " << fiber << " wave range = " << trace_wave_min << " " << trace_wave_max);
+      SPECEX_INFO("bundle " << bundle_it->first << " fiber " << fiber << " coefs = " << trace.X_vs_W.coeff);
+      
+      
 
       // loop on wavelength
       for(double wave = min_wave ; wave<= trace_wave_max; wave += wave_step) {
@@ -122,9 +125,12 @@ int main( int argc, char *argv[] ) {
 	spot->fiber = fiber;
 	spot->fiber_bundle = bundle_it->first;
 	spots.push_back(spot);
-	
+	SPECEX_INFO("fiber=" << spot->fiber << " wave=" << spot->wavelength << " x=" << spot->xc << " y=" << spot->yc);
+
 	//break; // DEBUG, only one spot per fiber
       }
+      
+      //exit(12); // DEBUG
     }
   }
   
