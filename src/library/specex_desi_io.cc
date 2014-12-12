@@ -109,7 +109,7 @@ void specex::read_DESI_traceset_in_fits(
     }
     trace.X_vs_Y.Fit(y,x);
     trace.W_vs_Y.Fit(y,w);
-    
+    trace.synchronized = true;
   }
   
   SPECEX_INFO("done reading traceset");

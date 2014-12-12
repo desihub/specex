@@ -1778,7 +1778,12 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
       if(spot->fiber==trace.fiber)
 	spots_of_fiber.push_back(spot);
     }
-    bool ok = trace.Fit(spots_of_fiber);
+    bool ok = true;
+    if(! trace.synchronized)
+      ok = trace.Fit(spots_of_fiber);
+    else
+      SPECEX_INFO("No need to refit synchronized trace (wavemin,wavemax = " << trace.X_vs_W.xmin << "," << trace.X_vs_W.xmax << ")");
+    
     if(ok) { 
       (*nok)++;
       
@@ -1786,7 +1791,7 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
 	specex::Spot_p& spot = spots_of_fiber[s];
 	spot->xc=trace.X_vs_W.Value(spot->wavelength);
 	spot->yc=trace.Y_vs_W.Value(spot->wavelength);
-
+	//SPECEX_INFO("TRACE " << trace.fiber << " wave=" << spot->wavelength << " x=" << spot->xc << " y=" << spot->yc);
       }
 
 
@@ -2041,13 +2046,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	if(it->second.Off()) continue;
 	
 	specex::Trace& trace=it->second;
-	int begin_j = int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmin)));
-	int end_j   = int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmax)))+1;
+	int begin_j = max(0,int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmin))));
+	int end_j   = min(int(weight.n_rows()),int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmax)))+1);
 	int ndead=0;
 	for(int j=begin_j;j<end_j;j++) {
 	  int i_center = trace.X_vs_Y.Value(double(j));
 	  int begin_i = max(0,i_center-3);
-	  int end_i   = min(int(image.n_cols()),i_center+4);
+	  int end_i   = min(int(weight.n_cols()),i_center+4);
 	  for(int i = begin_i ;i<end_i;i++) {
 	    if(weight(i,j)==0) ndead++;
 	  }
@@ -2078,6 +2083,24 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       if(max_x==min_x) max_x = min_x+1;
       if(max_wave==min_wave) max_wave = min_wave+1;
       
+      // if the traces are already synchronized, as is the case for DESI sims,
+      // we use this predefined range of coordinates
+      
+      bool modified=false;
+      for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
+	  it !=psf->FiberTraces.end(); ++it) {
+	const Trace& trace = it->second;
+	if(trace.synchronized) {
+	  min_wave = min( min_wave , trace.X_vs_W.xmin);
+	  max_wave = max( max_wave , trace.X_vs_W.xmax);
+	  min_x = min( min_x , trace.X_vs_W.Value(trace.X_vs_W.xmin));
+	  max_x = max( max_x , trace.X_vs_W.Value(trace.X_vs_W.xmax));
+	  modified=true;
+	}
+      }
+      if(modified)
+	SPECEX_INFO("Use range for traces wmin,wmax=" << min_wave << "," << max_wave << " xmin,xmax=" << min_x << "," << max_x);
+
       
       // get max number of spots per fiber
       map<int,int> number_of_spots_per_fiber;

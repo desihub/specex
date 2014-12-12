@@ -13,7 +13,7 @@
 specex::Trace::Trace(int i_fiber) :
   fiber(i_fiber)
 {
-  
+  synchronized=false;
 }
 
 void specex::Trace::resize(int ncoeff) {
@@ -201,6 +201,7 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
     write_spots_list(spots,"debug_spots.list");
     SPECEX_ERROR("specex::Trace::Fit rms are too large");
   }
+  synchronized = true;
   return true;
 }
 #warning check meaning of fibermask

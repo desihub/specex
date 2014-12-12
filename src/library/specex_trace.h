@@ -38,6 +38,7 @@ namespace specex {
     double yjumphi; // KEY  XJUMPHI in fits table
     double yjumpval; // KEY  XJUMPVAL in fits table
     
+    bool synchronized; // meaning X_vs_W Y_vs_W  W_vs_Y X_vs_Y are consistent
     
     Trace(int i_fiber=-1);
     
