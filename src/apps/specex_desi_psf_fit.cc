@@ -89,7 +89,6 @@ int main ( int argc, char *argv[] ) {
   string output_fits_filename="";
   string output_spots_filename="";
   
-  bool write_tmp_results = false;
   int flux_hdu=1;
   int ivar_hdu=2;
   
@@ -99,6 +98,9 @@ int main ( int argc, char *argv[] ) {
   // reading arguments
   // --------------------------------------------
   popts::options_description desc ( "Allowed Options" );
+
+  vector<string> argurment_priors;
+
   desc.add_options()
     ( "help,h", "display usage information" )
     ( "arc,a", popts::value<string>( &arc_image_filename ), "arc pre-reduced fits image file name (mandatory), ex:  sdProc-b1-00108382.fits" )
@@ -108,19 +110,19 @@ int main ( int argc, char *argv[] ) {
     ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
     ( "first_fiber", popts::value<int>( &first_fiber ), "first fiber (must be in bundle)")
     ( "last_fiber", popts::value<int>( &last_fiber ), "last fiber (must be in bundle)")
-    ( "half_size_x", popts::value<int>( &half_size_x ), "half size of PSF stamp (full size is 2*half_size+1)")
-    ( "half_size_y", popts::value<int>( &half_size_y ), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "half_size_x", popts::value<int>( &half_size_x )->default_value(4), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "half_size_y", popts::value<int>( &half_size_y )->default_value(4), "half size of PSF stamp (full size is 2*half_size+1)")
     ( "psfmodel", popts::value<string>( &psf_model ), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode" )
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/opfiles/lamplines.par)" )
     ( "core", "dump core files when harp exception is thrown" )
-    ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
-    ("gauss_hermite_deg2",  popts::value<int>( &gauss_hermite_deg2 ), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
+    ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg )->default_value(3), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
+    ("gauss_hermite_deg2",  popts::value<int>( &gauss_hermite_deg2 )->default_value(2), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
     //( "gauss_hermite_sigma",  popts::value<double>( &gauss_hermite_sigma ), "sigma of Gauss-Hermite PSF (same for x and y, only if GAUSSHERMITE psf)")
-    ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave ), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
-    ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x ), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
-    ( "psf_error",  popts::value<double>( &psf_error ), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
+    ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave )->default_value(4), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
+    ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x )->default_value(1), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
+    ( "psf_error",  popts::value<double>( &psf_error )->default_value(0), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
     ( "psf_core_wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 5x5 PSF core")
 #ifdef EXTERNAL_TAIL
     ( "fit_psf_tails", "unable fit of psf tails")
@@ -132,6 +134,8 @@ int main ( int argc, char *argv[] ) {
     ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
     ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
     ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
+    ( "prior", popts::value< vector<string> >( &argurment_priors )->multitoken(), " gaussian prior on a param : 'name' value error")  
+    ( "tmp_results", " write tmp results")  
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
 
@@ -164,10 +168,39 @@ int main ( int argc, char *argv[] ) {
     return EXIT_FAILURE;
   }
   
+  // dealing with priors
+  map<string,Prior*> priors;
+  {
+    int np=int(argurment_priors.size());
+    if( ! (np%3==0) ) {
+      cerr << "error in parsing, priors must be of the form 'name value error' (np=" << np << ")" << endl;
+      cerr << desc << endl;
+      return EXIT_FAILURE;
+    }
+    try {
+      for(int i=0;i<np/3;i++) {
+	string pname=argurment_priors[3*i];
+	double val=atof(argurment_priors[3*i+1].c_str());
+	double err=atof(argurment_priors[3*i+2].c_str());
+	cout << "priors[" << i << "]= " << pname << " " << val << " " << err << endl;
+	priors[pname]= new GaussianPrior(val,err);
+      }
+    }catch(std::exception e) {
+      cerr << "error in parsing arguments of priors" << endl;
+      cerr << "priors must be of the form 'name value error'" << endl;
+      cerr << desc << endl;
+      return EXIT_FAILURE;
+    } 
+  }
+  
+
+
   try {
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
+    bool write_tmp_results = (vm.count("tmp_results")>0);
+    
 #ifdef EXTERNAL_TAIL
     bool fit_psf_tails = (vm.count("fit_psf_tails")>0);
 #endif
@@ -252,10 +285,15 @@ int main ( int argc, char *argv[] ) {
     psf->hSizeX = half_size_x;
     psf->hSizeY = half_size_y;
     
+    
+    
+    
         
     
     psf->FiberTraces.clear();
+
     
+
     
     // init PSF fitter
     // -------------------------------------------- 
@@ -265,6 +303,7 @@ int main ( int argc, char *argv[] ) {
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
     fitter.psf->psf_error               = psf_error;
     fitter.corefootprint_weight_boost   = psf_core_wscale;
+    fitter.write_tmp_results            = write_tmp_results;
     
 #ifdef EXTERNAL_TAIL
     fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
@@ -289,6 +328,7 @@ int main ( int argc, char *argv[] ) {
       SPECEX_INFO("Using RDNOISE from image header = " << fitter.psf->readout_noise );
     }
     
+    fitter.priors = priors;
     
     for(int j=0;j<weight.Ny();j++) {
       for(int i=0;i<weight.Nx();i++) {
@@ -358,7 +398,7 @@ int main ( int argc, char *argv[] ) {
       if(psf->camera_id=="r2") {ymin=200; ymax = 3668;};
 
       
-      int margin = 1; // we want to keep as much as possible to minimize extrapolation
+      int margin = -psf->hSizeY+1; // we need to include spots that contribute to the image signal
       ymin+=margin;
       ymax-=margin;
       

@@ -122,8 +122,8 @@ class PSF_Fitter {
   
   Mask mask;
   
-
-
+  std::map<std::string,Prior*> priors;
+  
  PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight) :
     
   psf(i_psf),

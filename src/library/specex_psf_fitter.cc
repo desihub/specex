@@ -1970,35 +1970,58 @@ bool specex::PSF_Fitter::FitIndividualSpotPositions(std::vector<specex::Spot_p>&
 std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0) {
   
   std::vector<specex::Spot_p> selected_spots;
-  
-  for(size_t s=0;s<input_spots.size();s++) {
-    specex::Spot_p spot = input_spots[s];
-    
-    if(spot->eflux<=0 || spot->flux/spot->eflux<minimum_signal_to_noise) {
-      spot->status=0;
-      continue;
+
+  // need to either keep all or none of the spots at the same wavelength
+  std::vector<specex::SpotArray> spot_arrays = find_spot_arrays(input_spots);
+
+  for(size_t a=0;a<spot_arrays.size();a++) {
+    // compute min S/N
+    specex::SpotArray& spot_array = spot_arrays[a];
+    double sum_snr2=0;
+    int ns=0;
+    for(size_t s=0;s<spot_array.size();s++) {
+      specex::Spot_p spot = spot_array[s];      
+      if(spot->eflux<=0) {
+	continue;
+      }
+      sum_snr2 += specex::square(spot->flux/spot->eflux);
+      ns++;
     }
+    if(ns==0) continue;
+    double snr=sqrt(sum_snr2/ns);
+
+    SPECEX_INFO("select_spots : wave=" << spot_array.wavelength << " mean snr=" << snr);
+    bool select_array = (snr>minimum_signal_to_noise);
     
     // now loop on all spots to get distance
     if(min_wave_dist>0) {
-      double dist=1000;
-      for(size_t s2=0;s2<input_spots.size();s2++) {
-	if(s==s2) continue;
-	specex::Spot_p spot2 = input_spots[s2];
-	if(spot2->fiber != spot->fiber) continue;
+      for(size_t s=0;s<spot_array.size();s++) {
+	specex::Spot_p spot = spot_array[s];    
+	double dist=100000;
+	for(size_t s2=0;s2<input_spots.size();s2++) {
+	  specex::Spot_p spot2 = input_spots[s2];
+	  if(spot2->fiber != spot->fiber) continue;
+	  if(spot2->status==0) continue;
+	  if(spot2->wavelength == spot->wavelength) continue;
 	  dist=min(dist,fabs(spot2->wavelength-spot->wavelength));
+	}
+	if(dist<min_wave_dist) {
+	  select_array=false;
+	  break;
+	}
       }
-      if(dist<min_wave_dist) {
+      
+    }
+    for(size_t s=0;s<spot_array.size();s++) {
+      specex::Spot_p spot = spot_array[s];     
+      if(select_array && spot->eflux>0) {
+	spot->status=1;
+	selected_spots.push_back(spot);
+      }else{
 	spot->status=0;
-	continue;
       }
     }
-    
-    
-    spot->status=1;
-    selected_spots.push_back(spot);
-    
-  }
+  } // end of loop on spot arrays
   
   SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise << " and min dist = " << min_wave_dist << " A");
   return selected_spots;
@@ -2019,7 +2042,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   double chi2=1e30;
   int npix = 0;
   int niter = 0;
-  double min_snr_non_linear_terms = 50;
+  double min_snr_non_linear_terms = 5;
   double min_wave_dist_non_linear_terms = 4; // A 
   
   double min_snr_linear_terms = 3;
@@ -2238,10 +2261,16 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       psf_params->ContinuumPol.xmax = max_wave;
 #endif
     }
+    
+    for(map<string,Prior*>::const_iterator it=priors.begin(); it!=priors.end(); ++it) {
+      SPECEX_INFO("Setting Gaussian prior on param " << it->first);
+      psf->SetPrior(it->first,it->second);
+    }
   }
   
   fatal = true;
   include_signal_in_weight = false;
+  //include_signal_in_weight = true;
   chi2_precision = 10;
   bool ok = true;
   
@@ -2270,9 +2299,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
 
   include_signal_in_weight = false;
+  //include_signal_in_weight = true;
   ok = FitIndividualSpotFluxes(input_spots);
   std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
-  
+  if(write_tmp_results) {
+    write_spots_xml(selected_spots,"spots-before-gaussian-fit.xml");
+    write_psf_xml(psf,"psf-before-gaussian-fit.xml");
+  }
   /*
   std::vector<specex::Spot_p> selected_spots;
   std::vector<specex::Spot_p> tmp_selected_spots = select_spots(input_spots,min_snr_non_linear_terms);
@@ -2494,6 +2527,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
     }
     include_signal_in_weight = false;
+    //include_signal_in_weight = true;
     ok = FitIndividualSpotFluxes(input_spots);
     selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
   
@@ -2515,6 +2549,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
     }
     include_signal_in_weight = false;
+    //include_signal_in_weight = true;
     ok = FitIndividualSpotFluxes(input_spots);
     selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
   
@@ -2542,6 +2577,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
   }
   include_signal_in_weight = false;
+  //include_signal_in_weight = true;
+  
   ok = FitIndividualSpotFluxes(input_spots);
   
   
@@ -2611,6 +2648,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fit_position   = false;
   fit_trace      = false;
   include_signal_in_weight = false;
+  //include_signal_in_weight = true;
   
   int count=0;
   
@@ -2674,7 +2712,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
 
   if(true)
-    for(int i=0;i<2;i++) {
+    for(int i=0;i<1;i++) {
       fit_flux = true; fit_psf = false;
       count++;
       SPECEX_INFO("Starting FitSeveralSpots FLUX #" << count);
