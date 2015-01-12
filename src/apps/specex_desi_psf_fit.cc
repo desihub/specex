@@ -71,7 +71,10 @@ int main ( int argc, char *argv[] ) {
   int    half_size_y=4;
   
   string arc_image_filename="";
-  //string xy_trace_fits_name="";
+  string xcoord_filename="";
+  string ycoord_filename="";
+  int xcoord_hdu=0;
+  int ycoord_hdu=0;
   //string wy_trace_fits_name="";
   string lamp_lines_filename="";  
   double min_wavelength = 0;
@@ -104,8 +107,12 @@ int main ( int argc, char *argv[] ) {
   desc.add_options()
     ( "help,h", "display usage information" )
     ( "arc,a", popts::value<string>( &arc_image_filename ), "arc pre-reduced fits image file name (mandatory), ex:  sdProc-b1-00108382.fits" )
-    ( "flux-hdu", popts::value<int>( &flux_hdu ), " flux hdu in input arc fits")
-    ( "ivar-hdu", popts::value<int>( &ivar_hdu ), " ivar hdu in input arc fits")
+    ( "flux-hdu", popts::value<int>( &flux_hdu )->default_value(1), " flux hdu in input arc fits")
+    ( "ivar-hdu", popts::value<int>( &ivar_hdu )->default_value(2), " ivar hdu in input arc fits")
+    ( "xcoord-file", popts::value<string>( &xcoord_filename ), "fits image file name with xcoord legendre polynomial of wavelength (mandatory)" )
+    ( "xcoord-hdu", popts::value<int>( &xcoord_hdu )->default_value(1), "hdu of xcoord legendre polynomial of wavelength" )
+    ( "ycoord-file", popts::value<string>( &ycoord_filename ), "fits image file name with ycoord legendre polynomial of wavelength (mandatory)" )
+    ( "ycoord-hdu", popts::value<int>( &ycoord_hdu )->default_value(1), "hdu of ycoord legendre polynomial of wavelength" )
     ( "first_bundle", popts::value<int>( &first_fiber_bundle ), "first fiber bundle to fit")
     ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
     ( "first_fiber", popts::value<int>( &first_fiber ), "first fiber (must be in bundle)")
@@ -146,7 +153,7 @@ int main ( int argc, char *argv[] ) {
     popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
     popts::notify(vm);
     
-    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) ) {
+    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) || ( ! vm.count( "xcoord-file" ) ) || ( ! vm.count( "ycoord-file" ) ) ) {
       cerr << endl;
       cerr << desc << endl;
       cerr << "example:" << endl;
@@ -223,7 +230,7 @@ int main ( int argc, char *argv[] ) {
     }else if(spectrograph_name == "DESI"){
       spectro = new DESI_Spectrograph();
       /* read traces in arc file */
-      read_DESI_traceset_in_fits(traceset,arc_image_filename,5,6);
+      read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu);
       spectro->AutoConfigure(traceset);
       read_DESI_keywords(arc_image_filename,image_infos);
     }else{

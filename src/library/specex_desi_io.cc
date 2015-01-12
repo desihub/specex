@@ -29,11 +29,12 @@ using namespace std;
  */
 
 void specex::read_DESI_traceset_in_fits(
-				specex::TraceSet& traceset,
-				const std::string& arc_filename, 
-				int x_vs_wave_hdu_number, 
-				int y_vs_wave_hdu_number
-				) {
+					specex::TraceSet& traceset,
+					const std::string& x_vs_wave_filename, 
+					int x_vs_wave_hdu_number, 
+					const std::string& y_vs_wave_filename, 
+					int y_vs_wave_hdu_number
+					) {
   size_t nrows,ncols;
   specex::image_data x_vs_wave_coefs;
   specex::image_data y_vs_wave_coefs;
@@ -47,15 +48,18 @@ void specex::read_DESI_traceset_in_fits(
   
   try{
     fitsfile * fp= 0;
-    harp::fits::open_read (fp,arc_filename);
+    harp::fits::open_read (fp,x_vs_wave_filename);
     harp::fits::img_seek ( fp, x_vs_wave_hdu_number);
     harp::fits::img_dims ( fp, nrows, ncols );
     x_vs_wave_coefs.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
     harp::fits::img_read ( fp, x_vs_wave_coefs.data, false );
     harp::fits::key_read (fp,"WAVEMIN",x_vs_wave_wavemin);
     harp::fits::key_read (fp,"WAVEMAX",x_vs_wave_wavemax);
-      
-  
+    harp::fits::close ( fp ); 
+  }catch(...) { SPECEX_ERROR("could not read properly x traces in " << x_vs_wave_filename << " HDU " << x_vs_wave_hdu_number);}
+  try{
+    fitsfile * fp= 0;
+    harp::fits::open_read (fp,y_vs_wave_filename);
     harp::fits::img_seek ( fp, y_vs_wave_hdu_number);
     harp::fits::img_dims ( fp, nrows, ncols );
     y_vs_wave_coefs.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
@@ -64,13 +68,13 @@ void specex::read_DESI_traceset_in_fits(
     harp::fits::key_read (fp,"WAVEMAX",y_vs_wave_wavemax);
     
     harp::fits::close ( fp ); 
-  }catch(...) { SPECEX_ERROR("could not read properly traces in " << arc_filename);}
+  }catch(...) { SPECEX_ERROR("could not read properly y traces in " << y_vs_wave_filename << " HDU " << y_vs_wave_hdu_number);}
     
   SPECEX_INFO("X WAVEMIN WAVEMAX " << x_vs_wave_wavemin << " " << x_vs_wave_wavemax);
   SPECEX_INFO("X WAVE COEF SIZE  " << x_vs_wave_coefs.n_cols() << " " << x_vs_wave_coefs.n_rows());
   SPECEX_INFO("Y WAVEMIN WAVEMAX " << y_vs_wave_wavemin << " " << y_vs_wave_wavemax);
   SPECEX_INFO("Y WAVE COEF SIZE  " << y_vs_wave_coefs.n_cols() << " " << y_vs_wave_coefs.n_rows());
-  SPECEX_INFO("read traces '" << arc_filename << "'");
+  SPECEX_INFO("read traces in '" << x_vs_wave_filename << "' HDU "<< x_vs_wave_hdu_number << " and '" << y_vs_wave_filename << "' HDU " <<  y_vs_wave_hdu_number);
   
   int nfibers=x_vs_wave_coefs.n_rows();
   if(nfibers != y_vs_wave_coefs.n_rows()) {

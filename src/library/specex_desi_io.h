@@ -10,8 +10,9 @@ namespace specex {
   
   void read_DESI_traceset_in_fits(
 				  TraceSet& traceset,
-				  const std::string& arc_filename, 
+				  const std::string& x_vs_wave_filename, 
 				  int x_vs_wave_hdu_number, 
+				  const std::string& y_vs_wave_filename, 
 				  int y_vs_wave_hdu_number
 				  );
   void read_DESI_keywords(
