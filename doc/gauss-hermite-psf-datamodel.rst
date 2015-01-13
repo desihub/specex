@@ -56,30 +56,40 @@ a given spectrograph arm/CCD. Each row of the table contains the data
 vector of one PSF parameter.
 
 The size of the vector is ((FIBERMAX-FIBERMIN+1)*(LEGDEG+1))            
+
 Description of  the NPARAMS parameters :                                
+
 X        : CCD column coordinate (as a function of fiber and wavelength)
-Y        : CCD row coordinate (as a function of fiber and wavelength)   
-         (X,Y)=(0,0) means that PSF is centered on center of first pixel
+
+Y        : CCD row coordinate (as a function of fiber and wavelength) 
+(X,Y)=(0,0) means that PSF is centered on center of first pixel
+
 GHSIGX   : Sigma of first Gaussian along CCD columns for PSF core       
+
 GHSIGY   : Sigma of first Gaussian along CCD rows for PSF core          
+
 GH-i-j   : Hermite pol. coefficents, i along columns, j along rows,     
-         i is integer from 0 to GHDEGX, j is integer from 0 to GHDEGY,  
-         there are (GHDEGX+1)*(GHDEGY+1) such coefficents.              
+i is integer from 0 to GHDEGX, j is integer from 0 to GHDEGY,  
+there are (GHDEGX+1)*(GHDEGY+1) such coefficents.              
+
 TAILAMP  : Amplitude of PSF tail                                        
+
 TAILCORE : Size in pixels of PSF tail saturation in PSF core            
+
 TAILXSCA : Scaling apply to CCD coordinate along columns for PSF tail   
+
 TAILYSCA : Scaling apply to CCD coordinate along rows for PSF tail      
+
 TAILINDE : Asymptotic power law index of PSF tail                       
+
 CONT     : Continuum flux in arc image (not part of PSF)                
 
-PSF_core(X,Y) = [ SUM_ij (GH-i-j)*HERM(i,X/GHSIGX)*HERM(j,Y/GHSIGX) ]   
-                                       *GAUS(X,GHSIGX)*GAUS(Y,GHSIGY)   
 
-PSF_tail(X,Y) = TAILAMP*R^2/(TAILCORE^2+R^2)^(1+TAILINDE/2)             
-                with R^2=(X/TAILXSCA)^2+(Y/TAILYSCA)^2
+PSF_core(X,Y) = [ SUM_ij (GH-i-j)*HERM(i,X/GHSIGX)*HERM(j,Y/GHSIGX) ]*GAUS(X,GHSIGX)*GAUS(Y,GHSIGY)   
 
-PSF_core is integrated in pixel                                         
-PSF_tail is not, it is evaluated at center of pixel   
+PSF_tail(X,Y) = TAILAMP*R^2/(TAILCORE^2+R^2)^(1+TAILINDE/2) with R^2=(X/TAILXSCA)^2+(Y/TAILYSCA)^2
+
+PSF_core is integrated in pixel, PSF_tail is not, it is evaluated at center of pixel.   
 
 Required Header Keywords
 ~~~~~~~~~~~~~~~~~~~~~~~~
