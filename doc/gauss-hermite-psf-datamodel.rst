@@ -14,6 +14,7 @@ Naming Convention
 -----------------
 
 ``psf-AS-EXPNUM.fits``, where A is the spectrograph arm ('b','r' or 'z'), S the spectrograph identifier [0-9], and EXPNUM the exposure number.
+
 File Type
 ---------
 
