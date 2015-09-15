@@ -446,14 +446,14 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
 bool specex::FitsTable::HasKey(const string& key) const {
   int status = 0;
   char a_C_string[80];
-  fits_read_key(fptr, TSTRING, key.c_str(), a_C_string, NULL, &status);
+  fits_read_key(fptr, TSTRING, const_cast<char*>(key.c_str()), a_C_string, NULL, &status);
   return (status != KEY_NO_EXIST);
 }
 
 double specex::FitsTable::DoubleKeyValue(const string& key) const  {
   double val;
   int status = 0;
-  fits_read_key(fptr, TDOUBLE, key.c_str(), &val, NULL, &status);
+  fits_read_key(fptr, TDOUBLE, const_cast<char*>(key.c_str()), &val, NULL, &status);
   CHECKERROR;
   return val;
 }
@@ -461,7 +461,7 @@ double specex::FitsTable::DoubleKeyValue(const string& key) const  {
 string specex::FitsTable::StringKeyValue(const string& key) const  {
   int status = 0;
   char a_C_string[80];
-  fits_read_key(fptr, TSTRING, key.c_str(), a_C_string, NULL, &status);
+  fits_read_key(fptr, TSTRING, const_cast<char*>(key.c_str()), a_C_string, NULL, &status);
   CHECKERROR;
   return string(a_C_string);
 }
@@ -469,7 +469,7 @@ string specex::FitsTable::StringKeyValue(const string& key) const  {
 int specex::FitsTable::IntKeyValue(const string& key)  const {
   int val;
   int status = 0;
-  fits_read_key(fptr, TINT, key.c_str(), &val, NULL, &status);
+  fits_read_key(fptr, TINT, const_cast<char*>(key.c_str()), &val, NULL, &status);
   CHECKERROR;
   return val;
 }
