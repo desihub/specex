@@ -1,11 +1,5 @@
 
-PROGS = \
-specex_psf_image \
-specex_test_boost \
-specex_test_derivatives \
-specex_test_derivatives2 \
-specex_test_psf_specter_io \
-specex_test_psf_xml_io
+PROGS := $(patsubst %.cc,%,$(wildcard *.cc))
 
 
 all : $(PROGS)
