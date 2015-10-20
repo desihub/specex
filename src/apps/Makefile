@@ -1,15 +1,5 @@
 
-PROGS = \
-specex_cross_profile \
-specex_extract \
-specex_fiber_profile \
-specex_flexure_fit_for_flat \
-specex_flexure_fit_for_science \
-specex_merge_psf \
-specex_merge_spot \
-specex_psf_fit \
-specex_psf_residuals \
-specex_spot_list
+PROGS := $(patsubst %.cc,%,$(wildcard *.cc))
 
 
 all : $(PROGS)
