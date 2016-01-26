@@ -119,11 +119,11 @@ void specex::read_DESI_traceset_in_fits(
   SPECEX_INFO("done reading traceset");
 }
 
-void specex::read_DESI_keywords(const std::string& arc_image_filename, std::map<std::string,std::string>& infos) {
+void specex::read_DESI_keywords(const std::string& arc_image_filename, std::map<std::string,std::string>& infos, int hdu) {
   
   fitsfile * fp= 0;
   harp::fits::open_read (fp,arc_image_filename);
-  harp::fits::img_seek ( fp, 2);
+  harp::fits::img_seek ( fp, hdu);
   infos.clear();
   string keys[]={"RDNOISE"};
   for(int k=0;k<1;k++) {

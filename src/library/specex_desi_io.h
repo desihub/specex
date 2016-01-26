@@ -17,7 +17,8 @@ namespace specex {
 				  );
   void read_DESI_keywords(
 			  const std::string& arc_image_filename, 
-			  std::map<std::string,std::string>& infos
+			  std::map<std::string,std::string>& infos,
+			  int header_hdu
 			  );
 };
 

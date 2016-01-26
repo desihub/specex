@@ -92,8 +92,10 @@ int main ( int argc, char *argv[] ) {
   string output_fits_filename="";
   string output_spots_filename="";
   
-  int flux_hdu=1;
-  int ivar_hdu=2;
+  int flux_hdu=0;
+  int ivar_hdu=0;
+  int mask_hdu=0;
+  int header_hdu=0;
   
   if(getenv("SPECEXDATA"))
     lamp_lines_filename = string(getenv("SPECEXDATA"))+"/lamplines-specex.par";
@@ -109,6 +111,8 @@ int main ( int argc, char *argv[] ) {
     ( "arc,a", popts::value<string>( &arc_image_filename ), "arc pre-reduced fits image file name (mandatory), ex:  sdProc-b1-00108382.fits" )
     ( "flux-hdu", popts::value<int>( &flux_hdu )->default_value(1), " flux hdu in input arc fits")
     ( "ivar-hdu", popts::value<int>( &ivar_hdu )->default_value(2), " ivar hdu in input arc fits")
+    ( "mask-hdu", popts::value<int>( &mask_hdu )->default_value(3), " mask hdu in input arc fits")
+    ( "header-hdu", popts::value<int>( &header_hdu )->default_value(1), " header hdu in input arc fits")
     ( "xcoord-file", popts::value<string>( &xcoord_filename ), "fits image file name with xcoord legendre polynomial of wavelength (mandatory)" )
     ( "xcoord-hdu", popts::value<int>( &xcoord_hdu )->default_value(1), "hdu of xcoord legendre polynomial of wavelength" )
     ( "ycoord-file", popts::value<string>( &ycoord_filename ), "fits image file name with ycoord legendre polynomial of wavelength (mandatory)" )
@@ -232,7 +236,7 @@ int main ( int argc, char *argv[] ) {
       /* read traces in arc file */
       read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu);
       spectro->AutoConfigure(traceset);
-      read_DESI_keywords(arc_image_filename,image_infos);
+      read_DESI_keywords(arc_image_filename,image_infos,header_hdu);
     }else{
       SPECEX_ERROR("unknown spectrograph");
     }
@@ -251,11 +255,16 @@ int main ( int argc, char *argv[] ) {
     
     // open image
     // --------------------------------------------
-    image_data image,weight;
-    //read_fits_images(arc_image_filename,image,weight);
+    image_data image,weight,mask;
     read_fits_image(arc_image_filename,flux_hdu,image);
     read_fits_image(arc_image_filename,ivar_hdu,weight);
-    
+    read_fits_image(arc_image_filename,mask_hdu,mask);
+    for(int j=0;j<weight.Ny();j++) {
+      for(int i=0;i<weight.Nx();i++) {
+	if(mask(i,j)!=0) weight(i,j)=0;
+      }
+    }
+
     SPECEX_INFO("image  size = " << image.n_cols() << "x" << image.n_rows());
     SPECEX_INFO("weight size = " << weight.n_cols() << "x" << weight.n_rows());
     
@@ -337,12 +346,15 @@ int main ( int argc, char *argv[] ) {
     
     fitter.priors = priors;
     
-    for(int j=0;j<weight.Ny();j++) {
-      for(int i=0;i<weight.Nx();i++) {
-	if(weight(i,j)>0)
-	  weight(i,j)=1/square(psf->readout_noise);
-	else
-	  weight(i,j)=0;
+    if(0) {
+      SPECEX_INFO("Using RDNOISE to define weights" );
+      for(int j=0;j<weight.Ny();j++) {
+	for(int i=0;i<weight.Nx();i++) {
+	  if(weight(i,j)>0)
+	    weight(i,j)=1/square(psf->readout_noise);
+	  else
+	    weight(i,j)=0;
+	}
       }
     }
 
