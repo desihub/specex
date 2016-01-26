@@ -2393,17 +2393,22 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
     }
   }
-  /*
-  SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms");
-  SPECEX_INFO("===================================================");
   chi2=1e30;
-  fit_flux       = false;
-  fit_position   = false;
-  fit_psf        = true;
-  fit_trace      = false;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
-  */
+
+  for(int i=0;i<5;i++) {
+    SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms");
+    SPECEX_INFO("===================================================");
+    
+    fit_flux       = false;
+    fit_position   = false;
+    fit_psf        = true;
+    fit_trace      = false;
+    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
+  
+    ok = FitIndividualSpotFluxes(input_spots);
+    selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+  }
   
   force_positive_flux = true;
   //force_positive_flux = false;
