@@ -46,7 +46,9 @@ void specex::Spectrograph::AutoConfigure(const specex::TraceSet& traceset) {
     }
   }
   number_of_bundles += 1;
-  
+  if(number_of_bundles==1) { // there is only one 
+    bundle_size = nfibers;
+  }
   // save result
   number_of_fiber_bundles_per_ccd = number_of_bundles;
   number_of_fibers_per_bundle = bundle_size;

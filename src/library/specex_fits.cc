@@ -122,10 +122,19 @@ void specex::read_fits_image(std::string const & path, int hdu, image_data& img)
   harp::fits::img_dims ( fp, nrows, ncols );
   
   img.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
-
-  harp::fits::img_read ( fp, img.data , false);
+  
+  int bitpix;
+  harp::fits::key_read(fp ,"BITPIX", bitpix);
+  int status = 0;
+  int compressed = fits_is_compressed_image(fp,&status);
+  harp::fits::check ( status );
+  
+  harp::fits::img_read ( fp, img.data , false); // calls  fits_read_pix  , works with compressed BITPIX=8 for cfitsio 337
+    
   harp::fits::close ( fp ); 
-  SPECEX_INFO("read one image in '" << path << "' hdu=" << hdu);
+  SPECEX_INFO("read one image in '" << path << "' hdu=" << hdu << " size=" << nrows << "x" << ncols << " bitpix=" << bitpix << " compressed=" << compressed);
+  
+  
 }
 
 void specex::read_fits_image(std::string const & path, image_data& img) {
