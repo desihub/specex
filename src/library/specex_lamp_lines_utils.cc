@@ -34,7 +34,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
     if(word=="arclineid") {
       double wave;
       if(!(is >> wave)) continue;
-      SPECEX_INFO("adding wave= " << wave);
+      //SPECEX_INFO("adding wave= " << wave);
       
       // for test to go faster
       if(wave<min_wavelength || wave>max_wavelength) continue;
@@ -43,16 +43,16 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
 	
 	const specex::Trace& trace = traceset[fiber];
 	if(trace.Off()) {
-	  SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
+	  //SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
 	  continue;
 	}
 	
 	if(wave<trace.X_vs_W.xmin || wave>trace.X_vs_W.xmax) {
-	  SPECEX_INFO("ignore wave " << wave << " because outside X_vs_W range " <<  trace.X_vs_W.xmin << " " << trace.X_vs_W.xmax);
+	  //SPECEX_INFO("ignore wave " << wave << " because outside X_vs_W range " <<  trace.X_vs_W.xmin << " " << trace.X_vs_W.xmax);
 	  continue;
 	}
 	if(wave<trace.Y_vs_W.xmin || wave>trace.Y_vs_W.xmax) {
-	  SPECEX_INFO("ignore wave " << wave << " because outside Y_vs_W range " <<  trace.X_vs_W.xmin << " " << trace.X_vs_W.xmax);	  
+	  //SPECEX_INFO("ignore wave " << wave << " because outside Y_vs_W range " <<  trace.X_vs_W.xmin << " " << trace.X_vs_W.xmax);	  
 	  continue;
 	}
 	specex::Spot_p spot(new specex::Spot());
