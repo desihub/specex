@@ -75,6 +75,19 @@ specex_desi_psf_fit -a $DIR/pix-b-arc.fits --xcoord-file psf-b-boot.fits --xcoor
  * Output PSF is both in xml and fits formats. The fits format is described in [gauss-hermite-psf-datamodel.rst](doc/gauss-hermite-psf-datamodel.rst). It is read by the [specter](https://github.com/desihub/specter) package.
 
 
+### Parallel processing
+
+specex is not MPI. It uses internally `openmp` to speed up the computation (note also specex runs significantly faster with the configuration option `--optimize=3`). The number of cpu used is given by the value environment variable `OMP_NUM_THREADS`. A convenient way to do parallel computing is to fit the PSF per block of fibers (or bundle, as called in the code), and then merge the results.
+
+Example (in `bash`):
+
+```
+for BUNDLE in `seq 0 19`; do
+  specex_desi_psf_fit ... --first_bundle $BUNDLE --last_bundle $BUNDLE --out_xml psf-of-bundle-${BUNDLE}.xml &
+done
+wait
+specex_merge_psf psf-of-bundle-*.xml --out-fits psf.fits --out-xml  psf.xml
+```
 
 
 
