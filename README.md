@@ -1,8 +1,8 @@
-SPECtral EXtraction
+# SPECtral EXtraction
 
 Package for PSF measurement in fiber-fed spectrograph (BOSS data, DESI simulations).
 This package is intended to be used with [HARP](https://github.com/tskisner/HARP) and/or [specter](https://github.com/desihub/specter) extraction codes.
-The installation procedure is described in [INSTALL](INSTALL), the code depends on HARP.
+The installation procedure is described in [INSTALL.md](INSTALL.md), the code depends on HARP.
 
 
 ### Usage for DESI 
