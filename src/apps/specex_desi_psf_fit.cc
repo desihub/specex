@@ -84,6 +84,8 @@ int main ( int argc, char *argv[] ) {
   //double gauss_hermite_sigma = 1.1;
   int legendre_deg_wave = 4;
   int legendre_deg_x = 1;
+  int trace_deg_wave = 0;
+  int trace_deg_x = 0;
   
   double psf_error = 0;
   double psf_core_wscale = 0;
@@ -133,6 +135,8 @@ int main ( int argc, char *argv[] ) {
     //( "gauss_hermite_sigma",  popts::value<double>( &gauss_hermite_sigma ), "sigma of Gauss-Hermite PSF (same for x and y, only if GAUSSHERMITE psf)")
     ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave )->default_value(4), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
     ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x )->default_value(1), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
+    ( "trace_deg_wave",  popts::value<int>( &trace_deg_wave )->default_value(0), "degree of Legendre polynomials along wavelength for fit of traces")
+    ( "trace_deg_x",  popts::value<int>( &trace_deg_x )->default_value(0), "degree of Legendre polynomials along x_ccd for fit of traces")
     ( "psf_error",  popts::value<double>( &psf_error )->default_value(0), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
     ( "psf_core_wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 5x5 PSF core")
 #ifdef EXTERNAL_TAIL
@@ -234,7 +238,7 @@ int main ( int argc, char *argv[] ) {
     }else if(spectrograph_name == "DESI"){
       spectro = new DESI_Spectrograph();
       /* read traces in arc file */
-      read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu);
+      read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu,trace_deg_x,trace_deg_wave);
       spectro->AutoConfigure(traceset);
       read_DESI_keywords(arc_image_filename,image_infos,header_hdu);
     }else{
