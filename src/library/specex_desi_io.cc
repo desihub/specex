@@ -33,7 +33,9 @@ void specex::read_DESI_traceset_in_fits(
 					const std::string& x_vs_wave_filename, 
 					int x_vs_wave_hdu_number, 
 					const std::string& y_vs_wave_filename, 
-					int y_vs_wave_hdu_number
+					int y_vs_wave_hdu_number,
+					int required_x_vs_wave_degree ,
+					int required_y_vs_wave_degree
 					) {
   size_t nrows,ncols;
   specex::image_data x_vs_wave_coefs;
@@ -89,15 +91,15 @@ void specex::read_DESI_traceset_in_fits(
     trace.mask  = 0; // need to do something here?
     trace.X_vs_W.xmin = x_vs_wave_wavemin;
     trace.X_vs_W.xmax = x_vs_wave_wavemax;
-    trace.X_vs_W.deg  = x_vs_wave_coefs.n_cols()-1; // add 1 to minimise errors
+    trace.X_vs_W.deg  = max(required_x_vs_wave_degree,int(x_vs_wave_coefs.n_cols()-1));
     trace.X_vs_W.coeff.resize(trace.X_vs_W.deg+1);
-    for(int i=0;i<=trace.X_vs_W.deg;i++)
+    for(int i=0;i<int(x_vs_wave_coefs.n_cols());i++)
       trace.X_vs_W.coeff[i]= x_vs_wave_coefs(i,fiber);
     trace.Y_vs_W.xmin = y_vs_wave_wavemin;
     trace.Y_vs_W.xmax = y_vs_wave_wavemax;
-    trace.Y_vs_W.deg  = y_vs_wave_coefs.n_cols()-1; // add 1 to minimise errors
+    trace.Y_vs_W.deg  = max(required_y_vs_wave_degree,int(y_vs_wave_coefs.n_cols()-1));
     trace.Y_vs_W.coeff.resize(trace.Y_vs_W.deg+1);
-    for(int i=0;i<=trace.Y_vs_W.deg;i++)
+    for(int i=0;i<int(y_vs_wave_coefs.n_cols());i++)
       trace.Y_vs_W.coeff[i]= y_vs_wave_coefs(i,fiber);
 
     trace.X_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion

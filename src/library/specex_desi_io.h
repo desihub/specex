@@ -13,7 +13,9 @@ namespace specex {
 				  const std::string& x_vs_wave_filename, 
 				  int x_vs_wave_hdu_number, 
 				  const std::string& y_vs_wave_filename, 
-				  int y_vs_wave_hdu_number
+				  int y_vs_wave_hdu_number,
+				  int required_x_vs_wave_degree = 0,
+				  int required_y_vs_wave_degree = 0
 				  );
   void read_DESI_keywords(
 			  const std::string& arc_image_filename, 
