@@ -2396,18 +2396,21 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   chi2=1e30;
 
   for(int i=0;i<5;i++) {
-    SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms");
+    SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms (loop="<<i<<")");
     SPECEX_INFO("===================================================");
     
     fit_flux       = false;
     fit_position   = false;
     fit_psf        = true;
     fit_trace      = false;
+    float previous_chi2 = chi2;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
   
     ok = FitIndividualSpotFluxes(input_spots);
     selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+
+    if(fabs(previous_chi2 - chi2)<10) break;
   }
   
   force_positive_flux = true;
