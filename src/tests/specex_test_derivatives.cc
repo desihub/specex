@@ -35,11 +35,11 @@ int main() {
   harp::vector_double P = psf->DefaultParams();
 
   // test for derivatives of sigma
-  P(0)=2;
+  P(0)=1;
   P(1)=1.5;
   P(17)=0;
   
-  for(size_t i=5;i<min(35,int(P.size()));i++) P(i)=0.2;
+  for(size_t i=2;i<min(6,int(P.size()));i++) P(i)=4;
   //P(2)=3.;
   //P(20)=0.5;
   
@@ -67,7 +67,7 @@ int main() {
 
   //return 0;
   
-  double eps    = 0.001;
+  double eps    = 0.0001;
   {
     double valxp  = psf->PSFValueWithParamsXY(x+0.5*eps,y,i,j,P,0,0,true,true);
     double valxm  = psf->PSFValueWithParamsXY(x-0.5*eps,y,i,j,P,0,0,true,true);
