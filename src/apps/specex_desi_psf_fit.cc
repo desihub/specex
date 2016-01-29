@@ -176,8 +176,8 @@ int main ( int argc, char *argv[] ) {
     }
 
 
-  }catch(std::exception e) {
-    cerr << "error in arguments" << endl;
+  }catch(std::exception& e) {
+    cerr << "error in arguments : " << e.what() << endl;
     cerr << endl;
     cerr << desc << endl;
     return EXIT_FAILURE;
