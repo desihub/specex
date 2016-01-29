@@ -8,7 +8,6 @@
 #include "specex_fits.h"
 #include "specex_psf.h"
 #include "specex_psf_io.h"
-#include "specex_gauss_hermite_psf.h"
 #include "specex_image_data.h"
 #include "specex_serialization.h"
 
@@ -19,115 +18,69 @@ int main() {
   
   specex_set_verbose(true);
   
-  specex::PSF_p psf;
-  specex::read_psf_xml(psf,"psf-hh.xml");
+  //specex::PSF_p psf(new specex::HatHermitePSF(3));
+  //specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
+  specex::PSF_p psf(new specex::GaussHermitePSF(3));
+  //specex::PSF_p psf(new specex::HatMoffatPSF(3));
+  psf->AllocateDefaultParams();
   
-  int fiber=20;
-  double wave=6000;
-  
-  double x = psf->Xccd(fiber,wave);
-  double y = psf->Yccd(fiber,wave);
-  
+  vector<string> pnames = psf->DefaultParamNames();
 
-  int bundle=1;
+  double x = 0;
+  double y = 0;
   
   int i=int(x)+1;
   int j=int(y)+1;
 
-  harp::vector_double P = psf->AllLocalParamsFW(fiber,wave,bundle);
+  harp::vector_double P = psf->DefaultParams();
 
   // test for derivatives of sigma
-  // for(size_t i=2;i<P.size();i++) P(i)=0;
-  //for(size_t i=5;i<P.size();i++) P(i)=1;
-  P(4)=0; // test
+  P(0)=2;
+  P(1)=1.5;
+  P(17)=0;
+  
+  for(size_t i=5;i<min(35,int(P.size()));i++) P(i)=0.2;
+  //P(2)=3.;
+  //P(20)=0.5;
   
   cout << P << endl;
 
   harp::vector_double ParamDer(P.size());
   harp::vector_double PosDer(2);
   
-  psf->PSFValueWithParamsXY(x,y,i,j,P,&PosDer,&ParamDer);
+  psf->PSFValueWithParamsXY(x,y,i,j,P,&PosDer,&ParamDer,true,true);
 
   for(int k=0;k<int(P.size());k++) {
-    double eps = fabs(P(k))/1000.;
-    if(eps==0) eps=1.e-6;
+    double eps = fabs(P(k))/10000.;
+    if(eps<1e-5) eps = 1.e-5;
     harp::vector_double Pp = P; Pp(k)+=eps/2.;
-    double valp = psf->PSFValueWithParamsXY(x,y,i,j,Pp,0,0);
+    double valp = psf->PSFValueWithParamsXY(x,y,i,j,Pp,0,0,true,true);
     harp::vector_double Pm = P; Pm(k)-=eps/2.;
-    double valm = psf->PSFValueWithParamsXY(x,y,i,j,Pm,0,0);
-    
+    double valm = psf->PSFValueWithParamsXY(x,y,i,j,Pm,0,0,true,true);
+    cout << eps << " " << valp << " " << valm << endl;
     double numDer = (valp-valm)/eps;
 
-    cout << k << " P=" << P(k) << " aD=" << ParamDer(k) << " nD=" << numDer 
+    cout << k << " " << pnames[k] << " P=" << P(k) << " aD=" << ParamDer(k) << " nD=" << numDer 
 	 << " diff=" <<  ParamDer(k)-numDer << " ratio=" << (ParamDer(k)-numDer)/numDer << endl;
   }
-   cout << "----------" << endl;
+  cout << "----------" << endl;
 
+  //return 0;
   
   double eps    = 0.001;
   {
-    double valxp  = psf->PSFValueWithParamsXY(x+0.5*eps,y,i,j,P,0,0);
-    double valxm  = psf->PSFValueWithParamsXY(x-0.5*eps,y,i,j,P,0,0);
+    double valxp  = psf->PSFValueWithParamsXY(x+0.5*eps,y,i,j,P,0,0,true,true);
+    double valxm  = psf->PSFValueWithParamsXY(x-0.5*eps,y,i,j,P,0,0,true,true);
     double numDer = (valxp-valxm)/eps;
     cout << "dPdx aD=" << PosDer(0) << " nD=" << numDer
 	 << " diff=" <<  PosDer(0)-numDer << " ratio=" << PosDer(0)/numDer-1 << endl;
   }
   {
-    double valyp  = psf->PSFValueWithParamsXY(x,y+0.5*eps,i,j,P,0,0);
-    double valym  = psf->PSFValueWithParamsXY(x,y-0.5*eps,i,j,P,0,0);
+    double valyp  = psf->PSFValueWithParamsXY(x,y+0.5*eps,i,j,P,0,0,true,true);
+    double valym  = psf->PSFValueWithParamsXY(x,y-0.5*eps,i,j,P,0,0,true,true);
     double numDer = (valyp-valym)/eps;
     cout << "dPdy aD=" << PosDer(1) << " nD=" << numDer
 	 << " diff=" <<  PosDer(1)-numDer << " ratio=" << PosDer(1)/numDer-1 << endl;
   }
-
-  if(0){
-  cout  << "testing global monomials" << endl;
-  specex::PSF_Params &psf_global_params = psf->ParamsOfBundles[bundle];
-  harp::vector_double gP(psf->BundleNAllPar(bundle));
-  harp::vector_double gM(psf->BundleNAllPar(bundle));
-  int index=0;
-  for(int p=0;p<psf->LocalNAllPar();p++) {
-    harp::vector_double pM = psf_global_params.AllParPolXW[p]->Monomials(x,wave);
-    int p_size = pM.size();
-    ublas::project(gM,ublas::range(index,index+p_size))=pM;
-    ublas::project(gP,ublas::range(index,index+p_size))=psf_global_params.AllParPolXW[p]->coeff;
-    index += p_size;
-  }
-  harp::vector_double spot_params_1 = psf->AllLocalParamsXW_with_AllBundleParams(x,wave,bundle,gP);
-  harp::vector_double spot_params_2 = psf->AllLocalParamsXW(x,wave,bundle);
-  cout << "spot_params_1=" << spot_params_1 << endl;
-  cout << "spot_params_2=" << spot_params_2 << endl;
-  cout << "diff=" << spot_params_1-spot_params_2 << endl;
-
-  psf->PSFValueWithParamsXY(x,y, i, j, spot_params_1, &PosDer, &ParamDer);
-
-  // compute analytic der
-  harp::vector_double H(gP.size());
-  index=0;
-  for(int p=0;p<psf->LocalNAllPar();p++) {
-    int p_size = psf_global_params.AllParPolXW[p]->coeff.size();
-    ublas::project(H,ublas::range(index,index+p_size))=ParamDer[p]*ublas::project(gM,ublas::range(index,index+p_size));
-    index += p_size;
-  }
-
-  for(int k=0;k<int(gP.size());k++) {
-    double eps = fabs(gP(k))/1000.;
-
-    harp::vector_double gPp = gP; gPp(k)+=eps/2.;
-    harp::vector_double lPp = psf->AllLocalParamsXW_with_AllBundleParams(x,wave,bundle,gPp);
-    double valp = psf->PSFValueWithParamsXY(x,y,i,j,lPp,0,0);
-
-    harp::vector_double gPm = gP; gPm(k)-=eps/2.;
-    harp::vector_double lPm = psf->AllLocalParamsXW_with_AllBundleParams(x,wave,bundle,gPm);
-    double valm = psf->PSFValueWithParamsXY(x,y,i,j,lPm,0,0);
-    
-    double numDer = (valp-valm)/eps;
-    
-    cout << k << " P=" << gP(k) << " aD=" << H(k) << " nD=" << numDer 
-	 << " diff=" <<  H(k)-numDer << " ratio=" << (H(k)-numDer)/numDer << endl;
-  }
-  
-  }
-  
   return 0;
 }

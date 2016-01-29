@@ -34,6 +34,13 @@ namespace specex {
 		   harp::vector_double *PosDer = 0,
 		   harp::vector_double *ParamGradient = 0) const;
     
+    // needed for analytic integration
+    double PixValue(const double &Xc, const double &Yc,
+				     const double &XPix, const double &YPix,
+				     const harp::vector_double &Params,
+				     harp::vector_double *PosDer,
+				 harp::vector_double *ParamDer) const;
+    
     harp::vector_double DefaultParams() const;
     std::vector<std::string> DefaultParamNames() const;
     

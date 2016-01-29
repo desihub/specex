@@ -141,6 +141,188 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   return psf_val;
 }
 
+double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
+					 const double &XPix, const double &YPix,
+					 const harp::vector_double &Params,
+					 harp::vector_double *PosDer,
+					 harp::vector_double *ParamDer) const {
+
+  
+  // shut down analytic calculation
+  // return specex::PSF::PixValue(Xc,Yc,XPix,YPix,Params,PosDer,ParamDer);
+  
+  
+
+  
+  /*
+    P_n(x) = 1./sqrt(2*pi)*exp(-x**2/2)*H_n(x)
+    P_n(x) = -P_{n-1}'(x) for n>0, 
+    can be demonstrated with the recursive relation of P_n(P_(n-1),P_(n-2))
+    
+    int P_n(x) dx = P_{n-1}(x-hx)-P_{n-1}(x+hx)
+    
+    For n=0, 
+    int P_0(x) dx = e(x) = 0.5*(erf((x+hx)/sq2)-erf((x-hx)/sq2))
+    
+    int dx dy P(x,y)
+    = int dx dy sum_ij cij Pi(x) Pj(y) + A 
+    = sum_ij cij [int dx Pi(x)][int dy Pj(y)] + A
+    = sum_ij cij [P(i-1)(x-hx)-P(i-1)(x+hx)][P(j-1)(y-hy)-P(j-1)(y+hy)] + A
+    = sum_ij c(i+1,j+1) [Pi(x-hx)-Pi(x+hx)][Pj(y-hy)-Pj(y+hy)] + A
+    = prof(c+,x-hx,y-hy)-prof(c+,x+hx,y-hy)-prof(c+,x-hx,y+hy)+prof(c+,x+hx,y+hy) + A
+    
+    A = e(x) * sum_j c(0,j+1) [Pj(y-hy)-Pj(y+hy)] + e(y) * sum_i c(i+1,0) [Py(x-hx)-Pi(x+hx)] + c(0,0)*e(x)*e(y)
+  */
+
+  
+  // sigmas of Gaussian
+  const double &sx = Params(0);
+  const double &sy = Params(1);
+  const double isx = 1./sx;
+  const double isy = 1./sy;
+  
+  // reduced coordinates of edges of pixel
+  const double x1 = (floor(XPix+0.5) - Xc - 0.5)*isx;
+  const double x2 = (floor(XPix+0.5) - Xc + 0.5)*isx;
+  const double y1 = (floor(YPix+0.5) - Yc - 0.5)*isy;
+  const double y2 = (floor(YPix+0.5) - Yc + 0.5)*isy;
+  
+  const double isq2 = 1./sqrt(2.);
+  const double isq2pi = 1./sqrt(2.*M_PI);
+
+  // gaussians values on edges of pixel
+  double gx1=isq2pi*isx*exp(-0.5*(x1*x1));
+  double gx2=isq2pi*isx*exp(-0.5*(x2*x2));
+  double gy1=isq2pi*isy*exp(-0.5*(y1*y1));
+  double gy2=isq2pi*isy*exp(-0.5*(y2*y2));
+
+  // integral of gaussians in pixel  
+  double ex = 0.5*( erf(x2*isq2)-erf(x1*isq2) );
+  double ey = 0.5*( erf(y2*isq2)-erf(y1*isq2) );
+  
+  // derivative of integral of gaussians in pixel wrt sigmax and sigmay
+  double dexdsx = (x1 * gx1 - x2 * gx2); // VALIDATED
+  double deydsy = (y1 * gy1 - y2 * gy2); // VALIDATED
+  
+  // precompute to go faster
+  harp::vector_double Monomials;
+  harp::vector_double Monomials_dsx;
+  harp::vector_double Monomials_dsy;
+  
+  int first_hermite_param_index = 2; // first 2 params are sigmas
+  
+  double Hxi=0;
+  double Hyj=0;
+  
+  
+  
+  
+  const int nx=(degree+1);
+  const int ny=(degree+1);
+  const int nc=nx*ny-1; // skip (0,0)
+
+
+  double psfval=0;
+  if(PosDer==0 && ParamDer==0) {
+    int param_index=first_hermite_param_index;
+    
+    psfval = ex*ey; // 0th order
+    
+    for(int j=0;j<ny;j++) {
+      
+
+      if(j==0)
+	Hyj=ey;
+      else 
+	Hyj=sy*( gy1*HermitePol(j-1,y1)-gy2*HermitePol(j-1,y2) );
+
+      int imin=0; if(j==0) imin=1; // skip (0,0)
+      for(int i=imin;i<nx;i++,param_index++) {
+	
+	if(i==0)
+	  Hxi=ex;
+	else 
+	  Hxi=sx*( gx1*HermitePol(i-1,x1)-gx2*HermitePol(i-1,x2) );
+	
+	psfval+=Params(param_index)*Hyj*Hxi;
+      }
+    }
+    
+    return psfval;
+    
+  } else if(ParamDer) {
+    
+    Monomials.resize(nc);
+    Monomials_dsx.resize(nc); // need this for derivative of sigma
+    Monomials_dsy.resize(nc);
+    double dHxi=0;
+    double dHyj=0;
+    double t1=0;
+    double t2=0;
+  int index=0;
+    for(int j=0;j<ny;j++) {
+      
+      if(j==0) {
+	Hyj=ey; // VALIDATED
+	dHyj=deydsy; // VALIDATED
+      }
+      else {
+	t1=sy*gy1*HermitePol(j-1,y1);
+	t2=sy*gy2*HermitePol(j-1,y2);
+	Hyj= t1 - t2; // VALIDATED
+	dHyj = ( -gy1*y1*HermitePolDerivative(j-1,y1)+gy2*y2*HermitePolDerivative(j-1,y2) )
+	    + ( t1*y1*y1*isy - t2*y2*y2*isy ); // VALIDATED
+	
+      }
+      
+      
+      int imin=0; if(j==0) imin=1; // skip (0,0)
+      for(int i=imin;i<nx;i++,index++) {
+	
+	if(i==0) {
+	  Hxi=ex;// VALIDATED
+	  dHxi=dexdsx;// VALIDATED
+	}
+	else {
+	  t1=sx*gx1*HermitePol(i-1,x1); 
+	  t2=sx*gx2*HermitePol(i-1,x2);
+	  Hxi= t1 - t2 ; // VALIDATED
+	  // t = sx*gx*H(x) = sx*isq2pi*isx*exp(-0.5*x**2)*H(x) 
+	  // t = a*g(x)*H(x)
+	  // dH/ds = dH/dx * dx/ds = dH/dx * -x/s
+	  // dg/ds = dg/dx * dx/s  = -x*g * -x/s = x**2/s * g
+	  // dt/ds = a*g*dH/ds + a*dg/ds*H = a*g * dH/dx * -x/s + a*g*H*x**2/s 
+	  dHxi = ( -gx1*x1*HermitePolDerivative(i-1,x1)+gx2*x2*HermitePolDerivative(i-1,x2) )
+	    + ( t1*x1*x1*isx - t2*x2*x2*isx ); // VALIDATED
+	}
+	Monomials[index]=Hyj*Hxi;
+	Monomials_dsx[index]=Hyj*dHxi;
+	Monomials_dsy[index]=dHyj*Hxi;
+      }
+    }
+    
+    psfval = ex*ey + specex::dot(Monomials,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
+    
+    
+    // derivative wrt gauss-hermite coefficients , VALIDATED
+    ublas::project(*ParamDer,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)) = Monomials;
+
+    // derivative wrt sigmax
+    (*ParamDer)[0] = dexdsx*ey + specex::dot(Monomials_dsx,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
+    // derivative wrt sigmay
+    (*ParamDer)[1] += ex*deydsy + specex::dot(Monomials_dsy,ublas::project(Params,ublas::range(first_hermite_param_index,first_hermite_param_index+nc)));
+    
+    
+    return psfval;
+
+  }else if(PosDer && ParamDer==0) {
+
+    cout << "not implemented" << endl;
+    exit(12);
+  }
+  
+  return 0;
+}
   
 int specex::GaussHermitePSF::LocalNAllPar() const {
     
