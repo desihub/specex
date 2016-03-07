@@ -105,7 +105,13 @@ specex::PSF::PSF() {
   
   gain=1;
   readout_noise=1;
-  psf_error=0.01;
+  psf_error=0.0;
+  arc_exposure_id=0;
+  mjd=0;
+  plate_id=0;
+  ccd_image_n_cols=0;
+  ccd_image_n_rows=0;
+  camera_id="unknown";
 }
 
 #ifdef EXTERNAL_TAIL
