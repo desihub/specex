@@ -423,7 +423,7 @@ void specex::GaussHermitePSF::Append(const specex::PSF_p other_p) {
   if(degree != other.degree) SPECEX_ERROR("Cannot append two GaussHermitePSF of different Hermite degree " << degree << " " << other.degree );
   if(LocalNAllPar() != other.LocalNAllPar()) SPECEX_ERROR("Cannot append two PSF with different number of parameters " << LocalNAllPar()  << " " << other.LocalNAllPar() );
  
-  if(arc_exposure_id != other.arc_exposure_id) SPECEX_ERROR("Cannot append two PSF with different arc expsure id " <<  arc_exposure_id << " " << other.arc_exposure_id);
+  if(arc_exposure_id != other.arc_exposure_id) SPECEX_ERROR("Cannot append two PSF with different arc exposure id " <<  arc_exposure_id << " " << other.arc_exposure_id);
   
   // append fibertraces
   for(std::map<int,Trace>::const_iterator it=other.FiberTraces.begin(); it!=other.FiberTraces.end(); it++) {
