@@ -127,9 +127,11 @@ void specex::read_DESI_keywords(const std::string& arc_image_filename, std::map<
   harp::fits::open_read (fp,arc_image_filename);
   harp::fits::img_seek ( fp, hdu);
   infos.clear();
-  string keys[]={"RDNOISE"};
+  string keys[]={"RDNOISE","DATE-OBS","TELRA","TELDEC","FLAVOR","EXPTIME","CAMERA"};
   for(int k=0;k<1;k++) {
-    harp::fits::key_read (fp,keys[k],infos[keys[k]]);
+    try{ 
+      harp::fits::key_read (fp,keys[k],infos[keys[k]]);
+    }catch(...) { SPECEX_WARNING("could not read " << k << " key in " << arc_image_filename);}
   }
 
   harp::fits::close(fp);
