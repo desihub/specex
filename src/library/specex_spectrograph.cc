@@ -33,7 +33,7 @@ void specex::Spectrograph::AutoConfigure(const specex::TraceSet& traceset) {
       // we have a bundle
       int current_bundle_size = f-first_fiber+1;
       number_of_bundles += 1;
-      //SPECEX_INFO("Bundle of size " << current_bundle_size);
+      SPECEX_INFO("Bundle of size " << current_bundle_size);
       
       if(bundle_size==0) {
 	bundle_size = current_bundle_size;
