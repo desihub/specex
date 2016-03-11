@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
 
-import pyfits,sys,string
+import sys,string
+import astropy.io.fits as pyfits
 
 def usage() :
     print sys.argv[0], "-k key1 -k key2 ... file1 file2 ... (-hdu #)"
