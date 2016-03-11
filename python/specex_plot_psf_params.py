@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
-import pyfits,sys,numpy,pylab
+import sys,numpy,pylab
+import astropy.io.fits as pyfits
+
 from numpy.polynomial.legendre import legval
 
 def eval(pname,fiber,wavelength,verbose=False) :
@@ -45,8 +47,7 @@ pylab.xlabel("wavelength")
 pylab.ylabel(param)
 
 pylab.figure()
-wave=9500
-wave=4500
+wave=(wavemin+wavemax)/2.
 x=numpy.zeros((fibermax+1-fibermin))
 fibers=numpy.arange(fibermin,fibermax+1)
 for fiber in fibers :
