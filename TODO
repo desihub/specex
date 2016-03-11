@@ -1,9 +1,0 @@
-
-- drop Gauss-Hermite term 11 (also degenerate with traces)
-- implement jumps (not done so far)
-- analytic integration in pixel (today approximate)
-- import test of derivatives from spec2d
-- test multi-bundle fit (not tested yet)
-- see with Ted faster fill of matrix 
-- psf must derive from harp::psf
-- finish debugging interface to specter
