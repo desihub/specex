@@ -378,17 +378,25 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   //===============================================
 #define FASTER_THAN_SYR
 #ifdef FASTER_THAN_SYR  
+  
   vector<int> other_indices;
   harp::matrix_double Ablock;
   vector<harp::vector_double> Arect;
   bool do_faster_than_syr = compute_ab && fit_flux && spot_tmp_data.size()>1;
   if(do_faster_than_syr) {
+    Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
+    Ablock.clear();
     for(size_t s=0; s<spot_tmp_data.size(); s++) {
-      Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
-      Ablock.clear();
-      Arect.push_back(harp::vector_double(index_of_spots_parameters));
-      Arect.back().clear();    
+      //Arect.push_back(harp::vector_double(index_of_spots_parameters));
+      //Arect.back().clear();    
+      
+      const SpotTmpData& tmp = spot_tmp_data[s];
+      if(tmp.can_measure_flux) {
+	Arect.push_back(harp::vector_double(index_of_spots_parameters));
+	Arect.back().clear();    
+      }
     }
+     
   }
 #endif
   //=============================================== 
@@ -615,6 +623,17 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	} // end of test compute_ab
       } // end of loop on spots
       
+      /*
+      if(Ablock.size1()>0 && other_indices.size()>0) {
+	SPECEX_INFO("other_indices.size = " << other_indices.size());
+	SPECEX_INFO("Ablock size = " << Ablock.size1() << " " << Ablock.size2());
+	if (Arect.size()>0) { 
+	  SPECEX_INFO("Arect size = " << Arect.size() << " " << Arect[0].size());
+	} else { 
+	  SPECEX_INFO("Arect size = " << Arect.size());
+	}
+      }
+      */
       
       double wscale=1;
       if(recompute_weight_in_fit) {
@@ -742,17 +761,15 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   
 #ifdef FASTER_THAN_SYR  
   if(do_faster_than_syr) {
-    //SPECEX_INFO("rebuild A ...");
     size_t n=Ablock.size1();
     for(size_t j=0;j<n;j++)
       for(size_t i=j;i<n;i++)
 	(*Ap)(i,j) += Ablock(i,j);
-    for(size_t s=0; s<spot_tmp_data.size(); s++) {
-      int i = index_of_spots_parameters+s;
+    for(size_t s=0; s<Arect.size(); s++) {
+      int i = index_of_spots_parameters + s;
       for(size_t j=0;j<n;j++)
 	(*Ap)(i,j) += Arect[s](j);
     }
-    //SPECEX_INFO("done");
   }
 #endif
   
@@ -1977,8 +1994,57 @@ bool specex::PSF_Fitter::FitIndividualSpotPositions(std::vector<specex::Spot_p>&
   return true;
 }
 
-std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0) {
+void specex::PSF_Fitter::compare_spots_chi2_and_mask(std::vector<specex::Spot_p>& spots, const double& nsig) {
+  for(size_t i=0;i<spots.size();i++) {
+    specex::Spot_p spot= spots[i];
+    // look at other spots with same wavelength
+    double s = 0; // number of spots
+    double sc = 0; // sum of spots chi2
+    double sc2 = 0; // sum of spots chi2**2
+    for(size_t j=0;j<spots.size();j++) {
+      if(i==j) continue;
+      specex::Spot_p ospot= spots[j];
+      if(fabs(ospot->wavelength-spot->wavelength)>1.) continue;
+      s += 1;
+      sc += ospot->chi2;
+      sc2 += (ospot->chi2)*(ospot->chi2);
+    }
+    if(s<2) continue;
+    double mchi2=sc/s;
+    double rmschi2=sqrt(sc2/s-mchi2*mchi2);
+    if(spot->chi2 > (mchi2 + nsig*rmschi2)) {
+      SPECEX_WARNING("masking spot " << i << " at x=" << spot->xc << " y=" << spot->yc << " with large chi2 = " << spot->chi2 << ">" << mchi2 << "+" << nsig << "*" << rmschi2 << "=" << (mchi2 + nsig*rmschi2));
+      spot->flux=0;
+      spot->status=0;
+
+      // now set weights to zero here
+      {
+	Stamp stamp(footprint_weight);
+	SetStampLimitsFromPSF(stamp,psf,spot->xc,spot->yc);      
+	for (int j=stamp.begin_j;j<stamp.end_j;j++) {
+	  for (int i=stamp.begin_i;i<stamp.end_i;i++) {
+	    footprint_weight(i,j)=0;
+	  }
+	}
+      }
+      {
+	Stamp stamp(corefootprint);
+	SetStampLimitsFromPSF(stamp,psf,spot->xc,spot->yc);      
+	for (int j=stamp.begin_j;j<stamp.end_j;j++) {
+	  for (int i=stamp.begin_i;i<stamp.end_i;i++) {
+	    corefootprint(i,j)=0;
+	  }
+	}
+      }
+    }
+  }
+}
+
+std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist, double chi2_nsig) {
   
+  // add a systematic test of chi2 of spots
+  compare_spots_chi2_and_mask(input_spots,chi2_nsig);
+
   std::vector<specex::Spot_p> selected_spots;
   
   for(size_t s=0;s<input_spots.size();s++) {
@@ -2339,6 +2405,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = false;
   //include_signal_in_weight = true;
   ok = FitIndividualSpotFluxes(input_spots);
+  
   std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
   if(write_tmp_results) {
     write_spots_xml(selected_spots,"spots-before-gaussian-fit.xml");
