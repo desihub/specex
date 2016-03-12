@@ -1381,10 +1381,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  }
 	}
       }
-      if(As.size1()>1) {
+      /*
+	if(As.size1()>1) {
 	specex::write_new_fits_image("A.fits",As);
 	SPECEX_WARNING("wrote A.fits");
       }
+      */
       if(fatal) {
 	SPECEX_ERROR("cholesky_solve failed with status " << status);
       } else {
@@ -2011,7 +2013,9 @@ void specex::PSF_Fitter::compare_spots_chi2_and_mask(std::vector<specex::Spot_p>
     }
     if(s<2) continue;
     double mchi2=sc/s;
-    double rmschi2=sqrt(sc2/s-mchi2*mchi2);
+    double var=sc2/s-mchi2*mchi2;
+    if(var<=0) continue;
+    double rmschi2=sqrt(var);
     if(spot->chi2 > (mchi2 + nsig*rmschi2)) {
       SPECEX_WARNING("masking spot " << i << " at x=" << spot->xc << " y=" << spot->yc << " with large chi2 = " << spot->chi2 << ">" << mchi2 << "+" << nsig << "*" << rmschi2 << "=" << (mchi2 + nsig*rmschi2));
       spot->flux=0;
