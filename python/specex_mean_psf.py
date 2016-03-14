@@ -140,7 +140,8 @@ def main() :
                     
             else : # we have a problem here, take the smallest rchi2
                 i=np.argmin(bundle_rchi2[:,bundle])
-                output_coeff[f]=coeff[i,f]
+                for f in fibers :
+                    output_coeff[f]=coeff[i,f]
                 output_rchi2[bundle]=bundle_rchi2[i,bundle]
         
         # now copy this in output table
