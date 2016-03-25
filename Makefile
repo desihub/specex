@@ -25,7 +25,8 @@ all :
 
 install : all
 	@cd src/ ; $(MAKE) install; \
-	cd ../python; cp $(PYSCRIPTS) $(SPECEX_PREFIX)
+	cd ../python; cp $(PYSCRIPTS) $(SPECEX_PREFIX)/bin/; \
+	chmod +x $(SPECEX_PREFIX)/bin/specex*
 
 uninstall :
 	@cd src/ ; $(MAKE) uninstall
