@@ -14,6 +14,7 @@ export PLUG_EXT := $(shell harpconfig --plugext)
 
 export LINK := $(shell harpconfig --link)
 
+PYSCRIPTS = specex_mean_psf.py
 
 # descend to src directory
 
@@ -23,7 +24,9 @@ all :
 	@cd src/ ; $(MAKE)
 
 install : all
-	@cd src/ ; $(MAKE) install
+	@cd src/ ; $(MAKE) install; \
+	cd ../python; cp $(PYSCRIPTS) $(SPECEX_PREFIX)/bin/; \
+	chmod +x $(SPECEX_PREFIX)/bin/specex*
 
 uninstall :
 	@cd src/ ; $(MAKE) uninstall
