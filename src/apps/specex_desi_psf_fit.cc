@@ -63,8 +63,8 @@ int main ( int argc, char *argv[] ) {
   // --------------------------------------------
   string psf_model = "GAUSSHERMITE";
   string spectrograph_name = "DESI";  
-  int    first_fiber_bundle=1;
-  int    last_fiber_bundle=1;
+  int    first_fiber_bundle=0;
+  int    last_fiber_bundle=0;
   int    first_fiber=0;
   int    last_fiber=100000;
   int    half_size_x=4;
@@ -139,6 +139,7 @@ int main ( int argc, char *argv[] ) {
     ( "trace_deg_x",  popts::value<int>( &trace_deg_x )->default_value(6), "degree of Legendre polynomials along x_ccd for fit of traces")
     ( "psf_error",  popts::value<double>( &psf_error )->default_value(0), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
     ( "psf_core_wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 5x5 PSF core")
+    ( "per_fiber", "as many X parameters as fibers")
 #ifdef EXTERNAL_TAIL
     ( "fit_psf_tails", "unable fit of psf tails")
 #endif
@@ -226,7 +227,9 @@ int main ( int argc, char *argv[] ) {
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
     
-  
+    bool per_fiber=vm.count("per_fiber")>0;
+    
+      
 
     // define spectrograph (this should be improved)
     // --------------------------------------------
@@ -239,11 +242,22 @@ int main ( int argc, char *argv[] ) {
       spectro = new DESI_Spectrograph();
       /* read traces in arc file */
       read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu,trace_deg_x,trace_deg_wave);
-      spectro->AutoConfigure(traceset);
+      if(per_fiber) {
+	SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x, trace_deg_x)");
+	int nfibers = traceset.size();
+	spectro->number_of_fiber_bundles_per_ccd=nfibers;
+	spectro->number_of_fibers_per_bundle=nfibers;
+	SPECEX_INFO("number of fibers  = " << nfibers);
+	legendre_deg_x = nfibers - 1;
+	trace_deg_x = nfibers - 1;
+      }else{
+	spectro->AutoConfigure(traceset);
+      }
       read_DESI_keywords(arc_image_filename,image_infos,header_hdu);
     }else{
       SPECEX_ERROR("unknown spectrograph");
     }
+    
     
     
 
