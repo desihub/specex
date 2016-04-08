@@ -123,7 +123,7 @@ def main() :
                 log.info("for fiber bundle %d, %d valid PSFs"%(bundle,ok.size))
             
             fibers=np.arange(bundle*nfibers_per_bundle,(bundle+1)*nfibers_per_bundle)
-            if ok.size>=2 : # use mean (median is dangerous)
+            if ok.size>=2 : # use median
                 for f in fibers :
                     output_coeff[f]=np.median(coeff[ok,f],axis=0)
                 output_rchi2[bundle]=np.median(bundle_rchi2[ok,bundle])
