@@ -2058,7 +2058,11 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
       spot->status=0;
       continue;
     }
-    
+    // check spot is in image 
+    if( spot->yc<0 || spot->yc>=image.n_rows() || spot->xc<0 || spot->xc>=image.n_cols() ) {
+      spot->status=0;
+      continue;
+    }
     // now loop on all spots to get distance
     if(min_wave_dist>0) {
       double dist=1000;
