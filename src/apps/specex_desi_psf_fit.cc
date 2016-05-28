@@ -115,6 +115,7 @@ int main ( int argc, char *argv[] ) {
     ( "ivar-hdu", popts::value<int>( &ivar_hdu )->default_value(2), " ivar hdu in input arc fits")
     ( "mask-hdu", popts::value<int>( &mask_hdu )->default_value(3), " mask hdu in input arc fits")
     ( "header-hdu", popts::value<int>( &header_hdu )->default_value(1), " header hdu in input arc fits")
+    
     ( "xcoord-file", popts::value<string>( &xcoord_filename ), "fits image file name with xcoord legendre polynomial of wavelength (mandatory)" )
     ( "xcoord-hdu", popts::value<int>( &xcoord_hdu )->default_value(1), "hdu of xcoord legendre polynomial of wavelength" )
     ( "ycoord-file", popts::value<string>( &ycoord_filename ), "fits image file name with ycoord legendre polynomial of wavelength (mandatory)" )
@@ -231,36 +232,29 @@ int main ( int argc, char *argv[] ) {
     
       
 
-    // define spectrograph (this should be improved)
+    // read trace and data
     // --------------------------------------------
     TraceSet traceset;
-    map<string,string> image_infos;
-    Spectrograph *spectro = 0;
-    if(spectrograph_name == "BOSS") {
-      SPECEX_ERROR("do not deal with BOSS here");
-    }else if(spectrograph_name == "DESI"){
-      spectro = new DESI_Spectrograph();
-      /* read traces in arc file */
-      read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu,trace_deg_x,trace_deg_wave);
-      if(per_fiber) {
-	SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x, trace_deg_x)");
-	int nfibers = traceset.size();
-	spectro->number_of_fiber_bundles_per_ccd=nfibers;
-	spectro->number_of_fibers_per_bundle=nfibers;
-	SPECEX_INFO("number of fibers  = " << nfibers);
-	legendre_deg_x = nfibers - 1;
-	trace_deg_x = nfibers - 1;
-      }else{
-	spectro->AutoConfigure(traceset);
-      }
-      read_DESI_keywords(arc_image_filename,image_infos,header_hdu);
+    map<string,string> header;
+
+    image_data image,weight,mask,rdnoise;
+    read_DESI_preprocessed_image(arc_image_filename,image,weight,mask,rdnoise,header);
+    
+    Spectrograph *spectro = new DESI_Spectrograph();
+    /* read traces in arc file */
+    read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu,trace_deg_x,trace_deg_wave);
+    if(per_fiber) {
+      SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x, trace_deg_x)");
+      int nfibers = traceset.size();
+      spectro->number_of_fiber_bundles_per_ccd=nfibers;
+      spectro->number_of_fibers_per_bundle=nfibers;
+      SPECEX_INFO("number of fibers  = " << nfibers);
+      legendre_deg_x = nfibers - 1;
+      trace_deg_x = nfibers - 1;
     }else{
-      SPECEX_ERROR("unknown spectrograph");
+      spectro->AutoConfigure(traceset);
     }
     
-    
-    
-
     
     if(first_fiber_bundle<0 || first_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
       SPECEX_ERROR("invalid first fiber bundle");
@@ -268,37 +262,7 @@ int main ( int argc, char *argv[] ) {
     if(last_fiber_bundle<first_fiber_bundle || last_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
       SPECEX_ERROR("invalid last fiber bundle");
     }
-    
-  
-    
-    // open image
-    // --------------------------------------------
-    image_data image,weight,mask;
-    read_fits_image(arc_image_filename,flux_hdu,image);
-    read_fits_image(arc_image_filename,ivar_hdu,weight);
-    read_fits_image(arc_image_filename,mask_hdu,mask);
-    for(int j=0;j<weight.Ny();j++) {
-      for(int i=0;i<weight.Nx();i++) {
-	if(mask(i,j)!=0) weight(i,j)=0;
-      }
-    }
-
-    SPECEX_INFO("image  size = " << image.n_cols() << "x" << image.n_rows());
-    SPECEX_INFO("weight size = " << weight.n_cols() << "x" << weight.n_rows());
-    
-
-    // weight is 0 or 1
-    /*
-      for(int j=0;j<weight.Ny();j++) {
-      for(int i=0;i<weight.Nx();i++) {
-	if(weight(i,j)>0)
-	  weight(i,j)=1;
-	else
-	  weight(i,j)=0;
-      }
-    }
-    */
-    
+        
     // init PSF
     // --------------------------------------------
     specex::PSF_p psf;
@@ -350,19 +314,28 @@ int main ( int argc, char *argv[] ) {
     fitter.scheduled_fit_of_traces      = fit_traces;
 
     fitter.psf->gain = 1; // images are already in electrons
-    // fitter.readout_noise = 2; // b1, evaluated using spatial variance in sdProc-b1-00108382.fits[1:4000,1:600]
-
+    
     // compute mean readout noise
-    fitter.psf->readout_noise = 2;
-    if(image_infos.find("RDNOISE") != image_infos.end()) {
-      fitter.psf->readout_noise = atof(image_infos["RDNOISE"].c_str());
-      if(fitter.psf->readout_noise<=0) {
-	SPECEX_ERROR("Absurd RDNOISE read in header = " << fitter.psf->readout_noise );
+    double sum_rdnoise = 0;
+    int npix=0;
+    for(int j=0;j<rdnoise.Ny();j++) {
+      for(int i=0;i<rdnoise.Nx();i++) {
+	if(rdnoise(i,j)>0) {
+	  sum_rdnoise += rdnoise(i,j);
+	  npix ++;
+	}
       }
-      SPECEX_INFO("Using RDNOISE from image header = " << fitter.psf->readout_noise );
     }
-    if(image_infos.find("CAMERA") != image_infos.end()) {
-      fitter.psf->camera_id = image_infos["CAMERA"];
+    if(npix>0) {
+      fitter.psf->readout_noise = sum_rdnoise/npix;
+      SPECEX_INFO("Use mean read noise=" << fitter.psf->readout_noise );
+    }else{
+      fitter.psf->readout_noise = 1;
+      SPECEX_WARNING("Use dummy read noise=" << fitter.psf->readout_noise );
+    }
+    
+    if(header.find("CAMERA") != header.end()) {
+      fitter.psf->camera_id = header["CAMERA"];
       SPECEX_INFO("CAMERA = " << fitter.psf->camera_id );
     }else{
       SPECEX_WARNING("CAMERA Id not found in header");

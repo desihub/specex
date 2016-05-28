@@ -6,7 +6,7 @@
 #include "specex_trace.h"
 #include "specex_desi_io.h"
 #include "specex_message.h"
-
+#include "specex_fits.h"
 
 
 using namespace std;
@@ -121,18 +121,175 @@ void specex::read_DESI_traceset_in_fits(
   SPECEX_INFO("done reading traceset");
 }
 
-void specex::read_DESI_keywords(const std::string& arc_image_filename, std::map<std::string,std::string>& infos, int hdu) {
-  
+typedef std::map<std::string,std::string> Header;
+Header read_header(const std::string& filename, int hdu) {
   fitsfile * fp= 0;
-  harp::fits::open_read (fp,arc_image_filename);
+  harp::fits::open_read (fp,filename);
   harp::fits::img_seek ( fp, hdu);
-  infos.clear();
-  string keys[]={"RDNOISE","DATE-OBS","TELRA","TELDEC","FLAVOR","EXPTIME","CAMERA"};
-  for(int k=0;k<1;k++) {
-    try{ 
-      harp::fits::key_read (fp,keys[k],infos[keys[k]]);
-    }catch(...) { SPECEX_WARNING("could not read " << k << " key in " << arc_image_filename);}
-  }
+  
+  int status = 0;
+  int nkeys;
+  int morekeys;
+  int ret = fits_get_hdrspace ( fp, &nkeys, &morekeys, &status );
+  harp::fits::check ( status );
 
-  harp::fits::close(fp);
+  // get each key in order and append to the ptree
+  
+  
+  char keyname[200];
+  char keyval[200];
+  char keycom[200];
+  Header head;
+  for ( int i = 0; i < nkeys; ++i ) {
+    ret = fits_read_keyn ( fp, i+1, keyname, keyval, keycom, &status );
+    harp::fits::check ( status );
+    head[keyname]=keyval;
+    //SPECEX_INFO("READ IN HEADER " << keyname << " " << keyval); 
+  }
+  return head;
+}
+
+
+void specex::read_DESI_preprocessed_image(const std::string& filename, image_data &image, image_data &weight, image_data &mask, image_data &rdnoise, std::map<std::string,std::string>& header) {
+  
+  SPECEX_INFO("Reading DESI preprocessed image in " << filename);
+  
+  // first read list of headers and extensions to see if this is correct
+  fitsfile * fp= 0;
+  harp::fits::open_read (fp,filename);
+  int nhdus = harp::fits::nhdus(fp);
+  std::vector<std::string> extname;
+  std::vector<int> naxis;
+  std::vector<int> naxis1;
+  std::vector<int> naxis2;
+  for(int i=0;i<nhdus;i++) {
+    int hdu=i+1; // starts at 1
+    harp::fits::img_seek ( fp, hdu);
+    extname.push_back("");
+    naxis.push_back(0);
+    naxis1.push_back(0);
+    naxis2.push_back(0);
+    try {
+      harp::fits::key_read (fp,"EXTNAME",extname[i]);
+    }catch(...) { 
+      if(i!=0) SPECEX_WARNING("could not read EXTNAME in hdu " << hdu << " of " << filename);
+    }
+    try {
+      harp::fits::key_read (fp,"NAXIS",naxis[i]);
+    }catch(...) { 
+      SPECEX_WARNING("could not read NAXIS in hdu " << hdu << " of " << filename);
+    }
+    try {
+      harp::fits::key_read (fp,"NAXIS1",naxis1[i]);
+    }catch(...) { 
+      SPECEX_WARNING("could not read NAXIS1 in hdu " << hdu << " of " << filename);
+    }
+    try {
+      harp::fits::key_read (fp,"NAXIS2",naxis2[i]);
+    }catch(...) { 
+      SPECEX_WARNING("could not read NAXIS2 in hdu " << hdu << " of " << filename);
+    }
+  }
+  
+  int flux_hdu = -1;
+  int ivar_hdu = -1;
+  int mask_hdu = -1;
+  int rdnoise_hdu = -1;
+  for(int i=0;i<nhdus;i++) {
+    int hdu=i+1; // starts at 1
+    if(extname[i]=="IMAGE")
+      flux_hdu=hdu;
+    else if(extname[i]=="IVAR") 
+      ivar_hdu=hdu;
+    else if(extname[i]=="MASK") 
+      mask_hdu=hdu;
+    else if(extname[i]=="READNOISE") 
+      rdnoise_hdu=hdu;
+    else if (naxis[i]==2) {
+      if(flux_hdu == -1)
+	flux_hdu = hdu; // the first image is supposed to be flux
+      else if (ivar_hdu == -1)
+	ivar_hdu = hdu; // next is supposed to be ivar
+      else if (mask_hdu == -1)
+	mask_hdu = hdu; // next is supposed to be mask
+      else if (rdnoise_hdu == -1)
+	rdnoise_hdu = hdu; // next is supposed to be rdnoise
+    }
+    SPECEX_INFO("HDU=" << hdu << " EXTNAME='" << extname[i] << "' NAXIS=" << naxis[i] << " NAXIS1=" << naxis1[i] << " NAXIS2=" << naxis2[i]);
+  }
+  if(flux_hdu==-1) 
+    SPECEX_ERROR("Could not figure out which HDU has flux");
+  if(flux_hdu>-1)  
+    SPECEX_INFO("Will read flux in HDU " << flux_hdu);
+  if(ivar_hdu>-1)  
+    SPECEX_INFO("Will read ivar in HDU " << ivar_hdu);
+  if(mask_hdu>-1)  
+    SPECEX_INFO("Will read mask in HDU " << mask_hdu);
+  if(rdnoise_hdu>-1)  
+    SPECEX_INFO("Will read rdnoise in HDU " << rdnoise_hdu);
+  
+  if(flux_hdu>-1) 
+    read_fits_image(filename,flux_hdu,image);
+  if(ivar_hdu>-1) 
+    read_fits_image(filename,ivar_hdu,weight);
+  if(mask_hdu>-1) 
+    read_fits_image(filename,mask_hdu,mask);
+  if(rdnoise_hdu>-1) 
+    read_fits_image(filename,rdnoise_hdu,rdnoise);
+
+  // read header
+  header = read_header(filename,flux_hdu);
+  
+  if(ivar_hdu==-1) {
+    SPECEX_WARNING("Didn't find ivar in file " << filename << ", set ivar=1");
+    weight.resize(image.n_cols(),image.n_rows());
+    for(int j=0;j<weight.Ny();j++) {
+      for(int i=0;i<weight.Nx();i++) {
+	weight(i,j)=1;
+      }
+    }    
+  }
+  if(mask_hdu==-1) {
+    SPECEX_WARNING("Didn't find mask in file " << filename << ", set mask=0");
+    mask.resize(image.n_cols(),image.n_rows());
+    for(int j=0;j<mask.Ny();j++) {
+      for(int i=0;i<mask.Nx();i++) {
+	mask(i,j)=0;
+      }
+    } 
+  }else{
+    SPECEX_INFO("Set ivar=0 to pixels with mask!=0");
+    for(int j=0;j<weight.Ny();j++) {
+      for(int i=0;i<weight.Nx();i++) {
+	if(mask(i,j)!=0)
+	  weight(i,j)=0;
+      }
+    }
+  }
+  
+  if(rdnoise_hdu==-1) {
+    SPECEX_WARNING("Didn't find rdnoise image in file " << filename << ", look for header keyword");
+    rdnoise.resize(image.n_cols(),image.n_rows());
+    
+    double default_rdnoise_value = 0.001; // dummy default to avoid trouble in the code;
+    double rdnoise_value = default_rdnoise_value;
+    
+    for(Header::const_iterator it=header.begin(); it != header.end(); ++it) {
+      const string& key   = it->first;
+      const string& value = it->second;
+      if (key.find("NOISE")!=std::string::npos && ( key.find("RD")!=std::string::npos || key.find("READ")!=std::string::npos )) {
+      	SPECEX_INFO("Possible read noise header key '" << key << "'=" << value);
+	if (rdnoise_value==default_rdnoise_value) {
+	  SPECEX_INFO("Use this one :" << value);
+	  rdnoise_value=atof(value.c_str());
+	}
+      }
+    }
+    
+    for(int j=0;j<rdnoise.Ny();j++) {
+      for(int i=0;i<rdnoise.Nx();i++) {
+	rdnoise(i,j)=rdnoise_value;
+      }
+    } 
+  }
 }

@@ -17,11 +17,7 @@ namespace specex {
 				  int required_x_vs_wave_degree = 0,
 				  int required_y_vs_wave_degree = 0
 				  );
-  void read_DESI_keywords(
-			  const std::string& arc_image_filename, 
-			  std::map<std::string,std::string>& infos,
-			  int header_hdu
-			  );
+  void read_DESI_preprocessed_image(const std::string& arc_image_filename, image_data &image, image_data &weight, image_data &mask, image_data &read_noise, std::map<std::string,std::string>& header);
 };
 
 #endif
