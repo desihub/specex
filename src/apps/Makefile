@@ -20,7 +20,7 @@ clean :
 specex_extract : specex_extract.cc
 	$(CXX) $(CXXFLAGS) $(PLUG_FLAGS) -I../library -I../plugin -o $@ $< ../plugin/harp_plugin_specex.$(PLUG_EXT) ../library/libspecex.a $(PLUG_LINK) $(LINK)
 
-% : %.cc
+% : %.cc ../library/libspecex.a
 	$(CXX) $(CXXFLAGS) -I../library -I../plugin -o $@ $< ../library/libspecex.a $(LINK)
 
 
