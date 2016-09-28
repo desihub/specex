@@ -23,14 +23,21 @@ MAKEFLAGS = w
 #
 SUBDIRS = src
 #
-# ifndef SPECEX_PREFIX
-# SPECEX_PREFIX = $(error SPECEX_PREFIX undefined)UNDEFINED
-# endif
+# Set SPECEX_PREFIX, using INSTALL_DIR if available.
+#
+ifdef INSTALL_DIR
 export SPECEX_PREFIX = $(INSTALL_DIR)
+endif
+ifndef SPECEX_PREFIX
+NO_SPECEX_PREFIX = $(error SPECEX_PREFIX is undefined!)
+endif
 #
 # Get the variables from harpconfig
 #
 export CXX := $(shell harpconfig --cxx)
+ifndef CXX
+NO_CXX = $(error CXX is undefined! Is harpconfig in your PATH?)
+endif
 export CXXFLAGS := $(shell harpconfig --cxxflags --cppflags) -I. -Wuninitialized -Wunused-value -Wunused-variable
 export PLUG_FLAGS := $(shell harpconfig --plugflags)
 export PLUG_LINK := $(shell harpconfig --pluglink)
@@ -47,13 +54,13 @@ PYSCRIPTS = specex_mean_psf.py
 #
 # This should compile all code prior to it being installed.
 #
-all :
+all : ; $(NO_CXX)
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f all ; done
 
-install : all
+install : all ; $(NO_SPECEX_PREFIX)
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f install; done
-	@ for f in $(PYSCRIPTS); do cp python/$$f $(INSTALL_DIR)/bin; done
-	@ chmod +x $(INSTALL_DIR)/bin/specex*
+	@ for f in $(PYSCRIPTS); do cp python/$$f $(SPECEX_PREFIX)/bin; done
+	chmod +x $(SPECEX_PREFIX)/bin/specex*
 
 uninstall :
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f uninstall; done

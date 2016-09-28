@@ -1,4 +1,10 @@
-This package depends only on [HARP](https://github.com/tskisner/HARP), which provides links to `cfitsio` and `lapack`.
+# Installing specex
+
+## Prerequisites
+
+This package depends only on [HARP](https://github.com/tskisner/HARP),
+which provides links to `cfitsio` and `lapack`.  The command `harpconfig`
+must be in your `$PATH`.
 
 
 ## Installing with Makefiles
@@ -6,7 +12,7 @@ This package depends only on [HARP](https://github.com/tskisner/HARP), which pro
 This is the technique used by Ted to install specex at NERSC.  Ensure that
 HARP is installed and that the harpconfig script is in your $PATH.
 
-Next decide where to install specex.  We will call that directory "$WHERE".
+Next decide where to install specex.  We will call that directory `$WHERE`.
 Make all software and install it by doing:
 
 `SPECEX_PREFIX=$WHERE make install`
@@ -49,4 +55,3 @@ Example :
 ./waf install
 
 ```
-
