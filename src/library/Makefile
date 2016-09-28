@@ -7,6 +7,8 @@ DYEXT := so
 
 LIBS = libspecex.a libspecex.$(DYEXT)
 
+.PHONY : all install uninstall clean
+
 all : $(LIBS)
 
 libspecex.a : $(OBJS)
@@ -17,17 +19,15 @@ libspecex.$(DYEXT) : $(OBJS)
 	$(CXX) -Wl,--no-undefined -fPIC -shared -o $@ $(OBJS) $(LINK)
 
 install : all
-	@mkdir -p "$(SPECEX_PREFIX)/lib"; \
-	cp $(LIBS) "$(SPECEX_PREFIX)/lib/"
+	mkdir -p $(SPECEX_PREFIX)/lib
+	cp $(LIBS) $(SPECEX_PREFIX)/lib
 
 uninstall :
-	@rm -f "$(SPECEX_PREFIX)/lib/libspecex*"
+	- $(RM) "$(SPECEX_PREFIX)/lib/libspecex*"
 
 clean :
-	@rm -f $(LIBS) *.o *~
+	- $(RM) $(LIBS) *.o *~
 
 
 %.o : %.cc $(HEADERS)
 	$(CXX) $(CXXFLAGS) -fPIC -o $@ -c $<
-
-
