@@ -3,9 +3,7 @@ HEADERS := $(wildcard *.h)
 
 OBJS := $(patsubst %.cc,%.o,$(wildcard *.cc))
 
-DYEXT := so
-
-LIBS = libspecex.a libspecex.$(DYEXT)
+LIBS = libspecex.a libspecex.$(PLUG_EXT)
 
 .PHONY : all install uninstall clean
 
@@ -15,7 +13,7 @@ libspecex.a : $(OBJS)
 	ar cr $@ $(OBJS)
 	ranlib $@
 
-libspecex.$(DYEXT) : $(OBJS)
+libspecex.$(PLUG_EXT) : $(OBJS)
 	$(CXX) -Wl,--no-undefined -fPIC -shared -o $@ $(OBJS) $(LINK)
 
 install : all
