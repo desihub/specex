@@ -62,7 +62,7 @@ install : all ; $(NO_SPECEX_PREFIX)
 	@ for f in $(PYSCRIPTS); do cp python/$$f $(SPECEX_PREFIX)/bin; done
 	chmod +x $(SPECEX_PREFIX)/bin/specex*
 
-uninstall :
+uninstall : ; $(NO_SPECEX_PREFIX)
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f uninstall; done
 #
 # GNU make pre-defines $(RM).  The - in front of $(RM) causes make to

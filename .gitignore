@@ -1,5 +1,14 @@
+# Generic files
 *.pyc
+*.o
+*.a
+*.so
 *~
+
+# waf stuff
 .lock-wafbuild
 .waf*
 build*
+
+# MacOS
+.DS_Store
