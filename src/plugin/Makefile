@@ -3,20 +3,19 @@ HEADERS = harp_plugin_specex.h
 
 PLUGS = harp_plugin_specex.$(PLUG_EXT)
 
+.PHONY : all install uninstall clean
 
 all : $(PLUGS)
 
 install : all
-	@mkdir -p "$(SPECEX_PREFIX)/lib"; \
-	cp $(PLUGS) "$(SPECEX_PREFIX)/lib/"
+	mkdir -p $(SPECEX_PREFIX)/lib
+	cp $(PLUGS) $(SPECEX_PREFIX)/lib
 
 uninstall :
-	@for p in $(PLUGS); do \
-	rm -f "$(SPECEX_PREFIX)/lib/$${p}"; \
-	done
+	@ for p in $(PLUGS); do $(RM) "$(SPECEX_PREFIX)/lib/$${p}"; done
 
 clean :
-	@rm -f $(PLUGS) *.o *~
+	- $(RM) $(PLUGS) *.o *~
 
 
 harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o ../library/libspecex.a
@@ -24,4 +23,3 @@ harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o ../library/libspecex.a
 
 harp_plugin_specex.o : harp_plugin_specex.cc $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(PLUG_FLAGS) -I../library -o $@ -c $<
-

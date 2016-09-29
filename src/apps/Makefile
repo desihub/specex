@@ -1,20 +1,19 @@
 
 PROGS := $(patsubst %.cc,%,$(wildcard *.cc))
 
+.PHONY : all install uninstall clean
 
 all : $(PROGS)
 
 install : all
-	@mkdir -p "$(SPECEX_PREFIX)/bin"; \
-	cp $(PROGS) "$(SPECEX_PREFIX)/bin/"
+	mkdir -p $(SPECEX_PREFIX)/bin
+	cp $(PROGS) $(SPECEX_PREFIX)/bin
 
 uninstall :
-	@for p in $(PROGS); do \
-	rm -f "$(SPECEX_PREFIX)/bin/$${p}"; \
-	done
+	@ for p in $(PROGS); do $(RM) "$(SPECEX_PREFIX)/bin/$${p}"; done
 
 clean :
-	@rm -f $(PROGS) *.o *~
+	- $(RM) -f $(PROGS) *.o *~
 
 
 specex_extract : specex_extract.cc
@@ -22,5 +21,3 @@ specex_extract : specex_extract.cc
 
 % : %.cc ../library/libspecex.a
 	$(CXX) $(CXXFLAGS) -I../library -I../plugin -o $@ $< ../library/libspecex.a $(LINK)
-
-

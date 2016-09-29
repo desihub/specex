@@ -6,32 +6,22 @@ DIRS = library plugin tests apps
 all : $(DIRS)
 
 apps : plugin library
-	@cd apps; $(MAKE); cd ..
+	$(MAKE) -C apps
 
 tests : library
-	@cd tests; $(MAKE); cd ..
+	$(MAKE) -C tests
 
 plugin : library
-	@cd plugin; $(MAKE); cd ..
+	$(MAKE) -C plugin
 
 library :
-	@cd library; $(MAKE); cd ..
+	$(MAKE) -C library
 
 install : all
-	@for dir in $(DIRS); do \
-	cd $${dir}; $(MAKE) install; \
-	cd ..; \
-	done
+	@ for d in $(DIRS); do $(MAKE) -C $$d install; done
 
 uninstall :
-	@for dir in $(DIRS); do \
-	cd $${dir}; $(MAKE) uninstall; \
-	cd ..; \
-	done
+	@ for d in $(DIRS); do $(MAKE) -C $$d uninstall; done
 
 clean :
-	@for dir in $(DIRS); do \
-	cd $${dir}; $(MAKE) clean; \
-	cd ..; \
-	done
-
+	@ for d in $(DIRS); do $(MAKE) -C $$d clean; done
