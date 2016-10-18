@@ -176,8 +176,11 @@ double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
 
   
   // sigmas of Gaussian
-  const double &sx = Params(0);
-  const double &sy = Params(1);
+  double sx = Params(0);
+  double sy = Params(1);
+  if(sx<0.1) {sx=0.1;} // to avoid failures in exploration of model params
+  if(sy<0.1) {sy=0.1;} // to avoid failures in exploration of model params
+  
   const double isx = 1./sx;
   const double isy = 1./sy;
   
