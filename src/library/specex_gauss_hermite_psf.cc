@@ -37,8 +37,12 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 			  harp::vector_double *ParamDer) const
 {
 
-  double sigma_x_inv = 1./Params(0);
-  double sigma_y_inv = 1./Params(1);
+  double sx = Params(0);
+  double sy = Params(1);
+  if(sx<0.1) {sx=0.1;} // to avoid failures in exploration of model params
+  if(sy<0.1) {sy=0.1;} // to avoid failures in exploration of model params
+  double sigma_x_inv = 1./sx;
+  double sigma_y_inv = 1./sy;
   double x = input_X*sigma_x_inv;
   double y = input_Y*sigma_y_inv;
 
