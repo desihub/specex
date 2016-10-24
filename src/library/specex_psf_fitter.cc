@@ -2419,71 +2419,72 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     write_spots_xml(selected_spots,"spots-before-gaussian-fit.xml");
     write_psf_xml(psf,"psf-before-gaussian-fit.xml");
   }
-  
-  {
-    SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
-    psf_params->FitParPolXW.clear();
-    int npar = psf->LocalNAllPar();
-    for(int p=0;p<npar;p++) {
-      const string& name = psf->ParamName(p);
-      bool ok = false;
-      ok |= (name=="GHSIGX" || name=="GHSIGY" || name=="RADIUS"  || name=="SIGMA" );
-      //ok |= (name=="GHSIGX2");
-      //ok |= (name=="GHSIGY2");
-      //ok |= (name=="GHSCAL2");
-      if(ok)
-	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+  if(scheduled_fit_of_sigmas) {
+    {
+      SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
+      psf_params->FitParPolXW.clear();
+      int npar = psf->LocalNAllPar();
+      for(int p=0;p<npar;p++) {
+	const string& name = psf->ParamName(p);
+	bool ok = false;
+	ok |= (name=="GHSIGX" || name=="GHSIGY" || name=="RADIUS"  || name=="SIGMA" );
+	//ok |= (name=="GHSIGX2");
+	//ok |= (name=="GHSIGY2");
+	//ok |= (name=="GHSCAL2");
+	if(ok)
+	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+      }
     }
-  }
-  chi2=1e30;
+    chi2=1e30;
 
-  for(int i=0;i<5;i++) {
-    SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms then FLUX (loop="<<i<<")");
-    SPECEX_INFO("===================================================");
+    for(int i=0;i<5;i++) {
+      SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms then FLUX (loop="<<i<<")");
+      SPECEX_INFO("===================================================");
+      
+      fit_flux       = false;
+      fit_position   = false;
+      fit_psf        = true;
+      fit_trace      = false;
+      float previous_chi2 = chi2;
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
+      
+      ok = FitIndividualSpotFluxes(input_spots);
+      selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+      if(fabs(previous_chi2 - chi2)<1.) break;
+    }
     
-    fit_flux       = false;
+    force_positive_flux = true;
+    increase_weight_of_side_bands = false;
+  
+    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
+    SPECEX_INFO("========================================================");
+    fit_flux       = true;
     fit_position   = false;
     fit_psf        = true;
     fit_trace      = false;
-    float previous_chi2 = chi2;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
-  
-    ok = FitIndividualSpotFluxes(input_spots);
-    selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
-    if(fabs(previous_chi2 - chi2)<1.) break;
-  }
-  
-  force_positive_flux = true;
-  increase_weight_of_side_bands = false;
-  
-  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
-  SPECEX_INFO("========================================================");
-  fit_flux       = true;
-  fit_position   = false;
-  fit_psf        = true;
-  fit_trace      = false;
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  
-  
-  /* dump central values for all fibers */
+    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
+    
+    
+    /* dump central values for all fibers */
 
-  for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) {
-    specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
-    double w1 = trace.X_vs_W.xmin;
-    double w2 = (trace.X_vs_W.xmin+trace.X_vs_W.xmax)/2;
-    double w3 = trace.X_vs_W.xmax;
+    for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) {
+      specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
+      double w1 = trace.X_vs_W.xmin;
+      double w2 = (trace.X_vs_W.xmin+trace.X_vs_W.xmax)/2;
+      double w3 = trace.X_vs_W.xmax;
     
-    SPECEX_INFO("fiber " << fiber 
-		<< " wave " << w1 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w1,psf_params->bundle_id),ublas::range(0,2)) 
-		<< " wave " << w2 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w2,psf_params->bundle_id),ublas::range(0,2))
+      SPECEX_INFO("fiber " << fiber 
+		  << " wave " << w1 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w1,psf_params->bundle_id),ublas::range(0,2)) 
+		  << " wave " << w2 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w2,psf_params->bundle_id),ublas::range(0,2))
 		<< " wave " << w3 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w3,psf_params->bundle_id),ublas::range(0,2)));
-    
-  }
-  if(write_tmp_results) {
-    write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
-    write_psf_xml(psf,"psf-after-gaussian-fit.xml");
+      
+    }
+    if(write_tmp_results) {
+      write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
+      write_psf_xml(psf,"psf-after-gaussian-fit.xml");
+    }
   }
   
   if(scheduled_fit_of_traces) {
@@ -2654,15 +2655,17 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     ok = FitIndividualSpotFluxes(input_spots);
     selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
   
-    SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX+TRACE only gaussian terms");
-    SPECEX_INFO("========================================================");
-    fit_flux       = true;
-    fit_position   = false;
-    fit_psf        = true;
-    fit_trace      = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX+TRACE only gaussian terms");
-    
+    if(scheduled_fit_of_sigmas) {
+      SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX+TRACE only gaussian terms");
+      SPECEX_INFO("========================================================");
+      fit_flux       = true;
+      fit_position   = false;
+      fit_psf        = true;
+      fit_trace      = true;
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX+TRACE only gaussian terms");
+      
+    }
   }
   
   if(psf->HasParam("GHNSIG")) {

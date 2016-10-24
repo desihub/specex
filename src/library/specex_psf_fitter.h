@@ -99,6 +99,7 @@ class PSF_Fitter {
   bool fit_flux;
   bool fit_position;
   bool scheduled_fit_of_traces;
+  bool scheduled_fit_of_sigmas;
 #ifdef EXTERNAL_TAIL
   bool fit_psf_tail;
   bool scheduled_fit_of_psf_tail;
@@ -140,6 +141,7 @@ class PSF_Fitter {
    force_positive_flux(false),
    increase_weight_of_side_bands(false),
     scheduled_fit_of_traces(true),
+    scheduled_fit_of_sigmas(true),
 #ifdef EXTERNAL_TAIL
     fit_psf_tail(false),
     scheduled_fit_of_psf_tail(false),

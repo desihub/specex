@@ -147,6 +147,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "fit_continuum", "unable fit of continuum")
 #endif
     ( "no_trace_fit", "do not fit traces")
+    ( "no_sigma_fit", "do not fit the gaussian sigma")
     ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
     ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
     ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
@@ -215,6 +216,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
+    bool fit_sigmas = (vm.count("no_sigma_fit")==0);
     bool write_tmp_results = (vm.count("tmp_results")>0);
     
 #ifdef EXTERNAL_TAIL
@@ -311,7 +313,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 #endif
     
     fitter.scheduled_fit_of_traces      = fit_traces;
-
+    fitter.scheduled_fit_of_sigmas      = fit_sigmas;
+    
     fitter.psf->gain = 1; // images are already in electrons
     
     // compute mean readout noise
