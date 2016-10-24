@@ -310,7 +310,8 @@ public :
 
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
-    harp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    int GetBundleOfFiber(int fiber) const;
+    harp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
     harp::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
     harp::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
     harp::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;

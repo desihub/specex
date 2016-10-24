@@ -78,11 +78,8 @@ int main(int argc, char *argv[]) {
     if(half_size_x>0) psf->hSizeX = half_size_x;
     if(half_size_y>0) psf->hSizeY = half_size_y;
     
-
-    int bundle = fiber/20; // to be modified
-
-    cout << "wavelength = " << wavelength << " fiber = " << fiber << " bundle = " << bundle << endl;
-    write_psf_fits_image(psf,output_fits_image_filename,fiber,wavelength,bundle,oversampling);
+    cout << "wavelength = " << wavelength << " fiber = " << fiber << endl;
+    write_psf_fits_image(psf,output_fits_image_filename,fiber,wavelength,oversampling);
     
   }catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;

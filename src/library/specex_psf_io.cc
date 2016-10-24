@@ -16,15 +16,15 @@
 
 // also need #included <specex_serialisation.h>  before main() 
 
-void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int bundle, int oversampling) {
+void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int oversampling) {
   
   double x=psf->Xccd(fiber,wavelength);
   double y=psf->Yccd(fiber,wavelength);
-
+  SPECEX_INFO("PSF center X Y = " << x << " " << y);
   x = int(x);
   y = int(y);
-
-  harp::vector_double P=psf->AllLocalParamsFW(fiber,wavelength,bundle);
+  
+  harp::vector_double P=psf->AllLocalParamsFW(fiber,wavelength);
   
   SPECEX_INFO("PSF Params " << P);
   SPECEX_INFO("PSF value at center = " << psf->PSFValueWithParamsXY(int(x),int(y),int(x),int(y),P,0,0));
