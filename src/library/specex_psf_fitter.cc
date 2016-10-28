@@ -2574,7 +2574,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	SPECEX_WARNING("There are more than 2 fibers with large offsets, this is not due to dead columns, so we continue");
       }
       
-      if(fibers_with_large_offsets.size()>0 && fibers_with_large_offsets.size()<3) {
+      if(false && fibers_with_large_offsets.size()>0 && fibers_with_large_offsets.size()<3) {
 	// try to fix this : use interpolation of other fibers : this assume fiber slit heads allow it, as for BOSS
 	for(size_t f=0;f<fibers_with_large_offsets.size();f++) {
 	  int bad_fiber   = fibers_with_large_offsets[f];
