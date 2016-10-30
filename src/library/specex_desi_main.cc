@@ -70,10 +70,11 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   int    half_size_y=4;
   
   string arc_image_filename="";
-  string xcoord_filename="";
-  string ycoord_filename="";
-  int xcoord_hdu=0;
-  int ycoord_hdu=0;
+  string trace_filename="";
+  string xtrace_filename="";
+  string ytrace_filename="";
+  int xtrace_hdu=0;
+  int ytrace_hdu=0;
   //string wy_trace_fits_name="";
   string lamp_lines_filename="";  
   double min_wavelength = 0;
@@ -114,11 +115,13 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "ivar-hdu", popts::value<int>( &ivar_hdu )->default_value(2), " ivar hdu in input arc fits")
     ( "mask-hdu", popts::value<int>( &mask_hdu )->default_value(3), " mask hdu in input arc fits")
     ( "header-hdu", popts::value<int>( &header_hdu )->default_value(1), " header hdu in input arc fits")
+
+    ( "trace", popts::value<string>( &trace_filename ), "fits image file name with image extensions XTRACE and YTRACE for legendre polynomial of wavelength (mandatory)" )
     
-    ( "xcoord-file", popts::value<string>( &xcoord_filename ), "fits image file name with xcoord legendre polynomial of wavelength (mandatory)" )
-    ( "xcoord-hdu", popts::value<int>( &xcoord_hdu )->default_value(1), "hdu of xcoord legendre polynomial of wavelength" )
-    ( "ycoord-file", popts::value<string>( &ycoord_filename ), "fits image file name with ycoord legendre polynomial of wavelength (mandatory)" )
-    ( "ycoord-hdu", popts::value<int>( &ycoord_hdu )->default_value(1), "hdu of ycoord legendre polynomial of wavelength" )
+    ( "xcoord-file", popts::value<string>( &xtrace_filename ), "fits image file name with x trace legendre polynomial of wavelength (ignored if --trace given)" )
+    ( "xcoord-hdu", popts::value<int>( &xtrace_hdu )->default_value(-1), "hdu of x trace legendre polynomial of wavelength (default is looking for extension XTRACE)" )
+    ( "ycoord-file", popts::value<string>( &ytrace_filename ), "fits image file name with y trace legendre polynomial of wavelength (ignored if --trace given)" )
+    ( "ycoord-hdu", popts::value<int>( &ytrace_hdu )->default_value(-1), "hdu of y trace legendre polynomial of wavelength (default is looking for extension YTRACE)" )
     ( "first_bundle", popts::value<int>( &first_fiber_bundle ), "first fiber bundle to fit")
     ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
     ( "first_fiber", popts::value<int>( &first_fiber ), "first fiber (must be in bundle)")
@@ -163,7 +166,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
     popts::notify(vm);
     
-    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) || ( ! vm.count( "xcoord-file" ) ) || ( ! vm.count( "ycoord-file" ) ) ) {
+    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) || ( (! vm.count("trace")) && (( ! vm.count( "xcoord-file" ) ) || ( ! vm.count( "ycoord-file" ) ) ) )) {
       cerr << endl;
       cerr << desc << endl;
       cerr << "example:" << endl;
@@ -243,7 +246,11 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     
     Spectrograph *spectro = new DESI_Spectrograph();
     /* read traces in arc file */
-    read_DESI_traceset_in_fits(traceset,xcoord_filename,xcoord_hdu,ycoord_filename,ycoord_hdu,trace_deg_x,trace_deg_wave);
+    if(trace_filename !="") {
+      xtrace_filename=trace_filename;
+      ytrace_filename=trace_filename;
+    }
+    read_DESI_traceset_in_fits(traceset,xtrace_filename,xtrace_hdu,ytrace_filename,ytrace_hdu,trace_deg_x,trace_deg_wave);
     if(per_fiber) {
       SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x, trace_deg_x)");
       int nfibers = traceset.size();
