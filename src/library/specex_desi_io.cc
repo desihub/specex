@@ -32,11 +32,10 @@ void specex::read_DESI_traceset_in_fits(
   
   // reading
   
-  //try{
   {
     fitsfile * fp= 0;
     harp::fits::open_read (fp,x_vs_wave_filename);
-
+    
     if(x_vs_wave_hdu_number<0) x_vs_wave_hdu_number = find_hdu(fp,"XTRACE");
     if(x_vs_wave_hdu_number<0) { // backward compatibility
       x_vs_wave_hdu_number = find_hdu(fp,"XCOEFF");
@@ -52,10 +51,7 @@ void specex::read_DESI_traceset_in_fits(
     harp::fits::key_read (fp,"WAVEMAX",x_vs_wave_wavemax);
     harp::fits::close ( fp );
   }
-    //}catch(...) { SPECEX_ERROR("could not read properly x traces in " << x_vs_wave_filename << " HDU " << x_vs_wave_hdu_number);}
-
-    //try{
-    {
+  {
     fitsfile * fp= 0;
     harp::fits::open_read (fp,y_vs_wave_filename);
     
@@ -65,8 +61,6 @@ void specex::read_DESI_traceset_in_fits(
       if(y_vs_wave_hdu_number<0) SPECEX_ERROR("didn't find extension YTRACE of YCOEFF");
       SPECEX_WARNING("Using deprecated extension YCOEFF for YTRACE");
     }
-
-    
     
     harp::fits::img_seek ( fp, y_vs_wave_hdu_number);
     harp::fits::img_dims ( fp, nrows, ncols );
@@ -74,16 +68,12 @@ void specex::read_DESI_traceset_in_fits(
     harp::fits::img_read ( fp, y_vs_wave_coefs.data, false );
     harp::fits::key_read (fp,"WAVEMIN",y_vs_wave_wavemin);
     harp::fits::key_read (fp,"WAVEMAX",y_vs_wave_wavemax);
-    
     harp::fits::close ( fp );
-    }
-    //}catch(...) { SPECEX_ERROR("could not read properly y traces in " << y_vs_wave_filename << " HDU " << y_vs_wave_hdu_number);}
-    
-  SPECEX_INFO("X WAVEMIN WAVEMAX " << x_vs_wave_wavemin << " " << x_vs_wave_wavemax);
-  SPECEX_INFO("X WAVE COEF SIZE  " << x_vs_wave_coefs.n_cols() << " " << x_vs_wave_coefs.n_rows());
-  SPECEX_INFO("Y WAVEMIN WAVEMAX " << y_vs_wave_wavemin << " " << y_vs_wave_wavemax);
-  SPECEX_INFO("Y WAVE COEF SIZE  " << y_vs_wave_coefs.n_cols() << " " << y_vs_wave_coefs.n_rows());
-  SPECEX_INFO("read traces in '" << x_vs_wave_filename << "' HDU "<< x_vs_wave_hdu_number << " and '" << y_vs_wave_filename << "' HDU " <<  y_vs_wave_hdu_number);
+  }
+  
+  SPECEX_INFO("read traces in '" << x_vs_wave_filename << "' HDU "<< x_vs_wave_hdu_number << " and '" << y_vs_wave_filename << "' HDU " <<  y_vs_wave_hdu_number);    
+  SPECEX_INFO("X WAVE MIN MAX, SIZE " << x_vs_wave_wavemin << " " << x_vs_wave_wavemax << " " << x_vs_wave_coefs.n_cols() << "x" << x_vs_wave_coefs.n_rows());
+  SPECEX_INFO("Y WAVE MIN MAX, SIZE " << y_vs_wave_wavemin << " " << y_vs_wave_wavemax << " " << y_vs_wave_coefs.n_cols() << "x" << y_vs_wave_coefs.n_rows());
   
   int nfibers=x_vs_wave_coefs.n_rows();
   if(nfibers != y_vs_wave_coefs.n_rows()) {
@@ -98,15 +88,27 @@ void specex::read_DESI_traceset_in_fits(
     trace.mask  = 0; // need to do something here?
     trace.X_vs_W.xmin = x_vs_wave_wavemin;
     trace.X_vs_W.xmax = x_vs_wave_wavemax;
-    trace.X_vs_W.deg  = max(required_x_vs_wave_degree,int(x_vs_wave_coefs.n_cols()-1));
+    if(required_x_vs_wave_degree>=0) {
+      trace.X_vs_W.deg  = required_x_vs_wave_degree;
+      if(required_x_vs_wave_degree<(x_vs_wave_coefs.n_cols()-1) && fiber==0)
+	SPECEX_WARNING("Will use lower x trace degree that input");
+    } else {
+      trace.X_vs_W.deg  = x_vs_wave_coefs.n_cols()-1;
+    }
     trace.X_vs_W.coeff.resize(trace.X_vs_W.deg+1);
-    for(int i=0;i<int(x_vs_wave_coefs.n_cols());i++)
+    for(int i=0;i<min(int(trace.X_vs_W.coeff.size()),int(x_vs_wave_coefs.n_cols()));i++)
       trace.X_vs_W.coeff[i]= x_vs_wave_coefs(i,fiber);
     trace.Y_vs_W.xmin = y_vs_wave_wavemin;
     trace.Y_vs_W.xmax = y_vs_wave_wavemax;
-    trace.Y_vs_W.deg  = max(required_y_vs_wave_degree,int(y_vs_wave_coefs.n_cols()-1));
+    if(required_y_vs_wave_degree>=0) {
+      trace.Y_vs_W.deg  = required_y_vs_wave_degree;
+      if(required_y_vs_wave_degree<(y_vs_wave_coefs.n_cols()-1) && fiber==0)
+	SPECEX_WARNING("Will use lower y trace degree that input");
+    } else {
+      trace.Y_vs_W.deg  = y_vs_wave_coefs.n_cols()-1;
+    }
     trace.Y_vs_W.coeff.resize(trace.Y_vs_W.deg+1);
-    for(int i=0;i<int(y_vs_wave_coefs.n_cols());i++)
+    for(int i=0;i<min(int(trace.Y_vs_W.coeff.size()),int(y_vs_wave_coefs.n_cols()));i++)
       trace.Y_vs_W.coeff[i]= y_vs_wave_coefs(i,fiber);
 
     trace.X_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
@@ -125,7 +127,7 @@ void specex::read_DESI_traceset_in_fits(
     trace.synchronized = true;
   }
   
-  SPECEX_INFO("done reading traceset");
+  SPECEX_DEBUG("done reading traceset");
 }
 
 typedef std::map<std::string,std::string> Header;
@@ -222,18 +224,18 @@ void specex::read_DESI_preprocessed_image(const std::string& filename, image_dat
       else if (rdnoise_hdu == -1)
 	rdnoise_hdu = hdu; // next is supposed to be rdnoise
     }
-    SPECEX_INFO("HDU=" << hdu << " EXTNAME='" << extname[i] << "' NAXIS=" << naxis[i] << " NAXIS1=" << naxis1[i] << " NAXIS2=" << naxis2[i]);
+    SPECEX_DEBUG("HDU=" << hdu << " EXTNAME='" << extname[i] << "' NAXIS=" << naxis[i] << " NAXIS1=" << naxis1[i] << " NAXIS2=" << naxis2[i]);
   }
   if(flux_hdu==-1) 
     SPECEX_ERROR("Could not figure out which HDU has flux");
   if(flux_hdu>-1)  
-    SPECEX_INFO("Will read flux in HDU " << flux_hdu);
+    SPECEX_DEBUG("Will read flux in HDU " << flux_hdu);
   if(ivar_hdu>-1)  
-    SPECEX_INFO("Will read ivar in HDU " << ivar_hdu);
+    SPECEX_DEBUG("Will read ivar in HDU " << ivar_hdu);
   if(mask_hdu>-1)  
-    SPECEX_INFO("Will read mask in HDU " << mask_hdu);
+    SPECEX_DEBUG("Will read mask in HDU " << mask_hdu);
   if(rdnoise_hdu>-1)  
-    SPECEX_INFO("Will read rdnoise in HDU " << rdnoise_hdu);
+    SPECEX_DEBUG("Will read rdnoise in HDU " << rdnoise_hdu);
   
   if(flux_hdu>-1) 
     read_fits_image(filename,flux_hdu,image);
