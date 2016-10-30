@@ -410,7 +410,7 @@ int specex::PSF::GetBundleOfFiber(int fiber) const {
   for(std::map<int,specex::PSF_Params>::const_iterator it=ParamsOfBundles.begin() ; it != ParamsOfBundles.end(); ++it) {
     
     if (fiber>=it->second.fiber_min && fiber<=it->second.fiber_max) {
-      SPECEX_INFO("Found bundle of fiber #" << fiber << " : " << it->first);
+      SPECEX_DEBUG("Found bundle of fiber #" << fiber << " : " << it->first);
       bundle=it->first;
       found=true;
       break;
