@@ -85,7 +85,7 @@ int main ( int argc, char *argv[] ) {
     cerr << desc << endl;
     return EXIT_FAILURE;
   }
-  try {
+  //try {
 
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
@@ -128,7 +128,8 @@ int main ( int argc, char *argv[] ) {
       xml_ia >> BOOST_SERIALIZATION_NVP(input_spots);
       is.close();
     } 
-    
+    SPECEX_INFO("fiber = " << fiber);
+
     SPECEX_INFO("number of input spots = " << input_spots.size());
 
     vector<specex::Spot_p> spots;
@@ -141,19 +142,17 @@ int main ( int argc, char *argv[] ) {
     
     SPECEX_INFO("number of selected spots = " << spots.size());
     
-    int bundle = fiber/20; // hardcoded
-    
     // create output images
     // --------------------------------------------
     
     specex::Trace& trace = psf->FiberTraces[fiber];
     double wmin = trace.X_vs_W.xmin;
     double wmax = trace.X_vs_W.xmax;
-    double ymin = psf->Yccd(fiber,wmin);
-    double ymax = psf->Yccd(fiber,wmax);
+    double ymin = max(0,int(psf->Yccd(fiber,wmin)));
+    double ymax = min(int(image.n_rows())-1,int(psf->Yccd(fiber,wmax)));
     
-    cout << "wavelength range " << wmin << " " << wmax << endl;
-    cout << "y ccd      range " << ymin << " " << ymax << endl;
+    SPECEX_INFO("wavelength range " << wmin << " " << wmax);
+    SPECEX_INFO("y ccd      range " << ymin << " " << ymax);
     
     int hx = 3;
     ofstream os(output_filename.c_str());
@@ -175,7 +174,8 @@ int main ( int argc, char *argv[] ) {
     int tail_amp_index = psf->ParamIndex("TAILAMP");
     for(size_t s=0;s<spots.size();s++) {
       specex::Spot_p& spot = spots[s];
-      psf_params.push_back(psf->AllLocalParamsFW(spot->fiber,spot->wavelength,bundle));
+      if(spot->fiber != fiber) continue;
+      psf_params.push_back(psf->AllLocalParamsFW(spot->fiber,spot->wavelength));
       harp::vector_double p = psf_params.back();
       p(tail_amp_index)=0;
       psf_params_wo_tails.push_back(p);
@@ -183,13 +183,14 @@ int main ( int argc, char *argv[] ) {
 
     
 #ifdef CONTINUUM
+    int bundle=psf->GetBundleOfFiber(fiber);
     PSF_Params &params_of_bundle = psf->ParamsOfBundles.find(bundle)->second;
     double expfact_for_continuum=1./(sqrt(2*M_PI)*params_of_bundle.continuum_sigma_x);
 #endif
     
     
 
-    for(int j=int(ymin) ; j<=int(ymax)+1 ; j++) {
+    for(int j=int(ymin) ; j<=int(ymax) ; j++) {
       
       if((j%100)==0) cout << "done " << j << endl;
 
@@ -222,7 +223,8 @@ int main ( int argc, char *argv[] ) {
 
 	for(size_t s=0;s<spots.size();s++) {
 	  specex::Spot_p& spot = spots[s];
-
+	  if(spot->fiber != fiber) continue;
+	  
 	  bool in_core = fabs(i-spot->xc)<2*psf->hSizeX && fabs(j-spot->yc)<2*psf->hSizeY;
 	  double val = spot->flux*psf->PSFValueWithParamsXY(spot->xc, spot->yc,i, j,
 							    psf_params[s], 0, 0, in_core , true);
@@ -239,7 +241,7 @@ int main ( int argc, char *argv[] ) {
       
       os << " " << data_j << " " << val_j << " " << val_j_core << " " << val_j_tail << " " << val_j_cont;
       
-      harp::vector_double params = psf->AllLocalParamsFW(fiber,wave,bundle);
+      harp::vector_double params = psf->AllLocalParamsFW(fiber,wave);
       for(size_t p=0;p<params.size();p++)
 	os << " " << params(p);
       os << endl;
@@ -251,10 +253,14 @@ int main ( int argc, char *argv[] ) {
 
   // ending
   // --------------------------------------------
-  }catch(harp::exception e) {
-    cerr << "FATAL ERROR (harp) " << e.what() << endl;
-    return EXIT_FAILURE;
-  }
+
+
+    //}catch(harp::exception e) {
+    //cerr << "FATAL ERROR (harp) " << e.what() << endl;
+    //return EXIT_FAILURE;
+    //}
+
+    
     /*
       }catch(std::exception e) {
     cerr << "FATAL ERROR " << e.what() << endl;
