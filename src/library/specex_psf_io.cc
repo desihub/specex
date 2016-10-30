@@ -419,7 +419,7 @@ void specex::write_ytrace_fits_hdu(const specex::PSF& psf, fitsfile *fp, int hdu
 }
 
 void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& psf, fitsfile* fp, int first_hdu) {
-  SPECEX_INFO("write_gauss_hermite_two_psf_fits_version_2");
+  SPECEX_DEBUG("write_gauss_hermite_two_psf_fits_version_2");
   
   ////////////////////////////
   string PSFVER = "2";
@@ -495,7 +495,7 @@ void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& 
   
   int delta_deg = 1; // increase degree of legendre polynomials to minimize mapping errors
   ncoeff_max += delta_deg; 
-  SPECEX_INFO("ncoeff_max = " << ncoeff_max);
+  SPECEX_DEBUG("ncoeff_max = " << ncoeff_max);
   
   
   
@@ -1100,7 +1100,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
 
 void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu) {
   
-  SPECEX_INFO("write_gauss_hermite_psf_fits_version_2");
+  SPECEX_DEBUG("write_gauss_hermite_psf_fits_version_2");
   
   ////////////////////////////
   string PSFVER = "2";
@@ -1131,7 +1131,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     NFIBERS += (bundle_it->second.fiber_max-bundle_it->second.fiber_min+1);
   }
   
-  SPECEX_INFO("BUNDLMIN=" << BUNDLMIN << " BUNDLMAX=" << BUNDLMAX << " FIBERMIN=" << FIBERMIN << " FIBERMAX=" << FIBERMAX << " NFIBERS=" << NFIBERS);
+  SPECEX_DEBUG("BUNDLMIN=" << BUNDLMIN << " BUNDLMAX=" << BUNDLMAX << " FIBERMIN=" << FIBERMIN << " FIBERMAX=" << FIBERMAX << " NFIBERS=" << NFIBERS);
   
   // number of fibers per bundle from first bundle
   if(NFIBERS != (FIBERMAX+1)) {
@@ -1181,7 +1181,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
   }
   // no need to add degree for traces because same mapping
   
-  SPECEX_INFO("ncoeff = " << ncoeff);
+  SPECEX_DEBUG("ncoeff = " << ncoeff);
   
 
   specex::FitsTable table;
