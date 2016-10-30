@@ -11,6 +11,33 @@
 
 using namespace std;
 
+
+int specex::find_hdu( fitsfile *fp, const std::string& extname) {
+  //SPECEX_INFO("Looking for extension '" << extname << "'");
+  
+  int nhdus = harp::fits::nhdus(fp);
+  for(int i=0;i<nhdus;i++) {
+    int hdu=i+1; // starts at 1
+    int status = 0;
+    fits_movabs_hdu ( fp, hdu, NULL, &status );
+    
+    string extname_in_hdu="";
+    try {
+      harp::fits::key_read (fp,"EXTNAME",extname_in_hdu);
+    }catch(...) { 
+      if(i!=0) SPECEX_WARNING("could not read EXTNAME in hdu " << hdu);
+      extname_in_hdu="";
+    }
+    if(extname_in_hdu.find(extname) != extname_in_hdu.npos) {
+      //SPECEX_INFO("found in hdu "<<hdu);
+      return hdu;
+    }
+  }
+  SPECEX_WARNING("Didn't find extname '" << extname << "' in file");
+  return -1;
+}
+
+
 static vector<string> DecomposeString(const string &Source,vector<string> &Tokens)
 {
   vector<string> SubStrings;
