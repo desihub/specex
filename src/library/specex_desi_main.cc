@@ -131,6 +131,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "psfmodel", popts::value<string>( &psf_model )->default_value("GAUSSHERMITE"), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode" )
+    ( "debug", "turn on debug mode" )
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_boss.txt)" )
     ( "core", "dump core files when harp exception is thrown" )
     ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg )->default_value(6), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
@@ -216,6 +217,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 
 
   try {
+    specex_set_debug(vm.count("debug")>0);
     specex_set_verbose(vm.count("verbose")>0);
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
@@ -252,13 +254,12 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     }
     read_DESI_traceset_in_fits(traceset,xtrace_filename,xtrace_hdu,ytrace_filename,ytrace_hdu,trace_deg_x,trace_deg_wave);
     if(per_fiber) {
-      SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x, trace_deg_x)");
+      SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x)");
       int nfibers = traceset.size();
       spectro->number_of_fiber_bundles_per_ccd=nfibers;
       spectro->number_of_fibers_per_bundle=nfibers;
-      SPECEX_INFO("number of fibers  = " << nfibers);
+      SPECEX_DEBUG("number of fibers  = " << nfibers);
       legendre_deg_x = nfibers - 1;
-      trace_deg_x = nfibers - 1;
     }else{
       spectro->AutoConfigure(traceset);
     }
