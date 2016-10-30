@@ -554,6 +554,14 @@ int main ( int argc, char *argv[] ) {
   // read image
   // --------------------------------------------
   read_fits_images(input_science_image_filename,image,weight);
+
+  SPECEX_WARNING("Hardcoded readnoise for BOSS, need to change this to get reliable errors");
+  specex::image_data readnoise(image.n_cols(),image.n_rows());
+  for(int j=0;j<readnoise.Ny();j++) {
+    for(int i=0;i<readnoise.Nx();i++) {
+      readnoise(i,j)=2;
+    }
+  }
   
   if(1) {
     // add few% of signal in weight to account for PSF errors
@@ -570,8 +578,8 @@ int main ( int argc, char *argv[] ) {
 
 
   
-  {
-    specex::PSF_Fitter fitter(psf,image,weight);
+ { 
+    specex::PSF_Fitter fitter(psf,image,weight,readnoise);
     fitter.include_signal_in_weight = false;
     
     bool ok = true;

@@ -173,6 +173,15 @@ int main ( int argc, char *argv[] ) {
     // --------------------------------------------
     image_data image,weight;
     read_fits_images(arc_image_filename,image,weight);
+
+    SPECEX_WARNING("Hardcoded readnoise for BOSS, need to change this to get reliable errors");
+    image_data readnoise(image.n_cols(),image.n_rows());
+    for(int j=0;j<readnoise.Ny();j++) {
+      for(int i=0;i<readnoise.Nx();i++) {
+	readnoise(i,j)=2;
+      }
+    }
+    
     // weight is 0 or 1
     /*
       for(int j=0;j<weight.Ny();j++) {
@@ -229,8 +238,11 @@ int main ( int argc, char *argv[] ) {
     
     
     // init PSF fitter
-    // -------------------------------------------- 
-    PSF_Fitter fitter(psf,image,weight);
+    // --------------------------------------------
+
+    
+    
+    PSF_Fitter fitter(psf,image,weight,readnoise);
     
     fitter.polynomial_degree_along_x    = legendre_deg_x;
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
@@ -248,17 +260,12 @@ int main ( int argc, char *argv[] ) {
     fitter.scheduled_fit_of_traces      = fit_traces;
 
     fitter.psf->gain = 1; // images are already in electrons
-    // fitter.readout_noise = 2; // b1, evaluated using spatial variance in sdProc-b1-00108382.fits[1:4000,1:600]
-
-    // compute mean readout noise
-    fitter.psf->readout_noise = 2;
-    if(image_infos.find("RDNOISE0") != image_infos.end()) fitter.psf->readout_noise = atof(image_infos["RDNOISE0"].c_str());
-    
-    
+    fitter.psf->readout_noise = 0; // property of image, not PSF
+        
     for(int j=0;j<weight.Ny();j++) {
       for(int i=0;i<weight.Nx();i++) {
 	if(weight(i,j)>0)
-	  weight(i,j)=1/square(psf->readout_noise);
+	  weight(i,j)=1/square(readnoise(i,j));
 	else
 	  weight(i,j)=0;
       }
