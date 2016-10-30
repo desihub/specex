@@ -31,7 +31,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
     SPECEX_ERROR("cannot open file " << lamp_lines_filename);
   }
   SPECEX_INFO("reading " << lamp_lines_filename);
-  SPECEX_INFO("allocating spots in wavelength range " << min_wavelength << " " << max_wavelength);
+  SPECEX_DEBUG("allocating spots in wavelength range " << min_wavelength << " " << max_wavelength);
   
   int nlines=0;
   string line;
@@ -39,7 +39,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
     std::istringstream iss(line);
     if( !( iss >> ion >> wave >> score >> intensity) ) continue;
     
-    SPECEX_INFO(ion << " " << wave << " " << score << " " << intensity);
+    SPECEX_DEBUG(ion << " " << wave << " " << score << " " << intensity);
     
     if(wave<min_wavelength || wave>max_wavelength) continue;
     if(score<1 or score>4) {
