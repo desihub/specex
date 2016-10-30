@@ -12,22 +12,6 @@
 using namespace std;
 
 
-/*
-  input format of fits file
-  HDU 0 : blank
-  HDU 1 ELECTRONS : 2D image of noisy electrons
-  - RDNOISE is in header
-  HDU 2 IVAR : Inverse variance [1/electrons^2]
-  - ivar = 1/(pix.clip(0) + rdnoise**2)
-  HDU 3 MASK : 0=good.  Currently all 0.
-  HDU 4 XCOEFF : Legendre coefficients for mapping wavelength -> x
-  - WAVEMIN, WAVEMAX : domain for mapping to [-1,1] for Legendre polynomials
-  - image is coefficients for each fiber
-  HDU 5 YCOEFF : Legendre coefficients for mapping wavelength -> y
-  HDU 5 TRUE_ELECTRONS : original noiseless image in electrons
-  ELECTRONS = poisson(TRUE_ELECTRONS) + gaussian(rdnoise)
- */
-
 void specex::read_DESI_traceset_in_fits(
 					specex::TraceSet& traceset,
 					const std::string& x_vs_wave_filename, 
@@ -48,20 +32,42 @@ void specex::read_DESI_traceset_in_fits(
   
   // reading
   
-  try{
+  //try{
+  {
     fitsfile * fp= 0;
     harp::fits::open_read (fp,x_vs_wave_filename);
+
+    if(x_vs_wave_hdu_number<0) x_vs_wave_hdu_number = find_hdu(fp,"XTRACE");
+    if(x_vs_wave_hdu_number<0) { // backward compatibility
+      x_vs_wave_hdu_number = find_hdu(fp,"XCOEFF");
+      if(x_vs_wave_hdu_number<0) SPECEX_ERROR("didn't find extension XTRACE of XCOEFF");
+      SPECEX_WARNING("Using deprecated extension XCOEFF for XTRACE");
+    }
+    
     harp::fits::img_seek ( fp, x_vs_wave_hdu_number);
     harp::fits::img_dims ( fp, nrows, ncols );
     x_vs_wave_coefs.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
     harp::fits::img_read ( fp, x_vs_wave_coefs.data, false );
     harp::fits::key_read (fp,"WAVEMIN",x_vs_wave_wavemin);
     harp::fits::key_read (fp,"WAVEMAX",x_vs_wave_wavemax);
-    harp::fits::close ( fp ); 
-  }catch(...) { SPECEX_ERROR("could not read properly x traces in " << x_vs_wave_filename << " HDU " << x_vs_wave_hdu_number);}
-  try{
+    harp::fits::close ( fp );
+  }
+    //}catch(...) { SPECEX_ERROR("could not read properly x traces in " << x_vs_wave_filename << " HDU " << x_vs_wave_hdu_number);}
+
+    //try{
+    {
     fitsfile * fp= 0;
     harp::fits::open_read (fp,y_vs_wave_filename);
+    
+    if(y_vs_wave_hdu_number<0) y_vs_wave_hdu_number = find_hdu(fp,"YTRACE");
+    if(y_vs_wave_hdu_number<0) { // backward compatibility
+      y_vs_wave_hdu_number = find_hdu(fp,"YCOEFF");
+      if(y_vs_wave_hdu_number<0) SPECEX_ERROR("didn't find extension YTRACE of YCOEFF");
+      SPECEX_WARNING("Using deprecated extension YCOEFF for YTRACE");
+    }
+
+    
+    
     harp::fits::img_seek ( fp, y_vs_wave_hdu_number);
     harp::fits::img_dims ( fp, nrows, ncols );
     y_vs_wave_coefs.resize(ncols,nrows); // note my ordering in images, first is x=col, second is y=row
@@ -69,8 +75,9 @@ void specex::read_DESI_traceset_in_fits(
     harp::fits::key_read (fp,"WAVEMIN",y_vs_wave_wavemin);
     harp::fits::key_read (fp,"WAVEMAX",y_vs_wave_wavemax);
     
-    harp::fits::close ( fp ); 
-  }catch(...) { SPECEX_ERROR("could not read properly y traces in " << y_vs_wave_filename << " HDU " << y_vs_wave_hdu_number);}
+    harp::fits::close ( fp );
+    }
+    //}catch(...) { SPECEX_ERROR("could not read properly y traces in " << y_vs_wave_filename << " HDU " << y_vs_wave_hdu_number);}
     
   SPECEX_INFO("X WAVEMIN WAVEMAX " << x_vs_wave_wavemin << " " << x_vs_wave_wavemax);
   SPECEX_INFO("X WAVE COEF SIZE  " << x_vs_wave_coefs.n_cols() << " " << x_vs_wave_coefs.n_rows());
