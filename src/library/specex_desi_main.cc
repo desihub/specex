@@ -150,6 +150,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 #ifdef CONTINUUM
     ( "fit_continuum", "unable fit of continuum")
 #endif
+    ( "variance_model", "refit at the end with a model of the variance to avoid Poisson noise bias")
     ( "no_trace_fit", "do not fit traces")
     ( "no_sigma_fit", "do not fit the gaussian sigma")
     ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
@@ -230,6 +231,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 #ifdef CONTINUUM
     bool fit_continuum = (vm.count("fit_continuum")>0);
 #endif
+    bool use_variance_model = (vm.count("variance_model")>0);
     bool fit_individual_spots_position = vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
@@ -304,7 +306,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     
     // init PSF fitter
     // -------------------------------------------- 
-    PSF_Fitter fitter(psf,image,weight);
+    PSF_Fitter fitter(psf,image,weight,rdnoise);
     
     fitter.polynomial_degree_along_x    = legendre_deg_x;
     fitter.polynomial_degree_along_wave = legendre_deg_wave;
@@ -319,31 +321,15 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 #ifdef CONTINUUM
     fitter.scheduled_fit_of_continuum   = fit_continuum;
 #endif
+
+    fitter.scheduled_fit_with_weight_model  = use_variance_model;
     
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
     
     fitter.psf->gain = 1; // images are already in electrons
-    
-    // compute mean readout noise
-    double sum_rdnoise = 0;
-    int npix=0;
-    for(int j=0;j<rdnoise.Ny();j++) {
-      for(int i=0;i<rdnoise.Nx();i++) {
-	if(rdnoise(i,j)>0) {
-	  sum_rdnoise += rdnoise(i,j);
-	  npix ++;
-	}
-      }
-    }
-    if(npix>0) {
-      fitter.psf->readout_noise = sum_rdnoise/npix;
-      SPECEX_INFO("Use mean read noise=" << fitter.psf->readout_noise );
-    }else{
-      fitter.psf->readout_noise = 1;
-      SPECEX_WARNING("Use dummy read noise=" << fitter.psf->readout_noise );
-    }
-    
+    fitter.psf->readout_noise = 0; // readnoise is a property of image, not PSF
+        
     if(header.find("CAMERA") != header.end()) {
       fitter.psf->camera_id = header["CAMERA"];
       SPECEX_INFO("CAMERA = " << fitter.psf->camera_id );
@@ -353,18 +339,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     
     fitter.priors = priors;
     
-    if(0) {
-      SPECEX_INFO("Using RDNOISE to define weights" );
-      for(int j=0;j<weight.Ny();j++) {
-	for(int i=0;i<weight.Nx();i++) {
-	  if(weight(i,j)>0)
-	    weight(i,j)=1/square(psf->readout_noise);
-	  else
-	    weight(i,j)=0;
-	}
-      }
-    }
-
+    
     fitter.mask.Clear();
 
     
