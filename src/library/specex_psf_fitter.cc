@@ -2403,7 +2403,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   bool ok = true;
   
   SPECEX_INFO("Starting FitSeveralSpots FLUX");
-  SPECEX_INFO("=======================================");  
+  
   int saved_psf_hsizex = psf->hSizeX;
   int saved_psf_hsizey = psf->hSizeY;
   psf->hSizeX=min(3,psf->hSizeX);
@@ -2438,7 +2438,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
     for(int i=0;i<5;i++) {
       SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms then FLUX (loop="<<i<<")");
-      SPECEX_INFO("===================================================");
       
       fit_flux       = false;
       fit_position   = false;
@@ -2457,7 +2456,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     increase_weight_of_side_bands = false;
   
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX only gaussian terms");
-    SPECEX_INFO("========================================================");
+
     fit_flux       = true;
     fit_position   = false;
     fit_psf        = true;
@@ -2538,7 +2537,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
 
     SPECEX_INFO("Starting FitSeveralSpots TRACE");
-    SPECEX_INFO("=======================================");
+
     fit_flux       = false;
     fit_position   = false;
     fit_psf        = false;
@@ -2753,10 +2752,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   include_signal_in_weight = false;
   //include_signal_in_weight = true;
   
-  int count=0;
-  
+  int count=1;
+
+  /*
   fit_flux = true; fit_psf = false;
-  count+=1;
   SPECEX_INFO("Starting FitSeveralSpots FLUX #" << count);
   ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
   selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
@@ -2766,7 +2765,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     sprintf(filename,"spots-after-flux-%d.xml",count);
     write_spots_xml(selected_spots,filename);
   }
-    
+  */
   
   fit_flux = false; fit_psf = true;
   SPECEX_INFO("Starting FitSeveralSpots PSF #" << count);
@@ -2797,7 +2796,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
     
     SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
-    SPECEX_INFO("=======================================");
     fit_flux       = false;
     fit_position   = false;
     fit_psf        = false;
@@ -2891,7 +2889,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
 
   SPECEX_INFO("Compute in-core chi2");
-  SPECEX_INFO("=======================================");
   
   increase_weight_of_side_bands = false;
   
@@ -2920,8 +2917,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
  
   SPECEX_INFO("Compute final chi2");
-  SPECEX_INFO("=======================================");
-  
   
   fit_flux       = false;
   fit_position   = false;
