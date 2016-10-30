@@ -622,21 +622,10 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	} // end of test compute_ab
       } // end of loop on spots
       
-      /*
-      if(Ablock.size1()>0 && other_indices.size()>0) {
-	SPECEX_INFO("other_indices.size = " << other_indices.size());
-	SPECEX_INFO("Ablock size = " << Ablock.size1() << " " << Ablock.size2());
-	if (Arect.size()>0) { 
-	  SPECEX_INFO("Arect size = " << Arect.size() << " " << Arect[0].size());
-	} else { 
-	  SPECEX_INFO("Arect size = " << Arect.size());
-	}
-      }
-      */
       
       double wscale=1;
       if(recompute_weight_in_fit) {
-	w =  square(psf->readout_noise);
+	w =  square(readnoise(i,j));
 	if(signal>0) {
 	   w += signal/psf->gain;
 	   w += square(psf->psf_error*signal);	   
@@ -876,7 +865,6 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
     if(include_signal_in_weight) {
       
       SPECEX_INFO("WEIGHTS: Computing weights");
-      SPECEX_INFO("WEIGHTS: readout noise = " << psf->readout_noise);
       SPECEX_INFO("WEIGHTS: gain = " << psf->gain);
       SPECEX_INFO("WEIGHTS: psf error = " << psf->psf_error);
       
@@ -929,7 +917,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  double model_flux=footprint_weight(i,j);
 	  if(model_flux==0) continue;
 	  
-	  double var = square(psf->readout_noise);
+	  double var = square(readnoise(i,j));
 	  if(model_flux>0) { // else negative fluctuation
 	    var += model_flux/psf->gain;
 	    var += square(psf->psf_error*model_flux);
@@ -1785,7 +1773,7 @@ void specex::PSF_Fitter::SetAllPSFParams(const harp::vector_double &ParamsToSet)
 
 bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_fitted) {
   
-  SPECEX_INFO("specex::PSF_Fitter::FitTraces starting");
+  SPECEX_DEBUG("specex::PSF_Fitter::FitTraces starting");
 
   int nok_memory_slot;
   int *nok = &nok_memory_slot;
@@ -1810,7 +1798,7 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
     if(! trace.synchronized)
       ok = trace.Fit(spots_of_fiber);
     else
-      SPECEX_INFO("No need to refit synchronized trace (wavemin,wavemax = " << trace.X_vs_W.xmin << "," << trace.X_vs_W.xmax << ")");
+      SPECEX_DEBUG("No need to refit synchronized trace (wavemin,wavemax = " << trace.X_vs_W.xmin << "," << trace.X_vs_W.xmax << ")");
     
     if(ok) { 
       (*nok)++;
@@ -1825,7 +1813,7 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
 
     }
   }
-  SPECEX_INFO("specex::PSF_Fitter::FitTraces ended nok = " << (*nok) << "/" << psf->FiberTraces.size());
+  SPECEX_DEBUG("specex::PSF_Fitter::FitTraces ended nok = " << (*nok) << "/" << psf->FiberTraces.size());
  
   // detect failed traces via interpolation
   if(false && *nok>2) { // this may be problematic (need more check)
@@ -2873,34 +2861,35 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 #endif
 #endif
   
+  if(scheduled_fit_with_weight_model)
+    { 
+      // use model instead of data to weight the objects
+      // to avoid biases on the PSF
+      include_signal_in_weight = true;
+      fit_flux = true; fit_psf = false;
+      count++;
+      SPECEX_INFO("Starting FitSeveralSpots FLUX(w) #" << count);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+      
+      if(write_tmp_results) {
+	char filename[1000];
+	sprintf(filename,"spots-after-flux-%d.xml",count);
+	write_spots_xml(selected_spots,filename);
+      }
+      
+      fit_flux = false; fit_psf = true;
+      SPECEX_INFO("Starting FitSeveralSpots PSF(w) #" << count);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      
+      if(write_tmp_results) {
+	char filename[1000];
+	sprintf(filename,"spots-after-psf-%d.xml",count);
+	write_spots_xml(selected_spots,filename);
+      }
+    }
   
-  { 
-    // use model instead of data to weight the objects
-    // to avoid biases on the PSF
-    include_signal_in_weight = true;
-    fit_flux = true; fit_psf = false;
-    count++;
-    SPECEX_INFO("Starting FitSeveralSpots FLUX(w) #" << count);
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
-          
-    if(write_tmp_results) {
-      char filename[1000];
-      sprintf(filename,"spots-after-flux-%d.xml",count);
-      write_spots_xml(selected_spots,filename);
-    }
-    
-    fit_flux = false; fit_psf = true;
-    SPECEX_INFO("Starting FitSeveralSpots PSF(w) #" << count);
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    
-    if(write_tmp_results) {
-      char filename[1000];
-      sprintf(filename,"spots-after-psf-%d.xml",count);
-      write_spots_xml(selected_spots,filename);
-    }
-  }
-    
+
   SPECEX_INFO("Compute in-core chi2");
   SPECEX_INFO("=======================================");
   

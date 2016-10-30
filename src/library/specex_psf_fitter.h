@@ -90,6 +90,7 @@ class PSF_Fitter {
 
   const image_data& image;
   const image_data& weight;
+  const image_data& readnoise;
   image_data footprint_weight; // weight x psf footprint for global fit
   image_data corefootprint;
   double corefootprint_weight_boost;
@@ -108,6 +109,7 @@ class PSF_Fitter {
   bool fit_continuum;
   bool scheduled_fit_of_continuum;
 #endif
+  bool scheduled_fit_with_weight_model;
   bool write_tmp_results;
 
   double chi2_precision;
@@ -124,11 +126,12 @@ class PSF_Fitter {
   
   std::map<std::string,Prior*> priors;
   
- PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight) :
+ PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight, const image_data& i_readnoise) :
     
   psf(i_psf),
     image(i_image),
     weight(i_weight),
+    readnoise(i_readnoise),
     stamp(i_image), 
     fit_psf(false),
     fit_trace(false),
@@ -149,6 +152,7 @@ class PSF_Fitter {
     fit_continuum(false),
     scheduled_fit_of_continuum(false),
 #endif
+    scheduled_fit_with_weight_model(false),
     write_tmp_results(false),
     fatal(true),
     parallelized(true),
