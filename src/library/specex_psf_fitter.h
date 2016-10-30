@@ -115,7 +115,6 @@ class PSF_Fitter {
   bool recompute_weight_in_fit;
   bool force_positive_flux;
   bool increase_weight_of_side_bands;
-  bool verbose;
   bool fatal;
   bool parallelized;
   double polynomial_degree_along_x;
@@ -153,8 +152,7 @@ class PSF_Fitter {
     write_tmp_results(false),
     fatal(true),
     parallelized(true),
-    verbose(true),
-    
+        
       polynomial_degree_along_x(1),
       polynomial_degree_along_wave(4)
       {
