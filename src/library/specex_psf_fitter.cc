@@ -999,7 +999,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       }
     }
     
-    SPECEX_INFO("WEIGHTS: number of pixels in fit = " << *npix);
+    SPECEX_DEBUG("WEIGHTS: number of pixels in fit = " << *npix);
     
     
     if(increase_weight_of_side_bands) {
@@ -2887,8 +2887,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       }
     }
   
-
-  SPECEX_INFO("Compute in-core chi2");
+  
+  SPECEX_DEBUG("Compute in-core chi2");
   
   increase_weight_of_side_bands = false;
   
@@ -2907,7 +2907,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   int saved_hsizey = psf->hSizeY;
   psf->hSizeX=2;
   psf->hSizeY=2;
-  include_signal_in_weight = true;
+  if(scheduled_fit_with_weight_model)
+    include_signal_in_weight = true;
   ComputeWeigthImage(selected_spots,&npix);  
   psf_params->ndata_in_core = npix;
   InitTmpData(selected_spots);
@@ -2916,7 +2917,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   psf->hSizeY=saved_hsizey;
 
  
-  SPECEX_INFO("Compute final chi2");
+  SPECEX_DEBUG("Compute final chi2");
   
   fit_flux       = false;
   fit_position   = false;
@@ -2928,7 +2929,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 #ifdef EXTERNAL_TAIL
   fit_psf_tail   = false;
 #endif  
-  include_signal_in_weight = true;
+  if(scheduled_fit_with_weight_model)
+    include_signal_in_weight = true;
   ComputeWeigthImage(selected_spots,&npix); 
   psf_params->ndata = npix; 
   InitTmpData(selected_spots);
