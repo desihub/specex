@@ -2,6 +2,12 @@
 
 ## 0.5.0 (unreleased)
 
+* No changes yet
+
+## 0.4.1 (2016-11-09)
+
+* fix etc/specex.module to work with desiInstall
+
 ## 0.4.1 (2016-11-09)
 
 * Support desiInstall.
