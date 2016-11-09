@@ -1,6 +1,8 @@
 # specex Change Log
 
-## 0.4.1 (unreleased)
+## 0.5.0 (unreleased)
+
+## 0.4.1 (2016-11-09)
 
 * Support desiInstall.
 * Minor changes to documentation files: README.md, INSTALL.md, etc.
