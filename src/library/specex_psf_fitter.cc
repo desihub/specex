@@ -2553,13 +2553,17 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++) {
 	int nbad=0;
 	double delta=2; //pix
+	double max_dx=0;
+	double max_dy=0;
 	for(size_t s=0;s<input_spots.size();s++) {
 	  specex::Spot_p spot= input_spots[s];
 	  if(spot->fiber != fiber) continue;
+	  max_dx=max(max_dx,fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc));
+	  max_dy=max(max_dy,fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc));	  
 	  if(fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc)>delta || fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc)>delta) nbad++;
 	}
 	if(nbad>2) {
-	  SPECEX_WARNING("Large x y offset for fiber " << fiber);
+	  SPECEX_WARNING("Large x y offset for fiber " << fiber << " max dx,dy=" << max_dx << "," << max_dy);
 	  fibers_with_large_offsets.push_back(fiber);
 	  fiber_is_ok[fiber]=false;
 	}else{
