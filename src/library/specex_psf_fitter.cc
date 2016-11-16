@@ -2770,127 +2770,127 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     write_spots_xml(selected_spots,filename);
   }
   */
-  
-  fit_flux = false; fit_psf = true;
-  SPECEX_INFO("Starting FitSeveralSpots PSF #" << count);
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  fit_flux = true; fit_psf = true;
-  SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << count);
-  ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-  if(write_tmp_results) {
-    char filename[1000];
-    sprintf(filename,"spots-after-psf+flux-%d.xml",count);
-    write_spots_xml(selected_spots,filename);
-  }
-    
-  
-  // if we have continuum and tail, additional loop
-#ifdef CONTINUUM
-#ifdef EXTERNAL_TAIL  
-
-  if(scheduled_fit_of_psf_tail || scheduled_fit_of_continuum) {
-    psf_params->FitParPolXW.clear();
-    for(int p=0;p<psf->LocalNAllPar();p++) {
-      const string& name = psf->ParamName(p);
-      ok = (name=="TAILAMP");
-      if(ok)
-	psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
-    }
-  
-    
-    SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = false;
-    fit_psf_tail   = scheduled_fit_of_psf_tail;
-    fit_continuum  = scheduled_fit_of_continuum;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-  
-  
-    fit_psf_tail   = false; // don't fit this anymore
-    fit_continuum   = false; // don't fit this anymore
-    {
-      psf_params->FitParPolXW.clear();
-      for(int p=0;p<psf->LocalNAllPar();p++) {
-	const string& name = psf->ParamName(p);
-	ok = true;
-	ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHNSIG");
-	ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
-	//ok &= (name!="RADIUS" && name!="SIGMA");
-	ok &= (name!="RADIUS");
-	ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
-	if(ok)
-	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
-      }
-    }
-
-    fit_flux = true; fit_psf = false;
-    count++;
-    
-    /*
-    SPECEX_INFO("Starting FitSeveralSpots FLUX #" << count);
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
-    
-    if(write_tmp_results) {
-      char filename[1000];
-      sprintf(filename,"spots-after-flux-%d.xml",count);
-      write_spots_xml(selected_spots,filename);
-    }
-    */
-    
+  if(scheduled_fit_of_psf) {
     fit_flux = false; fit_psf = true;
     SPECEX_INFO("Starting FitSeveralSpots PSF #" << count);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    
-    
     fit_flux = true; fit_psf = true;
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << count);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
     if(write_tmp_results) {
       char filename[1000];
       sprintf(filename,"spots-after-psf+flux-%d.xml",count);
       write_spots_xml(selected_spots,filename);
     }
-
-
-  } // end of test of fit of tail or continuum
+    
+    
+    // if we have continuum and tail, additional loop
+#ifdef CONTINUUM
+#ifdef EXTERNAL_TAIL  
+    
+    if(scheduled_fit_of_psf_tail || scheduled_fit_of_continuum) {
+      psf_params->FitParPolXW.clear();
+      for(int p=0;p<psf->LocalNAllPar();p++) {
+	const string& name = psf->ParamName(p);
+	ok = (name=="TAILAMP");
+	if(ok)
+	  psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+      }
   
-#endif
-#endif
-  
-  if(scheduled_fit_with_weight_model)
-    { 
-      // use model instead of data to weight the objects
-      // to avoid biases on the PSF
-      include_signal_in_weight = true;
+      
+      SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
+      fit_flux       = false;
+      fit_position   = false;
+      fit_psf        = false;
+      fit_trace      = false;
+      fit_psf_tail   = scheduled_fit_of_psf_tail;
+      fit_continuum  = scheduled_fit_of_continuum;
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      
+      
+      fit_psf_tail   = false; // don't fit this anymore
+      fit_continuum   = false; // don't fit this anymore
+      {
+	psf_params->FitParPolXW.clear();
+	for(int p=0;p<psf->LocalNAllPar();p++) {
+	  const string& name = psf->ParamName(p);
+	  ok = true;
+	  ok &= (name!="GHSIGX" && name!="GHSIGY" && name!="GHNSIG");
+	  ok &= (name!="GHSIGX2" && name!="GHSIGY2" && name!="GHSCAL2");
+	  //ok &= (name!="RADIUS" && name!="SIGMA");
+	  ok &= (name!="RADIUS");
+	  ok &= (name!="TAILAMP" && name!="TAILCORE" && name!="TAILXSCA" && name!="TAILYSCA" && name!="TAILINDE");
+	  if(ok)
+	    psf_params->FitParPolXW.push_back(psf_params->AllParPolXW[p]);
+	}
+      }
+      
       fit_flux = true; fit_psf = false;
       count++;
-      SPECEX_INFO("Starting FitSeveralSpots FLUX(w) #" << count);
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-      selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
       
-      if(write_tmp_results) {
+      /*
+	SPECEX_INFO("Starting FitSeveralSpots FLUX #" << count);
+	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+	selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+	
+	if(write_tmp_results) {
 	char filename[1000];
 	sprintf(filename,"spots-after-flux-%d.xml",count);
 	write_spots_xml(selected_spots,filename);
-      }
+	}
+      */
       
       fit_flux = false; fit_psf = true;
-      SPECEX_INFO("Starting FitSeveralSpots PSF(w) #" << count);
+      SPECEX_INFO("Starting FitSeveralSpots PSF #" << count);
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
       
+    
+      fit_flux = true; fit_psf = true;
+      SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << count);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      
+      if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
       if(write_tmp_results) {
 	char filename[1000];
-	sprintf(filename,"spots-after-psf-%d.xml",count);
+	sprintf(filename,"spots-after-psf+flux-%d.xml",count);
 	write_spots_xml(selected_spots,filename);
       }
-    }
+      
+
+    } // end of test of fit of tail or continuum
   
+#endif
+#endif
+  
+    if(scheduled_fit_with_weight_model)
+      { 
+	// use model instead of data to weight the objects
+	// to avoid biases on the PSF
+	include_signal_in_weight = true;
+	fit_flux = true; fit_psf = false;
+	count++;
+	SPECEX_INFO("Starting FitSeveralSpots FLUX(w) #" << count);
+	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+	selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
+	
+	if(write_tmp_results) {
+	  char filename[1000];
+	  sprintf(filename,"spots-after-flux-%d.xml",count);
+	  write_spots_xml(selected_spots,filename);
+	}
+	
+	fit_flux = false; fit_psf = true;
+	SPECEX_INFO("Starting FitSeveralSpots PSF(w) #" << count);
+	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+	
+	if(write_tmp_results) {
+	  char filename[1000];
+	  sprintf(filename,"spots-after-psf-%d.xml",count);
+	  write_spots_xml(selected_spots,filename);
+	}
+      }
+  } // end of test on scheduled_fit_of_psf
   
   SPECEX_DEBUG("Compute in-core chi2");
   

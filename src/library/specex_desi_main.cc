@@ -153,6 +153,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "variance_model", "refit at the end with a model of the variance to avoid Poisson noise bias")
     ( "no_trace_fit", "do not fit traces")
     ( "no_sigma_fit", "do not fit the gaussian sigma")
+    ( "no_psf_fit", "do not fit the psf")
     ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
     ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
     ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
@@ -223,6 +224,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
     bool fit_sigmas = (vm.count("no_sigma_fit")==0);
+    bool fit_psf    = (vm.count("no_psf_fit")==0);
     bool write_tmp_results = (vm.count("tmp_results")>0);
     
 #ifdef EXTERNAL_TAIL
@@ -326,6 +328,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
+    fitter.scheduled_fit_of_psf         = fit_psf;
     
     fitter.psf->gain = 1; // images are already in electrons
     fitter.psf->readout_noise = 0; // readnoise is a property of image, not PSF

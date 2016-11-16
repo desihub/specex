@@ -101,6 +101,7 @@ class PSF_Fitter {
   bool fit_position;
   bool scheduled_fit_of_traces;
   bool scheduled_fit_of_sigmas;
+  bool scheduled_fit_of_psf;
 #ifdef EXTERNAL_TAIL
   bool fit_psf_tail;
   bool scheduled_fit_of_psf_tail;
@@ -144,6 +145,7 @@ class PSF_Fitter {
    increase_weight_of_side_bands(false),
     scheduled_fit_of_traces(true),
     scheduled_fit_of_sigmas(true),
+    scheduled_fit_of_psf(true),
 #ifdef EXTERNAL_TAIL
     fit_psf_tail(false),
     scheduled_fit_of_psf_tail(false),
