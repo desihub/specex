@@ -196,10 +196,10 @@ harp::vector_double specex::HatMoffatPSF::DefaultParams() const
   harp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning 
   int index=0;
-  Params(index++) = 1.5; // fiber radius in pixels
-  Params(index++) = 0.5; // moffat sigma
-  Params(index++) = 2; // this is sigma_x
-  Params(index++) = 2; // this is sigma_y  
+  Params(index++) = 107./3.75*1.70/15./2.; // fiber radius in pixels, tuned for DESI
+  Params(index++) = 0.8; // moffat sigma
+  Params(index++) = 1.; // this is sigma_x
+  Params(index++) = 1.; // this is sigma_y  
   
   index += (degree+1)*(degree+1); // gauss-hermite coefficients
   
