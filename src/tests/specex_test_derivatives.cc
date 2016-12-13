@@ -20,8 +20,9 @@ int main() {
   
   //specex::PSF_p psf(new specex::HatHermitePSF(3));
   //specex::PSF_p psf(new specex::GaussHermite2PSF(3,3));
-  specex::PSF_p psf(new specex::GaussHermitePSF(3));
+  //specex::PSF_p psf(new specex::GaussHermitePSF(3));
   //specex::PSF_p psf(new specex::HatMoffatPSF(3));
+  specex::PSF_p psf(new specex::DiskMoffatPSF(3));
   psf->AllocateDefaultParams();
   
   vector<string> pnames = psf->DefaultParamNames();
@@ -31,15 +32,19 @@ int main() {
   
   int i=int(x)+1;
   int j=int(y)+1;
-
+  
+  
   harp::vector_double P = psf->DefaultParams();
 
   // test for derivatives of sigma
-  P(0)=1;
-  P(1)=1.5;
+  P(0)=1.6;
+  P(1)=0.5;
+  P(2)=0.3;
+  P(3)=0.; // GH amplitude
+  
   P(17)=0;
   
-  for(size_t i=2;i<min(6,int(P.size()));i++) P(i)=4;
+  //for(size_t i=2;i<min(6,int(P.size()));i++) P(i)=4;
   //P(2)=3.;
   //P(20)=0.5;
   

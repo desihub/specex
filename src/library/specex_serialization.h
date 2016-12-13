@@ -14,6 +14,7 @@
 #include <specex_gauss_hermite_two_psf.h>
 #include <specex_hat_hermite_psf.h>
 #include <specex_hat_moffat_psf.h>
+#include <specex_disk_moffat_psf.h>
 
 
 #endif

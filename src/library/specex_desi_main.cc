@@ -288,6 +288,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
     else if(psf_model=="HATMOFFAT")
       psf = PSF_p(new specex::HatMoffatPSF(gauss_hermite_deg));
+    else if(psf_model=="DISKMOFFAT")
+      psf = PSF_p(new specex::DiskMoffatPSF(gauss_hermite_deg));
     else
       SPECEX_ERROR("don't know this psf model");
     
