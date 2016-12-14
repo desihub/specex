@@ -46,13 +46,11 @@ double specex::DiskMoffatPSF::Profile(const double &X, const double &Y,
   double x = X*sxi;
   double y = Y*syi;
   
-  // reduced radius coordinate
-  double rs2 = x*x+y*y; // (X/sx)**2+(Y/sy)**2
-  // reduced sigma
+  
   double s2  = sx*sy;
-  if(rs2>0) {
-    s2  = (X*X+Y*Y)/rs2;
-  }
+  double rs2 = (x*x+y*y); // ((X/sx)**2+(Y/sy)**2)
+  
+  
   // reduced fiber radius
   double R2 = R*R;
   double Rs2 = R2/s2; // = R2/r2*rs2 = R2/(X**2+Y**2)*((X/sx)**2+(Y/sy)**2)
@@ -75,13 +73,10 @@ double specex::DiskMoffatPSF::Profile(const double &X, const double &Y,
     double d_rs2_d_sy = 0;
     double d_Rs2_d_sy = 0;
     if(rs2>0) {
-      double X2  = X*X;
-      double Y2  = Y*Y;      
-      double r2  = X2+Y2;
-      d_rs2_d_sx = -2*X2/(sx*sx*sx);
-      d_Rs2_d_sx = R2/r2*d_rs2_d_sx;
-      d_rs2_d_sy = -2*Y2/(sy*sy*sy);
-      d_Rs2_d_sy = R2/r2*d_rs2_d_sy;
+      d_rs2_d_sx = -2*X*X/(sx*sx*sx);
+      d_Rs2_d_sx = -Rs2/sx;
+      d_rs2_d_sy = -2*Y*Y/(sy*sy*sy);
+      d_Rs2_d_sy = -Rs2/sy;
     }      
     // VALIDATED WITH specex_test_derivatives    
     (*ParamDer)(0) = disk_moffat_amp * d_Rs2_d_R * d_dmof_d_Rs2_r; // dvaldR 
