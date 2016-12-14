@@ -57,15 +57,33 @@ double specex::DiskMoffatPSF::Profile(const double &X, const double &Y,
   // internal param
   double As = Rs2-rs2-1;
   double As2 = As*As;
+
+  //#define DISK_MOFFAT_BETA2
+  #define DISK_MOFFAT_BETA3
+    
+    
+#ifdef DISK_MOFFAT_BETA2
   double disk_moffat_val = 1./(2*M_PI*R2)*(1+As/sqrt(As2+4*Rs2));
-  
+#endif
+#ifdef DISK_MOFFAT_BETA3
+  double disk_moffat_val = 1./(2*M_PI*R2)*(1+(As2*As+2*Rs2*(3*Rs2-3*rs2-1))/pow(As2+4*Rs2,1.5));
+#endif
+
   double disk_moffat_amp = (1-Params[first_hermite_param_index]); // so total integral = 1
   
 
   if(ParamDer) {
-    double d_dmof_d_Rs2_s = 2*(Rs2+rs2+1)/(2*M_PI*R2)/pow(As2+4*Rs2,3/2.);
+
+#ifdef DISK_MOFFAT_BETA2    
+    double d_dmof_d_Rs2_s = 2*(Rs2+rs2+1)/pow(As2+4*Rs2,3/2.)/(2*M_PI*R2);
+    double d_dmof_d_rs2 = -4*Rs2/pow(As2+4*Rs2,3/2.)/(2*M_PI*R2);
+#endif
+#ifdef DISK_MOFFAT_BETA3
+    double d_dmof_d_Rs2_s = 4*(1+2*rs2+2*Rs2+Rs2*Rs2+4*Rs2*rs2+rs2*rs2)/pow(As2+4*Rs2,5/2.)/(2*M_PI*R2);
+    double d_dmof_d_rs2 = -12*Rs2*(1+Rs2+rs2)/pow(As2+4*Rs2,5/2.)/(2*M_PI*R2);
+#endif
+    
     double d_dmof_d_Rs2_r = -disk_moffat_val/Rs2 + d_dmof_d_Rs2_s;
-    double d_dmof_d_rs2 = -4*Rs2/(2*M_PI*R2)/pow(As2+4*Rs2,3/2.);
     double d_Rs2_d_R    = 2*R/s2;
     
     double d_rs2_d_sx = 0;
