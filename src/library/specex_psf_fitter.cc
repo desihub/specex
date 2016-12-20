@@ -1512,7 +1512,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	double dchi2 = (-best_chi2+*psfChi2);
 	if(dchi2>0 || fabs(dchi2)<brent_precision) {
 	  SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = " << best_step << " dchi2=" << dchi2
-		      << " chi2pdf = " << best_chi2/(*npix-Params.size())
+		      << " chi2pdf = " << best_chi2/(*npix-Params.size()) << " npar = " << Params.size()
 		      );
 	}else{
 	  if(fatal) {
@@ -1532,7 +1532,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     } else { // didn't use brent
       Params += B;
       // *psfChi2 = ComputeChi2AB(false); // already computed above
-      SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots dchi2=" << oldChi2-*psfChi2 << " chi2pdf = " << *psfChi2/(*npix-Params.size()));
+      SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots dchi2=" << oldChi2-*psfChi2 << " chi2pdf = " << *psfChi2/(*npix-Params.size()) << " npar = " << Params.size());
       
     }
     
@@ -2329,7 +2329,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  degw=0;
 	}
 	
-	{
+	if(reduce_psf_params_variation){
 	  // loop on high order GH coefficients if exist
 	  // limit to legendre deg 4 higher orders
 	  char label[1000];
@@ -2350,7 +2350,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	
 	
 	// insert by hand
-	if(1) {
+	if(reduce_psf_params_variation) {
 	  for(int i=0;i<=degx;i++) { // x coordinate
 	    for(int j=0;j<=degw;j++) { // wave coordinate	      
 	      if(i==0) {
@@ -2399,7 +2399,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   fatal = true;
   include_signal_in_weight = false;
   //include_signal_in_weight = true;
-  chi2_precision = 10;
+  chi2_precision = 50.;
   bool ok = true;
   
   SPECEX_INFO("Starting FitSeveralSpots FLUX");
@@ -2449,9 +2449,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       
       ok = FitIndividualSpotFluxes(input_spots);
       selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
-      if(fabs(previous_chi2 - chi2)<1.) break;
+      if(fabs(previous_chi2 - chi2)<chi2_precision) break;
     }
-    
+    chi2_precision = 0.1;
     force_positive_flux = true;
     increase_weight_of_side_bands = false;
   
