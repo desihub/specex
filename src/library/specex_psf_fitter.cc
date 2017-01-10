@@ -1241,7 +1241,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   if(n_to_attach>0) {
     SPECEX_INFO("Need to attach " << n_to_attach << " spots");
-    for(size_t s=0;s<spot_tmp_data.size();s++) {
+    for(size_t s=0;s<spot_tmp_data.size(); ) { // no incrementation here because we may erase the spot 
+    
       SpotTmpData& tmp = spot_tmp_data[s];
       if(!tmp.can_measure_flux) {
 	// find a nice neighbour
@@ -1256,16 +1257,18 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  neighbour  = &tmp2;
 	  if(fiber_diff==1) break; // it's ok
 	  }
-	}
+	}	
 	if(!neighbour) {
 	  SPECEX_WARNING("couldn't find a spot to attach to x=" << tmp.x << " y=" << tmp.y << " erasing it");
 	  // erase this spot
-	  spot_tmp_data.erase(spot_tmp_data.begin()+s);
+	  spot_tmp_data.erase(spot_tmp_data.begin()+s);	
 	  continue;
 	}
 	tmp.flux_parameter_index = neighbour->flux_parameter_index;
 	tmp.flux = neighbour->flux;
       }
+      
+      s++;
     }
   }
 
