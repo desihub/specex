@@ -215,6 +215,8 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 }
 
 void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
+
+  SPECEX_DEBUG("InitTmpData with " << spots.size() << " spots");
   
   // load spot_tmp_data 
   spot_tmp_data.clear();
@@ -1002,6 +1004,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
     }
     
     SPECEX_DEBUG("WEIGHTS: number of pixels in fit = " << *npix);
+    SPECEX_DEBUG("WEIGHTS: number of spots in fit  = " << spots.size());
     
     
     if(increase_weight_of_side_bands) {
@@ -1254,11 +1257,14 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  SpotTmpData& tmp2 = spot_tmp_data[s2];
 	  if(fabs(tmp2.wavelength - tmp.wavelength)>0.00000001) continue;
 	  if(!tmp2.can_measure_flux) continue;
-	  if(abs(tmp2.fiber-tmp.fiber)<fiber_diff) {
-	    fiber_diff = abs(tmp2.fiber-tmp.fiber);
-	  neighbour  = &tmp2;
-	  if(fiber_diff==1) break; // it's ok
+	  if(fabs(tmp2.x-tmp.x)>2*psf->hSizeX) continue;
+	  if(fabs(tmp2.y-tmp.y)>2*psf->hSizeY) continue;
+	  int tmp_fiber_diff = abs(tmp2.fiber-tmp.fiber);
+	  if(fiber_diff > tmp_fiber_diff) {
+	    neighbour  = &tmp2;
+	    fiber_diff = tmp_fiber_diff;
 	  }
+	  if(fiber_diff==1) break; // it's ok
 	}	
 	if(!neighbour) {
 	  SPECEX_WARNING("couldn't find a spot to attach to x=" << tmp.x << " y=" << tmp.y << " erasing it");
@@ -1690,6 +1696,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 	cout << " chi2= " << *psfChi2;
 	cout << " niter=" << *niter;
+	
 	cout << endl;
 	
 #ifdef EXTERNAL_TAIL
