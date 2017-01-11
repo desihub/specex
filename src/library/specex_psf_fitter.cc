@@ -1358,15 +1358,15 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving done");
 
     if (status != 0) {
-      *psfChi2 = 1e30; 
+      *psfChi2 = 1e30;
       for(size_t i=0;i<As.size1();i++) {
 	if(As(i,i)<=0) {
-	  cout << "DEBUG A(" <<i << "," << i << ")=" << As(i,i) << endl;
+	  SPECEX_DEBUG("DEBUG A(" <<i << "," << i << ")=" << As(i,i));
 	  if(fit_flux) { // find it
 	    for(size_t s=0;s<spot_tmp_data.size();s++) {
 	      SpotTmpData& tmp = spot_tmp_data[s];
 	      if(i==tmp.flux_parameter_index) {
-		cout << "DEBUG " << i << " it's spot x,y= " << tmp.x << "," << tmp.y << " fiber=" << tmp.fiber << " flux=" << tmp.flux << endl;
+		SPECEX_DEBUG(i << " it's spot x,y= " << tmp.x << "," << tmp.y << " fiber=" << tmp.fiber << " flux=" << tmp.flux);
 	      }
 	    }
 	  }
