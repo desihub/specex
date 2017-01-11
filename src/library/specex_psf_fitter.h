@@ -47,7 +47,7 @@ namespace specex {
     Stamp stamp;
 
     bool can_measure_flux;
-    
+    bool ignore;
   };
 
 class PSF_Fitter {

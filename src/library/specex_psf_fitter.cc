@@ -225,6 +225,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     const specex::Spot_p spot=spots[s];
     
     SpotTmpData tmp;
+    tmp.ignore = false;
     tmp.flux = spot->flux;
     tmp.x    = psf->Xccd(spot->fiber,spot->wavelength);
     tmp.y    = psf->Yccd(spot->fiber,spot->wavelength);
@@ -269,6 +270,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
 	}
       }
       tmp.can_measure_flux = (nbad<=5); // can survive one dead column = 5pix, not more
+      if(!tmp.can_measure_flux) tmp.ignore = true; // ignore by default
       if(!tmp.can_measure_flux) SPECEX_WARNING("cannot measure flux of spot " << s << " at x=" << tmp.x << " y=" << tmp.y << ", will attach it to a neighbour");
     }
     
@@ -392,7 +394,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       //Arect.back().clear();    
       
       const SpotTmpData& tmp = spot_tmp_data[s];
-      if(tmp.can_measure_flux) {
+      if(tmp.can_measure_flux && !tmp.ignore) {
 	Arect.push_back(harp::vector_double(index_of_spots_parameters));
 	Arect.back().clear();    
       }
@@ -411,6 +413,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   }
   
   double chi2 = 0;
+  int npix_in_chi2 = 0;
+  double sum_flux = 0;
   
   harp::vector_double gradAllPar,gradPos;
   harp::vector_double *gradAllPar_pointer = 0;
@@ -552,7 +556,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       for(size_t s=0;s<spot_tmp_data.size();s++) { // loop on tmp spots data
 	
 	const specex::SpotTmpData &tmp = spot_tmp_data[s];
-	
+	if (tmp.ignore) continue;
 	bool in_core = tmp.stamp.Contains(i,j);
 
 	//if( (!in_core) && (!fit_psf_tail)  ) continue; // if we fit tails we use the data outside the core, completely wrong, we need tails values everywhere
@@ -650,7 +654,11 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       res -= signal;
       
       chi2 += w*res*res;
-
+      if(w>0) {
+	npix_in_chi2 ++;
+	sum_flux += signal;
+      }
+      
       /////////////////////////////////////////////////////
       // this is for debugging when developping the code
       //#define TESTING_H_VECTOR
@@ -793,6 +801,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     for(size_t s=0;s<spot_tmp_data.size();s++) { // loop on tmp spots data
       
       const specex::SpotTmpData &tmp = spot_tmp_data[s];
+      if(tmp.ignore) continue;
       
       int index=0;
       int fp=0; // fitted par. index
@@ -833,7 +842,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     }
 
   }
-
+  SPECEX_DEBUG("ComputeChi2AB chi2=" << chi2 << " npix=" << npix_in_chi2 << " sumflux=" << sum_flux);
   //SPECEX_INFO("ComputeChi2AB j range= " << input_begin_j << " " << input_end_j << " chi2= " << chi2);
   return chi2;
 }
@@ -1246,7 +1255,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   if(n_to_attach>0) {
     SPECEX_INFO("Need to attach " << n_to_attach << " spots");
-    for(size_t s=0;s<spot_tmp_data.size(); ) { // no incrementation here because we may erase the spot 
+    for(size_t s=0;s<spot_tmp_data.size(); s++) {
     
       SpotTmpData& tmp = spot_tmp_data[s];
       if(!tmp.can_measure_flux) {
@@ -1266,17 +1275,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  }
 	  if(fiber_diff==1) break; // it's ok
 	}	
-	if(!neighbour) {
-	  SPECEX_WARNING("couldn't find a spot to attach to x=" << tmp.x << " y=" << tmp.y << " erasing it");
-	  // erase this spot
-	  spot_tmp_data.erase(spot_tmp_data.begin()+s);	
-	  continue;
-	}
+	if(!neighbour) continue;
+	SPECEX_DEBUG("use neighbour flux");
 	tmp.flux_parameter_index = neighbour->flux_parameter_index;
 	tmp.flux = neighbour->flux;
+	tmp.ignore = false;
       }
-      
-      s++;
     }
   }
 
@@ -1646,10 +1650,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 
   // save results for spots
-    SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots saving spots fluxes");
+    SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots saving spots fluxes nspots=" << spots.size() << " ntmp=" << spot_tmp_data.size());
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p& spot= spots[s];
-    specex::SpotTmpData& tmp = spot_tmp_data[s];
+    specex::SpotTmpData& tmp = spot_tmp_data[s]; // BUG IF WE ERASED DATA ???
     if(fit_flux) {
       if(force_positive_flux) {
 	spot->flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
@@ -2928,6 +2932,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ComputeWeigthImage(selected_spots,&npix);  
   psf_params->ndata_in_core = npix;
   InitTmpData(selected_spots);
+
+  for(size_t s=0;s<spot_tmp_data.size();s++) 
+    if(spot_tmp_data[s].flux<0) spot_tmp_data[s].flux=0;
+  
   psf_params->chi2_in_core = ParallelizedComputeChi2AB(false);
   psf->hSizeX=saved_hsizex;
   psf->hSizeY=saved_hsizey;
@@ -2950,6 +2958,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ComputeWeigthImage(selected_spots,&npix); 
   psf_params->ndata = npix; 
   InitTmpData(selected_spots);
+  
+  for(size_t s=0;s<spot_tmp_data.size();s++) 
+    if(spot_tmp_data[s].flux<0) spot_tmp_data[s].flux=0;
+  
   psf_params->chi2 = ParallelizedComputeChi2AB(false);
   return ok;
 }
