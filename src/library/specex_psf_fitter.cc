@@ -913,6 +913,8 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       
       for (int j=stamp.begin_j; j <stamp.end_j; ++j) {  // this stamp is a rectangle with all the spots in it
 	for (int i=stamp.begin_i ; i < stamp.end_i; ++i) {
+
+	  if( weight(i,j)==0) continue ; // pixels with ivar=0 still at 0
 	  
 	  double model_flux=footprint_weight(i,j);
 	  if(model_flux==0) continue;
