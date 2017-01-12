@@ -46,10 +46,11 @@ int main ( int argc, char *argv[] ) {
   string spots_xml_filename="";
   string input_fits_image_filename="";
   string output_fits_image_filename="";  
-  double psf_error=0;
-  double readout_noise=2;
+  //double psf_error=0;
+  //double readout_noise=2;
   int flux_hdu=1;
   int ivar_hdu=2;
+  int mask_hdu=3;
   
   // reading arguments
   // --------------------------------------------
@@ -60,10 +61,11 @@ int main ( int argc, char *argv[] ) {
     ( "spots", popts::value<string>( &spots_xml_filename ), "spots xml filename" )
     ( "in", popts::value<string>( &input_fits_image_filename ), " input fits image file name" )
     ( "out", popts::value<string>( &output_fits_image_filename ), " output fits image file name")
-    ( "readout-noise", popts::value<double>( &readout_noise ), " readout noise for pull")
-    ( "psf-error", popts::value<double>( &psf_error ), " psf relative error for pull")
+    //( "readout-noise", popts::value<double>( &readout_noise ), " readout noise for pull")
+    //( "psf-error", popts::value<double>( &psf_error ), " psf relative error for pull")
     ( "flux-hdu", popts::value<int>( &flux_hdu ), " flux hdu in input fits")
     ( "ivar-hdu", popts::value<int>( &ivar_hdu ), " ivar hdu in input fits")
+    ( "mask-hdu", popts::value<int>( &mask_hdu ), " mask hdu in input fits")
     ( "verbose,v", "turn on verbose mode" )
     ( "core", "dump core files when harp exception is thrown" )
     ;
@@ -101,13 +103,21 @@ int main ( int argc, char *argv[] ) {
     
     // open image
     // --------------------------------------------
-    image_data image,weight;
+    image_data image,weight,mask,rdnoise;
+    //read_DESI_preprocessed_image(arc_image_filename,image,weight,mask,rdnoise,header);
     //read_fits_images(input_fits_image_filename,image,weight);
     read_fits_image(input_fits_image_filename,flux_hdu,image);
     read_fits_image(input_fits_image_filename,ivar_hdu,weight);
-     
-
+    read_fits_image(input_fits_image_filename,mask_hdu,mask);
+    for(int j=0;j<weight.Ny();j++) {
+      for(int i=0;i<weight.Nx();i++) {
+	if(mask(i,j)!=0)
+	  weight(i,j)=0;
+      }
+    }
+    
     // weight is 0 or 1
+    /*
     for(int j=0;j<weight.Ny();j++) {
       for(int i=0;i<weight.Nx();i++) {
 	if(weight(i,j)>0)
@@ -116,6 +126,7 @@ int main ( int argc, char *argv[] ) {
 	  weight(i,j)=0;
       }
     }
+    */
     
     // read PSF
     // --------------------------------------------
@@ -180,10 +191,11 @@ int main ( int argc, char *argv[] ) {
     
     parallelized_compute_model_image(model,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0);
     
-    const image_data& model_for_var = model;
+    
 
-
+    /*
     // now compute variance 
+    const image_data& model_for_var = model;
     image_data variance(image.n_cols(),image.n_rows());
     image_data variance2(image.n_cols(),image.n_rows());
     image_data data_in_stamp(image.n_cols(),image.n_rows());
@@ -206,7 +218,7 @@ int main ( int argc, char *argv[] ) {
 	variance2.data(i) += (flux + square(psf_error*flux));
       
     } // end of loop on all pixels
-    
+    */
 
     // compute chi2 (image and core)
     // ---------------------------
@@ -223,7 +235,7 @@ int main ( int argc, char *argv[] ) {
     double chi2_image = 0;
     int ndata_image = 0;
     double chi2_core = 0;
-    double chi2_core2 = 0;
+    //double chi2_core2 = 0;
     int ndata_core = 0;
     for (int j=global_stamp.begin_j; j <global_stamp.end_j; ++j) {  
 
@@ -233,21 +245,30 @@ int main ( int argc, char *argv[] ) {
       int end_i   = global_stamp.end_i;
 
       for (int i=begin_i ; i <end_i; ++i) {
-	if(variance(i,j)>0) {
-
-	  // variance(i,j) = 1; // debug
-
-	  double dchi2 = square(residual(i,j))/(variance(i,j));
-	  
+	if(weight(i,j)>0) {
+	  double dchi2 = weight(i,j)*square(residual(i,j)); 
 	  chi2_image += dchi2;
 	  ndata_image ++;
-	
+	  
+	  if(core_footprint(i,j)>0) {
+	    chi2_core += dchi2;
+	    //chi2_core2 += weight(i,j)*square(residual(i,j));
+	    ndata_core ++;
+	  }
+	  
+	}
+	/*
+	if(variance(i,j)>0) {
+	  double dchi2 = square(residual(i,j))/(variance(i,j)); 
+	  chi2_image += dchi2;
+	  ndata_image ++;	
 	  if(core_footprint(i,j)>0) {
 	    chi2_core += dchi2;
 	    chi2_core2 += square(residual(i,j))/(variance2(i,j));
 	    ndata_core ++;
 	  }
 	}
+	*/
       }
     }
     
@@ -265,12 +286,12 @@ int main ( int argc, char *argv[] ) {
     
     int ndf_image  = ndata_image-npar; 
     int ndf_core   = ndata_core-npar;
-    cout << "readout noise      = " << readout_noise << endl;
-    cout << "assumed psf error  = " << psf_error << endl;
+    //cout << "readout noise      = " << readout_noise << endl;
+    //cout << "assumed psf error  = " << psf_error << endl;
     cout << "number of spots    = " << spots.size() << endl;
     cout << "image chi2/ndf     = " << chi2_image << "/" << ndf_image << " = " << chi2_image/ndf_image << endl;
-    cout << "spot core 5x5 chi2/ndf (using model in var) = " << chi2_core << "/" << ndf_core << " =" << chi2_core/ndf_core << endl;
-    cout << "spot core 5x5 chi2/ndf (using data in var)  = " << chi2_core2 << "/" << ndf_core << " =" << chi2_core2/ndf_core << endl;
+    cout << "spot core 5x5 chi2/ndf = " << chi2_core << "/" << ndf_core << " =" << chi2_core/ndf_core << endl;
+    //cout << "spot core 5x5 chi2/ndf (using data in var)  = " << chi2_core2 << "/" << ndf_core << " =" << chi2_core2/ndf_core << endl;
     cout << "ndata in image = " << ndata_image << endl;
     cout << "ndata in core  = " << ndata_core << endl;
     
@@ -293,7 +314,7 @@ int main ( int argc, char *argv[] ) {
       harp::fits::key_write(fp,"EXTNAME","RESIDUAL","");
         
       for(size_t i=0; i<residual.data.size() ;i++) {
-	if(variance.data(i)>0) residual.data(i) /= sqrt(variance.data(i));
+	residual.data(i) *= sqrt(weight.data(i));
       }
     
       harp::fits::img_append < double > ( fp, image.n_rows(), image.n_cols() );
