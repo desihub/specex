@@ -1391,7 +1391,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       if(fatal) {
 	SPECEX_ERROR("cholesky_solve failed with status " << status);
       } else {
-	SPECEX_WARNING("cholesky_solve failed with status " << status);
+	if(spot_tmp_data.size()>1)
+	  SPECEX_WARNING("cholesky_solve failed with status " << status);
 	psf_params->fit_status = 1;
 	psf_params->chi2 = *psfChi2;
 	psf_params->nparams = Params.size();
