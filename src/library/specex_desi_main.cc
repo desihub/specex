@@ -100,7 +100,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   int header_hdu=0;
   
   if(getenv("SPECEXDATA"))
-    lamp_lines_filename = string(getenv("SPECEXDATA"))+"/specex_linelist_boss.txt";
+    lamp_lines_filename = string(getenv("SPECEXDATA"))+"/specex_linelist_desi.txt";
    
   // reading arguments
   // --------------------------------------------
@@ -132,7 +132,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode" )
     ( "debug", "turn on debug mode" )
-    ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_boss.txt)" )
+    ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_desi.txt)" )
     ( "core", "dump core files when harp exception is thrown" )
     ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg )->default_value(6), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
     ("gauss_hermite_deg2",  popts::value<int>( &gauss_hermite_deg2 )->default_value(2), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
