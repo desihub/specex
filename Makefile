@@ -60,7 +60,8 @@ all : ; $(NO_CXX)
 install : all ; $(NO_SPECEX_PREFIX)
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f install; done
 	@ for f in $(PYSCRIPTS); do cp python/$$f $(SPECEX_PREFIX)/bin; done
-	chmod +x $(SPECEX_PREFIX)/bin/specex*
+	@ cp -a data $(SPECEX_PREFIX)/
+	@ chmod +x $(SPECEX_PREFIX)/bin/specex*
 
 uninstall : ; $(NO_SPECEX_PREFIX)
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f uninstall; done
