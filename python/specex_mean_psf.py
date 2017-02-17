@@ -22,6 +22,7 @@ def main() :
                     help = 'input specex psf (fits format)')
     parser.add_argument('-o','--output', type = str, default = None, required=True,
 		                        help = 'output specex psf (fits format)')
+    
 
     args = parser.parse_args()
     log=get_logger()
@@ -47,8 +48,8 @@ def main() :
             nbundles=(psf[1].header["BUNDLMAX"]-psf[1].header["BUNDLMIN"])+1
             nfibers=(psf[1].header["FIBERMAX"]-psf[1].header["FIBERMIN"])+1
             nfibers_per_bundle=nfibers/nbundles
-            print "nbundles=%d"%nbundles
-            print "nfibers_per_bundle=%d"%nfibers_per_bundle
+            log.info("nbundles=%d"%nbundles)
+            log.info("nfibers_per_bundle=%d"%nfibers_per_bundle)
             
         else :
             if not compatible(psf[1].header,refhead) :
@@ -66,7 +67,12 @@ def main() :
         bundle_rchi2.append(rchi2)
     
     bundle_rchi2=np.array(bundle_rchi2)
-    print "bundle_rchi2=",bundle_rchi2
+    log.info("bundle_rchi2=",bundle_rchi2)
+    median_bundle_rchi2 = np.median(bundle_rchi2)
+    rchi2_threshold=median_bundle_rchi2+1.
+    log.info("median chi2=%f threshold=%f"%(median_bundle_rchi2,rchi2_threshold))
+    
+
 
     for entry in range(tables[0].size) :
         PARAM=tables[0][entry]["PARAM"]
@@ -114,7 +120,7 @@ def main() :
         #log.info("output coeff.shape = %d"%output_coeff.shape)
         
         # now merge, using rchi2 as selection score
-        rchi2_threshold=2.
+        
         for bundle in range(bundle_rchi2.shape[1]) :
             
             ok=np.where(bundle_rchi2[:,bundle]<rchi2_threshold)[0]
@@ -124,15 +130,18 @@ def main() :
             
             fibers=np.arange(bundle*nfibers_per_bundle,(bundle+1)*nfibers_per_bundle)
             if ok.size>=2 : # use median
+                log.info("bundle #%d : use median"%bundle)
                 for f in fibers :
                     output_coeff[f]=np.median(coeff[ok,f],axis=0)
                 output_rchi2[bundle]=np.median(bundle_rchi2[ok,bundle])
             elif ok.size==1 : # copy
+                log.info("bundle #%d : use only one psf "%bundle)
                 for f in fibers :
                     output_coeff[f]=coeff[ok[0],f]
                 output_rchi2[bundle]=bundle_rchi2[ok[0],bundle]
                     
             else : # we have a problem here, take the smallest rchi2
+                log.info("bundle #%d : take smallest chi2 "%bundle)
                 i=np.argmin(bundle_rchi2[:,bundle])
                 for f in fibers :
                     output_coeff[f]=coeff[i,f]
