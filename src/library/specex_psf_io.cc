@@ -1,6 +1,7 @@
 #include <fstream>
 #include <boost/archive/xml_oarchive.hpp>
 #include <boost/archive/xml_iarchive.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include <harp.hpp>
 
@@ -99,6 +100,7 @@ void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
   
 }
 
+void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu);
 
 void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu);
 void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu);
@@ -131,13 +133,186 @@ void specex::write_psf_fits(const specex::PSF_p psf, fitsfile* fp, int first_hdu
 }
 
 void specex::read_psf_fits(specex::PSF_p& psf, const string& filename) {
-  SPECEX_ERROR("not implemented");
+  fitsfile * fp;
+  harp::fits::open_read(fp,filename);
+  read_psf_fits(psf,fp,1);
+  harp::fits::close(fp);
+  SPECEX_INFO("read PSF in " << filename);
 }
 
 void specex::read_psf_fits(specex::PSF_p& psf, fitsfile* fp, int first_hdu) {
-  SPECEX_ERROR("not implemented");
+  int status = 0;
+  fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
+  
+  string psftype; harp::fits::key_read(fp,"PSFTYPE",psftype);
+  SPECEX_INFO("PSFTYPE=" << psftype);
+  int psfver; harp::fits::key_read (fp,"PSFVER",psfver);
+  SPECEX_INFO("PSFVER=" << psfver);
+  
+  if(psftype=="GAUSS-HERMITE" && psfver==2) {
+    read_gauss_hermite_psf_fits_version_2(psf,fp,first_hdu+1);
+  }else{
+    SPECEX_ERROR("read_psf_fits not implemented for PSFTYPE=" << psftype << " and PSFVER=" << psfver);
+  }
 }
 
+void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu) {
+  int status = 0;
+  fits_movabs_hdu ( fp, hdu, NULL, &status ); harp::fits::check ( status );
+  
+  int GHDEGX;  harp::fits::key_read(fp,"GHDEGX",GHDEGX);
+  int GHDEGY;  harp::fits::key_read(fp,"GHDEGY",GHDEGY);
+  if(GHDEGX != GHDEGY) {
+    SPECEX_ERROR("expect GHDEGX=GHDEGY");
+  }
+  psf = specex::PSF_p(new specex::GaussHermitePSF(GHDEGX));
+  harp::fits::key_read(fp,"MJD",psf->mjd);
+  harp::fits::key_read(fp,"PLATEID",psf->plate_id);
+  harp::fits::key_read(fp,"CAMERA",psf->camera_id);
+  harp::fits::key_read(fp,"ARCEXP",psf->arc_exposure_id);
+  
+  int npix_x; harp::fits::key_read(fp,"NPIX_X",npix_x);
+  int npix_y; harp::fits::key_read(fp,"NPIX_Y",npix_y);
+  
+  harp::fits::key_read(fp,"HSIZEX",psf->hSizeX);
+  harp::fits::key_read(fp,"HSIZEY",psf->hSizeY);
+  
+  
+  int bundlemin; harp::fits::key_read(fp,"BUNDLMIN",bundlemin);
+  int bundlemax; harp::fits::key_read(fp,"BUNDLMAX",bundlemax);
+  int fibermin; harp::fits::key_read(fp,"FIBERMIN",fibermin);
+  int fibermax; harp::fits::key_read(fp,"FIBERMAX",fibermax);
+  int nparams; harp::fits::key_read(fp,"NPARAMS",nparams);
+  int legdeg; harp::fits::key_read(fp,"LEGDEG",legdeg);
+  
+  specex::FitsTable table;
+  table.Read(fp);
+  // 
+  int param_col = table.columns["PARAM"].col;
+  int wmin_col  = table.columns["WAVEMIN"].col;
+  int wmax_col  = table.columns["WAVEMAX"].col;
+  int coeff_col = table.columns["COEFF"].col;
+  std::vector<std::string> params;
+  std::map<std::string,int> param_row;
+  std::map<std::string,double> param_wavemin;
+  std::map<std::string,double> param_wavemax;
+  std::map<std::string,harp::vector_double > param_coeff;
+  for(int i=0;i<table.data.size();i++) { 
+    std::string pname=table.data[i][param_col].string_val;
+    boost::trim(pname);
+    SPECEX_INFO(i << " '" << pname << "'");
+    params.push_back(pname);
+    param_row[pname]=i;
+    param_wavemin[pname]=table.data[i][wmin_col].double_vals[0];
+    param_wavemax[pname]=table.data[i][wmax_col].double_vals[0];
+    param_coeff[pname]=table.data[i][coeff_col].double_vals;    
+  }
+  
+  // FiberTraces
+  // check size makes sense
+  int nfibers = fibermax-fibermin+1;
+  int ncoeff  = nfibers*(legdeg+1);
+  if( int(param_coeff["X"].size()) != ncoeff)
+    SPECEX_ERROR("XCOEFF SIZE INCONSISTENT WITH LEGDEG AND NUMBER OF FIBERS");
+  int index=0;
+  for(int fiber=fibermin;fiber<=fibermax; fiber++,index++) {
+    specex::Trace trace;
+    trace.fiber=fiber;
+    trace.mask=0; //?
+    trace.X_vs_W = specex::Legendre1DPol(legdeg,param_wavemin["X"],param_wavemax["X"]);
+    trace.Y_vs_W = specex::Legendre1DPol(legdeg,param_wavemin["Y"],param_wavemax["Y"]);
+    for(int i=0;i<legdeg+1;i++) {
+      trace.X_vs_W.coeff[i] = param_coeff["X"][i+index*(legdeg+1)]; // or transposed
+      trace.Y_vs_W.coeff[i] = param_coeff["Y"][i+index*(legdeg+1)]; // or transposed
+    }
+    trace.synchronized = false;
+    psf->FiberTraces[fiber] = trace;
+  }
+
+  // Now that's more complicated, need to loop on bundles
+  int nbundles = (bundlemax-bundlemin)+1;
+  int nfibers_per_bundle = nfibers/nbundles; // not safe ...
+  SPECEX_INFO("Number of bundles= " << nbundles);
+  SPECEX_INFO("Number of fibers per bundle= " << nfibers_per_bundle);
+  
+  for(int bundle = bundlemin ; bundle <= bundlemax ; bundle++) {
+    int bundle_fibermin=bundle*nfibers_per_bundle;
+    int bundle_fibermax=(bundle+1)*nfibers_per_bundle-1;
+    if(bundle_fibermin<fibermin || bundle_fibermax>fibermax) {
+      SPECEX_ERROR("FIBERMIN,FIBERMAX,BUNDLEMIN,BUNDLEMAX ARE INCONSISTENT");
+    }
+    specex::PSF_Params bundle_params;
+    bundle_params.bundle_id=bundle;
+    bundle_params.fiber_min=bundle_fibermin;
+    bundle_params.fiber_max=bundle_fibermax;
+    
+    double xmin=100000;
+    double xmax=0;
+    double wavemin = param_wavemin["X"]; // or any other param
+    double wavemax = param_wavemax["X"]; // or any other param
+    
+    for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
+      const specex::Trace& trace = psf->FiberTraces[fiber];
+      for(double wave=wavemin;wave<=wavemax;wave+=10) {
+	double x = trace.X_vs_W.Value(wave);
+	xmin=min(xmin,x);
+	xmax=max(xmax,x);	  
+      }
+    }
+    SPECEX_INFO("bundle=" << bundle << " xmin xmax : " << xmin << " " << xmax);
+    
+
+    // need to set : bundle_params.AllParPolXW  and bundle_params.FitParPolXW
+    for(int i=0;i<(int)params.size();i++) {
+      const string& pname=params[i];
+      if(pname=="X") continue; // trace
+      if(pname=="Y") continue; // trace
+      if(pname=="GH-0-0") continue; // not used in c++ version
+      // now we need to fit a 2D legendre polynomial of X and wave
+      // for the subset of fibers of this bundle
+
+      // NOTE : we remove 1 deg along wave, because 1 was added in the c++/xml -> fits conversion X->fiber
+      specex::Pol_p pol(new specex::Pol(nfibers_per_bundle-1,xmin,xmax,legdeg-1,wavemin,wavemax));
+      pol->name = pname;
+      pol->Fill(false); // sparse or not sparse
+
+      int npar = (pol->xdeg+1)*(pol->ydeg+1);
+      harp::matrix_double A(npar,npar);
+      harp::vector_double B(npar);
+      A *= 0;
+      B *= 0;
+      for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
+	const specex::Trace& trace = psf->FiberTraces[fiber];
+	specex::Legendre1DPol fiberpol(legdeg,param_wavemin[pname],param_wavemax[pname]);
+	for(int i=0;i<=legdeg;i++)
+	  fiberpol.coeff[i]=param_coeff[pname][i+fiber*(legdeg+1)]; // or transpose
+	for(double wave=wavemin;wave<=wavemax;wave+=(wavemax-wavemin)/(legdeg+2)) {
+	  double x    = trace.X_vs_W.Value(wave);
+	  double pval = fiberpol.Value(wave);
+	  harp::vector_double der = pol->Monomials(x,wave);
+	  specex::syr(1.,der,A); // A += der*der.transposed;
+	  specex::axpy(pval,der,B); // B += pval*der;
+	}
+      }
+      // now need to solve
+      int status = specex::cholesky_solve(A,B);
+      if(status != 0) 
+	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname);
+      
+      pol->coeff = B;
+      SPECEX_INFO("Fit of parameter " << pname << " in bundle " << bundle << " done");
+      
+      bundle_params.AllParPolXW.push_back(pol);
+      
+      
+    }
+    
+    
+    psf->ParamsOfBundles[bundle] = bundle_params;
+  } 
+
+  //SPECEX_ERROR("Finish implementation");
+}
 
 ///////////////////////////////////
 

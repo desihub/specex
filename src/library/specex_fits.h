@@ -53,6 +53,7 @@ namespace specex {
     FitsTable();
     FitsTable(const std::string& filename, int hdu_number, bool verbose = false);
     void Read(const std::string& filename, int hdu_number, bool verbose = false);
+    void Read(fitsfile *fp, bool verbose = false);
     bool HasKey(const std::string& key) const;
     bool Write(fitsfile *fp) const;
     double DoubleKeyValue(const std::string& key) const;

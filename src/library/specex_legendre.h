@@ -99,12 +99,12 @@ class SparseLegendre2DPol
   double xmin,xmax,ymin,ymax;
   
   void Add(int i,int j);
-  void Fill(); // this is equivalent to a std Legendre2DPol
+  void Fill(bool sparse = true); // this is equivalent to a std Legendre2DPol is sparse=false
   void Clear(); // reset
 
   SparseLegendre2DPol(int i_xdeg=0, const double& i_xmin=0, const double& i_xmax=0, 
 		      int i_ydeg=0, const double& i_ymin=0, const double& i_ymax=0);
- 
+  
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   

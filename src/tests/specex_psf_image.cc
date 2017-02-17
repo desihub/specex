@@ -24,7 +24,7 @@ namespace popts = boost::program_options;
 int main(int argc, char *argv[]) {
 
 
-  string psf_xml_filename = "";
+  string psf_filename = "";
   string output_fits_image_filename = "";
   int fiber = 0;
   double wavelength = 6000;
@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
   popts::options_description desc ( "Allowed Options" );
   desc.add_options()
     ( "help,h", "display usage information" )
-    ( "psf", popts::value<string>( &psf_xml_filename ), "psf xml filename" )
+    ( "psf", popts::value<string>( &psf_filename ), "psf xml or fits filename" )
     ( "out", popts::value<string>( &output_fits_image_filename ), " output fits image file name")
     ( "fiber", popts::value<int>( &fiber ), "")
     ( "wavelength", popts::value<double>( &wavelength ), "")
@@ -73,7 +73,20 @@ int main(int argc, char *argv[]) {
     specex_set_verbose(true);
     
     specex::PSF_p psf;
-    specex::read_psf_xml(psf,psf_xml_filename);
+    
+    if (psf_filename.find(".xml") != std::string::npos) {
+      cout << "read xlm file " << psf_filename << endl;
+      specex::read_psf_xml(psf,psf_filename);
+    } else {
+      if (psf_filename.find(".fits") != std::string::npos) {
+	cout << "read fits file " << psf_filename << endl;
+	specex::read_psf_fits(psf,psf_filename);
+      } else {
+	cout << "not sure how to read this file (expect xxx.fits or xxx.xml) " << psf_filename << endl;
+	exit(12);
+      }
+    }
+    
   
     if(half_size_x>0) psf->hSizeX = half_size_x;
     if(half_size_y>0) psf->hSizeY = half_size_y;

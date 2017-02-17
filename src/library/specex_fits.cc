@@ -355,21 +355,25 @@ bool specex::FitsTable::Write(fitsfile *fp) const {
     }
     return 0;
 }
-
-
 void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbose)  {
   int status = 0;
   fits_open_file(&fptr, filename.c_str() , READONLY, &status);
   CHECKERROR;
   fits_movrel_hdu(fptr, hdu_number, NULL, &status);
   CHECKERROR;
-  
+  Read(fptr,verbose);
+}
+
+void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
+  fptr = fp;
+  int status = 0;
+    
   // checking HDU TYPE
   int hdutype;
   fits_get_hdu_type(fptr, &hdutype, &status);
   CHECKERROR;
   if(hdutype != BINARY_TBL && hdutype != ASCII_TBL ) {
-    SPECEX_ERROR("FitsTable::Read file " << filename << " hdu " << hdu_number << " is not a table");
+    SPECEX_ERROR("FitsTable::Read : hdu is not a table");
   }
   
   long nrows;

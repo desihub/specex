@@ -2364,25 +2364,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
 	specex::Pol_p pol(new specex::Pol(degx,min_x,max_x,degw,min_wave,max_wave));
 	pol->name = name;
-	
-	
-	// insert by hand
-	if(reduce_psf_params_variation) {
-	  for(int i=0;i<=degx;i++) { // x coordinate
-	    for(int j=0;j<=degw;j++) { // wave coordinate	      
-	      if(i==0) {
-		pol->Add(i,j); // full wavelength resolution
-	      }else if(i==1) {
-		if(j<2) pol->Add(i,j); // only first x * wavelength cross-term
-	      }else{
-		if(j==0) pol->Add(i,j); // only  x terms
-	      }	    
-	    }
-	  }
-	}else{
-	  pol->Fill();
-	}
-	
+	pol->Fill(reduce_psf_params_variation); // is sparse
 	
 
 	pol->coeff(0) = default_params(p);

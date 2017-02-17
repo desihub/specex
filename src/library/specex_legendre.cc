@@ -212,6 +212,7 @@ specex::SparseLegendre2DPol::SparseLegendre2DPol(int i_xdeg, const double& i_xmi
 {
 }
 
+
 void specex::SparseLegendre2DPol::Add(int i,int j) {
   if(i<0 || i>xdeg || j<0 || j>ydeg) {SPECEX_ERROR("in SparseLegendre2DPol::Add not valid indices " << i << " " << j);}
   
@@ -228,11 +229,25 @@ void specex::SparseLegendre2DPol::Add(int i,int j) {
   coeff.clear();
 }
  
-void specex::SparseLegendre2DPol::Fill() {
+void specex::SparseLegendre2DPol::Fill(bool sparse) {
   non_zero_indices.clear();
-  for(int k=0;k<(xdeg+1)*(ydeg+1);k++) non_zero_indices.push_back(k);
-  coeff.resize(non_zero_indices.size());
-  coeff.clear();
+  if ( ! sparse ) {
+    for(int k=0;k<(xdeg+1)*(ydeg+1);k++) non_zero_indices.push_back(k);
+    coeff.resize(non_zero_indices.size());
+    coeff.clear();
+  }else{
+    for(int i=0;i<=xdeg;i++) { // x coordinate
+      for(int j=0;j<=ydeg;j++) { // wave coordinate	      
+	if(i==0) {
+	  Add(i,j); // full wavelength resolution
+	}else if(i==1) {
+	  if(j<2) Add(i,j); // only first x * wavelength cross-term
+	}else{
+	  if(j==0) Add(i,j); // only  x terms
+	}	    
+      }
+    }
+  }
 }
 
 void specex::SparseLegendre2DPol::Clear() {
