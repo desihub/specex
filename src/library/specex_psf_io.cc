@@ -29,6 +29,18 @@ void specex::read_psf(specex::PSF_p& psf, const std::string& filename) {
     SPECEX_ERROR("not sure how to read this file (expect xxx.fits or xxx.xml) " << filename);
   }
 }
+void specex::write_psf(const specex::PSF_p psf, const std::string& filename) {
+  
+  if (filename.find(".xml") != std::string::npos) {
+    SPECEX_INFO("write xml file " << filename);
+    specex::write_psf_xml(psf,filename);
+  } else if (filename.find(".fits") != std::string::npos) {
+    SPECEX_INFO("write fits file " << filename);
+    specex::write_psf_fits(psf,filename);
+  } else {
+    SPECEX_ERROR("not sure how to write this file (expect xxx.fits or xxx.xml) " << filename);
+  }
+}
 
 void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int oversampling) {
   
@@ -182,9 +194,10 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   harp::fits::key_read(fp,"CAMERA",psf->camera_id);
   harp::fits::key_read(fp,"ARCEXP",psf->arc_exposure_id);
   
-  int npix_x; harp::fits::key_read(fp,"NPIX_X",npix_x);
-  int npix_y; harp::fits::key_read(fp,"NPIX_Y",npix_y);
-  
+  int nx; harp::fits::key_read(fp,"NPIX_X",nx);
+  psf->ccd_image_n_cols = nx;
+  int ny; harp::fits::key_read(fp,"NPIX_Y",ny);
+  psf->ccd_image_n_rows = ny;
   harp::fits::key_read(fp,"HSIZEX",psf->hSizeX);
   harp::fits::key_read(fp,"HSIZEY",psf->hSizeY);
   

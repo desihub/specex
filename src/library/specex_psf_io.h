@@ -18,6 +18,7 @@ namespace specex {
   
   void write_psf_fits(const specex::PSF_p psf, fitsfile* fp, int first_hdu=1);
   void write_psf_fits(const specex::PSF_p psf, const string& filename);
+  void write_psf(const specex::PSF_p psf, const string& filename);
   
   void read_psf_fits(specex::PSF_p& psf,  fitsfile* fp, int first_hdu=1);
   void read_psf_fits(specex::PSF_p& psf, const string& filename);
