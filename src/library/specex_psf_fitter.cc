@@ -2455,11 +2455,13 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	    sdy+= (spot->yc - spot->initial_yc);	  
 	  }
 	}
-	if(sum>0) {
-	  double mean_dx=sdx/sum;
-	  double mean_dy=sdy/sum;
-	  //SPECEX_INFO("Fiber " << fiber << " dx=" << mean_dx << " dy=" << mean_dy);
-	}else{
+	
+	//if(sum>0) {
+	//double mean_dx=sdx/sum;
+	//double mean_dy=sdy/sum;
+	//SPECEX_INFO("Fiber " << fiber << " dx=" << mean_dx << " dy=" << mean_dy);
+	//}else{
+	if(sum<=0) {
 	  SPECEX_WARNING("No selected spot for fiber " << fiber);
 	  trace.mask=3;
 	}
