@@ -2433,7 +2433,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
 	if(trace.Off()) continue;
 	
-	SPECEX_INFO("Fiber " << fiber << " nspots= " << nspots 
+	SPECEX_DEBUG("Fiber " << fiber << " nspots= " << nspots 
 		    << " xdeg=" << trace.X_vs_W.deg
 		    << " ydeg=" << trace.Y_vs_W.deg);
 
@@ -2458,7 +2458,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	if(sum>0) {
 	  double mean_dx=sdx/sum;
 	  double mean_dy=sdy/sum;
-	  SPECEX_INFO("Fiber " << fiber << " dx=" << mean_dx << " dy=" << mean_dy);
+	  //SPECEX_INFO("Fiber " << fiber << " dx=" << mean_dx << " dy=" << mean_dy);
 	}else{
 	  SPECEX_WARNING("No selected spot for fiber " << fiber);
 	  trace.mask=3;
@@ -2467,67 +2467,67 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       }
     
     if( ! direct_simultaneous_fit) {
-    SPECEX_INFO("Starting FitSeveralSpots TRACE");
-
-    fit_flux       = false;
-    fit_position   = false;
-    fit_psf        = false;
-    fit_trace      = true;
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-    if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
-    
-    
+      SPECEX_INFO("Starting FitSeveralSpots TRACE");
+      
+      fit_flux       = false;
+      fit_position   = false;
+      fit_psf        = false;
+      fit_trace      = true;
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      if(!ok) SPECEX_ERROR("FitSeveralSpots failed for TRACE");
+      
+      
      
-    { // testing traces
-      vector<int> fibers_with_large_offsets;
-      map<int,bool> fiber_is_ok;      
-      for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++) {
-	int nbad=0;
-	double delta=2; //pix
-	double max_dx=0;
-	double max_dy=0;
-	for(size_t s=0;s<input_spots.size();s++) {
+      { // testing traces
+	vector<int> fibers_with_large_offsets;
+	map<int,bool> fiber_is_ok;      
+	for(int fiber = psf_params->fiber_min; fiber<=psf_params->fiber_max;fiber++) {
+	  int nbad=0;
+	  double delta=2; //pix
+	  double max_dx=0;
+	  double max_dy=0;
+	  for(size_t s=0;s<input_spots.size();s++) {
 	  specex::Spot_p spot= input_spots[s];
 	  if(spot->fiber != fiber) continue;
 	  max_dx=max(max_dx,fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc));
 	  max_dy=max(max_dy,fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc));	  
 	  if(fabs(psf->Xccd(spot->fiber,spot->wavelength)-spot->initial_xc)>delta || fabs(psf->Yccd(spot->fiber,spot->wavelength)-spot->initial_yc)>delta) nbad++;
-	}
-	if(nbad>2) {
-	  SPECEX_WARNING("Large x y offset for fiber " << fiber << " max dx,dy=" << max_dx << "," << max_dy);
-	  fibers_with_large_offsets.push_back(fiber);
-	  fiber_is_ok[fiber]=false;
-	}else{
-	  fiber_is_ok[fiber]=true;
+	  }
+	  if(nbad>2) {
+	    SPECEX_WARNING("Large x y offset for fiber " << fiber << " max dx,dy=" << max_dx << "," << max_dy);
+	    fibers_with_large_offsets.push_back(fiber);
+	    fiber_is_ok[fiber]=false;
+	  }else{
+	    fiber_is_ok[fiber]=true;
+	  }
+	  
 	}
 	
-      }
-      
-      if(fibers_with_large_offsets.size()>=3) {
-	SPECEX_WARNING("There are more than 2 fibers with large offsets, this is not due to dead columns, so we continue");
-      }
-      
-      if(false && fibers_with_large_offsets.size()>0 && fibers_with_large_offsets.size()<3) {
-	// try to fix this : use interpolation of other fibers : this assume fiber slit heads allow it, as for BOSS
-	for(size_t f=0;f<fibers_with_large_offsets.size();f++) {
-	  int bad_fiber   = fibers_with_large_offsets[f];
-	  int fiber1  = -1;
-	  int fiber2  = -1;
-	  
-	  if(bad_fiber==psf_params->fiber_min) {
-	    for(int fiber=bad_fiber+1;fiber<=psf_params->fiber_max;fiber++)
-	      if(fiber_is_ok[fiber]) { fiber1=fiber; break;}
-	  }else{
-	    for(int fiber=bad_fiber-1;fiber>=psf_params->fiber_min;fiber--)
-	      if(fiber_is_ok[fiber]) { fiber1=fiber; break;}
-	  }
-	  if(bad_fiber==psf_params->fiber_max) {
-	    for(int fiber=min(bad_fiber,fiber1)-1;fiber>=psf_params->fiber_min;fiber--)
-	      if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
-	  }else{
-	    for(int fiber=max(bad_fiber,fiber1)+1;fiber<=psf_params->fiber_max;fiber++)
-	      if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
-	  }
+	if(fibers_with_large_offsets.size()>=3) {
+	  SPECEX_WARNING("There are more than 2 fibers with large offsets, this is not due to dead columns, so we continue");
+	}
+	
+	if(false && fibers_with_large_offsets.size()>0 && fibers_with_large_offsets.size()<3) {
+	  // try to fix this : use interpolation of other fibers : this assume fiber slit heads allow it, as for BOSS
+	  for(size_t f=0;f<fibers_with_large_offsets.size();f++) {
+	    int bad_fiber   = fibers_with_large_offsets[f];
+	    int fiber1  = -1;
+	    int fiber2  = -1;
+	    
+	    if(bad_fiber==psf_params->fiber_min) {
+	      for(int fiber=bad_fiber+1;fiber<=psf_params->fiber_max;fiber++)
+		if(fiber_is_ok[fiber]) { fiber1=fiber; break;}
+	    }else{
+	      for(int fiber=bad_fiber-1;fiber>=psf_params->fiber_min;fiber--)
+		if(fiber_is_ok[fiber]) { fiber1=fiber; break;}
+	    }
+	    if(bad_fiber==psf_params->fiber_max) {
+	      for(int fiber=min(bad_fiber,fiber1)-1;fiber>=psf_params->fiber_min;fiber--)
+		if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
+	    }else{
+	      for(int fiber=max(bad_fiber,fiber1)+1;fiber<=psf_params->fiber_max;fiber++)
+		if(fiber_is_ok[fiber]) { fiber2=fiber; break;}
+	    }
 	  if(fiber1==-1 || fiber2==-1) {
 	    SPECEX_ERROR("can't fix this, abort");
 	  }
@@ -2538,24 +2538,22 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  bad_trace.X_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.X_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.X_vs_W.coeff;
 	  bad_trace.Y_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.Y_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.Y_vs_W.coeff;
 	  
+	  }
+	  scheduled_fit_of_traces = false;
 	}
-	scheduled_fit_of_traces = false;
+	
+    
+	for(size_t s=0;s<input_spots.size();s++) {
+	  specex::Spot_p& spot= input_spots[s];
+	  spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
+	  spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
+	}
       }
       
-    
-      for(size_t s=0;s<input_spots.size();s++) {
-	specex::Spot_p& spot= input_spots[s];
-	spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
-	spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
-      }
-    }
-    
-    if(write_tmp_results)
-      write_spots_xml(input_spots,"spots-after-trace-fit.xml");
-    }
-  }
+      if(write_tmp_results)
+	write_spots_xml(input_spots,"spots-after-trace-fit.xml");
+    } // end of test direct_simultaneous_fit
   
-  if(scheduled_fit_of_traces) {
     
     for(size_t s=0;s<input_spots.size();s++) {
       specex::Spot_p& spot= input_spots[s];
@@ -2564,14 +2562,12 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     include_signal_in_weight = false;
     //include_signal_in_weight = true;
-    ok = FitIndividualSpotFluxes(input_spots);
-    selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
-  
-
-
-
+    if (!direct_simultaneous_fit) {
+      ok = FitIndividualSpotFluxes(input_spots);
+      selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+    }
+    
     SPECEX_INFO("Starting FitSeveralSpots FLUX+TRACE ");
-    SPECEX_INFO("=======================================");
     fit_flux       = true;
     fit_position   = false;
     fit_psf        = false;
@@ -2592,7 +2588,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     /*
     if(scheduled_fit_of_sigmas) {
       SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX+TRACE only gaussian terms");
-      SPECEX_INFO("========================================================");
       fit_flux       = true;
       fit_position   = false;
       fit_psf        = true;
@@ -2653,8 +2648,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
     
     
-    /* dump central values for all fibers */
-
+    /*
+    // dump central values for all fibers 
     for(int fiber=psf_params->fiber_min; fiber<=psf_params->fiber_max; fiber++) {
       specex::Trace& trace = psf->FiberTraces.find(fiber)->second;
       double w1 = trace.X_vs_W.xmin;
@@ -2667,6 +2662,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 		<< " wave " << w3 << " :" << ublas::project(psf->AllLocalParamsFW(fiber,w3,psf_params->bundle_id),ublas::range(0,2)));
       
     }
+    */
+    
     if(write_tmp_results) {
       write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
       write_psf_xml(psf,"psf-after-gaussian-fit.xml");
@@ -2711,7 +2708,6 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     
     SPECEX_INFO("Starting FitSeveralSpots TAIL&CONTINUUM");
-    SPECEX_INFO("=======================================");
     fit_flux       = false;
     fit_position   = false;
     fit_psf        = false;
