@@ -284,6 +284,13 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
       }
     }
     //SPECEX_INFO("bundle=" << bundle << " xmin xmax : " << xmin << " " << xmax);
+#ifdef CONTINUUM
+    // dealing with continuum
+    bundle_params.ContinuumPol = specex::Legendre1DPol(legdeg,param_wavemin["CONT"],param_wavemax["CONT"]);
+    for(int i=0;i<legdeg+1;i++) {
+      bundle_params.ContinuumPol.coeff[i] = param_coeff["CONT"][i+bundle_params.fiber_min*(legdeg+1)];
+    }
+#endif    
     
 
     // need to set : bundle_params.AllParPolXW  and bundle_params.FitParPolXW
