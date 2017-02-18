@@ -370,6 +370,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
     fitter.scheduled_fit_of_psf         = fit_psf;
+    fitter.direct_simultaneous_fit      = (input_psf_filename != "");
     
     fitter.psf->gain = 1; // images are already in electrons
     fitter.psf->readout_noise = 0; // readnoise is a property of image, not PSF

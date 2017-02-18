@@ -2342,7 +2342,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  degw=0;
 	}
 	
-	if(reduce_psf_params_variation){
+	if(sparse_pol){
 	  // loop on high order GH coefficients if exist
 	  // limit to legendre deg 4 higher orders
 	  char label[1000];
@@ -2360,7 +2360,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
 	specex::Pol_p pol(new specex::Pol(degx,min_x,max_x,degw,min_wave,max_wave));
 	pol->name = name;
-	pol->Fill(reduce_psf_params_variation); // is sparse
+	pol->Fill(sparse_pol); // is sparse
 	
 
 	pol->coeff(0) = default_params(p);
@@ -2398,7 +2398,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   chi2_precision = 50.;
   bool ok = true;
   
-  SPECEX_INFO("Starting FitSeveralSpots FLUX");
+  //SPECEX_INFO("Starting FitSeveralSpots FLUX");
   
   int saved_psf_hsizex = psf->hSizeX;
   int saved_psf_hsizey = psf->hSizeY;
@@ -2466,7 +2466,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
       }
     
-
+    if( ! direct_simultaneous_fit) {
     SPECEX_INFO("Starting FitSeveralSpots TRACE");
 
     fit_flux       = false;
@@ -2552,6 +2552,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
     if(write_tmp_results)
       write_spots_xml(input_spots,"spots-after-trace-fit.xml");
+    }
   }
   
   if(scheduled_fit_of_traces) {
@@ -2621,20 +2622,22 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     chi2=1e30;
 
-    for(int i=0;i<5;i++) {
-      SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms then FLUX (loop="<<i<<")");
-      
-      fit_flux       = false;
-      fit_position   = false;
-      fit_psf        = true;
-      fit_trace      = false;
-      float previous_chi2 = chi2;
-      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
-      if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
-      
-      ok = FitIndividualSpotFluxes(input_spots);
-      selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
-      if(fabs(previous_chi2 - chi2)<chi2_precision) break;
+    if( ! direct_simultaneous_fit) {
+      for(int i=0;i<5;i++) {
+	SPECEX_INFO("Starting FitSeveralSpots PSF gaussian terms then FLUX (loop="<<i<<")");
+	
+	fit_flux       = false;
+	fit_position   = false;
+	fit_psf        = true;
+	fit_trace      = false;
+	float previous_chi2 = chi2;
+	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+	if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF");
+	
+	ok = FitIndividualSpotFluxes(input_spots);
+	selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+	if(fabs(previous_chi2 - chi2)<chi2_precision) break;
+      }
     }
     chi2_precision = 0.1;
     force_positive_flux = true;
@@ -2771,9 +2774,11 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
   */
   if(scheduled_fit_of_psf) {
-    fit_flux = false; fit_psf = true;
-    SPECEX_INFO("Starting FitSeveralSpots PSF #" << count);
-    ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    if( ! direct_simultaneous_fit) {
+      fit_flux = false; fit_psf = true;
+      SPECEX_INFO("Starting FitSeveralSpots PSF #" << count);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+    }
     fit_flux = true; fit_psf = true;
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << count);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
