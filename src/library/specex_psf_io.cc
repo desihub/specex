@@ -17,7 +17,18 @@
 #include <specex_gauss_hermite_two_psf.h>
 #include <specex_hat_hermite_psf.h>
 
-// also need #included <specex_serialisation.h>  before main() 
+void specex::read_psf(specex::PSF_p& psf, const std::string& filename) {
+  
+  if (filename.find(".xml") != std::string::npos) {
+    SPECEX_INFO("read xml file " << filename);
+    specex::read_psf_xml(psf,filename);
+  } else if (filename.find(".fits") != std::string::npos) {
+    SPECEX_INFO("read fits file " << filename);
+    specex::read_psf_fits(psf,filename);
+  } else {
+    SPECEX_ERROR("not sure how to read this file (expect xxx.fits or xxx.xml) " << filename);
+  }
+}
 
 void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int oversampling) {
   
@@ -222,10 +233,23 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     trace.X_vs_W = specex::Legendre1DPol(legdeg,param_wavemin["X"],param_wavemax["X"]);
     trace.Y_vs_W = specex::Legendre1DPol(legdeg,param_wavemin["Y"],param_wavemax["Y"]);
     for(int i=0;i<legdeg+1;i++) {
-      trace.X_vs_W.coeff[i] = param_coeff["X"][i+index*(legdeg+1)]; // or transposed
-      trace.Y_vs_W.coeff[i] = param_coeff["Y"][i+index*(legdeg+1)]; // or transposed
+      trace.X_vs_W.coeff[i] = param_coeff["X"][i+index*(legdeg+1)];
+      trace.Y_vs_W.coeff[i] = param_coeff["Y"][i+index*(legdeg+1)];
     }
-    trace.synchronized = false;
+    trace.X_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
+    trace.W_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
+    int npts=100;
+    harp::vector_double w(npts);
+    harp::vector_double x(npts);
+    harp::vector_double y(npts);
+    for(int i=0;i<npts;i++) {
+      w[i]=param_wavemin["Y"]+((param_wavemax["Y"]-param_wavemin["Y"])/(npts-1))*i;
+      x[i]=trace.X_vs_W.Value(w[i]);
+      y[i]=trace.Y_vs_W.Value(w[i]);      
+    }
+    trace.X_vs_Y.Fit(y,x);
+    trace.W_vs_Y.Fit(y,w);
+    trace.synchronized = true;
     psf->FiberTraces[fiber] = trace;
   }
 
@@ -268,6 +292,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
       if(pname=="X") continue; // trace
       if(pname=="Y") continue; // trace
       if(pname=="GH-0-0") continue; // not used in c++ version
+      if(pname=="CONT") continue; // not a local param
       // now we need to fit a 2D legendre polynomial of X and wave
       // for the subset of fibers of this bundle
 
@@ -285,7 +310,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	const specex::Trace& trace = psf->FiberTraces[fiber];
 	specex::Legendre1DPol fiberpol(legdeg,param_wavemin[pname],param_wavemax[pname]);
 	for(int i=0;i<=legdeg;i++)
-	  fiberpol.coeff[i]=param_coeff[pname][i+fiber*(legdeg+1)]; // or transpose
+	  fiberpol.coeff[i]=param_coeff[pname][i+fiber*(legdeg+1)];
 	for(double wave=wavemin;wave<=wavemax;wave+=(wavemax-wavemin)/(legdeg+2)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
@@ -653,7 +678,7 @@ void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& 
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
       bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 
-    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles");
+    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles: AllParPolXW.size=" << bundle_it->second.AllParPolXW.size() << " psf.LocalNAllPar()=" << nparams);
 
     for(size_t p=0;p<bundle_it->second.AllParPolXW.size();p++) {
       ncoeff_max=max(ncoeff_max,bundle_it->second.AllParPolXW[p]->ydeg+1);
@@ -940,7 +965,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
       bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 
-    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles");
+    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles: AllParPolXW.size=" << bundle_it->second.AllParPolXW.size() << " psf.LocalNAllPar()=" << nparams);
 
     for(size_t p=0;p<bundle_it->second.AllParPolXW.size();p++) {
       ncoeff=max(ncoeff,bundle_it->second.AllParPolXW[p]->ydeg+1);
@@ -1336,7 +1361,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
       bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 
-    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles");
+    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles: AllParPolXW.size=" << bundle_it->second.AllParPolXW.size() << " psf.LocalNAllPar()=" << nparams);
 
     for(size_t p=0;p<bundle_it->second.AllParPolXW.size();p++) {
       ncoeff=max(ncoeff,bundle_it->second.AllParPolXW[p]->ydeg+1);
@@ -1719,7 +1744,7 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
       bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
 
-    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles");
+    if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles: AllParPolXW.size=" << bundle_it->second.AllParPolXW.size() << " psf.LocalNAllPar()=" << nparams);
 
     for(size_t p=0;p<bundle_it->second.AllParPolXW.size();p++) {
       ncoeff=max(ncoeff,bundle_it->second.AllParPolXW[p]->ydeg+1);

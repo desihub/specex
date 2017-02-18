@@ -6,8 +6,7 @@
 
 namespace specex {
 
-  class TraceSet;
-
+  
   std::vector<specex::Legendre1DPol> read_BOSS_singleset_in_fits(const std::string& filename, int hdu_number, bool verbose=false);
   
   

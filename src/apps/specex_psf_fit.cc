@@ -339,7 +339,7 @@ int main ( int argc, char *argv[] ) {
       
 
       vector<Spot_p> spots;
-      allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
+      allocate_spots_of_bundle(spots,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
       

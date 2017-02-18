@@ -122,11 +122,11 @@ void specex::read_BOSS_traceset_in_fits(
   
   if(lW_vs_Y_pols.size() !=  X_vs_Y_pols.size()) SPECEX_ERROR("lW_vs_Y and X_vs_Y dont' have same number of fibers");
   
-  traceset.resize(X_vs_Y_pols.size());
+  
   for(int fiber=0;fiber<int(lW_vs_Y_pols.size());fiber++) {
     
         
-    specex::Trace& trace = traceset[fiber];
+    specex::Trace trace;
     trace.fiber = fiber;
     trace.mask = fibermask(fiber,0);
     // need to convert lW into W
@@ -158,7 +158,9 @@ void specex::read_BOSS_traceset_in_fits(
     trace.X_vs_Y = X_vs_Y_pols[fiber];
     
     // now compose
-    trace.X_vs_W = composed_pol(trace.X_vs_Y,trace.Y_vs_W);   
+    trace.X_vs_W = composed_pol(trace.X_vs_Y,trace.Y_vs_W);
+
+    traceset[fiber] = trace;
   }
   if(verbose) cout << "INFO specex::read_BOSS_traceset_in_fits done" << endl;
   

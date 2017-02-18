@@ -6,8 +6,6 @@
 
 namespace specex {
 
-  class TraceSet;
-
   class Spectrograph {
     
   public :

@@ -21,7 +21,8 @@ namespace specex {
   
   void read_psf_fits(specex::PSF_p& psf,  fitsfile* fp, int first_hdu=1);
   void read_psf_fits(specex::PSF_p& psf, const string& filename);
-
+  void read_psf(specex::PSF_p& psf, const string& filename);
+  
 
   
 

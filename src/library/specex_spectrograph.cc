@@ -12,14 +12,14 @@ void specex::Spectrograph::AutoConfigure(const specex::TraceSet& traceset) {
   
   double* central_waves = new double[nfibers];
   for(int f=0;f<nfibers;f++)
-    central_waves[f]=(traceset[f].X_vs_W.xmin+traceset[f].X_vs_W.xmax)/2.;
+    central_waves[f]=(traceset.find(f)->second.X_vs_W.xmin+traceset.find(f)->second.X_vs_W.xmax)/2.;
   double central_wave=DConstArrayMedian(central_waves,nfibers);
   SPECEX_INFO("Central wavelength             = " << central_wave);
   delete [] central_waves;
   
   double* spacing = new double[nfibers-1];
   for(int f=0;f<nfibers-1;f++) {
-    spacing[f] = traceset[f+1].X_vs_W.Value(central_wave)-traceset[f].X_vs_W.Value(central_wave);
+    spacing[f] = traceset.find(f+1)->second.X_vs_W.Value(central_wave)-traceset.find(f)->second.X_vs_W.Value(central_wave);
     //SPECEX_INFO("Spacing=" << spacing[f]);
   }
   double median_spacing = DConstArrayMedian(spacing,nfibers-1);

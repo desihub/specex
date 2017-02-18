@@ -9,6 +9,7 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 
+#include <specex_trace.h>
 #include <specex_psf.h>
 #include <specex_gauss_hermite_psf.h>
 #include <specex_gauss_hermite_two_psf.h>

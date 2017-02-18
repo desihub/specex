@@ -178,7 +178,7 @@ public :
     
   public :
 
-    std::map<int,Trace> FiberTraces; // fiber traces, one independent trace per fiber
+    TraceSet FiberTraces; // fiber traces, one independent trace per fiber
 
     const Trace& GetTrace(int fiber) const;
     Trace& GetTrace(int fiber);

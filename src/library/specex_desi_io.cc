@@ -80,10 +80,9 @@ void specex::read_DESI_traceset_in_fits(
     SPECEX_ERROR("not same number of fibers for x and y " << x_vs_wave_coefs.n_rows() << " " << y_vs_wave_coefs.n_rows() );
   }
 
-  traceset.resize(nfibers);
-  
   for(int fiber=0;fiber<nfibers;fiber++) {
-    specex::Trace& trace = traceset[fiber];
+    
+    specex::Trace trace;
     trace.fiber = fiber;
     trace.mask  = 0; // need to do something here?
     trace.X_vs_W.xmin = x_vs_wave_wavemin;
@@ -125,6 +124,7 @@ void specex::read_DESI_traceset_in_fits(
     trace.X_vs_Y.Fit(y,x);
     trace.W_vs_Y.Fit(y,w);
     trace.synchronized = true;
+    traceset[fiber] = trace;
   }
   
   SPECEX_DEBUG("done reading traceset");

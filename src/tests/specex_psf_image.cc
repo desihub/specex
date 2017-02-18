@@ -73,19 +73,7 @@ int main(int argc, char *argv[]) {
     specex_set_verbose(true);
     
     specex::PSF_p psf;
-    
-    if (psf_filename.find(".xml") != std::string::npos) {
-      cout << "read xlm file " << psf_filename << endl;
-      specex::read_psf_xml(psf,psf_filename);
-    } else {
-      if (psf_filename.find(".fits") != std::string::npos) {
-	cout << "read fits file " << psf_filename << endl;
-	specex::read_psf_fits(psf,psf_filename);
-      } else {
-	cout << "not sure how to read this file (expect xxx.fits or xxx.xml) " << psf_filename << endl;
-	exit(12);
-      }
-    }
+    specex::read_psf(psf,psf_filename);
     
   
     if(half_size_x>0) psf->hSizeX = half_size_x;

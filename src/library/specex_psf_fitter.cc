@@ -2195,105 +2195,101 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   SPECEX_INFO("starting to fit PSF with " <<  input_spots.size() << " spots");
  
   if(init_psf) {
-    
-    SPECEX_INFO("init PSF");
-    
+    SPECEX_INFO("init traces");
     FitTraces(input_spots);
-
-    int number_of_fibers_with_dead_columns = 0;
     
-    if(1) {
-      SPECEX_INFO("detecting dead columns in fiber traces ");
-      for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
-	  it !=psf->FiberTraces.end(); ++it) {
-	
-	if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
-	if(it->second.Off()) continue;
-	
-	specex::Trace& trace=it->second;
-	int begin_j = max(0,int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmin))));
-	int end_j   = min(int(weight.n_rows()),int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmax)))+1);
-	int ndead=0;
-	for(int j=begin_j;j<end_j;j++) {
-	  int i_center = trace.X_vs_Y.Value(double(j));
-	  int begin_i = max(0,i_center-3);
-	  int end_i   = min(int(weight.n_cols()),i_center+4);
-	  for(int i = begin_i ;i<end_i;i++) {
-	    if(weight(i,j)==0) ndead++;
-	  }
-	} 
-	if(ndead>0)
-	  SPECEX_INFO("fiber " << it->first << " ndead=" << ndead);
-	if(ndead>500) number_of_fibers_with_dead_columns++;
+    int number_of_fibers_with_dead_columns = 0;
+  
+    
+    SPECEX_INFO("detecting dead columns in fiber traces ");
+    for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
+	it !=psf->FiberTraces.end(); ++it) {
+      
+      if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
+      if(it->second.Off()) continue;
+      
+      specex::Trace& trace=it->second;
+      int begin_j = max(0,int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmin))));
+      int end_j   = min(int(weight.n_rows()),int(floor(trace.Y_vs_W.Value(trace.Y_vs_W.xmax)))+1);
+      int ndead=0;
+      for(int j=begin_j;j<end_j;j++) {
+	int i_center = trace.X_vs_Y.Value(double(j));
+	int begin_i = max(0,i_center-3);
+	int end_i   = min(int(weight.n_cols()),i_center+4);
+	for(int i = begin_i ;i<end_i;i++) {
+	  if(weight(i,j)==0) ndead++;
+	}
+      } 
+      if(ndead>0)
+	SPECEX_INFO("fiber " << it->first << " ndead=" << ndead);
+      if(ndead>500) number_of_fibers_with_dead_columns++;
+    }
+    if(number_of_fibers_with_dead_columns>0)
+      SPECEX_INFO("Number of fibers with dead columns = " << number_of_fibers_with_dead_columns);
+    
+  
+    // here we need to count number of wavelength and spots per wavelength
+    double min_wave = 1e12;
+    double max_wave = -1e12;
+    double min_x = 1e12;
+    double max_x = -1e12;      
+    for(size_t s=0;s<input_spots.size(); ++s) {
+      const specex::Spot_p spot = input_spots[s];
+      if(spot->xc < min_x ) min_x = spot->xc;
+      if(spot->xc > max_x ) max_x = spot->xc;
+      if(spot->wavelength < min_wave ) min_wave = spot->wavelength;
+      if(spot->wavelength > max_wave ) max_wave = spot->wavelength;
+      
+    }
+    // can happend when testing
+    if(max_x==min_x) max_x = min_x+1;
+    if(max_wave==min_wave) max_wave = min_wave+1;
+    
+    // if the traces are already synchronized, as is the case for DESI sims,
+    // we use this predefined range of coordinates
+    
+    bool modified=false;
+    for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
+	it !=psf->FiberTraces.end(); ++it) {
+      const Trace& trace = it->second;
+      if(trace.synchronized) {
+	min_wave = min( min_wave , trace.X_vs_W.xmin);
+	max_wave = max( max_wave , trace.X_vs_W.xmax);
+	min_x = min( min_x , trace.X_vs_W.Value(trace.X_vs_W.xmin));
+	max_x = max( max_x , trace.X_vs_W.Value(trace.X_vs_W.xmax));
+	modified=true;
       }
-      if(number_of_fibers_with_dead_columns>0)
-	SPECEX_INFO("Number of fibers with dead columns = " << number_of_fibers_with_dead_columns);
+    }
+    if(modified)
+      SPECEX_INFO("Use range for traces wmin,wmax=" << min_wave << "," << max_wave << " xmin,xmax=" << min_x << "," << max_x);
+    
+    
+    // get max number of spots per fiber
+    map<int,int> number_of_spots_per_fiber;
+    for(size_t s=0;s<input_spots.size(); ++s) {
+      const specex::Spot_p spot = input_spots[s];
+      number_of_spots_per_fiber[spot->fiber]++;
+    }
+    int number_of_fibers = number_of_spots_per_fiber.size();
+    int max_number_of_spots_per_fiber = 0;
+    for(map<int,int>::const_iterator it=number_of_spots_per_fiber.begin();
+	it != number_of_spots_per_fiber.end(); ++it) {
+      if(it->second > max_number_of_spots_per_fiber ) max_number_of_spots_per_fiber = it->second;
     }
     
-    // here we need to count number of wavelength and spots per wavelength
-    {
-      
-      double min_wave = 1e12;
-      double max_wave = -1e12;
-      double min_x = 1e12;
-      double max_x = -1e12;      
-      for(size_t s=0;s<input_spots.size(); ++s) {
-	const specex::Spot_p spot = input_spots[s];
-	if(spot->xc < min_x ) min_x = spot->xc;
-	if(spot->xc > max_x ) max_x = spot->xc;
-	if(spot->wavelength < min_wave ) min_wave = spot->wavelength;
-	if(spot->wavelength > max_wave ) max_wave = spot->wavelength;
-	
-      }
-      // can happend when testing
-      if(max_x==min_x) max_x = min_x+1;
-      if(max_wave==min_wave) max_wave = min_wave+1;
-      
-      // if the traces are already synchronized, as is the case for DESI sims,
-      // we use this predefined range of coordinates
-      
-      bool modified=false;
-      for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
-	  it !=psf->FiberTraces.end(); ++it) {
-	const Trace& trace = it->second;
-	if(trace.synchronized) {
-	  min_wave = min( min_wave , trace.X_vs_W.xmin);
-	  max_wave = max( max_wave , trace.X_vs_W.xmax);
-	  min_x = min( min_x , trace.X_vs_W.Value(trace.X_vs_W.xmin));
-	  max_x = max( max_x , trace.X_vs_W.Value(trace.X_vs_W.xmax));
-	  modified=true;
-	}
-      }
-      if(modified)
-	SPECEX_INFO("Use range for traces wmin,wmax=" << min_wave << "," << max_wave << " xmin,xmax=" << min_x << "," << max_x);
-
-      
-      // get max number of spots per fiber
-      map<int,int> number_of_spots_per_fiber;
-      for(size_t s=0;s<input_spots.size(); ++s) {
-	const specex::Spot_p spot = input_spots[s];
-	number_of_spots_per_fiber[spot->fiber]++;
-      }
-      int number_of_fibers = number_of_spots_per_fiber.size();
-      int max_number_of_spots_per_fiber = 0;
-      for(map<int,int>::const_iterator it=number_of_spots_per_fiber.begin();
-	  it != number_of_spots_per_fiber.end(); ++it) {
-	if(it->second > max_number_of_spots_per_fiber ) max_number_of_spots_per_fiber = it->second;
-      }
-      
-      SPECEX_INFO("Number of fibers " << number_of_fibers);
-      SPECEX_INFO("Max number of spots per fiber " << max_number_of_spots_per_fiber);
-     
-      
-      if(polynomial_degree_along_x>number_of_fibers-1) {
-	polynomial_degree_along_x=number_of_fibers-1;
-	SPECEX_INFO("Reducing polynomial degree along x to " << polynomial_degree_along_x << " because of number of fibers");
-      }
-      if(polynomial_degree_along_wave>max_number_of_spots_per_fiber-1) {
-	polynomial_degree_along_wave=max_number_of_spots_per_fiber-1;
-	SPECEX_INFO("Reducing polynomial degree along wavelength to " << polynomial_degree_along_wave << " because of number of spots");
-      }
-      
+    SPECEX_INFO("Number of fibers " << number_of_fibers);
+    SPECEX_INFO("Max number of spots per fiber " << max_number_of_spots_per_fiber);
+    
+    if(polynomial_degree_along_x>number_of_fibers-1) {
+      polynomial_degree_along_x=number_of_fibers-1;
+      SPECEX_INFO("Reducing polynomial degree along x to " << polynomial_degree_along_x << " because of number of fibers");
+    }
+    
+    if(polynomial_degree_along_wave>max_number_of_spots_per_fiber-1) {
+      polynomial_degree_along_wave=max_number_of_spots_per_fiber-1;
+      SPECEX_INFO("Reducing polynomial degree along wavelength to " << polynomial_degree_along_wave << " because of number of spots");
+    }
+    
       SPECEX_INFO("Setting PSF polynomial degrees " << polynomial_degree_along_x << " " << polynomial_degree_along_wave);
       
       psf_params->AllParPolXW.clear();
@@ -2376,7 +2372,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	
       }
       SPECEX_INFO("Total number of PSF params = " << npar_tot);
-      
+  
       //exit(12); // debug
 
 #ifdef CONTINUUM
@@ -2387,13 +2383,14 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       psf_params->ContinuumPol.xmin = min_wave;
       psf_params->ContinuumPol.xmax = max_wave;
 #endif
-    }
-    
-    for(map<string,Prior*>::const_iterator it=priors.begin(); it!=priors.end(); ++it) {
-      SPECEX_INFO("Setting Gaussian prior on param " << it->first);
-      psf->SetPrior(it->first,it->second);
-    }
+  } // end of test of init psf
+
+  
+  for(map<string,Prior*>::const_iterator it=priors.begin(); it!=priors.end(); ++it) {
+    SPECEX_INFO("Setting Gaussian prior on param " << it->first);
+    psf->SetPrior(it->first,it->second);
   }
+  
   
   fatal = true;
   include_signal_in_weight = false;

@@ -65,7 +65,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   int    first_fiber_bundle=0;
   int    last_fiber_bundle=0;
   int    first_fiber=0;
-  int    last_fiber=100000;
+#define DEFAULT_LAST_FIBER 100000
+  int    last_fiber=DEFAULT_LAST_FIBER;
   int    half_size_x=4;
   int    half_size_y=4;
   
@@ -93,6 +94,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   string output_xml_filename="";
   string output_fits_filename="";
   string output_spots_filename="";
+  string input_psf_filename="";
   
   int flux_hdu=0;
   int ivar_hdu=0;
@@ -156,6 +158,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "no_psf_fit", "do not fit the psf")
     ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
     ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
+    ( "input-psf", popts::value<string>( &input_psf_filename ), " input psf file name (fits or xml)")  
     ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
     ( "prior", popts::value< vector<string> >( &argurment_priors )->multitoken(), " gaussian prior on a param : 'name' value error")  
     ( "tmp_results", " write tmp results")  
@@ -169,14 +172,23 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
     popts::notify(vm);
     
-    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) || ( (! vm.count("trace")) && (( ! vm.count( "xcoord-file" ) ) || ( ! vm.count( "ycoord-file" ) ) ) )) {
+    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) || ( (! vm.count("trace")) && (( ! vm.count( "xcoord-file" )  || ( ! vm.count( "ycoord-file" ) ) ) ) && ( ! vm.count( "input-psf" ) ))) {
       cerr << endl;
       cerr << desc << endl;
       cerr << "example:" << endl;
       cerr << argv[0] << " -v" << endl;
       return EXIT_FAILURE;
     }
-
+    if(vm.count("trace") && vm.count( "input-psf" )) {
+      cout << "will use input-psf and ignore --trace option" << endl;
+    }
+    if(vm.count( "input-psf" )) {
+      if(first_fiber>0 || last_fiber<DEFAULT_LAST_FIBER) {
+	cerr << "cannot specify first and last fiber with input psf option, because this would mean to change number of parameters" << endl;
+	exit(12);
+      }
+    }
+    
     if(lamp_lines_filename == "") {
       cerr << endl;
       cerr << "missing lamp_lines_filename either define env. variable SPECEXDATA or use option --lamplines" << endl;
@@ -242,69 +254,96 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     
       
 
-    // read trace and data
+    // read data
     // --------------------------------------------
-    TraceSet traceset;
     map<string,string> header;
 
     image_data image,weight,mask,rdnoise;
     read_DESI_preprocessed_image(arc_image_filename,image,weight,mask,rdnoise,header);
     
     Spectrograph *spectro = new DESI_Spectrograph();
+    
+    // read trace
+    // --------------------------------------------
     /* read traces in arc file */
     if(trace_filename !="") {
       xtrace_filename=trace_filename;
       ytrace_filename=trace_filename;
     }
-    read_DESI_traceset_in_fits(traceset,xtrace_filename,xtrace_hdu,ytrace_filename,ytrace_hdu,trace_deg_x,trace_deg_wave);
-    if(per_fiber) {
-      SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x)");
-      int nfibers = traceset.size();
-      spectro->number_of_fiber_bundles_per_ccd=nfibers;
-      spectro->number_of_fibers_per_bundle=nfibers;
-      SPECEX_DEBUG("number of fibers  = " << nfibers);
-      legendre_deg_x = nfibers - 1;
-    }else{
-      spectro->AutoConfigure(traceset);
-    }
-    
-    
-    if(first_fiber_bundle<0 || first_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
-      SPECEX_ERROR("invalid first fiber bundle");
-    }
-    if(last_fiber_bundle<first_fiber_bundle || last_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
-      SPECEX_ERROR("invalid last fiber bundle");
-    }
-        
-    // init PSF
-    // --------------------------------------------
+
     specex::PSF_p psf;
+    TraceSet traceset; // only filled if no input PSF
+    if( input_psf_filename == "") {
 
-    if(psf_model=="GAUSSHERMITE")
-      psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
-    else if(psf_model=="GAUSSHERMITE2")
-      psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg2));
-    else if(psf_model=="HATHERMITE")
-      psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
-    else if(psf_model=="HATMOFFAT")
-      psf = PSF_p(new specex::HatMoffatPSF(gauss_hermite_deg));
-    else if(psf_model=="DISKMOFFAT")
-      psf = PSF_p(new specex::DiskMoffatPSF(gauss_hermite_deg));
-    else
-      SPECEX_ERROR("don't know this psf model");
-    
-    psf->ccd_image_n_cols = image.n_cols();
-    psf->ccd_image_n_rows = image.n_rows();
-    psf->hSizeX = half_size_x;
-    psf->hSizeY = half_size_y;
-    
-    
-    
-    
-        
-    
-    psf->FiberTraces.clear();
+      read_DESI_traceset_in_fits(traceset,xtrace_filename,xtrace_hdu,ytrace_filename,ytrace_hdu,trace_deg_x,trace_deg_wave);
+      if(per_fiber) {
+	SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x)");
+	int nfibers = traceset.size();
+	spectro->number_of_fiber_bundles_per_ccd=nfibers;
+	spectro->number_of_fibers_per_bundle=nfibers;
+	SPECEX_DEBUG("number of fibers  = " << nfibers);
+	legendre_deg_x = nfibers - 1;
+      }else{
+	spectro->AutoConfigure(traceset);
+      }
+      
+      
+      if(first_fiber_bundle<0 || first_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
+	SPECEX_ERROR("invalid first fiber bundle");
+      }
+      if(last_fiber_bundle<first_fiber_bundle || last_fiber_bundle>= spectro->number_of_fiber_bundles_per_ccd) {
+	SPECEX_ERROR("invalid last fiber bundle");
+      }
+      
+      // init PSF
+      // --------------------------------------------
+      
+      if(psf_model=="GAUSSHERMITE")
+	psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
+      else if(psf_model=="GAUSSHERMITE2")
+	psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg2));
+      else if(psf_model=="HATHERMITE")
+	psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
+      else if(psf_model=="HATMOFFAT")
+	psf = PSF_p(new specex::HatMoffatPSF(gauss_hermite_deg));
+      else if(psf_model=="DISKMOFFAT")
+	psf = PSF_p(new specex::DiskMoffatPSF(gauss_hermite_deg));
+      else
+	SPECEX_ERROR("don't know this psf model");
+      
+      psf->ccd_image_n_cols = image.n_cols();
+      psf->ccd_image_n_rows = image.n_rows();
+      psf->hSizeX = half_size_x;
+      psf->hSizeY = half_size_y;
+      psf->FiberTraces.clear();
+    }else{
+      read_psf(psf,input_psf_filename);
 
+      // erase traces outside fiber range
+      /*
+	for (specex::TraceSet::iterator it = psf->FiberTraces.begin(); it != psf->FiberTraces.end() ; ) {
+	if((it->first<first_fiber)||(it->first>last_fiber)) {
+	SPECEX_INFO("erase trace of fiber " << it->first);
+	psf->FiberTraces.erase(it++);
+	}else {
+	++it;
+	}
+	}
+      */
+
+      
+      if(per_fiber) {
+	SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x)");
+	int nfibers = psf->FiberTraces.size();
+	spectro->number_of_fiber_bundles_per_ccd=nfibers;
+	spectro->number_of_fibers_per_bundle=nfibers;
+	SPECEX_DEBUG("number of fibers  = " << nfibers);
+	legendre_deg_x = nfibers - 1;
+      }else{
+	spectro->AutoConfigure(psf->FiberTraces);
+      }
+      
+    }
     
 
     
@@ -368,26 +407,29 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 	psf->ParamsOfBundles[bundle].bundle_id = bundle;
 	psf->ParamsOfBundles[bundle].fiber_min = spectro->number_of_fibers_per_bundle*bundle;
 	psf->ParamsOfBundles[bundle].fiber_max = psf->ParamsOfBundles[bundle].fiber_min+spectro->number_of_fibers_per_bundle-1; // included
-	
-	// now check mask ?
-
-
-	if(psf->ParamsOfBundles[bundle].fiber_min < first_fiber) {
-	  psf->ParamsOfBundles[bundle].fiber_min = first_fiber;
-	  SPECEX_INFO("restricting fiber range first fiber = " << first_fiber);
-	}
-	if(psf->ParamsOfBundles[bundle].fiber_max > last_fiber) {
-	  psf->ParamsOfBundles[bundle].fiber_max = last_fiber;
-	  SPECEX_INFO("restricting fiber range last fiber = " << last_fiber);
-	}
-	
       }
       
+
+      // now check mask ?
+      if(psf->ParamsOfBundles[bundle].fiber_min < first_fiber) {
+	psf->ParamsOfBundles[bundle].fiber_min = first_fiber;
+	SPECEX_INFO("restricting fiber range first fiber = " << first_fiber);
+      }
+      if(psf->ParamsOfBundles[bundle].fiber_max > last_fiber) {
+	psf->ParamsOfBundles[bundle].fiber_max = last_fiber;
+	SPECEX_INFO("restricting fiber range last fiber = " << last_fiber);
+      }
+      
+      
+      
       // load traces in PSF 
-      // --------------------------------------------  
+      // --------------------------------------------
       for(int fiber=psf->ParamsOfBundles[bundle].fiber_min; fiber<=psf->ParamsOfBundles[bundle].fiber_max; fiber++) {
-	psf->FiberTraces[fiber]=traceset[fiber];
+	if(traceset.find(fiber) != traceset.end())
+	  psf->FiberTraces[fiber]=traceset[fiber];
       } 
+
+      
       
       fitter.SelectFiberBundle(bundle);
       
@@ -412,18 +454,30 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       SPECEX_INFO("valid y(=rows) range = " << ymin << " " << ymax);
 
       vector<Spot_p> spots;
-      allocate_spots_of_bundle(spots,*spectro,lamp_lines_filename,traceset,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
+      allocate_spots_of_bundle(spots,lamp_lines_filename,psf->FiberTraces,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
       if(write_tmp_results)
 	write_spots_xml(spots,"spots-init.xml");
+
+      /* DEBUGGING
+      {
+	for(int fiber=psf->ParamsOfBundles[bundle].fiber_min; fiber <= psf->ParamsOfBundles[bundle].fiber_max ;fiber ++) {
+	  cout << "DEBUGGING check trace in fiber " << fiber << endl;
+	  cout<< "X_vs_W xmin,xmax,deg " << psf->GetTrace(fiber).X_vs_W.xmin << " " << psf->GetTrace(fiber).X_vs_W.xmax << " " << psf->GetTrace(fiber).X_vs_W.deg << endl;
+	  cout<< "Y_vs_W xmin,xmax,deg " << psf->GetTrace(fiber).Y_vs_W.xmin << " " << psf->GetTrace(fiber).Y_vs_W.xmax << " " << psf->GetTrace(fiber).Y_vs_W.deg << endl;
+	  cout<< "X_vs_Y xmin,xmax,deg " << psf->GetTrace(fiber).X_vs_Y.xmin << " " << psf->GetTrace(fiber).X_vs_Y.xmax << " " << psf->GetTrace(fiber).X_vs_Y.deg << endl;
+	  cout<< "W_vs_Y xmin,xmax,deg " << psf->GetTrace(fiber).W_vs_Y.xmin << " " << psf->GetTrace(fiber).W_vs_Y.xmax << " " << psf->GetTrace(fiber).W_vs_Y.deg << endl;
+	}
+	exit(12);
+      }
+      */
       
-      
-      //exit(12);
 
       // starting fit
       // --------------------------------------------
-      fitter.FitEverything(spots,true);
+      bool init_psf = (input_psf_filename=="");
+      fitter.FitEverything(spots,init_psf);
 
       int ndf = psf->ParamsOfBundles[bundle].ndata - psf->ParamsOfBundles[bundle].nparams;
       SPECEX_INFO("Bundle " << bundle << " PSF fit status   = "<< psf->ParamsOfBundles[bundle].fit_status);
