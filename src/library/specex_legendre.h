@@ -97,7 +97,7 @@ class SparseLegendre2DPol
   harp::vector_double coeff;
   int xdeg,ydeg;
   double xmin,xmax,ymin,ymax;
-  
+  int Npar() const { return non_zero_indices.size();}
   void Add(int i,int j);
   void Fill(bool sparse = true); // this is equivalent to a std Legendre2DPol is sparse=false
   void Clear(); // reset

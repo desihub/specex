@@ -211,7 +211,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   for(int i=0;i<table.data.size();i++) { 
     std::string pname=table.data[i][param_col].string_val;
     boost::trim(pname);
-    SPECEX_INFO(i << " '" << pname << "'");
+    //SPECEX_INFO(i << " '" << pname << "'");
     params.push_back(pname);
     param_row[pname]=i;
     param_wavemin[pname]=table.data[i][wmin_col].double_vals[0];
@@ -256,8 +256,8 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   // Now that's more complicated, need to loop on bundles
   int nbundles = (bundlemax-bundlemin)+1;
   int nfibers_per_bundle = nfibers/nbundles; // not safe ...
-  SPECEX_INFO("Number of bundles= " << nbundles);
-  SPECEX_INFO("Number of fibers per bundle= " << nfibers_per_bundle);
+  //SPECEX_INFO("Number of bundles= " << nbundles);
+  //SPECEX_INFO("Number of fibers per bundle= " << nfibers_per_bundle);
   
   for(int bundle = bundlemin ; bundle <= bundlemax ; bundle++) {
     int bundle_fibermin=bundle*nfibers_per_bundle;
@@ -283,7 +283,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	xmax=max(xmax,x);	  
       }
     }
-    SPECEX_INFO("bundle=" << bundle << " xmin xmax : " << xmin << " " << xmax);
+    //SPECEX_INFO("bundle=" << bundle << " xmin xmax : " << xmin << " " << xmax);
     
 
     // need to set : bundle_params.AllParPolXW  and bundle_params.FitParPolXW
@@ -299,9 +299,9 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
       // NOTE : we remove 1 deg along wave, because 1 was added in the c++/xml -> fits conversion X->fiber
       specex::Pol_p pol(new specex::Pol(nfibers_per_bundle-1,xmin,xmax,legdeg-1,wavemin,wavemax));
       pol->name = pname;
-      pol->Fill(false); // sparse or not sparse
+      pol->Fill(true); // sparse or not sparse
 
-      int npar = (pol->xdeg+1)*(pol->ydeg+1);
+      int npar = pol->Npar();
       harp::matrix_double A(npar,npar);
       harp::vector_double B(npar);
       A *= 0;
@@ -325,7 +325,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname);
       
       pol->coeff = B;
-      SPECEX_INFO("Fit of parameter " << pname << " in bundle " << bundle << " done");
+      //SPECEX_INFO("Fit of parameter " << pname << " in bundle " << bundle << " done");
       
       bundle_params.AllParPolXW.push_back(pol);
       
