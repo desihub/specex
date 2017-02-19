@@ -132,7 +132,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "half_size_y", popts::value<int>( &half_size_y )->default_value(5), "half size of PSF stamp (full size is 2*half_size+1)")
     ( "psfmodel", popts::value<string>( &psf_model )->default_value("GAUSSHERMITE"), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
-    ( "verbose,v", "turn on verbose mode" )
+    ( "verbose,v", "turn on verbose mode (deprecated, true by default)" )
+    ( "quiet", "no info message, only warning" )
     ( "debug", "turn on debug mode" )
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_desi.txt)" )
     ( "core", "dump core files when harp exception is thrown" )
@@ -232,7 +233,9 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 
   try {
     specex_set_debug(vm.count("debug")>0);
-    specex_set_verbose(vm.count("verbose")>0);
+    //specex_set_verbose(vm.count("verbose")>0);
+    specex_set_verbose(vm.count("quiet")==0);
+    
     specex_set_dump_core(vm.count("core")>0);
     bool fit_traces = (vm.count("no_trace_fit")==0);
     bool fit_sigmas = (vm.count("no_sigma_fit")==0);
