@@ -208,6 +208,28 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   int fibermax; harp::fits::key_read(fp,"FIBERMAX",fibermax);
   int nparams; harp::fits::key_read(fp,"NPARAMS",nparams);
   int legdeg; harp::fits::key_read(fp,"LEGDEG",legdeg);
+  int legdeg_param_fit=0;
+  int legdeg_xtrace_fit=0;
+  int legdeg_ytrace_fit=0;
+  try { 
+    harp::fits::key_read(fp,"PALEGDEG",legdeg_param_fit);
+    harp::fits::key_read(fp,"TXLEGDEG",legdeg_xtrace_fit);
+    harp::fits::key_read(fp,"TYLEGDEG",legdeg_ytrace_fit);
+  } catch(...) {
+    SPECEX_DEBUG("No key PALEGDEG,TXLEGDEG or TYLEGDEG");
+  }
+  if(legdeg_param_fit>0) {
+    SPECEX_DEBUG("Will use fitted legendre degrees"); 
+  }else{
+    legdeg_param_fit=legdeg-1;
+    legdeg_xtrace_fit=legdeg-1;
+    legdeg_ytrace_fit=legdeg-1;
+  }
+    
+    
+  SPECEX_DEBUG("legdeg_param_fit  = " << legdeg_param_fit);
+  SPECEX_DEBUG("legdeg_xtrace_fit = " << legdeg_xtrace_fit);
+  SPECEX_DEBUG("legdeg_ytrace_fit = " << legdeg_ytrace_fit);
   
   specex::FitsTable table;
   table.Read(fp);
@@ -243,9 +265,9 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     specex::Trace trace;
     trace.fiber=fiber;
     trace.mask=0; //?
-    trace.X_vs_W = specex::Legendre1DPol(legdeg,param_wavemin["X"],param_wavemax["X"]);
-    trace.Y_vs_W = specex::Legendre1DPol(legdeg,param_wavemin["Y"],param_wavemax["Y"]);
-    for(int i=0;i<legdeg+1;i++) {
+    trace.X_vs_W = specex::Legendre1DPol(legdeg_xtrace_fit,param_wavemin["X"],param_wavemax["X"]);
+    trace.Y_vs_W = specex::Legendre1DPol(legdeg_ytrace_fit,param_wavemin["Y"],param_wavemax["Y"]);
+    for(int i=0;i<legdeg_xtrace_fit+1;i++) {
       trace.X_vs_W.coeff[i] = param_coeff["X"][i+index*(legdeg+1)];
       trace.Y_vs_W.coeff[i] = param_coeff["Y"][i+index*(legdeg+1)];
     }
@@ -317,7 +339,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
       // for the subset of fibers of this bundle
 
       // NOTE : we remove 1 deg along wave, because 1 was added in the c++/xml -> fits conversion X->fiber
-      specex::Pol_p pol(new specex::Pol(nfibers_per_bundle-1,xmin,xmax,legdeg-1,wavemin,wavemax));
+      specex::Pol_p pol(new specex::Pol(nfibers_per_bundle-1,xmin,xmax,legdeg_param_fit,wavemin,wavemax));
       pol->name = pname;
       pol->Fill(true); // sparse or not sparse
 
@@ -331,7 +353,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	specex::Legendre1DPol fiberpol(legdeg,param_wavemin[pname],param_wavemax[pname]);
 	for(int i=0;i<=legdeg;i++)
 	  fiberpol.coeff[i]=param_coeff[pname][i+fiber*(legdeg+1)];
-	for(double wave=wavemin;wave<=wavemax;wave+=(wavemax-wavemin)/(legdeg+2)) {
+	for(double wave=wavemin;wave<=wavemax;wave+=(wavemax-wavemin)/(legdeg_param_fit+2)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
 	  harp::vector_double der = pol->Monomials(x,wave);
@@ -974,6 +996,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
   
   // get largest legendre degree of all params in all bundles and check param numbers match !!
   int ncoeff=0;
+  
   int nparams=psf.LocalNAllPar();
   int nparams_all = nparams;
   nparams_all += 2; // X and Y
@@ -991,7 +1014,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
       ncoeff=max(ncoeff,bundle_it->second.AllParPolXW[p]->ydeg+1);
     }
   }
-
+  
   ncoeff += 2; // increase degree of legendre polynomials to minimize mapping errors
   
   specex::FitsTable table;
@@ -1369,7 +1392,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
   
   
   // get largest legendre degree of all params in all bundles and check param numbers match !!
-  int ncoeff=0;
+  int ncoeff_param_fit=0;
   int nparams=psf.LocalNAllPar();
   int nparams_all = nparams;
   nparams_all += 2; // X and Y
@@ -1384,21 +1407,32 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     if( int(bundle_it->second.AllParPolXW.size()) != nparams ) SPECEX_ERROR("Fatal inconsistency in number of parameters in psf between bundles: AllParPolXW.size=" << bundle_it->second.AllParPolXW.size() << " psf.LocalNAllPar()=" << nparams);
 
     for(size_t p=0;p<bundle_it->second.AllParPolXW.size();p++) {
-      ncoeff=max(ncoeff,bundle_it->second.AllParPolXW[p]->ydeg+1);
+      ncoeff_param_fit=max(ncoeff_param_fit,bundle_it->second.AllParPolXW[p]->ydeg+1);
     }
   }
-  int delta_deg = 1; // increase degree of legendre polynomials to minimize mapping errors
-  ncoeff += delta_deg; 
+
+  
+  
+  int ncoeff_xtrace_fit=0;
+  int ncoeff_ytrace_fit=0;
   
   // add traces
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
       bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
     const specex::PSF_Params & params_of_bundle = bundle_it->second;
     for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
-      ncoeff=max(ncoeff,int(psf.FiberTraces.find(fiber)->second.X_vs_W.coeff.size()));
-      ncoeff=max(ncoeff,int(psf.FiberTraces.find(fiber)->second.Y_vs_W.coeff.size()));
+      ncoeff_xtrace_fit=max(ncoeff_xtrace_fit,int(psf.FiberTraces.find(fiber)->second.X_vs_W.coeff.size()));
+      ncoeff_ytrace_fit=max(ncoeff_ytrace_fit,int(psf.FiberTraces.find(fiber)->second.Y_vs_W.coeff.size()));
+      
     }
   }
+  int ncoeff=ncoeff_param_fit;
+  ncoeff=max(ncoeff,ncoeff_xtrace_fit);
+  ncoeff=max(ncoeff,ncoeff_ytrace_fit);
+
+  int delta_deg = 1; // increase degree of legendre polynomials to minimize mapping errors
+  ncoeff += delta_deg; 
+
   // no need to add degree for traces because same mapping
   
   SPECEX_DEBUG("ncoeff = " << ncoeff);
@@ -1641,6 +1675,9 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     harp::fits::key_write(fp,"FIBERMAX",(long long int)FIBERMAX,"last fiber (included)");
     harp::fits::key_write(fp,"NPARAMS",(long long int)nparams_all,"number of PSF parameters");
     harp::fits::key_write(fp,"LEGDEG",(long long int)(ncoeff-1),"degree of Legendre pol.(wave) for parameters");
+    harp::fits::key_write(fp,"PALEGDEG",(long long int)(ncoeff_param_fit-1),"fitted degree of Legendre pol. for parameters");
+    harp::fits::key_write(fp,"TXLEGDEG",(long long int)(ncoeff_xtrace_fit-1),"fitted degree of Legendre pol. for trace along x");
+    harp::fits::key_write(fp,"TYLEGDEG",(long long int)(ncoeff_ytrace_fit-1),"fitted degree of Legendre pol. for trace along y");    
     harp::fits::key_write(fp,"GHDEGX",(long long int)GHDEGX,"degree of Hermite polynomial along CCD columns");
     harp::fits::key_write(fp,"GHDEGY",(long long int)GHDEGY,"degree of Hermite polynomial along CCD rows");
     
