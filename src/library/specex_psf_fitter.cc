@@ -271,7 +271,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
       }
       tmp.can_measure_flux = (nbad<=5); // can survive one dead column = 5pix, not more
       if(!tmp.can_measure_flux) tmp.ignore = true; // ignore by default
-      if(!tmp.can_measure_flux) SPECEX_WARNING("cannot measure flux of spot " << s << " at x=" << tmp.x << " y=" << tmp.y << ", will attach it to a neighbour");
+      if(!tmp.can_measure_flux) SPECEX_WARNING("cannot measure flux of spot " << s << " at x=" << tmp.x << " y=" << tmp.y);
     }
     
     // psf parameters
@@ -300,7 +300,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     
     specex::SpotTmpData &tmp = spot_tmp_data[s];
-    
+    if(tmp.ignore) continue;
     if(fit_flux) {
       if(force_positive_flux) {
 	tmp.flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
@@ -627,7 +627,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
 	} // end of test compute_ab
       } // end of loop on spots
-      
+
+      //SPECEX_DEBUG("end of loop on spots");
       
       double wscale=1;
       if(recompute_weight_in_fit) {
@@ -719,7 +720,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	}
 
 	// doing A += w*h*h.transposed();  B += fact*h;
-
+	//SPECEX_DEBUG("H.size=" << H.size());
+	//SPECEX_DEBUG("Ap->size=" << Ap->size1() << " " << Ap->size2());
+      
 #ifdef FASTER_THAN_SYR
 	if(do_faster_than_syr) {
 	  if(index_of_spots_parameters==0) {
@@ -745,13 +748,18 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	}else{
 	  specex::syr(w,H,*Ap);
 	}
+	
 	specex::axpy(bfact,H,*Bp);
 		
 #else
+	//SPECEX_DEBUG("before filling A and B");
 	specex::syr(w,H,*Ap); //  this is still way too slow; this routine takes advantage of the zeros in h, its faster than sparse matrices
-	specex::axpy(bfact,H,*Bp); 	
+	//SPECEX_DEBUG("after filling A");
+	specex::axpy(bfact,H,*Bp);
+	//SPECEX_DEBUG("after filling B");
 #endif
- 
+	
+	
       } // end of test on compute_ab
       
     } // end of loop on pix coord. i
@@ -1093,9 +1101,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SpotTmpData& tmp = spot_tmp_data[s];
     if(!tmp.can_measure_flux) n_to_attach++;
   }
-  if(fit_flux)
+  if(fit_flux && n_to_attach>0) {
+    SPECEX_DEBUG("n_to_attach = " << n_to_attach << " nparTot " << nparTot << " -> " << nparTot-n_to_attach);
     nparTot -= n_to_attach;
-  
+  }
   
   
 
@@ -1206,7 +1215,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   int index = index_of_spots_parameters;
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     SpotTmpData& tmp = spot_tmp_data[s];
-
+    if(tmp.ignore) continue;
     if(fit_flux) {
       if(tmp.can_measure_flux) {
 	tmp.flux_parameter_index = index;
@@ -1254,7 +1263,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
   
   if(n_to_attach>0) {
-    SPECEX_INFO("Need to attach " << n_to_attach << " spots");
+    SPECEX_DEBUG("Check whether need to attach " << n_to_attach << " spots");
+    int n_attached = 0;
+    int n_ignored  = 0;
     for(size_t s=0;s<spot_tmp_data.size(); s++) {
     
       SpotTmpData& tmp = spot_tmp_data[s];
@@ -1275,13 +1286,18 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  }
 	  if(fiber_diff==1) break; // it's ok
 	}	
-	if(!neighbour) continue;
+	if(!neighbour) {n_ignored ++; continue;}
 	SPECEX_DEBUG("use neighbour flux");
 	tmp.flux_parameter_index = neighbour->flux_parameter_index;
 	tmp.flux = neighbour->flux;
 	tmp.ignore = false;
+	n_attached ++;
       }
     }
+    SPECEX_DEBUG("Number of attached spots = " << n_attached);
+    SPECEX_DEBUG("Number of ignored spots  = " << n_ignored);
+    
+    
   }
 
   
@@ -1654,7 +1670,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots saving spots fluxes nspots=" << spots.size() << " ntmp=" << spot_tmp_data.size());
   for(size_t s=0;s<spots.size();s++) {
     specex::Spot_p& spot= spots[s];
-    specex::SpotTmpData& tmp = spot_tmp_data[s]; // BUG IF WE ERASED DATA ???
+    specex::SpotTmpData& tmp = spot_tmp_data[s];
+    if(tmp.ignore) continue;
     if(fit_flux) {
       if(force_positive_flux) {
 	spot->flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
