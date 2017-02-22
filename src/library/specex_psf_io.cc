@@ -6,6 +6,7 @@
 #include <harp.hpp>
 
 #include <specex_psf.h>
+#include <specex_spot.h>
 #include <specex_psf_io.h>
 #include <specex_message.h>
 #include <specex_image_data.h>
@@ -29,14 +30,14 @@ void specex::read_psf(specex::PSF_p& psf, const std::string& filename) {
     SPECEX_ERROR("not sure how to read this file (expect xxx.fits or xxx.xml) " << filename);
   }
 }
-void specex::write_psf(const specex::PSF_p psf, const std::string& filename) {
+void specex::write_psf(const specex::PSF_p psf, const std::string& filename, std::vector<specex::Spot_p> *spots) {
   
   if (filename.find(".xml") != std::string::npos) {
     SPECEX_INFO("write xml file " << filename);
     specex::write_psf_xml(psf,filename);
   } else if (filename.find(".fits") != std::string::npos) {
     SPECEX_INFO("write fits file " << filename);
-    specex::write_psf_fits(psf,filename);
+    specex::write_psf_fits(psf,filename,spots);
   } else {
     SPECEX_ERROR("not sure how to write this file (expect xxx.fits or xxx.xml) " << filename);
   }
@@ -126,23 +127,23 @@ void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
 void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu);
 
 void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu);
-void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu);
+void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu, std::vector<specex::Spot_p> *spots);
 void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& psf, fitsfile* fp, int first_hdu);
 void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& psf, fitsfile* fp, int first_hdu);
 
 
-void specex::write_psf_fits(const specex::PSF_p psf, const string& path) {
+void specex::write_psf_fits(const specex::PSF_p psf, const string& path, std::vector<specex::Spot_p> *spots) {
   fitsfile * fp;  
   harp::fits::create(fp,path);
-  write_psf_fits(psf,fp,1);
+  write_psf_fits(psf,fp,1,spots);
   harp::fits::close(fp);
   SPECEX_INFO("wrote PSF in " << path);
 }
 
-void specex::write_psf_fits(const specex::PSF_p psf, fitsfile* fp, int first_hdu) {
+void specex::write_psf_fits(const specex::PSF_p psf, fitsfile* fp, int first_hdu, std::vector<specex::Spot_p> *spots) {
 
   if(psf->Name()=="GaussHermitePSF") 
-    write_gauss_hermite_psf_fits_version_2((const specex::GaussHermitePSF&)*psf,fp,first_hdu);
+    write_gauss_hermite_psf_fits_version_2((const specex::GaussHermitePSF&)*psf,fp,first_hdu,spots);
   else if(psf->Name()=="GaussHermite2PSF") 
     write_gauss_hermite_two_psf_fits_version_2((const specex::GaussHermite2PSF&)*psf,fp,first_hdu);
   else 
@@ -950,6 +951,8 @@ void write_gauss_hermite_two_psf_fits_version_2(const specex::GaussHermite2PSF& 
 
 
   } // end of write keywords
+
+
   
 } // end of routine
 
@@ -1341,7 +1344,7 @@ void write_gauss_hermite_two_psf_fits_version_1(const specex::GaussHermite2PSF& 
 
 
 
-void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu) {
+void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu, std::vector<specex::Spot_p> *spots) {
   
   SPECEX_DEBUG("write_gauss_hermite_psf_fits_version_2");
   
@@ -1725,7 +1728,41 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     
   } // end of write key words
   
-  
+  if( spots != NULL ) { // write spots
+    
+    fits_movrel_hdu ( fp, 1, NULL, &status ); harp::fits::check ( status );
+
+    specex::FitsTable table;
+    { // column description
+      table.AddColumnDescription("X","D","","");
+      table.AddColumnDescription("Y","D","","");
+      table.AddColumnDescription("FLUX","D","","");
+      table.AddColumnDescription("WAVE","D","","");
+      table.AddColumnDescription("FIBER","D","","");
+      table.AddColumnDescription("BUNDLE","D","","");
+      table.AddColumnDescription("CHI2","D","","");
+      table.AddColumnDescription("STATUS","D","","");
+    }
+    
+    for(size_t s=0;s<spots->size();s++) {
+      const specex::Spot_p spot=(*spots)[s];      
+      std::vector<specex::FitsTableEntry> row;
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->xc; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->yc; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->flux; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->wavelength; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->fiber; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->fiber_bundle; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->chi2; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->status; row.push_back(entry);}
+      table.data.push_back(row);
+    }
+    table.Write(fp);
+    
+    harp::fits::key_write(fp,"EXTNAME","SPOTS","");
+    fits_write_comment(fp,"Fitted spots properties",&status); harp::fits::check ( status );
+    
+  }
 } // end of routine
 
 

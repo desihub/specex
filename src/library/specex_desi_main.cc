@@ -518,7 +518,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     if(output_xml_filename != "")
       write_psf_xml(fitter.psf,output_xml_filename);
     if(output_fits_filename != "")
-      write_psf_fits(fitter.psf,output_fits_filename);
+      write_psf_fits(fitter.psf,output_fits_filename,&fitted_spots);
     if(output_spots_filename != "")
       write_spots_xml(fitted_spots,output_spots_filename);
     
