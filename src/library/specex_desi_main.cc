@@ -87,6 +87,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   int legendre_deg_x = 1;
   int trace_deg_wave = 0;
   int trace_deg_x = 0;
+  int max_number_of_lines = 200; 
   
   double psf_error = 0;
   double psf_core_wscale = 0;
@@ -163,6 +164,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
     ( "prior", popts::value< vector<string> >( &argurment_priors )->multitoken(), " gaussian prior on a param : 'name' value error")  
     ( "tmp_results", " write tmp results")  
+    ( "nlines", popts::value<int>( &max_number_of_lines )," maximum number of emission lines used in fit (uses a algorithm to select best ones based on S/N and line coverage")  
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
 
@@ -374,6 +376,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
     fitter.scheduled_fit_of_psf         = fit_psf;
     fitter.direct_simultaneous_fit      = (input_psf_filename != "");
+    fitter.max_number_of_lines          = max_number_of_lines;
     
     fitter.psf->gain = 1; // images are already in electrons
     fitter.psf->readout_noise = 0; // readnoise is a property of image, not PSF

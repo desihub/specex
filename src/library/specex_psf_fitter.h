@@ -92,9 +92,10 @@ class PSF_Fitter {
   const image_data& weight;
   const image_data& readnoise;
   image_data footprint_weight; // weight x psf footprint for global fit
-  image_data corefootprint;
-  double corefootprint_weight_boost;
+  image_data corefootprint;  
   Stamp stamp; // rectangle in image where the fit occurs
+  
+  double corefootprint_weight_boost;
   bool fit_psf;
   bool fit_trace;
   bool fit_flux;
@@ -125,6 +126,8 @@ class PSF_Fitter {
   double polynomial_degree_along_x;
   double polynomial_degree_along_wave;
   
+  int max_number_of_lines;
+  
   Mask mask;
   
   std::map<std::string,Prior*> priors;
@@ -135,7 +138,8 @@ class PSF_Fitter {
     image(i_image),
     weight(i_weight),
     readnoise(i_readnoise),
-    stamp(i_image), 
+    stamp(i_image),
+    corefootprint_weight_boost(0), 
     fit_psf(false),
     fit_trace(false),
     fit_flux(false),
@@ -163,12 +167,10 @@ class PSF_Fitter {
     fatal(true),
     parallelized(true),
         
-      polynomial_degree_along_x(1),
-      polynomial_degree_along_wave(4)
+    polynomial_degree_along_x(1),
+    polynomial_degree_along_wave(4),
+    max_number_of_lines(0)
       {
-	corefootprint_weight_boost=0;
-
-
       };
     
     void SetStampLimitsFromPSF(Stamp& stamp, const PSF_p psf, const double &X, const double &Y);

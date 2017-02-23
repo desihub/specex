@@ -850,7 +850,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     }
 
   }
-  SPECEX_DEBUG("ComputeChi2AB chi2=" << chi2 << " npix=" << npix_in_chi2 << " sumflux=" << sum_flux);
+  //SPECEX_DEBUG("ComputeChi2AB chi2=" << chi2 << " npix=" << npix_in_chi2 << " sumflux=" << sum_flux);
   //SPECEX_INFO("ComputeChi2AB j range= " << input_begin_j << " " << input_end_j << " chi2= " << chi2);
   return chi2;
 }
@@ -2078,12 +2078,15 @@ void specex::PSF_Fitter::compare_spots_chi2_and_mask(std::vector<specex::Spot_p>
 }
 
 std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist, double chi2_nsig) {
+
+  double min_dwave = 5; //A 
+  double max_dwave = 300; //A 
   
   // add a systematic test of chi2 of spots
   compare_spots_chi2_and_mask(input_spots,chi2_nsig);
 
-  std::vector<specex::Spot_p> selected_spots;
   
+  // first selection pass based on input criteria
   for(size_t s=0;s<input_spots.size();s++) {
     specex::Spot_p spot = input_spots[s];
     
@@ -2110,14 +2113,158 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
 	continue;
       }
     }
-    
-    
-    spot->status=1;
-    selected_spots.push_back(spot);
-    
+    spot->status=1;   
   }
   
+  if(max_number_of_lines>0) { // second selection pass with a more complex algorithm
+    
+    std::map<int,int>  selected;
+    std::map<int,int>  nspots_per_wave;
+    std::map<int,int>  snr_per_wave;
+   
+    
+    for(size_t s=0;s<input_spots.size();s++) {
+      specex::Spot_p spot = input_spots[s];
+      if(spot->status==0) continue;
+      
+      int waveid=int(spot->wavelength*10);
+      if(nspots_per_wave.find(waveid) == nspots_per_wave.end()) {
+	selected[waveid]=1;
+	nspots_per_wave[waveid]=1;
+	if ( spot->eflux > 0 )
+	  snr_per_wave[waveid]=spot->flux / spot->eflux;
+	else 
+	  snr_per_wave[waveid]=0;
+      }else{
+	if ( spot->eflux > 0 ) { 
+	  snr_per_wave[waveid]=(snr_per_wave[waveid]*nspots_per_wave[waveid]+spot->flux/spot->eflux)/(nspots_per_wave[waveid]+1);
+	}
+	nspots_per_wave[waveid]+=1;
+      }
+    }
+    
+    
+    
+    int max_number_of_fibers_for_spot=0;
+    for(std::map<int,int>::iterator it = nspots_per_wave.begin() ; it != nspots_per_wave.end(); ++it) {
+      //double wave=it->first/10.;
+      //SPECEX_DEBUG("SPOT SELECTION " << wave << " n=" << it->second << " S/N=" << snr_per_wave[it->first]);
+      max_number_of_fibers_for_spot=max(max_number_of_fibers_for_spot,it->second);
+    }
+    // index of spot after the first with max number of fibers
+    double begin_waveid=0;
+    double end_waveid=0;    
+    bool has_found_a_spot_with_all_fibers = false;
+    for(std::map<int,int>::iterator  it_begin = nspots_per_wave.begin() ; it_begin != nspots_per_wave.end(); ++it_begin) {
+      if(has_found_a_spot_with_all_fibers) {begin_waveid=it_begin->first; break;}
+      has_found_a_spot_with_all_fibers = (it_begin->second == max_number_of_fibers_for_spot);
+    }
+    for(std::map<int,int>::reverse_iterator it_end = nspots_per_wave.rbegin() ; it_end != nspots_per_wave.rend() ; ++it_end) {
+      if(it_end->second == max_number_of_fibers_for_spot) {end_waveid=(it_end->first-1); break;}
+    }
+    
+    SPECEX_DEBUG("BEGIN SPOT WE COULD REMOVE wave=" << begin_waveid/10.);
+    SPECEX_DEBUG("END   SPOT WE COULD REMOVE wave=" << end_waveid/10.);
+    
+    while(true) {
+      int number_of_lines = 0;
+      for(std::map<int,int>::iterator  it = nspots_per_wave.begin() ; it != nspots_per_wave.end(); ++it) {
+	if(it->second >= (max_number_of_fibers_for_spot*0.6))
+	  if( selected[it->first] )
+	    number_of_lines++;
+      }
+      SPECEX_DEBUG("NUMBER OF LINES in at least 2/3 of fibers =" << number_of_lines);
+      if(number_of_lines<=max_number_of_lines) break;
+      
+      // need to sort the selected flux by incr. order
+      std::map<int,int>  wave_vs_snr;
+      for(std::map<int,int>::iterator it = snr_per_wave.begin() ; it != snr_per_wave.end(); ++it) {
+	if(selected[it->first])
+	  wave_vs_snr[it->second]=it->first;
+      }
+      int waveid_to_remove=0;
+      for(std::map<int,int>::iterator it = wave_vs_snr.begin() ; it != wave_vs_snr.end(); ++it) {
+	double waveid = it->second;
+	if(waveid<=begin_waveid) continue;
+	if(waveid>=end_waveid) continue;
+	
+	double previous_selected_waveid = begin_waveid; 
+	double next_selected_waveid = end_waveid;
+	for(std::map<int,int>::iterator jt = wave_vs_snr.begin() ; jt != wave_vs_snr.end(); ++jt) {
+	  if ( (jt->second<waveid) && (jt->second>previous_selected_waveid) ) previous_selected_waveid = jt->second;
+	  if ( (jt->second>waveid) && (jt->second<next_selected_waveid) ) next_selected_waveid = jt->second;	  
+	}
+	double dwave = (next_selected_waveid-previous_selected_waveid)/10.;
+	if(dwave > max_dwave ) {
+	  SPECEX_DEBUG("KEEP SPOT at " << waveid/10. << " BECAUSE dwave = " << dwave);
+	  continue;
+	}
+	waveid_to_remove=waveid;
+	break;
+      }
+      if (waveid_to_remove == 0) {
+	SPECEX_DEBUG("NO LINE TO REMOVE");
+	break;
+      }
+      SPECEX_DEBUG("REMOVING LINE " << waveid_to_remove/10. << " with S/N=" << snr_per_wave[waveid_to_remove]);
+      selected[waveid_to_remove] = 0;
+    }
+    
+    
+
+    
+    // now bring back all spots within min_dwave of selected
+    while(true) {
+      bool has_brought_at_least_one_back = false;
+      for(std::map<int,int>::iterator  it = selected.begin() ; it != selected.end(); ++it) {
+	if(it->second == 0) continue;
+	for(std::map<int,int>::iterator  jt = selected.begin() ; jt != selected.end(); ++jt) {
+	  if(jt->second == 1) continue;
+	  if(fabs( it->first/10. - jt->first/10.) < min_dwave) {
+	    jt->second = 1;
+	    has_brought_at_least_one_back = true;
+	    SPECEX_DEBUG("BRING BACK SPOT AT WAVE = " << jt->first/10. << " BECAUSE CLOSE TO SELECTED ONE");
+	  }
+	}
+      }
+      if(! has_brought_at_least_one_back) break;
+    }
+
+
+    for(std::map<int,int>::iterator it = nspots_per_wave.begin() ; it != nspots_per_wave.end(); ++it) {
+      if ( selected[it->first] ) {
+	double wave=it->first/10.;	
+	SPECEX_DEBUG("SPOT SELECTION " << wave << " n=" << it->second << " S/N=" << snr_per_wave[it->first]);
+      }
+    }
+    for(size_t s=0;s<input_spots.size();s++) {
+      specex::Spot_p spot = input_spots[s];
+      int waveid=int(spot->wavelength*10);
+      if(selected[waveid]==0)
+	spot->status = 0;
+    }
+    
+    // NOW, keep all spots less that N A from a selected spot
+    
+
+    //int number_of_lines = nspots_per_wave.size();    
+    //while ( nspots_per_wave.size() >  max_number_of_lines ) {
+      
+    //}
+    // exit(12);
+  }
+  
+  std::vector<specex::Spot_p> selected_spots;  
+  for(size_t s=0;s<input_spots.size();s++) {
+    specex::Spot_p spot = input_spots[s];
+    
+    if(spot->status == 1) selected_spots.push_back(spot);
+  }
+
+  
   SPECEX_INFO("selected " << selected_spots.size() << " spots out of " << input_spots.size() << " with S/N>" << minimum_signal_to_noise << " and min dist = " << min_wave_dist << " A");
+  if( max_number_of_lines>0) SPECEX_INFO("  with a max. number of lines of " << max_number_of_lines << " (approximately) and keeping neighboring blended lines within " << min_dwave << "A and avoiding gaps larger than " << max_dwave << " A");
+  
   return selected_spots;
 }
 
