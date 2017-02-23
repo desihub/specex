@@ -1737,6 +1737,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
       table.AddColumnDescription("X","D","","");
       table.AddColumnDescription("Y","D","","");
       table.AddColumnDescription("FLUX","D","","");
+      table.AddColumnDescription("EFLUX","D","","");
       table.AddColumnDescription("WAVE","D","","");
       table.AddColumnDescription("FIBER","D","","");
       table.AddColumnDescription("BUNDLE","D","","");
@@ -1750,6 +1751,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
       {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->xc; row.push_back(entry);}
       {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->yc; row.push_back(entry);}
       {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->flux; row.push_back(entry);}
+      {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->eflux; row.push_back(entry);}
       {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->wavelength; row.push_back(entry);}
       {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->fiber; row.push_back(entry);}
       {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = spot->fiber_bundle; row.push_back(entry);}
