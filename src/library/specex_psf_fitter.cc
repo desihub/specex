@@ -1479,7 +1479,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }
       if(fit_trace) {
 	// don't want a step larger than N pix for all spots (can take some time to compute)
-	double max_step=0.2; //pixel
+	double max_step=0.5; //pixel
 	//SPECEX_INFO("trace fit:check max step lower than " << max_step << " pix");
 	
 	double scale=1;
@@ -2585,7 +2585,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok = FitIndividualSpotFluxes(input_spots);
       selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
     }
-    
+    chi2_precision = 0.1;
     SPECEX_INFO("Starting FitSeveralSpots FLUX+TRACE ");
     fit_flux       = true;
     fit_position   = false;
@@ -2593,12 +2593,34 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     fit_trace      = true;
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
-  
+    
+
+    double max_delta=0;
     for(size_t s=0;s<input_spots.size();s++) {
       specex::Spot_p& spot= input_spots[s];
-      spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
-      spot->yc = psf->Yccd(spot->fiber,spot->wavelength);
+      double nxc = psf->Xccd(spot->fiber,spot->wavelength);
+      double nyc = psf->Yccd(spot->fiber,spot->wavelength);
+      max_delta=max( max_delta , sqrt((spot->xc-nxc)*(spot->xc-nxc)+(spot->yc-nyc)*(spot->yc-nyc)));
+      spot->xc = nxc;
+      spot->yc = nxc;
     }
+    if(max_delta>0.5) {
+      SPECEX_INFO("Redo FitSeveralSpots FLUX+TRACE max_delta =" << max_delta);
+      ok = FitIndividualSpotFluxes(input_spots);
+      selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
+      ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
+      if(!ok) SPECEX_ERROR("FitSeveralSpots failed for FLUX+TRACE");
+    }
+    max_delta=0;
+    for(size_t s=0;s<input_spots.size();s++) {
+      specex::Spot_p& spot= input_spots[s];
+      double nxc = psf->Xccd(spot->fiber,spot->wavelength);
+      double nyc = psf->Yccd(spot->fiber,spot->wavelength);
+      max_delta=max( max_delta , sqrt((spot->xc-nxc)*(spot->xc-nxc)+(spot->yc-nyc)*(spot->yc-nyc)));
+      spot->xc = nxc;
+      spot->yc = nxc;
+    }
+    
     include_signal_in_weight = false;
     //include_signal_in_weight = true;
     ok = FitIndividualSpotFluxes(input_spots);
