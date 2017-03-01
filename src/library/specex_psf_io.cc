@@ -247,14 +247,14 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   for(int i=0;i<table.data.size();i++) { 
     std::string pname=table.data[i][param_col].string_val;
     boost::trim(pname);
-    //SPECEX_INFO(i << " '" << pname << "'");
+    SPECEX_DEBUG("read_gauss_hermite_psf " << i << " '" << pname << "'");
     params.push_back(pname);
     param_row[pname]=i;
     param_wavemin[pname]=table.data[i][wmin_col].double_vals[0];
     param_wavemax[pname]=table.data[i][wmax_col].double_vals[0];
     param_coeff[pname]=table.data[i][coeff_col].double_vals;    
   }
-  
+  SPECEX_DEBUG("Reading and converting FiberTraces");
   // FiberTraces
   // check size makes sense
   int nfibers = fibermax-fibermin+1;
@@ -263,6 +263,9 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     SPECEX_ERROR("XCOEFF SIZE INCONSISTENT WITH LEGDEG AND NUMBER OF FIBERS");
   int index=0;
   for(int fiber=fibermin;fiber<=fibermax; fiber++,index++) {
+
+    SPECEX_DEBUG("Fiber #" << fiber);
+
     specex::Trace trace;
     trace.fiber=fiber;
     trace.mask=0; //?
@@ -270,6 +273,8 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     trace.Y_vs_W = specex::Legendre1DPol(legdeg_ytrace_fit,param_wavemin["Y"],param_wavemax["Y"]);
     for(int i=0;i<legdeg_xtrace_fit+1;i++) {
       trace.X_vs_W.coeff[i] = param_coeff["X"][i+index*(legdeg+1)];
+    }
+    for(int i=0;i<legdeg_ytrace_fit+1;i++) {
       trace.Y_vs_W.coeff[i] = param_coeff["Y"][i+index*(legdeg+1)];
     }
     trace.X_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
@@ -292,10 +297,14 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   // Now that's more complicated, need to loop on bundles
   int nbundles = (bundlemax-bundlemin)+1;
   int nfibers_per_bundle = nfibers/nbundles; // not safe ...
-  //SPECEX_INFO("Number of bundles= " << nbundles);
-  //SPECEX_INFO("Number of fibers per bundle= " << nfibers_per_bundle);
+  SPECEX_DEBUG("Number of bundles= " << nbundles);
+  SPECEX_DEBUG("Number of fibers per bundle= " << nfibers_per_bundle);
   
   for(int bundle = bundlemin ; bundle <= bundlemax ; bundle++) {
+    
+    
+    SPECEX_DEBUG("Fitting pols of bundle " << bundle);
+
     int bundle_fibermin=bundle*nfibers_per_bundle;
     int bundle_fibermax=(bundle+1)*nfibers_per_bundle-1;
     if(bundle_fibermin<fibermin || bundle_fibermax>fibermax) {
@@ -319,7 +328,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	xmax=max(xmax,x);	  
       }
     }
-    //SPECEX_INFO("bundle=" << bundle << " xmin xmax : " << xmin << " " << xmax);
+    SPECEX_DEBUG("bundle=" << bundle << " xmin xmax : " << xmin << " " << xmax);
 #ifdef CONTINUUM
     // dealing with continuum
     bundle_params.ContinuumPol = specex::Legendre1DPol(legdeg,param_wavemin["CONT"],param_wavemax["CONT"]);
@@ -368,7 +377,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname);
       
       pol->coeff = B;
-      //SPECEX_INFO("Fit of parameter " << pname << " in bundle " << bundle << " done");
+      SPECEX_DEBUG("Fit of parameter " << pname << " in bundle " << bundle << " done");
       
       bundle_params.AllParPolXW.push_back(pol);
       
