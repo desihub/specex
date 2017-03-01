@@ -367,7 +367,9 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
 void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
   fptr = fp;
   int status = 0;
-    
+  
+  SPECEX_DEBUG("Starting specex::FitsTable::Read");
+
   // checking HDU TYPE
   int hdutype;
   fits_get_hdu_type(fptr, &hdutype, &status);
@@ -429,6 +431,8 @@ void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
   
   data.resize(nrows);
   
+  SPECEX_DEBUG("specex::FitsTable::Read start reading rows");
+  
   // loop on rows
   for(int r=0; r<nrows; r++) {
     
@@ -478,6 +482,7 @@ void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
     }
     
   }
+  SPECEX_DEBUG("specex::FitsTable::Read done reading rows");
   delete[] strptr[0];
   delete[] strptr;
 }
