@@ -1,5 +1,9 @@
 # specex Change Log
 
+## 0.5.0 (N/A)
+
+* Development in progress.
+
 ## 0.4.3 (2017-03-02)
 
 * Install data files along with code.
