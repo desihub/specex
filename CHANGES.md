@@ -1,10 +1,10 @@
 # specex Change Log
 
-## 0.5.0 (unreleased)
+## 0.4.3 (2017-03-02)
 
-* No changes yet
+* Install data files along with code.
 
-## 0.4.1 (2016-11-09)
+## 0.4.2 (2016-11-09)
 
 * fix etc/specex.module to work with desiInstall
 
