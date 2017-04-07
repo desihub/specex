@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
   if(output_filename=="") {
-    cerr << "need input filename" << endl;
+    cerr << "need output filename" << endl;
     return EXIT_FAILURE;
   }
   
