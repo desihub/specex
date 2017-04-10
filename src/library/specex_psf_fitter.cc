@@ -1346,15 +1346,9 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots chi2 = " << *psfChi2);
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving ...");
     
-#ifdef SPARSE_H
-#warning copy sparse mat and vect to dense for the moment 
-    harp::matrix_double A = A_of_band[0];
-    harp::vector_double B = B_of_band[0];
-#else
     harp::matrix_double& A = A_of_band[0];
     harp::vector_double& B = B_of_band[0];
-#endif 
-
+    
     harp::matrix_double As=A;
     //harp::vector_double Bs=B;
     
@@ -1377,10 +1371,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     */
 
     
-    //if(fit_psf && fit_flux) { specex::write_new_fits_image("A.fits",A); exit(12); }
+    //if(fit_psf && fit_flux) {SPECEX_DEBUG("Writing A.fits"); specex::write_new_fits_image("A.fits",A);  }
     
     int status = cholesky_solve(A,B);
 
+    //{SPECEX_DEBUG("Writing fitweight-0.fits"); specex::write_new_fits_image("fitweight-0.fits",A);}
+    
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving done");
 
     if (status != 0) {
@@ -1612,9 +1608,14 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
   
   fitWeight = A_of_band[0];
+  SPECEX_DEBUG("Calling cholesky_invert_after_decomposition");
+
+  //{SPECEX_DEBUG("Writing fitweight.fits"); specex::write_new_fits_image("fitweight.fits",fitWeight);  }
+
   if (specex::cholesky_invert_after_decomposition(fitWeight) != 0) {
     SPECEX_ERROR("cholesky_invert_after_decomposition failed");
   }
+  SPECEX_DEBUG("done cholesky_invert_after_decomposition");
   
   // fitWeight is now a covariance matrix
   // just to avoid confusion :
@@ -1675,10 +1676,20 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     if(fit_flux) {
       if(force_positive_flux) {
 	spot->flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
-	spot->eflux = spot->flux*sqrt(fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index));
+	double cov = fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index);
+	if(cov>=0) {
+	  spot->eflux = spot->flux*sqrt(cov);
+	}else{
+	  SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots negative cov = " << cov << " for spot " << s);
+	}
       }else{
-	spot->flux = Params(tmp.flux_parameter_index); 
-	spot->eflux = sqrt(fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index));
+	spot->flux = Params(tmp.flux_parameter_index);
+	double cov = fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index);
+	if(cov>=0) {
+	  spot->eflux = sqrt(cov);
+	}else{
+	  SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots negative cov = " << cov << " for spot " << s);
+	}
       }
     }
     if(fit_position) {
