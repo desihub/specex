@@ -33,7 +33,7 @@ namespace popts = boost::program_options;
 #ifndef __USE_GNU
 #define __USE_GNU
 #endif
-#include <fenv.h>
+#include <portable_fenv.h>
 
 
 
