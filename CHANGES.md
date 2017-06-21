@@ -1,8 +1,9 @@
 # specex Change Log
 
-## 0.5.0 (N/A)
+## 0.4.4 (2017-06-21)
 
-* Development in progress.
+* On OS X, disable harp plugin.
+* Add portable fenv.h wrapper to fix compile on OS X
 
 ## 0.4.3 (2017-03-02)
 
