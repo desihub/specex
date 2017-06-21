@@ -1,5 +1,9 @@
 # specex Change Log
 
+## 0.5.0 (N/A)
+
+* Development in progress.
+
 ## 0.4.4 (2017-06-21)
 
 * On OS X, disable harp plugin.
