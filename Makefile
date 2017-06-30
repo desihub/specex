@@ -43,6 +43,7 @@ export PLUG_FLAGS := $(shell harpconfig --plugflags)
 export PLUG_LINK := $(shell harpconfig --pluglink)
 export PLUG_EXT := $(shell harpconfig --plugext)
 export LINK := $(shell harpconfig --link)
+export CPPFLAGS := $(shell harpconfig --cppflags)
 #
 # Copy these scripts to the bin directory.
 #

@@ -6,12 +6,12 @@
 
 #include <boost/program_options.hpp>
 
-#include <boost/archive/xml_oarchive.hpp>
-
 #include <harp.hpp>
 
 #include <specex_message.h>
-#include <specex_psf.h>
+
+#include <specex_serialization.h>
+
 #include <specex_trace.h>
 #include <specex_spot.h>
 #include <specex_spot_array.h>
@@ -22,7 +22,7 @@
 #include <specex_psf_fitter.h>
 
 #include <specex_psf_io.h>
-#include <specex_serialization.h>
+
 
 using namespace std;
 using namespace specex;
@@ -502,5 +502,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   return EXIT_SUCCESS;
 }
 
+
+#include <specex_serialization_implement.h>
 
 

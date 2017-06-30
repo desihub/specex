@@ -13,6 +13,8 @@
 
 #include <harp_plugin_specex.h>
 
+#include <specex_serialization.h>
+
 
 using namespace std;
 namespace popts = boost::program_options;

@@ -5,9 +5,9 @@
 
 #include <harp.hpp>
 
-#include <specex_psf.h>
-#include <specex_psf_io.h>
 #include <specex_serialization.h>
+
+#include <specex_psf_io.h>
 
 #include <iostream>
 

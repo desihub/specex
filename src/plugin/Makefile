@@ -4,10 +4,11 @@ OS := $(shell uname)
 HEADERS = harp_plugin_specex.h
 
 PLUGS = harp_plugin_specex.$(PLUG_EXT)
+LIBS = harp_plugin_specex_lib.a
 
 .PHONY : all install uninstall clean
 
-all : $(PLUGS)
+all : $(PLUGS) $(LIBS)
 
 install : all
 	mkdir -p $(SPECEX_PREFIX)/lib
@@ -17,20 +18,19 @@ uninstall :
 	@ for p in $(PLUGS); do $(RM) "$(SPECEX_PREFIX)/lib/$${p}"; done
 
 clean :
-	- $(RM) $(PLUGS) *.o *~
+	- $(RM) $(PLUGS) *.o *~ *.$(PLUG_EXT) *.a
 
-ifeq ($(OS), Darwin)
 
-harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o ../library/libspecex.a
-	touch harp_plugin_specex.$(PLUG_EXT)
+# We build two versions here, one is an internal library used by applications
+# and the other is a loadable module.
 
-else
+harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o harp_plugin_specex_reg.o ../library/libspecex.a
+	$(CXX) $(PLUG_FLAGS) $(PLUG_LINK) -o $@ $< harp_plugin_specex_reg.o ../library/libspecex.a $(LINK)
 
-harp_plugin_specex.$(PLUG_EXT) : harp_plugin_specex.o ../library/libspecex.a
-	$(CXX) $(PLUG_FLAGS) $(PLUG_LINK) -o $@ $< ../library/libspecex.a $(LINK)
+harp_plugin_specex_lib.a : harp_plugin_specex.o
+	ar cr $@ harp_plugin_specex.o
+	ranlib $@
 
-endif
 
-harp_plugin_specex.o : harp_plugin_specex.cc $(HEADERS)
-	$(CXX) $(CXXFLAGS) $(PLUG_FLAGS) -I../library -o $@ -c $<
-
+%.o : %.cc $(HEADERS)
+	$(CXX) $(CXXFLAGS) -I. -I../library -fPIC -o $@ -c $<
