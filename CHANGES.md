@@ -1,5 +1,9 @@
 # specex Change Log
 
+## 0.5.0 (NA)
+
+* In Development
+
 ## 0.4.5 (2017-07-19)
 
 * Change build of libraries to differentiate between
