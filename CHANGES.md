@@ -1,8 +1,10 @@
 # specex Change Log
 
-## 0.5.0 (N/A)
+## 0.4.5 (2017-07-19)
 
-* Development in progress.
+* Change build of libraries to differentiate between
+  internal libraries and loadable modules.  Build
+  proper bundles on OS X.
 
 ## 0.4.4 (2017-06-21)
 
