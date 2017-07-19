@@ -6,7 +6,6 @@ OBJS := $(patsubst %.cc,%.o,$(wildcard *.cc))
 LIBS = libspecex.a libspecex.$(PLUG_EXT)
 
 OS := $(shell uname)
-
 ifeq ($(OS), Darwin)
   NOUNDEF = -Wl,-undefined,error
 else
@@ -23,7 +22,7 @@ libspecex.a : $(OBJS)
 	ranlib $@
 
 libspecex.$(PLUG_EXT) : $(OBJS)
-	$(CXX) $(NOUNDEF) -fPIC -shared -o $@ $(OBJS) $(LINK)
+	$(CXX) $(NOUNDEF) $(PLUG_FLAGS) $(PLUG_LINK) -o $@ $(OBJS) $(LINK)
 
 install : all
 	mkdir -p $(SPECEX_PREFIX)/lib
@@ -38,3 +37,4 @@ clean :
 
 %.o : %.cc $(HEADERS)
 	$(CXX) $(CXXFLAGS) -I. -fPIC -o $@ -c $<
+

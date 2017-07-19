@@ -241,10 +241,6 @@ size_t harp::specex_psf::response_nnz_estimate ( ) const {
 }
 
 
-// This export statement allows use of the plugin with serialization operations in HARP.
-
-BOOST_CLASS_EXPORT(harp::specex_psf)
-
 // Define the plugin creation function here.
 
 harp::psf * harp::specex_psf_create ( boost::property_tree::ptree const & props ) {
