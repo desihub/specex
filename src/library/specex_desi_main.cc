@@ -58,50 +58,71 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   // to crash when NaN
   feenableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
   
-  // default arguments
-  // --------------------------------------------
-  string psf_model = "GAUSSHERMITE";
+  
   string spectrograph_name = "DESI";  
-  int    first_fiber_bundle=0;
-  int    last_fiber_bundle=0;
-  int    first_fiber=0;
-#define DEFAULT_LAST_FIBER 100000
-  int    last_fiber=DEFAULT_LAST_FIBER;
-  int    half_size_x=4;
-  int    half_size_y=4;
   
+  
+  //  arguments
+  // default values
+  // -------------------------------------------------------
+
+  /*
+  int default_flux_hdu=0;
+  int default_ivar_hdu=0;
+  int default_mask_hdu=0;
+  int default_header_hdu=0;
+  int default_xtrace_hdu=0;
+  int default_ytrace_hdu=0;  
+  string default_psf_model="";
+  int    default_first_fiber_bundle=0;
+  int    default_last_fiber_bundle=0;
+  int    default_first_fiber=0;
+  int    default_last_fiber=0;
+  int    default_half_size_x=0;
+  int    default_half_size_y=0;  
+  int default_gauss_hermite_deg=0;
+  int default_gauss_hermite_deg2=0; 
+  int default_legendre_deg_wave=0;
+  int default_legendre_deg_x=0;
+  int default_trace_deg_wave=0;
+  int default_trace_deg_x=0;  
+  double default_psf_error=0;
+  double default_psf_core_wscale=0;
+  int default_max_number_of_lines=0; 
+  */
+  
+
+  // -------------------------------------------------------
   string arc_image_filename="";
-  string trace_filename="";
-  string xtrace_filename="";
-  string ytrace_filename="";
-  int xtrace_hdu=0;
-  int ytrace_hdu=0;
-  //string wy_trace_fits_name="";
-  string lamp_lines_filename="";  
-  double min_wavelength = 0;
-  double max_wavelength = 1e6;
-  int gauss_hermite_deg  = 3;
-  int gauss_hermite_deg2 = 2;
-  //double gauss_hermite_sigma = 1.1;
-  int legendre_deg_wave = 4;
-  int legendre_deg_x = 1;
-  int trace_deg_wave = 0;
-  int trace_deg_x = 0;
-  int max_number_of_lines = 200; 
-  
-  double psf_error = 0;
-  double psf_core_wscale = 0;
-  
+  string input_psf_filename="";
   string output_xml_filename="";
   string output_fits_filename="";
   string output_spots_filename="";
-  string input_psf_filename="";
-  
   int flux_hdu=0;
   int ivar_hdu=0;
   int mask_hdu=0;
   int header_hdu=0;
+  int xtrace_hdu=0;
+  int ytrace_hdu=0;
   
+  string psf_model="";
+  int    first_fiber_bundle=0;
+  int    last_fiber_bundle=0;
+  int    first_fiber=0;
+  int    last_fiber=0;
+  int    half_size_x=0;
+  int    half_size_y=0;  
+  int gauss_hermite_deg=0;
+  int gauss_hermite_deg2=0; 
+  int legendre_deg_wave=0;
+  int legendre_deg_x=0;
+  int trace_deg_wave=0;
+  int trace_deg_x=0;  
+  double psf_error=0;
+  double psf_core_wscale=0;
+  int max_number_of_lines=0; 
+  
+  string lamp_lines_filename="";
   if(getenv("SPECEXDATA"))
     lamp_lines_filename = string(getenv("SPECEXDATA"))+"/specex_linelist_desi.txt";
    
@@ -113,24 +134,30 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 
   desc.add_options()
     ( "help,h", "display usage information" )
-    ( "arc,a", popts::value<string>( &arc_image_filename ), "arc pre-reduced fits image file name (mandatory), ex:  sdProc-b1-00108382.fits" )
-    ( "flux-hdu", popts::value<int>( &flux_hdu )->default_value(1), " flux hdu in input arc fits")
-    ( "ivar-hdu", popts::value<int>( &ivar_hdu )->default_value(2), " ivar hdu in input arc fits")
-    ( "mask-hdu", popts::value<int>( &mask_hdu )->default_value(3), " mask hdu in input arc fits")
-    ( "header-hdu", popts::value<int>( &header_hdu )->default_value(1), " header hdu in input arc fits")
-
-    ( "trace", popts::value<string>( &trace_filename ), "fits image file name with image extensions XTRACE and YTRACE for legendre polynomial of wavelength (mandatory)" )
+    ( "arc,a", popts::value<string>( &arc_image_filename ), "arc preprocessed fits image file name (mandatory)" )
+    ( "in-psf", popts::value<string>( &input_psf_filename ), " input psf file name (fits or xml, can contain only the traces, mandatory)")  
+    ( "out-psf", popts::value<string>( &output_fits_filename ), " output psf fits file name (mandatory)")  
+    ( "only-trace-fit", "only fit the trace coordinates (default is trace,sigma,psf)")
+    ( "no-trace-fit", "do not fit the trace coordinates (default is trace,sigma,psf)")
+    ( "no-sigma-fit", "do not fit the gaussian sigma (default is trace,sigma,psf)")
+    ( "no-psf-fit", "do not fit the psf (default is trace,sigma,psf)")
+    ( "all-fibers", "fit all fibers, with as many parameters along X as fibers (this is the default if less than 50 fibers in image)")
     
-    ( "xcoord-file", popts::value<string>( &xtrace_filename ), "fits image file name with x trace legendre polynomial of wavelength (ignored if --trace given)" )
-    ( "xcoord-hdu", popts::value<int>( &xtrace_hdu )->default_value(-1), "hdu of x trace legendre polynomial of wavelength (default is looking for extension XTRACE)" )
-    ( "ycoord-file", popts::value<string>( &ytrace_filename ), "fits image file name with y trace legendre polynomial of wavelength (ignored if --trace given)" )
-    ( "ycoord-hdu", popts::value<int>( &ytrace_hdu )->default_value(-1), "hdu of y trace legendre polynomial of wavelength (default is looking for extension YTRACE)" )
-    ( "first_bundle", popts::value<int>( &first_fiber_bundle ), "first fiber bundle to fit")
-    ( "last_bundle", popts::value<int>( &last_fiber_bundle ), "last fiber bundle to fit")
-    ( "first_fiber", popts::value<int>( &first_fiber ), "first fiber (must be in bundle)")
-    ( "last_fiber", popts::value<int>( &last_fiber ), "last fiber (must be in bundle)")
-    ( "half_size_x", popts::value<int>( &half_size_x )->default_value(8), "half size of PSF stamp (full size is 2*half_size+1)")
-    ( "half_size_y", popts::value<int>( &half_size_y )->default_value(5), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "flux-hdu", popts::value<int>( &flux_hdu )->default_value(1), " flux hdu in input arc fits, for unusual data format")
+    ( "ivar-hdu", popts::value<int>( &ivar_hdu )->default_value(2), " ivar hdu in input arc fits, for unusual data format")
+    ( "mask-hdu", popts::value<int>( &mask_hdu )->default_value(3), " mask hdu in input arc fits, for unusual data format")
+    ( "header-hdu", popts::value<int>( &header_hdu )->default_value(1), " header hdu in input arc fits, for unusual data format")
+
+    // ( "trace", popts::value<string>( &trace_filename ), "fits image file name with image extensions XTRACE and YTRACE for legendre polynomial of wavelength (mandatory)" )
+    
+    ( "xcoord-hdu", popts::value<int>( &xtrace_hdu )->default_value(-1), "hdu of x trace legendre polynomial of wavelength (default is extension XTRACE)" )
+    ( "ycoord-hdu", popts::value<int>( &ytrace_hdu )->default_value(-1), "hdu of y trace legendre polynomial of wavelength (default is extension YTRACE)" )
+    ( "first-bundle", popts::value<int>( &first_fiber_bundle )->default_value(0), "first fiber bundle to fit")
+    ( "last-bundle", popts::value<int>( &last_fiber_bundle )->default_value(0), "last fiber bundle to fit")
+    ( "first-fiber", popts::value<int>( &first_fiber )->default_value(0), "first fiber (must be in bundle)")
+    ( "last-fiber", popts::value<int>( &last_fiber )->default_value(100000), "last fiber (must be in bundle)")
+    ( "half-size-x", popts::value<int>( &half_size_x )->default_value(8), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "half-size-y", popts::value<int>( &half_size_y )->default_value(5), "half size of PSF stamp (full size is 2*half_size+1)")
     ( "psfmodel", popts::value<string>( &psf_model )->default_value("GAUSSHERMITE"), "PSF model, default is GAUSSHERMITE")
     ( "positions", "fit positions of each spot individually after global fit for debugging")
     ( "verbose,v", "turn on verbose mode (deprecated, true by default)" )
@@ -138,72 +165,110 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "debug", "turn on debug mode" )
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_desi.txt)" )
     ( "core", "dump core files when harp exception is thrown" )
-    ( "gauss_hermite_deg",  popts::value<int>( &gauss_hermite_deg )->default_value(6), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
-    ("gauss_hermite_deg2",  popts::value<int>( &gauss_hermite_deg2 )->default_value(2), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
+    ( "gauss-hermite-deg",  popts::value<int>( &gauss_hermite_deg )->default_value(6), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
+    ("gauss-hermite-deg2",  popts::value<int>( &gauss_hermite_deg2 )->default_value(2), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)")
     //( "gauss_hermite_sigma",  popts::value<double>( &gauss_hermite_sigma ), "sigma of Gauss-Hermite PSF (same for x and y, only if GAUSSHERMITE psf)")
-    ( "legendre_deg_wave",  popts::value<int>( &legendre_deg_wave )->default_value(4), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
-    ( "legendre_deg_x",  popts::value<int>( &legendre_deg_x )->default_value(1), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
-    ( "trace_deg_wave",  popts::value<int>( &trace_deg_wave )->default_value(6), "degree of Legendre polynomials along wavelength for fit of traces")
-    ( "trace_deg_x",  popts::value<int>( &trace_deg_x )->default_value(6), "degree of Legendre polynomials along x_ccd for fit of traces")
-    ( "psf_error",  popts::value<double>( &psf_error )->default_value(0), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
-    ( "psf_core_wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 5x5 PSF core")
-    ( "per_fiber", "as many X parameters as fibers")
+    ( "legendre-deg-wave",  popts::value<int>( &legendre_deg_wave )->default_value(4), "degree of Legendre polynomials along wavelength (can be reduced if missing data)")
+    ( "legendre-deg-x",  popts::value<int>( &legendre_deg_x )->default_value(1), "degree of Legendre polynomials along x_ccd (can be reduced if missing data)")
+    ( "trace-deg-wave",  popts::value<int>( &trace_deg_wave )->default_value(6), "degree of Legendre polynomials along wavelength for fit of traces")
+    ( "trace-deg-x",  popts::value<int>( &trace_deg_x )->default_value(6), "degree of Legendre polynomials along x_ccd for fit of traces")
+    ( "psf-error",  popts::value<double>( &psf_error )->default_value(0), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
+    ( "psf-core-wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 5x5 PSF core")
+    
 #ifdef EXTERNAL_TAIL
-    ( "fit_psf_tails", "unable fit of psf tails")
+    ( "fit-psf-tails", "unable fit of psf tails")
 #endif
 #ifdef CONTINUUM
-    ( "fit_continuum", "unable fit of continuum")
+    ( "fit-continuum", "unable fit of continuum")
 #endif
-    ( "variance_model", "refit at the end with a model of the variance to avoid Poisson noise bias")
-    ( "no_trace_fit", "do not fit traces")
-    ( "no_sigma_fit", "do not fit the gaussian sigma")
-    ( "no_psf_fit", "do not fit the psf")
-    ( "out_xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
-    ( "out_fits", popts::value<string>( &output_fits_filename ), " output psf fits file name")  
-    ( "input-psf", popts::value<string>( &input_psf_filename ), " input psf file name (fits or xml)")  
-    ( "out_spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
+    ( "variance-model", "refit at the end with a model of the variance to avoid Poisson noise bias")
+    
+    ( "out-psf-xml", popts::value<string>( &output_xml_filename ), " output psf xml file name")
+   
+    ( "out-spots", popts::value<string>( &output_spots_filename ), " output spots file name")  
     ( "prior", popts::value< vector<string> >( &argurment_priors )->multitoken(), " gaussian prior on a param : 'name' value error")  
     ( "tmp_results", " write tmp results")  
-    ( "nlines", popts::value<int>( &max_number_of_lines )," maximum number of emission lines used in fit (uses a algorithm to select best ones based on S/N and line coverage")  
+    ( "nlines", popts::value<int>( &max_number_of_lines )->default_value(200)," maximum number of emission lines used in fit (uses a algorithm to select best ones based on S/N and line coverage")  
     //( "out", popts::value<string>( &outfile ), "output image file" )
     ;
 
   popts::variables_map vm;
 
-  try {
-    
+  try {    
     popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
     popts::notify(vm);
-    
-    if ( ( argc < 2 ) || vm.count( "help" ) || ( ! vm.count( "arc" ) ) || ( (! vm.count("trace")) && (( ! vm.count( "xcoord-file" )  || ( ! vm.count( "ycoord-file" ) ) ) ) && ( ! vm.count( "input-psf" ) ))) {
-      cerr << endl;
-      cerr << desc << endl;
-      cerr << "example:" << endl;
-      cerr << argv[0] << " -v" << endl;
-      return EXIT_FAILURE;
-    }
-    if(vm.count("trace") && vm.count( "input-psf" )) {
-      cout << "will use input-psf and ignore --trace option" << endl;
-    }
-    if(vm.count( "input-psf" )) {
-      if(first_fiber>0 || last_fiber<DEFAULT_LAST_FIBER) {
-	cerr << "cannot specify first and last fiber with input psf option, because this would mean to change number of parameters" << endl;
-	exit(12);
-      }
-    }
-    
-    if(lamp_lines_filename == "") {
-      cerr << endl;
-      cerr << "missing lamp_lines_filename either define env. variable SPECEXDATA or use option --lamplines" << endl;
-      return EXIT_FAILURE;
-    }
-
-
   }catch(std::exception& e) {
     cerr << "error in arguments : " << e.what() << endl;
-    cerr << endl;
-    cerr << desc << endl;
+    cerr << "try --help for options" << endl;
     return EXIT_FAILURE;
+  }
+  
+  if ( ( argc < 2 ) || vm.count( "help" ) ) {
+      cerr << endl;
+      cerr << desc << endl;      
+      return EXIT_FAILURE;
+  }
+  if ( ! vm.count( "arc" ) ) {
+    cerr << endl;
+    cerr << "missing --arc , try --help for options" << endl;      
+    return EXIT_FAILURE;
+  }
+  if ( ! vm.count( "in-psf" ) ) {
+    cerr << endl;
+    cerr << "missing --in-psf , try --help for options" << endl;      
+    return EXIT_FAILURE;
+  }    
+  if(lamp_lines_filename == "") {
+    cerr << endl;
+    cerr << "missing lamp_lines_filename either define env. variable SPECEXDATA or use option --lamplines" << endl;
+    return EXIT_FAILURE;
+  }
+  
+  // set logging info
+  specex_set_debug(vm.count("debug")>0);
+  specex_set_verbose(vm.count("quiet")==0);
+  
+  // check input PSF type, can be from boot calib with only the traces
+  bool use_input_specex_psf = false;
+  if (input_psf_filename.find(".xml") != std::string::npos) { // xml file
+    SPECEX_INFO("Input PSF file is xml");
+    use_input_specex_psf = true;
+  }else{ // fits file, look at header  
+    try {
+      fitsfile * fp;
+      harp::fits::open_read(fp,input_psf_filename);
+      int status = 0;
+      int first_hdu = 1;
+      fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
+      string psftype; harp::fits::key_read(fp,"PSFTYPE",psftype);
+      SPECEX_INFO("Input PSF type = " << psftype);
+      use_input_specex_psf = (psftype=="GAUSS-HERMITE"); 
+    } catch (harp::exception e) {
+      SPECEX_WARNING("Could not read PSF type in " << input_psf_filename);
+    }
+  }
+
+  // if PSF parameter options are given, we cannot start from a pre-existing specex psf  
+  bool psf_change_req = false; 
+  psf_change_req |= (! vm["first-bundle"].defaulted());
+  psf_change_req |= (! vm["last-bundle"].defaulted());
+  psf_change_req |= (! vm["first-fiber"].defaulted());
+  psf_change_req |= (! vm["last-fiber"].defaulted());
+  psf_change_req |= (! vm["half-size-x"].defaulted());
+  psf_change_req |= (! vm["half-size-y"].defaulted());
+  psf_change_req |= (! vm["gauss-hermite-deg"].defaulted());
+  psf_change_req |= (! vm["gauss-hermite-deg2"].defaulted());
+  psf_change_req |= (! vm["legendre-deg-wave"].defaulted());
+  psf_change_req |= (! vm["legendre-deg-x"].defaulted());
+  psf_change_req |= (! vm["trace-deg-wave"].defaulted());
+  psf_change_req |= (! vm["trace-deg-x"].defaulted());
+  
+  if(psf_change_req && use_input_specex_psf) {
+    SPECEX_WARNING("option(s) were given to specify the psf properties, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");
+    use_input_specex_psf = false;
+  }
+  if(use_input_specex_psf) {
+    SPECEX_INFO("will start from input psf parameters")
   }
   
   // dealing with priors
@@ -234,28 +299,36 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 
 
   try {
-    specex_set_debug(vm.count("debug")>0);
-    //specex_set_verbose(vm.count("verbose")>0);
-    specex_set_verbose(vm.count("quiet")==0);
+   
     
     specex_set_dump_core(vm.count("core")>0);
-    bool fit_traces = (vm.count("no_trace_fit")==0);
-    bool fit_sigmas = (vm.count("no_sigma_fit")==0);
-    bool fit_psf    = (vm.count("no_psf_fit")==0);
-    bool write_tmp_results = (vm.count("tmp_results")>0);
+    bool fit_traces = (vm.count("no-trace-fit")==0);
+    bool fit_sigmas = (vm.count("no-sigma-fit")==0);
+    bool fit_psf    = (vm.count("no-psf-fit")==0);
+    if (vm.count("only-trace-fit")>0) {
+      if (vm.count("no-trace-fit")>0) {
+	SPECEX_ERROR("cannot have both options --only-trace-fit and --no-trace-fit");
+	return EXIT_FAILURE;
+      }
+      fit_traces = true;
+      fit_sigmas = false;
+      fit_psf    = false;      
+    }
+
+    bool write_tmp_results = (vm.count("tmp-results")>0);
     
 #ifdef EXTERNAL_TAIL
-    bool fit_psf_tails = (vm.count("fit_psf_tails")>0);
+    bool fit_psf_tails = (vm.count("fit-psf-tails")>0);
 #endif
 #ifdef CONTINUUM
-    bool fit_continuum = (vm.count("fit_continuum")>0);
+    bool fit_continuum = (vm.count("fit-continuum")>0);
 #endif
-    bool use_variance_model = (vm.count("variance_model")>0);
+    bool use_variance_model = (vm.count("variance-model")>0);
     bool fit_individual_spots_position = vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << lamp_lines_filename); 
     
-    bool per_fiber=vm.count("per_fiber")>0;
+    bool all_fibers =vm.count("all_fibers")>0;
     
       
 
@@ -268,22 +341,14 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     
     Spectrograph *spectro = new DESI_Spectrograph();
     
-    // read trace
-    // --------------------------------------------
-    /* read traces in arc file */
-    if(trace_filename !="") {
-      xtrace_filename=trace_filename;
-      ytrace_filename=trace_filename;
-    }
-
     specex::PSF_p psf;
     TraceSet traceset; // only filled if no input PSF
-    if( input_psf_filename == "") {
+    if( ! use_input_specex_psf ) {
 
-      read_DESI_traceset_in_fits(traceset,xtrace_filename,xtrace_hdu,ytrace_filename,ytrace_hdu,trace_deg_x,trace_deg_wave);
-      if(per_fiber) {
+      read_DESI_traceset_in_fits(traceset,input_psf_filename,xtrace_hdu,input_psf_filename,ytrace_hdu,trace_deg_x,trace_deg_wave);
+      int nfibers = traceset.size();
+      if(nfibers<50 or all_fibers) {
 	SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x)");
-	int nfibers = traceset.size();
 	spectro->number_of_fiber_bundles_per_ccd=nfibers;
 	spectro->number_of_fibers_per_bundle=nfibers;
 	SPECEX_DEBUG("number of fibers  = " << nfibers);
@@ -302,6 +367,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       
       // init PSF
       // --------------------------------------------
+      SPECEX_INFO("Initializing a " << psf_model << " PSF");
       
       if(psf_model=="GAUSSHERMITE")
 	psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
@@ -337,7 +403,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       */
 
       
-      if(per_fiber) {
+      int nfibers = traceset.size();
+      if(nfibers<50 or all_fibers) {
 	SPECEX_INFO("Use as many parameters along X as there are fibers (solve all at once, ie a single bundle, and overwrite legendre_deg_x)");
 	int nfibers = psf->FiberTraces.size();
 	spectro->number_of_fiber_bundles_per_ccd=nfibers;
@@ -461,6 +528,9 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       SPECEX_INFO("valid y(=rows) range = " << ymin << " " << ymax);
 
       vector<Spot_p> spots;
+      
+      double min_wavelength = 0;
+      double max_wavelength = 1e6;  
       allocate_spots_of_bundle(spots,lamp_lines_filename,psf->FiberTraces,bundle,psf->ParamsOfBundles[bundle].fiber_min,psf->ParamsOfBundles[bundle].fiber_max,ymin,ymax,min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
@@ -483,7 +553,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 
       // starting fit
       // --------------------------------------------
-      bool init_psf = (input_psf_filename=="");
+      bool init_psf = (!use_input_specex_psf);
       fitter.FitEverything(spots,init_psf);
 
       int ndf = psf->ParamsOfBundles[bundle].ndata - psf->ParamsOfBundles[bundle].nparams;
