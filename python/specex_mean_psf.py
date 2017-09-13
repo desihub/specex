@@ -6,7 +6,7 @@ import argparse
 import sys,os
 from numpy.polynomial.legendre import legval,legfit
 
-from desispec.log import get_logger
+from desiutil.log import get_logger
 
 def compatible(head1,head2) :
     log=get_logger()
@@ -67,7 +67,7 @@ def main() :
         bundle_rchi2.append(rchi2)
     
     bundle_rchi2=np.array(bundle_rchi2)
-    log.info("bundle_rchi2=",bundle_rchi2)
+    log.info("bundle_rchi2= %s"%str(bundle_rchi2))
     median_bundle_rchi2 = np.median(bundle_rchi2)
     rchi2_threshold=median_bundle_rchi2+1.
     log.info("median chi2=%f threshold=%f"%(median_bundle_rchi2,rchi2_threshold))
@@ -128,7 +128,7 @@ def main() :
             if entry==0 :
                 log.info("for fiber bundle %d, %d valid PSFs"%(bundle,ok.size))
             
-            fibers=np.arange(bundle*nfibers_per_bundle,(bundle+1)*nfibers_per_bundle)
+            fibers=np.arange(bundle*nfibers_per_bundle,(bundle+1)*nfibers_per_bundle).astype(int)
             if ok.size>=2 : # use median
                 log.info("bundle #%d : use median"%bundle)
                 for f in fibers :
