@@ -8,7 +8,7 @@ The installation procedure is described in the [INSTALL file](INSTALL.md), the c
 
 ## Using specex for DESI
 
-### Command-line specex for test stand data with sparse fiber slit head
+### specex usage for sparse fiber slit (spectrograph tests)
 
 The code needs an input PSF file which can contain only trace coordinates.
 
