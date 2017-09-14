@@ -300,7 +300,10 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     
     specex::SpotTmpData &tmp = spot_tmp_data[s];
-    if(tmp.ignore) continue;
+
+    // if(tmp.ignore) continue; // even if spot is ignored now, can still be used afterwards if attached, so we have to update its parameters
+
+    
     if(fit_flux) {
       if(force_positive_flux) {
 	tmp.flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
@@ -359,10 +362,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, harp::matrix_double* input_Ap, harp::vector_double* input_Bp, bool update_tmp_data) const  {
 
-  
-  
-  
-  
+    
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
   
@@ -381,7 +381,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   //===============================================
 #define FASTER_THAN_SYR
 #ifdef FASTER_THAN_SYR  
-  
+
   vector<int> other_indices;
   harp::matrix_double Ablock;
   vector<harp::vector_double> Arect;
@@ -410,6 +410,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   harp::vector_double H;  
   if(compute_ab) {
     H.resize(nparTot);
+
+    
   }
   
   double chi2 = 0;
@@ -453,7 +455,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     
     
   }
-  
+ 
   bool use_footprint = (spot_tmp_data.size()>1 && footprint_weight.Nx()>0);
   
 
@@ -581,7 +583,6 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	signal += flux*psfVal;
 	
 	if (compute_ab) {
-	  
 	  if((fit_psf && in_core) || fit_psf_tail) {
 	    size_t index = 0;
 	    for(int p=0;p<npar_fixed_coord;p++) {
@@ -591,6 +592,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      index += m_size;
 	    }
 	  }
+	  //}
 	  if(fit_trace) {
 	    ublas::noalias(ublas::project(H,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size()))) 
 	      += (gradPos(0) * flux)*tmp.trace_x_monomials;
@@ -599,7 +601,6 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	  }
 	  
 	  if(fit_flux && in_core) {
-
 	    if(force_positive_flux)
 	      H(tmp.flux_parameter_index) += tmp.flux*psfVal;
 	    else
@@ -609,7 +610,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    if(tmp.can_measure_flux)
 	      other_indices.push_back(tmp.flux_parameter_index);
 #endif
-	  }
+	    }
 	  if(fit_position) {
 	    H(tmp.x_parameter_index) += gradPos(0) * flux;
 	    H(tmp.y_parameter_index) += gradPos(1) * flux;
@@ -764,7 +765,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       
     } // end of loop on pix coord. i
   } // end of loop on pix coord. j
-  
+
 #ifdef FASTER_THAN_SYR  
   if(do_faster_than_syr) {
     size_t n=Ablock.size1();
@@ -850,6 +851,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     }
 
   }
+  
   //SPECEX_DEBUG("ComputeChi2AB chi2=" << chi2 << " npix=" << npix_in_chi2 << " sumflux=" << sum_flux);
   //SPECEX_INFO("ComputeChi2AB j range= " << input_begin_j << " " << input_end_j << " chi2= " << chi2);
   return chi2;
@@ -1209,7 +1211,51 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }
     }
   }
-  
+
+  /* now deal with spots for which we cannot measure fluxes
+     we have to to try and pair them with other spots of neighboring fiber
+     because we want to have a PSF for them anyway.
+     
+     for now we register pairs if possible and say we do not ignore the paired spot for 
+     which we cannot measure flux
+   */
+
+ std:map<int,int> indices_of_spots_to_pair;
+  if(n_to_attach>0) {
+    SPECEX_DEBUG("Check whether need to attach " << n_to_attach << " spots");
+    int n_attached = 0;
+    int n_ignored  = 0;
+    for(size_t s=0;s<spot_tmp_data.size(); s++) {
+    
+      SpotTmpData& tmp = spot_tmp_data[s];
+      if(!tmp.can_measure_flux) {
+	// find a  neighbour
+	int neighbour_index = -1;
+	int fiber_diff = 100000;
+	for(size_t s2=0;s2<spot_tmp_data.size();s2++) {
+	  SpotTmpData& tmp2 = spot_tmp_data[s2];
+	  if(fabs(tmp2.wavelength - tmp.wavelength)>0.00000001) continue;
+	  if(!tmp2.can_measure_flux) continue;
+	  if(fabs(tmp2.x-tmp.x)>2*psf->hSizeX) continue;
+	  if(fabs(tmp2.y-tmp.y)>2*psf->hSizeY) continue;
+	  int tmp_fiber_diff = abs(tmp2.fiber-tmp.fiber);
+	  if(fiber_diff > tmp_fiber_diff) {
+	    neighbour_index = s2;
+	    fiber_diff = tmp_fiber_diff;
+	  }
+	  if(fiber_diff==1) break; // it's ok
+	}	
+	if(neighbour_index == -1) {n_ignored ++; continue;}
+	indices_of_spots_to_pair[s] = neighbour_index;
+	tmp.ignore = false;
+	n_attached ++;
+      }
+    }
+    SPECEX_DEBUG("Number of attached spots = " << n_attached);
+    SPECEX_DEBUG("Number of ignored spots  = " << n_ignored);
+    
+    
+  }
   // indexation and Params and monomials for tmp spots 
   {
   int index = index_of_spots_parameters;
@@ -1258,47 +1304,13 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     }
   }
   }
-  
-  // now deal with spots for which we cannot measure fluxes
 
-  
-  if(n_to_attach>0) {
-    SPECEX_DEBUG("Check whether need to attach " << n_to_attach << " spots");
-    int n_attached = 0;
-    int n_ignored  = 0;
-    for(size_t s=0;s<spot_tmp_data.size(); s++) {
-    
-      SpotTmpData& tmp = spot_tmp_data[s];
-      if(!tmp.can_measure_flux) {
-	// find a nice neighbour
-	SpotTmpData* neighbour = 0;
-	int fiber_diff = 100000;
-	for(size_t s2=0;s2<spot_tmp_data.size();s2++) {
-	  SpotTmpData& tmp2 = spot_tmp_data[s2];
-	  if(fabs(tmp2.wavelength - tmp.wavelength)>0.00000001) continue;
-	  if(!tmp2.can_measure_flux) continue;
-	  if(fabs(tmp2.x-tmp.x)>2*psf->hSizeX) continue;
-	  if(fabs(tmp2.y-tmp.y)>2*psf->hSizeY) continue;
-	  int tmp_fiber_diff = abs(tmp2.fiber-tmp.fiber);
-	  if(fiber_diff > tmp_fiber_diff) {
-	    neighbour  = &tmp2;
-	    fiber_diff = tmp_fiber_diff;
-	  }
-	  if(fiber_diff==1) break; // it's ok
-	}	
-	if(!neighbour) {n_ignored ++; continue;}
-	SPECEX_DEBUG("use neighbour flux");
-	tmp.flux_parameter_index = neighbour->flux_parameter_index;
-	tmp.flux = neighbour->flux;
-	tmp.ignore = false;
-	n_attached ++;
-      }
-    }
-    SPECEX_DEBUG("Number of attached spots = " << n_attached);
-    SPECEX_DEBUG("Number of ignored spots  = " << n_ignored);
-    
-    
+  /* now we need to association the flux value and flux parameter indices for the paired spots */
+  for(std::map<int,int>::const_iterator it=indices_of_spots_to_pair.begin();it!=indices_of_spots_to_pair.end();it++) {
+    spot_tmp_data[it->first].flux = spot_tmp_data[it->second].flux;
+    spot_tmp_data[it->first].flux_parameter_index = spot_tmp_data[it->second].flux_parameter_index;
   }
+  
 
   
   SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots inc. signal in w=" << include_signal_in_weight << ", npix footprint = " << *npix);
