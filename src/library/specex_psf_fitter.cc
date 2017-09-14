@@ -301,7 +301,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
     
     specex::SpotTmpData &tmp = spot_tmp_data[s];
 
-    // if(tmp.ignore) continue; // even if spot is ignored now, can still be used afterwards if attached, so we have to update its parameters
+    if(tmp.ignore) continue;
 
     
     if(fit_flux) {
