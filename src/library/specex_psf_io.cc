@@ -18,14 +18,14 @@
 #include <specex_gauss_hermite_two_psf.h>
 #include <specex_hat_hermite_psf.h>
 
-void specex::read_psf(specex::PSF_p& psf, const std::string& filename) {
+void specex::read_psf(specex::PSF_p& psf, const std::string& filename, int first_bundle, int last_bundle) {
   
   if (filename.find(".xml") != std::string::npos) {
     SPECEX_INFO("read xml file " << filename);
     specex::read_psf_xml(psf,filename);
   } else if (filename.find(".fits") != std::string::npos) {
     SPECEX_INFO("read fits file " << filename);
-    specex::read_psf_fits(psf,filename);
+    specex::read_psf_fits(psf,filename,first_bundle,last_bundle);
   } else {
     SPECEX_ERROR("not sure how to read this file (expect xxx.fits or xxx.xml) " << filename);
   }
@@ -112,6 +112,7 @@ void specex::write_psf_xml(const specex::PSF_p psf, const std::string& filename)
 void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
   
   
+  
   std::ifstream is(filename.c_str());
   
   boost::archive::xml_iarchive xml_ia ( is );
@@ -124,7 +125,7 @@ void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
   
 }
 
-void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu);
+void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu, int first_bundle, int last_bundle);
 
 void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu);
 void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu, std::vector<specex::Spot_p> *spots);
@@ -156,15 +157,15 @@ void specex::write_psf_fits(const specex::PSF_p psf, fitsfile* fp, int first_hdu
     
 }
 
-void specex::read_psf_fits(specex::PSF_p& psf, const string& filename) {
+void specex::read_psf_fits(specex::PSF_p& psf, const string& filename, int first_bundle, int last_bundle) {
   fitsfile * fp;
   harp::fits::open_read(fp,filename);
-  read_psf_fits(psf,fp,1);
+  read_psf_fits(psf,fp,1,first_bundle,last_bundle);
   harp::fits::close(fp);
   SPECEX_INFO("read PSF in " << filename);
 }
 
-void specex::read_psf_fits(specex::PSF_p& psf, fitsfile* fp, int first_hdu) {
+void specex::read_psf_fits(specex::PSF_p& psf, fitsfile* fp, int first_hdu, int first_bundle, int last_bundle) {
   int status = 0;
   fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
   
@@ -174,13 +175,16 @@ void specex::read_psf_fits(specex::PSF_p& psf, fitsfile* fp, int first_hdu) {
   SPECEX_INFO("PSFVER=" << psfver);
   
   if(psftype=="GAUSS-HERMITE" && psfver==2) {
-    read_gauss_hermite_psf_fits_version_2(psf,fp,first_hdu+1);
+    read_gauss_hermite_psf_fits_version_2(psf,fp,first_hdu+1,first_bundle,last_bundle);
   }else{
     SPECEX_ERROR("read_psf_fits not implemented for PSFTYPE=" << psftype << " and PSFVER=" << psfver);
   }
 }
 
-void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu) {
+void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int hdu, int first_bundle, int last_bundle) {
+  
+  SPECEX_DEBUG("read_gauss_hermite_psf_fits_version_2 hdu=" << hdu << " first,last bundle=" << first_bundle << "," << last_bundle);
+
   int status = 0;
   fits_movabs_hdu ( fp, hdu, NULL, &status ); harp::fits::check ( status );
   
@@ -254,6 +258,32 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     param_wavemax[pname]=table.data[i][wmax_col].double_vals[0];
     param_coeff[pname]=table.data[i][coeff_col].double_vals;    
   }
+
+  
+  if(bundlemin<first_bundle || bundlemax>last_bundle) {
+    SPECEX_DEBUG("Truncating input PSF bundles [" << bundlemin << "," << bundlemax << "] -> [" 
+		 << first_bundle << "," << last_bundle << "]");
+    int original_nfibers  = (fibermax-fibermin)+1;
+    int original_nbundles = (bundlemax-bundlemin)+1;
+    int nfibers_per_bundle = original_nfibers/original_nbundles; // not safe ...
+    int new_fiber_begin = first_bundle*nfibers_per_bundle;
+    int new_fiber_end   = (last_bundle+1)*nfibers_per_bundle;
+    for(size_t s=0;s<params.size();s++) {
+      string pname=params[s];
+      //SPECEX_DEBUG("Truncated parameter " << pname);
+      int ncoef_per_fiber = param_coeff[pname].size()/original_nfibers;
+      param_coeff[pname] = ublas::project(param_coeff[pname],ublas::range(new_fiber_begin*ncoef_per_fiber,new_fiber_end*ncoef_per_fiber));
+    }
+    fibermin=new_fiber_begin;
+    fibermax=new_fiber_end-1;
+    bundlemin=first_bundle;
+    bundlemax=last_bundle;
+    SPECEX_DEBUG("Truncated FIBERMIN " << fibermin);
+    SPECEX_DEBUG("Truncated FIBERMAX " << fibermax);
+    SPECEX_DEBUG("Truncated BUNDLEMIN " << bundlemin);
+    SPECEX_DEBUG("Truncated BUNDLEMAX " << bundlemax);    
+  }
+
   SPECEX_DEBUG("Reading and converting FiberTraces");
   // FiberTraces
   // check size makes sense
@@ -303,7 +333,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   for(int bundle = bundlemin ; bundle <= bundlemax ; bundle++) {
     
     
-    SPECEX_DEBUG("Fitting pols of bundle " << bundle);
+    //SPECEX_DEBUG("Fitting pols of bundle " << bundle);
 
     int bundle_fibermin=bundle*nfibers_per_bundle;
     int bundle_fibermax=(bundle+1)*nfibers_per_bundle-1;
@@ -333,14 +363,17 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     // dealing with continuum
     bundle_params.ContinuumPol = specex::Legendre1DPol(legdeg,param_wavemin["CONT"],param_wavemax["CONT"]);
     for(int i=0;i<legdeg+1;i++) {
-      bundle_params.ContinuumPol.coeff[i] = param_coeff["CONT"][i+bundle_params.fiber_min*(legdeg+1)];
+      bundle_params.ContinuumPol.coeff[i] = param_coeff["CONT"][i+(bundle_params.fiber_min-fibermin)*(legdeg+1)];
     }
 #endif    
     
 
     // need to set : bundle_params.AllParPolXW  and bundle_params.FitParPolXW
-    for(int i=0;i<(int)params.size();i++) {
+    for(int i=0;i<(int)params.size();i++) {      
       const string& pname=params[i];
+      
+      SPECEX_DEBUG("Fitting pol of parameter " << pname << " in bundle " << bundle);
+
       if(pname=="X") continue; // trace
       if(pname=="Y") continue; // trace
       if(pname=="GH-0-0") continue; // not used in c++ version
@@ -362,7 +395,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	const specex::Trace& trace = psf->FiberTraces[fiber];
 	specex::Legendre1DPol fiberpol(legdeg,param_wavemin[pname],param_wavemax[pname]);
 	for(int i=0;i<=legdeg;i++)
-	  fiberpol.coeff[i]=param_coeff[pname][i+fiber*(legdeg+1)];
+	  fiberpol.coeff[i]=param_coeff[pname][i+(fiber-fibermin)*(legdeg+1)];
 	for(double wave=wavemin;wave<=wavemax;wave+=(wavemax-wavemin)/(legdeg_param_fit+2)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
@@ -377,7 +410,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname);
       
       pol->coeff = B;
-      SPECEX_DEBUG("Fit of parameter " << pname << " in bundle " << bundle << " done");
+      //SPECEX_DEBUG("Fit of parameter " << pname << " in bundle " << bundle << " done");
       
       bundle_params.AllParPolXW.push_back(pol);
       

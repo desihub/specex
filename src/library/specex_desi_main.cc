@@ -250,10 +250,10 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 
   // if PSF parameter options are given, we cannot start from a pre-existing specex psf  
   bool psf_change_req = false; 
-  psf_change_req |= (! vm["first-bundle"].defaulted());
-  psf_change_req |= (! vm["last-bundle"].defaulted());
-  psf_change_req |= (! vm["first-fiber"].defaulted());
-  psf_change_req |= (! vm["last-fiber"].defaulted());
+  //psf_change_req |= (! vm["first-bundle"].defaulted());
+  //psf_change_req |= (! vm["last-bundle"].defaulted());
+  //psf_change_req |= (! vm["first-fiber"].defaulted());
+  //psf_change_req |= (! vm["last-fiber"].defaulted());
   psf_change_req |= (! vm["half-size-x"].defaulted());
   psf_change_req |= (! vm["half-size-y"].defaulted());
   psf_change_req |= (! vm["gauss-hermite-deg"].defaulted());
@@ -387,8 +387,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       psf->hSizeX = half_size_x;
       psf->hSizeY = half_size_y;
       psf->FiberTraces.clear();
-    }else{
-      read_psf(psf,input_psf_filename);
+    }else{ // use_input_specex_psf
+      read_psf(psf,input_psf_filename,first_fiber_bundle,last_fiber_bundle);
 
       // erase traces outside fiber range
       /*

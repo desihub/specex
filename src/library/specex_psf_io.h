@@ -20,9 +20,9 @@ namespace specex {
   void write_psf_fits(const specex::PSF_p psf, const string& filename, std::vector<specex::Spot_p> *spots = NULL);
   void write_psf(const specex::PSF_p psf, const string& filename, std::vector<specex::Spot_p> *spots = NULL);
   
-  void read_psf_fits(specex::PSF_p& psf,  fitsfile* fp, int first_hdu=1);
-  void read_psf_fits(specex::PSF_p& psf, const string& filename);
-  void read_psf(specex::PSF_p& psf, const string& filename);
+  void read_psf_fits(specex::PSF_p& psf,  fitsfile* fp, int first_hdu=1, int first_bundle=-1, int last_bundle=-1);
+  void read_psf_fits(specex::PSF_p& psf, const string& filename, int first_bundle=-1, int last_bundle=-1);
+  void read_psf(specex::PSF_p& psf, const string& filename, int first_bundle=-1, int last_bundle=-1);
   
 
   
