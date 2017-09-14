@@ -260,7 +260,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   }
 
   
-  if(bundlemin<first_bundle || bundlemax>last_bundle) {
+  if(first_bundle>=0 && last_bundle>=first_bundle && (bundlemin<first_bundle || bundlemax>last_bundle)) {
     SPECEX_DEBUG("Truncating input PSF bundles [" << bundlemin << "," << bundlemax << "] -> [" 
 		 << first_bundle << "," << last_bundle << "]");
     int original_nfibers  = (fibermax-fibermin)+1;
