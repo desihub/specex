@@ -142,7 +142,7 @@ void write_gauss_hermite_psf_fits_version_3(const specex::GaussHermitePSF& psf, 
   { // add a parameter to link fibers and bundles in fit
     coeff.clear();
     for(int fiber=FIBERMIN;fiber<=FIBERMAX;fiber++)
-      coeff(fiber*ncoeff) = -1; // no bundle
+      coeff((fiber-FIBERMIN)*ncoeff) = -1; // no bundle
     for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf.ParamsOfBundles.begin();
 	bundle_it != psf.ParamsOfBundles.end(); ++bundle_it) {
       const specex::PSF_Params & params_of_bundle = bundle_it->second;
