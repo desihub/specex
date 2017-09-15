@@ -1,5 +1,20 @@
+#include <fstream>
+#include <boost/algorithm/string.hpp>
+#include <harp.hpp>
+#include <specex_fits.h>
+#include <specex_trace.h>
+#include <specex_gauss_hermite_psf.h>
 
+using namespace std ;
 
+static void AddRow1(specex::FitsTable& table,const string& PARAM, double wavemin, double wavemax, harp::vector_double& coeff) {
+  std::vector<specex::FitsTableEntry> row;
+  {specex::FitsTableEntry entry; entry.string_val = PARAM; row.push_back(entry);}
+  {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = wavemin; row.push_back(entry);}
+  {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = wavemax; row.push_back(entry);}
+  {specex::FitsTableEntry entry; entry.double_vals = coeff; row.push_back(entry);}
+  table.data.push_back(row);
+}
 
 void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, fitsfile* fp, int first_hdu, std::vector<specex::Spot_p> *spots) {
   

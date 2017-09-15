@@ -1,3 +1,11 @@
+#include <fstream>
+#include <boost/algorithm/string.hpp>
+#include <harp.hpp>
+#include <specex_fits.h>
+#include <specex_trace.h>
+#include <specex_gauss_hermite_psf.h>
+
+using namespace std ;
 
 static void AddRow2(specex::FitsTable& table,const string& PARAM, harp::vector_double& coeff, int legdegx, int legdegw) {
   std::vector<specex::FitsTableEntry> row;
@@ -423,23 +431,27 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
       harp::vector_double B(npar);
       A *= 0;
       B *= 0;
+      
+      int npoints=0;
       for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
 	const specex::Trace& trace = psf->FiberTraces[fiber];
 	specex::Legendre1DPol fiberpol(LEGDEG,WAVEMIN,WAVEMAX);
 	for(int i=0;i<=LEGDEG;i++)
 	  fiberpol.coeff[i]=param_coeff[pname][i+(fiber-FIBERMIN)*(LEGDEG+1)];
-	for(double wave=WAVEMIN;wave<=WAVEMAX;wave+=(WAVEMAX-WAVEMIN)/(degw+2)) {
+	
+	for(double wave=WAVEMIN;wave<WAVEMAX+0.01;wave+=(WAVEMAX-WAVEMIN)/(degw+3)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
 	  harp::vector_double der = pol->Monomials(x,wave);
 	  specex::syr(1.,der,A); // A += der*der.transposed;
 	  specex::axpy(pval,der,B); // B += pval*der;
+	  npoints += 1;
 	}
       }
       // now need to solve
       int status = specex::cholesky_solve(A,B);
       if(status != 0) 
-	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname);
+	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname << " " << "bundle fibermin,fibermax=" << bundle_fibermin << "," << bundle_fibermax << " degx,degw=" << degx << "," << degw << " " << "xmin,xmax=" << xmin << "," << xmax << " WAVEMIN,WAVEMAX=" << WAVEMIN << "," << WAVEMAX << " npoints=" << npoints );
       
       pol->coeff = B;
       bundle_params.AllParPolXW.push_back(pol);
