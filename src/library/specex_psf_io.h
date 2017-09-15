@@ -15,8 +15,8 @@ namespace specex {
   void write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename);
   
   // write routines
-  void write_xtrace_fits_hdu(const specex::PSF& psf, fitsfile *fp, int hdu);
-  void write_ytrace_fits_hdu(const specex::PSF& psf, fitsfile *fp, int hdu);
+  void write_xtrace_fits(const specex::PSF& psf, fitsfile *fp);
+  void write_ytrace_fits(const specex::PSF& psf, fitsfile *fp);
   
   void write_psf_xml(const specex::PSF_p psf, const std::string& filename);
   void write_psf_fits(const specex::PSF_p psf, fitsfile* fp, int first_hdu=1, std::vector<specex::Spot_p> *spots = NULL);

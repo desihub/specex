@@ -297,55 +297,62 @@ harp::vector_double coeffs_from_pold2d(int param_index, const double& wavemin, c
   return coeff;
 }
 
-void _write_trace(const specex::PSF &psf, fitsfile *fp, int hdu, bool is_x) {
+void _write_trace(const specex::PSF &psf, fitsfile *fp, bool is_x) {
   int ncoeff=0;
-  double wavemin=0;
-  double wavemax=0;
+  double WAVEMIN=0;
+  double WAVEMAX=0;
   for(std::map<int,specex::Trace>::const_iterator it=psf.FiberTraces.begin(); it!=psf.FiberTraces.end(); it++) {
     const specex::Legendre1DPol *pol=0;
     if(is_x) pol = &(it->second.X_vs_W);
     else pol = &(it->second.Y_vs_W);
-    
+    if((pol->xmin)==0) continue;
     ncoeff=max(ncoeff,int(pol->coeff.size()));
-    if(wavemin==0) wavemin=pol->xmin;
-    else if(wavemin != pol->xmin) {SPECEX_ERROR("requires same wavemin for all traces");}
-    if(wavemax==0) wavemax=pol->xmax;
-    else if(wavemax != pol->xmax) {SPECEX_ERROR("requires same wavemax for all traces");}
+    if(WAVEMIN==0) WAVEMIN=pol->xmin;
+    else if(WAVEMIN != pol->xmin) {SPECEX_ERROR("requires same WAVEMIN for all traces and have" << WAVEMIN << " != " << pol->xmin);}
+    if(WAVEMAX==0) WAVEMAX=pol->xmax;
+    else if(WAVEMAX != pol->xmax) {SPECEX_ERROR("requires same WAVEMAX for all traces and have" << WAVEMAX << " != " << pol->xmax);} 
   }
-  int nfibers=psf.FiberTraces.size();
-    
-  specex::image_data coeff2d(ncoeff,nfibers);
-  int f=0;
+  WAVEMIN=floor(WAVEMIN);
+  WAVEMAX=floor(WAVEMAX)+1;
+
+  int FIBERMIN=100000;
+  int FIBERMAX=0;
   for(std::map<int,specex::Trace>::const_iterator it=psf.FiberTraces.begin(); it!=psf.FiberTraces.end(); it++) {
+    FIBERMIN=min(FIBERMIN,it->second.fiber);
+    FIBERMAX=max(FIBERMAX,it->second.fiber);
+    
+  }
+  int NFIBERS=(FIBERMAX-FIBERMIN+1);
+  
+  specex::image_data coeff2d(ncoeff,NFIBERS);
+  for(std::map<int,specex::Trace>::const_iterator it=psf.FiberTraces.begin(); it!=psf.FiberTraces.end(); it++) {
+    int fiber = it->second.fiber;
     const specex::Legendre1DPol *pol=0;
     if(is_x) pol = &(it->second.X_vs_W);
     else pol = &(it->second.Y_vs_W);
     for(int c=0;c<pol->coeff.size();c++)
-      coeff2d(c,f)=pol->coeff(c);
-    f++;
+      coeff2d(c,fiber-FIBERMIN)=pol->coeff(c);
   }
-
-  int status = 0;
-  fits_movabs_hdu ( fp, hdu, NULL, &status ); harp::fits::check ( status );
-  
   harp::fits::img_append < double > ( fp, coeff2d.n_rows(), coeff2d.n_cols() );
   harp::fits::img_write ( fp, coeff2d.data, false );
   if(is_x)
     harp::fits::key_write(fp,"EXTNAME","XTRACE","");
   else
     harp::fits::key_write(fp,"EXTNAME","YTRACE","");
-  harp::fits::key_write(fp,"WAVEMIN",wavemin,"");
-  harp::fits::key_write(fp,"WAVEMAX",wavemax,"");
-
+  harp::fits::key_write(fp,"FIBERMIN",FIBERMIN,"");
+  harp::fits::key_write(fp,"FIBERMAX",FIBERMAX,"");
+  harp::fits::key_write(fp,"WAVEMIN",WAVEMIN,"");
+  harp::fits::key_write(fp,"WAVEMAX",WAVEMAX,"");
+  SPECEX_DEBUG("done write trace in HDU ");
 }
   
-void specex::write_xtrace_fits_hdu(const specex::PSF& psf, fitsfile *fp, int hdu) {
-  SPECEX_INFO("write_xtrace in hdu "<< hdu);
-  return _write_trace(psf,fp,hdu,true); // X 
+void specex::write_xtrace_fits(const specex::PSF& psf, fitsfile *fp) {
+  SPECEX_INFO("write XTRACE");
+  return _write_trace(psf,fp,true); // X 
 }
-void specex::write_ytrace_fits_hdu(const specex::PSF& psf, fitsfile *fp, int hdu) {
-  SPECEX_INFO("write_ytrace in hdu "<< hdu);
-  return _write_trace(psf,fp,hdu,false); // Y 
+void specex::write_ytrace_fits(const specex::PSF& psf, fitsfile *fp) {
+  SPECEX_INFO("write YTRACE");
+  return _write_trace(psf,fp,false); // Y 
 }
 
 void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx) {
@@ -357,14 +364,14 @@ void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx) {
   harp::fits::img_read ( fp, coeff.data , false);
   int nfibers = coeff.n_rows();
   int ncoefs  = coeff.n_cols();
-  double wavemin; harp::fits::key_read(fp,"WAVEMIN",wavemin);
-  double wavemax; harp::fits::key_read(fp,"WAVEMAX",wavemax);
+  double WAVEMIN; harp::fits::key_read(fp,"WAVEMIN",WAVEMIN);
+  double WAVEMAX; harp::fits::key_read(fp,"WAVEMAX",WAVEMAX);
     
   for(int fiber=0;fiber<nfibers; fiber++) {
     // create or not the trace
     specex::Trace& trace = psf->FiberTraces[fiber];
     trace.fiber=fiber;
-    specex::Legendre1DPol pol(ncoefs-1,wavemin,wavemax);
+    specex::Legendre1DPol pol(ncoefs-1,WAVEMIN,WAVEMAX);
     for(int i=0;i<ncoefs;i++)
       pol.coeff[i]=coeff(i,fiber);
     if(isx) trace.X_vs_W=pol;
@@ -451,17 +458,32 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
 
 
 
+
 void specex::write_psf_fits(const specex::PSF_p psf, const string& path, std::vector<specex::Spot_p> *spots) {
   fitsfile * fp;  
   harp::fits::create(fp,path);
+  int status=0;
+ 
 
-  specex::write_xtrace_fits_hdu(*psf,fp,1);
-  specex::write_ytrace_fits_hdu(*psf,fp,2);
+  string psftype;
+  if( psf->Name()=="GaussHermitePSF") psftype=="GAUSS-HERMITE";
+  else if ( psf->Name()=="GaussHermite2PSF") psftype=="GAUSS-HERMITE2";
+  else SPECEX_ERROR("specex::write_psf_fits not implemented for PSF '" << psf->Name() << "'");
   
-  if(psf->Name()=="GaussHermitePSF")
-    write_gauss_hermite_psf_fits_version_3((const specex::GaussHermitePSF&)*psf,fp,3,spots);
+  int psfver=3;
+  
+  specex::write_xtrace_fits(*psf,fp);
+
+  harp::fits::key_write(fp,"PSFTYPE","GAUSS-HERMITE","");
+  harp::fits::key_write(fp,"PSFVER",psfver,"");
+  fits_write_comment(fp,"PSF generated by specex, https://github.com/desihub/specex",&status);
+  
+  specex::write_ytrace_fits(*psf,fp);
+  
+  if(psf->Name()=="GaussHermitePSF" && psfver==3)
+    write_gauss_hermite_psf_fits_version_3((const specex::GaussHermitePSF&)*psf,fp); // ,spots);
   else 
-    SPECEX_ERROR("specex::write_psf_fits not implemented for PSF '" << psf->Name() << '"');
+    SPECEX_ERROR("specex::write_psf_fits not implemented for PSF '" << psf->Name() << "' and I/O version " << psfver);
   
   harp::fits::close(fp);
   SPECEX_INFO("wrote PSF in " << path);
@@ -473,8 +495,6 @@ void specex::read_psf_fits(specex::PSF_p& psf, const string& filename, int first
   harp::fits::open_read(fp,filename);
 
   // first look at primary header to get psf type and I/O version
-  int status=0;
-  fits_movabs_hdu ( fp, 1, NULL, &status ); harp::fits::check ( status );  
   string psftype; harp::fits::key_read(fp,"PSFTYPE",psftype);
   int psfver; harp::fits::key_read (fp,"PSFVER",psfver);
   SPECEX_INFO("PSFTYPE=" << psftype);  
@@ -495,6 +515,7 @@ void specex::read_psf_fits(specex::PSF_p& psf, const string& filename, int first
     read_ytrace_fits_hdu(psf,fp,find_hdu(fp,"YTRACE"));
 
     if(psftype=="GAUSS-HERMITE" && psfver==2) read_gauss_hermite_psf_fits_version_2(psf,fp,find_hdu(fp,"PSF"),first_bundle,last_bundle);
+    else if(psftype=="GAUSS-HERMITE" && psfver==3) read_gauss_hermite_psf_fits_version_3(psf,fp,find_hdu(fp,"PSF"),first_bundle,last_bundle);
     else SPECEX_ERROR("read fits not implemented for psf " << psftype << " and I/O version " << psfver);
     
   }
