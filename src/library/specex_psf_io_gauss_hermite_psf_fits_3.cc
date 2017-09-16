@@ -408,8 +408,8 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
 #endif    
 
     // loop on parameters
-    for(int i=0;i<(int)params.size();i++) {      
-      const string& pname=params[i];
+    for(int pi=0;pi<(int)params.size();pi++) {      
+      const string& pname=params[pi];
       if(pname=="GH-0-0") continue; // not used in c++ version
       if(pname=="CONT") continue; // not a local param
       if(pname=="BUNDLE") continue; // not a local param
@@ -427,19 +427,17 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
       pol->Fill(true); // sparse or not sparse ????
       
       int npar = pol->Npar();
-      harp::matrix_double A(npar,npar);
-      harp::vector_double B(npar);
-      A *= 0;
-      B *= 0;
+      harp::matrix_double A(npar,npar); A.clear();
+      harp::vector_double B(npar); B.clear();
       
       int npoints=0;
       for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
 	const specex::Trace& trace = psf->FiberTraces[fiber];
 	specex::Legendre1DPol fiberpol(LEGDEG,WAVEMIN,WAVEMAX);
-	for(int i=0;i<=LEGDEG;i++)
-	  fiberpol.coeff[i]=param_coeff[pname][i+(fiber-FIBERMIN)*(LEGDEG+1)];
+	for(int cj=0;cj<=LEGDEG;cj++)
+	  fiberpol.coeff[cj]=param_coeff[pname][cj+(fiber-FIBERMIN)*(LEGDEG+1)];
 	
-	for(double wave=WAVEMIN;wave<WAVEMAX+0.01;wave+=(WAVEMAX-WAVEMIN)/(degw+3)) {
+	for(double wave=WAVEMIN;wave<WAVEMAX+0.01;wave+=(WAVEMAX-WAVEMIN)/(degw+1)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
 	  harp::vector_double der = pol->Monomials(x,wave);
@@ -451,7 +449,7 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
       // now need to solve
       int status = specex::cholesky_solve(A,B);
       if(status != 0) 
-	SPECEX_ERROR("Failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname << " " << "bundle fibermin,fibermax=" << bundle_fibermin << "," << bundle_fibermax << " degx,degw=" << degx << "," << degw << " " << "xmin,xmax=" << xmin << "," << xmax << " WAVEMIN,WAVEMAX=" << WAVEMIN << "," << WAVEMAX << " npoints=" << npoints );
+	SPECEX_ERROR("Oups, failed to convert LegPol(fiber,wave) -> LegPol(x,wave) for bundle " << bundle << " and parameter " << pname << " " << "bundle fibermin,fibermax=" << bundle_fibermin << "," << bundle_fibermax << " degx,degw=" << degx << "," << degw << " " << "xmin,xmax=" << xmin << "," << xmax << " WAVEMIN,WAVEMAX=" << WAVEMIN << "," << WAVEMAX << " npoints=" << npoints );
       
       pol->coeff = B;
       bundle_params.AllParPolXW.push_back(pol);

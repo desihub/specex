@@ -177,7 +177,7 @@ harp::vector_double specex::Legendre2DPol::Monomials(const double &x, const doub
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
-  harp::vector_double mx(xdeg+1);
+  harp::vector_double mx(xdeg+1); mx.clear();
   for(int i=0;i<=xdeg;i++)
     mx[i]=LegendrePol(i,rx);
   
@@ -263,7 +263,7 @@ harp::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, cons
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
   
-  harp::vector_double m(non_zero_indices.size());
+  harp::vector_double m(non_zero_indices.size()); m.clear();
   int index=0;
   for(std::vector<int>::const_iterator k = non_zero_indices.begin(); k!=  non_zero_indices.end(); k++, index++) {
     int i = (*k)%(xdeg+1);

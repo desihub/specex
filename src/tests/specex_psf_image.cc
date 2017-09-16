@@ -45,6 +45,7 @@ int main(int argc, char *argv[]) {
     ( "oversampling", popts::value<int>( &oversampling ), "")
     ( "half_size_x", popts::value<int>( &half_size_x ), "half size of PSF stamp (full size is 2*half_size+1)")
     ( "half_size_y", popts::value<int>( &half_size_y ), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "debug", "debug mode" )
     ;
   
   popts::variables_map vm;
@@ -71,6 +72,7 @@ int main(int argc, char *argv[]) {
   try {
 
     specex_set_verbose(true);
+    specex_set_debug(vm.count("debug")>0);
     
     specex::PSF_p psf;
     specex::read_psf(psf,psf_filename);
