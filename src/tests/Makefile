@@ -16,5 +16,5 @@ clean :
 	- $(RM) $(PROGS) *.o *~
 
 
-% : %.cc
+% : %.cc ../library/libspecex.a
 	$(CXX) $(CXXFLAGS) -I../library -o $@ $< ../library/libspecex.a $(LINK)
