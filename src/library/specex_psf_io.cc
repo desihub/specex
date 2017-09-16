@@ -165,6 +165,27 @@ void specex::read_ytrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu) {
   return _read_trace(psf,fp,hdu,false); // Y 
 }
 
+void specex::synchronize_traces(specex::PSF_p psf) {
+  SPECEX_INFO("synchronizing traces");
+  for(std::map<int,specex::Trace>::iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); it++) {
+    specex::Trace &trace = it->second;
+    // X_vs_Y
+    int deg     = trace.Y_vs_W.deg;
+    double wmin = trace.Y_vs_W.xmin;
+    double wmax = trace.Y_vs_W.xmax;
+    harp::vector_double ty(deg+1);
+    harp::vector_double tx(deg+1);
+    for(int i=0;i<deg+1;i++) {
+      double wave=wmin+i*((wmax-wmin)/deg);
+      ty[i]=trace.Y_vs_W.Value(wave);
+      tx[i]=trace.X_vs_W.Value(wave);
+    }
+    trace.X_vs_Y = specex::Legendre1DPol(deg,0,4000);
+    trace.X_vs_Y.Fit(ty,tx,0,true);    
+    trace.synchronized=true;
+  }
+}
+
 void specex::write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename) {
   std::ofstream os(filename.c_str());
   boost::archive::xml_oarchive xml_oa ( os );
@@ -282,7 +303,8 @@ void specex::read_psf_fits(specex::PSF_p& psf, const string& filename, int first
         
     read_xtrace_fits_hdu(psf,fp,find_hdu(fp,"XTRACE"));
     read_ytrace_fits_hdu(psf,fp,find_hdu(fp,"YTRACE"));
-
+    synchronize_traces(psf);
+    
     if(psftype=="GAUSS-HERMITE" && psfver==2) read_gauss_hermite_psf_fits_version_2(psf,fp,find_hdu(fp,"PSF"),first_bundle,last_bundle);
     else if(psftype=="GAUSS-HERMITE" && psfver==3) read_gauss_hermite_psf_fits_version_3(psf,fp,find_hdu(fp,"PSF"),first_bundle,last_bundle);
     else SPECEX_ERROR("read fits not implemented for psf " << psftype << " and I/O version " << psfver);

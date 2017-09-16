@@ -26,6 +26,7 @@ namespace specex {
   // read routines
   void read_xtrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu);
   void read_ytrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu);
+  void synchronize_traces(specex::PSF_p psf);
   
   void read_psf_xml(specex::PSF_p& psf, const std::string& filename);
   void read_psf_fits(specex::PSF_p& psf, const string& filename, int first_bundle=-1, int last_bundle=-1);
