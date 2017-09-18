@@ -1362,28 +1362,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     harp::vector_double& B = B_of_band[0];
     
     harp::matrix_double As=A;
-    //harp::vector_double Bs=B;
     
-    /*
-    if(0 && fit_psf && npar_fixed_coord>2) {
-      {
-	ofstream os("A.xml");
-	boost::archive::xml_oarchive xml_oa ( os );
-	xml_oa << BOOST_SERIALIZATION_NVP(A);
-	os.close();
-      }
-      {
-	ofstream os("B.xml");
-	boost::archive::xml_oarchive xml_oa ( os );
-	xml_oa << BOOST_SERIALIZATION_NVP(B);
-	os.close();
-      }
-      exit(12);
-    }
-    */
-
-    
-    //if(fit_psf && fit_flux) {SPECEX_DEBUG("Writing A.fits"); specex::write_new_fits_image("A.fits",A);  }
+    //if(false) {SPECEX_DEBUG("Writing A.fits"); specex::write_new_fits_image("A.fits",A);  }
     
     int status = cholesky_solve(A,B);
 
@@ -2380,10 +2360,12 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   
   SPECEX_INFO("starting to fit PSF with " <<  input_spots.size() << " spots");
  
-
-    //SPECEX_INFO("init traces");
-    //FitTraces(input_spots);
-    
+  /*
+  if(init_psf) {
+  SPECEX_INFO("init traces");
+  FitTraces(input_spots);
+  }
+  */
     int number_of_fibers_with_dead_columns = 0;
   
     
@@ -2438,13 +2420,15 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       bool modified=false;
       for(map<int,specex::Trace>::iterator it=psf->FiberTraces.begin();
 	  it !=psf->FiberTraces.end(); ++it) {
-	const Trace& trace = it->second;
-	if(trace.synchronized) {
-	  min_wave = min( min_wave , trace.X_vs_W.xmin);
-	  max_wave = max( max_wave , trace.X_vs_W.xmax);
-	  min_x = min( min_x , trace.X_vs_W.Value(trace.X_vs_W.xmin));
-	  max_x = max( max_x , trace.X_vs_W.Value(trace.X_vs_W.xmax));
-	  modified=true;
+	if(it->first >= psf_params->fiber_min && it->first <= psf_params->fiber_max) {
+	  const Trace& trace = it->second;
+	  if(trace.synchronized) {
+	    min_wave = min( min_wave , trace.X_vs_W.xmin);
+	    max_wave = max( max_wave , trace.X_vs_W.xmax);
+	    min_x = min( min_x , trace.X_vs_W.Value(trace.X_vs_W.xmin));
+	    max_x = max( max_x , trace.X_vs_W.Value(trace.X_vs_W.xmax));
+	    modified=true;
+	  }
 	}
       }
       if(modified)
