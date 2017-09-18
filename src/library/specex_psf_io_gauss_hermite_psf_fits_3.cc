@@ -426,7 +426,8 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
       if(pname=="GH-0-0") continue; // not used in c++ version
       if(pname=="CONT") continue; // not a local param
       if(pname=="BUNDLE") continue; // not a local param
-
+      if(pname=="STATUS") continue; // not a local param
+      
       SPECEX_DEBUG("Fitting pol of parameter " << pname << " in bundle " << bundle << " fibers in [" << bundle_fibermin << "," << bundle_fibermax << "]" );
       
       // now we need to fit a 2D legendre polynomial of X and wave

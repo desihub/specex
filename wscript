@@ -112,9 +112,10 @@ def configure(conf):
     print "optimize=",conf.options.optimize
     opti=string.atoi(str(conf.options.optimize))
     if opti > 0 :
+        print "opti=",opti
         conf.env['CFLAGS'].append('-O%d' % opti )
         conf.env['CXXFLAGS'].append('-O%d' % opti )
-
+    
     if conf.options.openmp :
         conf.env['CCFLAGS'].append('-fopenmp')
         conf.env['CXXFLAGS'].append('-fopenmp')

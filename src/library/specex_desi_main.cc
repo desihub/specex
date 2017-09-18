@@ -58,40 +58,6 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   // to crash when NaN
   feenableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
   
-  
-  //string spectrograph_name = "DESI";  
-  
-  
-  //  arguments
-  // default values
-  // -------------------------------------------------------
-
-  /*
-  int default_flux_hdu=0;
-  int default_ivar_hdu=0;
-  int default_mask_hdu=0;
-  int default_header_hdu=0;
-  int default_xtrace_hdu=0;
-  int default_ytrace_hdu=0;  
-  string default_psf_model="";
-  int    default_first_fiber_bundle=0;
-  int    default_last_fiber_bundle=0;
-  int    default_first_fiber=0;
-  int    default_last_fiber=0;
-  int    default_half_size_x=0;
-  int    default_half_size_y=0;  
-  int default_gauss_hermite_deg=0;
-  int default_gauss_hermite_deg2=0; 
-  int default_legendre_deg_wave=0;
-  int default_legendre_deg_x=0;
-  int default_trace_deg_wave=0;
-  int default_trace_deg_x=0;  
-  double default_psf_error=0;
-  double default_psf_core_wscale=0;
-  int default_max_number_of_lines=0; 
-  */
-  
-
   // -------------------------------------------------------
   string arc_image_filename="";
   string input_psf_filename="";
@@ -389,7 +355,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
     fitter.scheduled_fit_of_psf         = fit_psf;
-    fitter.direct_simultaneous_fit      = (input_psf_filename != "");
+    fitter.direct_simultaneous_fit      = true;
     fitter.max_number_of_lines          = max_number_of_lines;
     
     fitter.psf->gain = 1; // images are already in electrons
@@ -450,17 +416,9 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       
       int ymin = 0; // range of usable CCD coordinates, hard coded for now
       int ymax = image.n_rows(); // range of usable CCD coordinates, hard coded for now
-      
-      if(psf->camera_id=="b1") {ymin=696; ymax = 3516;};
-      if(psf->camera_id=="b2") {ymin=696; ymax = 3516;};
-      if(psf->camera_id=="r1") {ymin=200; ymax = 3668;}; 
-      if(psf->camera_id=="r2") {ymin=200; ymax = 3668;};
-
-      
       int margin = -psf->hSizeY+1; // we need to include spots that contribute to the image signal
       ymin+=margin;
       ymax-=margin;
-      
 
       SPECEX_INFO("valid y(=rows) range = " << ymin << " " << ymax);
 
@@ -473,7 +431,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       
       if(write_tmp_results)
 	write_spots_xml(spots,"spots-init.xml");
-
+      
       /* DEBUGGING
       {
 	for(int fiber=psf->ParamsOfBundles[bundle].fiber_min; fiber <= psf->ParamsOfBundles[bundle].fiber_max ;fiber ++) {
