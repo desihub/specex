@@ -355,7 +355,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
     fitter.scheduled_fit_of_psf         = fit_psf;
-    fitter.direct_simultaneous_fit      = true;
+    fitter.direct_simultaneous_fit      = true; // use_input_specex_psf;
     fitter.max_number_of_lines          = max_number_of_lines;
     
     fitter.psf->gain = 1; // images are already in electrons
@@ -416,6 +416,15 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       
       int ymin = 0; // range of usable CCD coordinates, hard coded for now
       int ymax = image.n_rows(); // range of usable CCD coordinates, hard coded for now
+      
+      /*
+      SPECEX_WARNING("RESTRICTING Y RANGE !!!!!");
+      if(psf->camera_id=="b1") {ymin=696; ymax = 3516;};
+      if(psf->camera_id=="b2") {ymin=696; ymax = 3516;};
+      if(psf->camera_id=="r1") {ymin=200; ymax = 3668;}; 
+      if(psf->camera_id=="r2") {ymin=200; ymax = 3668;};
+      */
+
       int margin = -psf->hSizeY+1; // we need to include spots that contribute to the image signal
       ymin+=margin;
       ymax-=margin;
