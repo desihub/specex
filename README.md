@@ -41,7 +41,7 @@ for BUNDLE in `seq 0 19`; do
 done
 ```
 
-In production, merging is done in ```desispec.scripts.specex.merge_psf`` , and averaging done in ```desispec.scripts.specex.mean_psf``.
+In production, merging is done in ```desispec.scripts.specex.merge_psf``` , and averaging done in ```desispec.scripts.specex.mean_psf```.
 
 ## License
 
