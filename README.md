@@ -35,15 +35,13 @@ specex is not MPI, but it uses internally `openmp` to speed up the computation (
 
 Example (in `bash`):
 
-THIS EXAMPLE IS DEPRECATED, THIS HAS TO BE MODIFIED.
-
 ```
 for BUNDLE in `seq 0 19`; do
-  desi_psf_fit ... --first_bundle $BUNDLE --last_bundle $BUNDLE --out-psf-xml psf-of-bundle-${BUNDLE}.xml &
+  desi_psf_fit ... --first_bundle $BUNDLE --last_bundle $BUNDLE --out-psf psf-of-bundle-${BUNDLE}.fits &
 done
-wait
-specex_merge_psf psf-of-bundle-*.xml --out-fits psf.fits --out-xml  psf.xml
 ```
+
+In production, merging is done in ```desispec.scripts.specex.merge_psf`` , and averaging done in ```desispec.scripts.specex.mean_psf``.
 
 ## License
 
