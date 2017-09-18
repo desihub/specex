@@ -85,5 +85,7 @@ namespace specex {
 
   typedef std::map<int, Trace> TraceSet;
 
+  int eval_bundle_size(const TraceSet& traceset);
+
 }
 #endif

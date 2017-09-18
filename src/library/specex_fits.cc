@@ -12,10 +12,11 @@
 using namespace std;
 
 
-int specex::find_hdu( fitsfile *fp, const std::string& extname) {
+int specex::find_hdu( fitsfile *fp, const std::string& extname, const std::string& alternate_extname) {
   //SPECEX_DEBUG("Looking for extension '" << extname << "'");
   
   int nhdus = harp::fits::nhdus(fp);
+  map<string,int> extname_in_hdus;
   for(int i=0;i<nhdus;i++) {
     int hdu=i+1; // starts at 1
     int status = 0;
@@ -26,15 +27,28 @@ int specex::find_hdu( fitsfile *fp, const std::string& extname) {
       harp::fits::key_read (fp,"EXTNAME",extname_in_hdu);
     }catch(...) { 
       if(i!=0) SPECEX_WARNING("could not read EXTNAME in hdu " << hdu);
-      extname_in_hdu="";
+      continue;
     }
-    if(extname_in_hdu.find(extname) != extname_in_hdu.npos) {
-      //SPECEX_DEBUG("found '" << extname << "' in hdu "<<hdu);
-      return hdu;
+    extname_in_hdus[extname_in_hdu]=hdu;
+  }
+  map<string,int>::iterator it=extname_in_hdus.find(extname);
+  if(it != extname_in_hdus.end()) {
+    SPECEX_DEBUG("found '" << extname << "' in hdu "<< it->second);
+    return it->second;
+  }
+  if(alternate_extname != "") {
+    it=extname_in_hdus.find(alternate_extname);
+    if(it != extname_in_hdus.end()) {
+      SPECEX_DEBUG("found '" << alternate_extname << "' in hdu "<< it->second);
+      return it->second;
     }
   }
- 
-  SPECEX_WARNING("Didn't find extname '" << extname << "' in file");
+
+  if(alternate_extname != "") {
+    SPECEX_WARNING("Didn't find extname '" << extname << "' nor '" << alternate_extname << "' in file");
+  } else {
+    SPECEX_WARNING("Didn't find extname '" << extname << "' in file"); 
+  }
   return -1;
 }
 

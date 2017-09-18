@@ -25,7 +25,7 @@ friend class boost::serialization::access;
   double Value(const double &x) const;
   
   bool Fit(const harp::vector_double& x, const harp::vector_double& y, const harp::vector_double* ey=0, bool set_range = true);
-  Legendre1DPol Invert(int add_degree=1) const;
+  Legendre1DPol Invert(int add_degree=0) const;
   
   private :
 

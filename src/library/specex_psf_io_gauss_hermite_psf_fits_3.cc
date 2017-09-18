@@ -305,9 +305,9 @@ void write_gauss_hermite_psf_fits_version_3(const specex::GaussHermitePSF& psf, 
 
 
 
-void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int hdu, int first_bundle, int last_bundle) {
+void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int hdu) {
   
-  SPECEX_DEBUG("read_gauss_hermite_psf_fits_version_3 hdu=" << hdu << " first,last bundle=" << first_bundle << "," << last_bundle);
+  SPECEX_DEBUG("read_gauss_hermite_psf_fits_version_3 hdu=" << hdu);
 
   int status = 0;
   fits_movabs_hdu ( fp, hdu, NULL, &status ); harp::fits::check ( status );

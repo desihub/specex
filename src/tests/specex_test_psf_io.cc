@@ -18,16 +18,12 @@ int main(int argc, char *argv[]) {
   
   string input_filename="";
   string output_filename="";
-  int first_bundle=-1;
-  int last_bundle=-1;
   
   popts::options_description desc ( "Allowed Options" );
   desc.add_options()
     ( "help,h", "display usage information" )
     ( "in,i", popts::value<string>( &input_filename ), "input psf filename (xml or fits)" )
     ( "out,o", popts::value<string>( &output_filename ), "output psf filename (xml or fits)" )
-    ( "first-bundle", popts::value<int>( &first_bundle ), "first bundle" )
-    ( "last-bundle", popts::value<int>( &last_bundle ), "first bundle" )    
     ( "debug", "turn on debug mode" );
   
   popts::variables_map vm;
@@ -59,7 +55,7 @@ int main(int argc, char *argv[]) {
   specex_set_debug(vm.count("debug")>0);
   
   specex::PSF_p psf;
-  specex::read_psf(psf,input_filename,first_bundle,last_bundle);
+  specex::read_psf(psf,input_filename);
   specex::write_psf(psf,output_filename);
   
   

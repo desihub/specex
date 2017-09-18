@@ -29,13 +29,15 @@ void specex::axpy(const double &a, const harp::vector_double& h,  harp::vector_d
 void specex::gemv(const double &alpha,  const harp::matrix_double &A,  const harp::vector_double& h, const double &beta, harp::vector_double& B) {
   blas::gemv(alpha,A,h,beta,B);
 }
+
+/*
 // ! C = alpha*A*B + beta*C if side='L' , C = alpha*B*A + beta*C if side='R' , where A is a symmetric matrix
 // see vn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_3_blas/symm.html
 void specex::symm(const char side, const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C) {
-#warning NEED TO FIX THIS !
-  HARP_THROW("specex::symm not implemented");
+  SPECEX_ERROR("specex::symm not implemented");
   //blas::symm('L',alpha,boost::numeric::bindings::lower(A),B,beta,C);
 }
+*/
 
 // ! C = alpha*A*B + beta*C 
 // see vn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_3_blas/gemm.html

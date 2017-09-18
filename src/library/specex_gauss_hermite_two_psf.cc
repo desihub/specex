@@ -473,7 +473,8 @@ double specex::GaussHermite2PSF::PSFValueWithParamsXY(const double &Xc, const do
   double val = 0;
 
   if(with_core) {
-
+    
+    /*
     //here is a hack
 #define NASTY_HACK_FOR_SPECTER
 #ifdef NASTY_HACK_FOR_SPECTER
@@ -486,9 +487,9 @@ double specex::GaussHermite2PSF::PSFValueWithParamsXY(const double &Xc, const do
     else
       par(2)=0; // out of inner core everywhere in the pixel
 #endif
+    */
     
-    
-    val += PixValue(Xc,Yc,IPix, JPix, par, PosDer, ParamDer); 
+    val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 
   }
   
 

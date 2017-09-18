@@ -1620,14 +1620,13 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
   
   fitWeight = A_of_band[0];
-  SPECEX_DEBUG("Calling cholesky_invert_after_decomposition");
-
+  SPECEX_DEBUG("Compute covariance");
   //{SPECEX_DEBUG("Writing fitweight.fits"); specex::write_new_fits_image("fitweight.fits",fitWeight);  }
 
   if (specex::cholesky_invert_after_decomposition(fitWeight) != 0) {
     SPECEX_ERROR("cholesky_invert_after_decomposition failed");
   }
-  SPECEX_DEBUG("done cholesky_invert_after_decomposition");
+  //SPECEX_DEBUG("done cholesky_invert_after_decomposition");
   
   // fitWeight is now a covariance matrix
   // just to avoid confusion :
@@ -1854,8 +1853,8 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
     bool ok = true;
     if(! trace.synchronized)
       ok = trace.Fit(spots_of_fiber);
-    else
-      SPECEX_DEBUG("No need to refit synchronized trace (wavemin,wavemax = " << trace.X_vs_W.xmin << "," << trace.X_vs_W.xmax << ")");
+    //else
+    //SPECEX_DEBUG("No need to refit synchronized trace (wavemin,wavemax = " << trace.X_vs_W.xmin << "," << trace.X_vs_W.xmax << ")");
     
     if(ok) { 
       (*nok)++;
