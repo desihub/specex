@@ -403,7 +403,24 @@ double specex::PSF::PSFValueFW(const int fiber, const double &wave,
 }
 
 
-
+int specex::PSF::GetBundleOfFiber(int fiber) const {
+  // find bundle for this fiber
+  int bundle=0;
+  bool found=false;
+  for(std::map<int,specex::PSF_Params>::const_iterator it=ParamsOfBundles.begin() ; it != ParamsOfBundles.end(); ++it) {
+    
+    if (fiber>=it->second.fiber_min && fiber<=it->second.fiber_max) {
+      SPECEX_DEBUG("Found bundle of fiber #" << fiber << " : " << it->first);
+      bundle=it->first;
+      found=true;
+      break;
+    }
+  }
+  if(!found) {
+    SPECEX_ERROR("Did not find any bundle for fiber #" << fiber);
+  }
+  return bundle;
+}
 
 harp::vector_double specex::PSF::AllLocalParamsXW(const double &X, const double &wave, int bundle_id) const {
   
@@ -419,6 +436,10 @@ harp::vector_double specex::PSF::AllLocalParamsXW(const double &X, const double 
 }
 
 harp::vector_double specex::PSF::AllLocalParamsFW(const int fiber, const double &wave, int bundle_id) const {
+  if(bundle_id<0) { // not given
+    bundle_id = GetBundleOfFiber(fiber);
+  }
+
   double X=Xccd(fiber,wave); 
   return AllLocalParamsXW(X,wave,bundle_id);
 }

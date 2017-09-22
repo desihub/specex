@@ -25,7 +25,7 @@ friend class boost::serialization::access;
   double Value(const double &x) const;
   
   bool Fit(const harp::vector_double& x, const harp::vector_double& y, const harp::vector_double* ey=0, bool set_range = true);
-  Legendre1DPol Invert(int add_degree=1) const;
+  Legendre1DPol Invert(int add_degree=0) const;
   
   private :
 
@@ -97,14 +97,14 @@ class SparseLegendre2DPol
   harp::vector_double coeff;
   int xdeg,ydeg;
   double xmin,xmax,ymin,ymax;
-  
+  int Npar() const { return non_zero_indices.size();}
   void Add(int i,int j);
-  void Fill(); // this is equivalent to a std Legendre2DPol
+  void Fill(bool sparse = true); // this is equivalent to a std Legendre2DPol is sparse=false
   void Clear(); // reset
 
   SparseLegendre2DPol(int i_xdeg=0, const double& i_xmin=0, const double& i_xmax=0, 
 		      int i_ydeg=0, const double& i_ymin=0, const double& i_ymax=0);
- 
+  
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   

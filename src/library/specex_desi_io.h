@@ -6,8 +6,6 @@
 
 namespace specex {
 
-  class TraceSet;
-  
   void read_DESI_traceset_in_fits(
 				  TraceSet& traceset,
 				  const std::string& x_vs_wave_filename, 

@@ -5,20 +5,22 @@
 
 #include "specex_spot.h"
 #include "specex_trace.h"
-#include "specex_spectrograph.h"
+//#include "specex_spectrograph.h"
 #include "specex_lamp_lines_utils.h"
 #include "specex_message.h"
 
 using namespace std;
 
 
-void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const specex::Spectrograph & spectro, const string& lamp_lines_filename, const specex::TraceSet& traceset, 
-				     int fiber_bundle, int fiber_min, int fiber_max, int ymin, int ymax, 
+void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const string& lamp_lines_filename, const specex::TraceSet& traceset, 
+				      int fiber_bundle, int fiber_min, int fiber_max, int ymin, int ymax, 
 				      const double& min_wavelength, const double& max_wavelength) {
   
-  if(fiber_bundle<0 || fiber_bundle >= spectro.number_of_fiber_bundles_per_ccd) {
-    SPECEX_ERROR("inproper fiber bundle id");
-  }
+  /*
+    if(fiber_bundle<0 || fiber_bundle >= spectro.number_of_fiber_bundles_per_ccd) {
+    SPECEX_ERROR("incorrect fiber bundle id : " << fiber_bundle);
+    }
+  */
 
   spots.clear();
   
@@ -31,7 +33,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
     SPECEX_ERROR("cannot open file " << lamp_lines_filename);
   }
   SPECEX_INFO("reading " << lamp_lines_filename);
-  SPECEX_INFO("allocating spots in wavelength range " << min_wavelength << " " << max_wavelength);
+  SPECEX_DEBUG("allocating spots in wavelength range " << min_wavelength << " " << max_wavelength);
   
   int nlines=0;
   string line;
@@ -39,7 +41,7 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
     std::istringstream iss(line);
     if( !( iss >> ion >> wave >> score >> intensity) ) continue;
     
-    SPECEX_INFO(ion << " " << wave << " " << score << " " << intensity);
+    SPECEX_DEBUG(ion << " " << wave << " " << score << " " << intensity);
     
     if(wave<min_wavelength || wave>max_wavelength) continue;
     if(score<1 or score>4) {
@@ -47,9 +49,10 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const spece
       continue;
     }
     nlines ++;
-    for(int fiber=max(spectro.number_of_fibers_per_bundle*fiber_bundle,fiber_min); fiber<min(spectro.number_of_fibers_per_bundle*(fiber_bundle+1),fiber_max+1); fiber++) {
+    //for(int fiber=max(spectro.number_of_fibers_per_bundle*fiber_bundle,fiber_min); fiber<min(spectro.number_of_fibers_per_bundle*(fiber_bundle+1),fiber_max+1); fiber++) {
+    for(int fiber=fiber_min; fiber<=fiber_max; fiber++) {
       
-      const specex::Trace& trace = traceset[fiber];
+      const specex::Trace& trace = traceset.find(fiber)->second; //traceset[fiber];
       if(trace.Off()) {
 	//SPECEX_WARNING("Ignore spot in fiber " << fiber << " because mask=" << trace.mask);
 	continue;

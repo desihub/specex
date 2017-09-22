@@ -47,7 +47,7 @@ namespace specex {
     Stamp stamp;
 
     bool can_measure_flux;
-    
+    bool ignore;
   };
 
 class PSF_Fitter {
@@ -90,15 +90,19 @@ class PSF_Fitter {
 
   const image_data& image;
   const image_data& weight;
+  const image_data& readnoise;
   image_data footprint_weight; // weight x psf footprint for global fit
-  image_data corefootprint;
-  double corefootprint_weight_boost;
+  image_data corefootprint;  
   Stamp stamp; // rectangle in image where the fit occurs
+  
+  double corefootprint_weight_boost;
   bool fit_psf;
   bool fit_trace;
   bool fit_flux;
   bool fit_position;
   bool scheduled_fit_of_traces;
+  bool scheduled_fit_of_sigmas;
+  bool scheduled_fit_of_psf;
 #ifdef EXTERNAL_TAIL
   bool fit_psf_tail;
   bool scheduled_fit_of_psf_tail;
@@ -107,6 +111,9 @@ class PSF_Fitter {
   bool fit_continuum;
   bool scheduled_fit_of_continuum;
 #endif
+  bool scheduled_fit_with_weight_model;
+  bool sparse_pol;
+  bool direct_simultaneous_fit;
   bool write_tmp_results;
 
   double chi2_precision;
@@ -114,22 +121,25 @@ class PSF_Fitter {
   bool recompute_weight_in_fit;
   bool force_positive_flux;
   bool increase_weight_of_side_bands;
-  bool verbose;
   bool fatal;
   bool parallelized;
   double polynomial_degree_along_x;
   double polynomial_degree_along_wave;
   
+  int max_number_of_lines;
+  
   Mask mask;
   
   std::map<std::string,Prior*> priors;
   
- PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight) :
+ PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight, const image_data& i_readnoise) :
     
   psf(i_psf),
     image(i_image),
     weight(i_weight),
-    stamp(i_image), 
+    readnoise(i_readnoise),
+    stamp(i_image),
+    corefootprint_weight_boost(0), 
     fit_psf(false),
     fit_trace(false),
     fit_flux(false),
@@ -140,6 +150,8 @@ class PSF_Fitter {
    force_positive_flux(false),
    increase_weight_of_side_bands(false),
     scheduled_fit_of_traces(true),
+    scheduled_fit_of_sigmas(true),
+    scheduled_fit_of_psf(true),
 #ifdef EXTERNAL_TAIL
     fit_psf_tail(false),
     scheduled_fit_of_psf_tail(false),
@@ -148,17 +160,17 @@ class PSF_Fitter {
     fit_continuum(false),
     scheduled_fit_of_continuum(false),
 #endif
+    scheduled_fit_with_weight_model(false),
+    sparse_pol(true),
+    direct_simultaneous_fit(false),
     write_tmp_results(false),
     fatal(true),
     parallelized(true),
-    verbose(true),
-    
-      polynomial_degree_along_x(1),
-      polynomial_degree_along_wave(4)
+        
+    polynomial_degree_along_x(1),
+    polynomial_degree_along_wave(4),
+    max_number_of_lines(0)
       {
-	corefootprint_weight_boost=0;
-
-
       };
     
     void SetStampLimitsFromPSF(Stamp& stamp, const PSF_p psf, const double &X, const double &Y);

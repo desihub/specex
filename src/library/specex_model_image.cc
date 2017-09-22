@@ -44,13 +44,13 @@ specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const
 
 void specex::parallelized_compute_model_image(specex::image_data& model_image, const specex::image_data& weight, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, bool only_on_spots, bool only_psf_core, bool only_positive, int x_margin, int y_margin, int only_this_bundle) {
 
-  SPECEX_INFO("parallelized_compute_model_image");
+  SPECEX_DEBUG("parallelized_compute_model_image");
   
   int number_of_image_chuncks = 1;
   char* OMP_NUM_THREADS = getenv("OMP_NUM_THREADS");
   if(OMP_NUM_THREADS) {
     number_of_image_chuncks = atoi(OMP_NUM_THREADS);
-    SPECEX_INFO("Using " << number_of_image_chuncks << " image chunks equal to value of OMP_NUM_THREADS");
+    SPECEX_DEBUG("Using " << number_of_image_chuncks << " image chunks equal to value of OMP_NUM_THREADS");
   }
 
 #ifdef EXTERNAL_TAIL  

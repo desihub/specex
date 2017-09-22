@@ -11,6 +11,48 @@
 
 using namespace std;
 
+
+int specex::find_hdu( fitsfile *fp, const std::string& extname, const std::string& alternate_extname) {
+  //SPECEX_DEBUG("Looking for extension '" << extname << "'");
+  
+  int nhdus = harp::fits::nhdus(fp);
+  map<string,int> extname_in_hdus;
+  for(int i=0;i<nhdus;i++) {
+    int hdu=i+1; // starts at 1
+    int status = 0;
+    fits_movabs_hdu ( fp, hdu, NULL, &status );
+    
+    string extname_in_hdu="";
+    try {
+      harp::fits::key_read (fp,"EXTNAME",extname_in_hdu);
+    }catch(...) { 
+      if(i!=0) SPECEX_WARNING("could not read EXTNAME in hdu " << hdu);
+      continue;
+    }
+    extname_in_hdus[extname_in_hdu]=hdu;
+  }
+  map<string,int>::iterator it=extname_in_hdus.find(extname);
+  if(it != extname_in_hdus.end()) {
+    SPECEX_DEBUG("found '" << extname << "' in hdu "<< it->second);
+    return it->second;
+  }
+  if(alternate_extname != "") {
+    it=extname_in_hdus.find(alternate_extname);
+    if(it != extname_in_hdus.end()) {
+      SPECEX_DEBUG("found '" << alternate_extname << "' in hdu "<< it->second);
+      return it->second;
+    }
+  }
+
+  if(alternate_extname != "") {
+    SPECEX_WARNING("Didn't find extname '" << extname << "' nor '" << alternate_extname << "' in file");
+  } else {
+    SPECEX_WARNING("Didn't find extname '" << extname << "' in file"); 
+  }
+  return -1;
+}
+
+
 static vector<string> DecomposeString(const string &Source,vector<string> &Tokens)
 {
   vector<string> SubStrings;
@@ -177,8 +219,19 @@ bool specex::FitsColumnDescription::IsDouble() const {
   char last = format[format.size()-1];
   return (last=='D' || last=='E');
 }
+bool specex::FitsColumnDescription::IsInt() const {
+  if(format.empty()) return false;
+  if(format=="UNKNOWN") return false;
+  char last = format[format.size()-1];
+  return (last=='I' || last=='U' || last=='J'|| last=='V' || last=='K');
+}
 int specex::FitsColumnDescription::SizeOfVectorOfDouble() const {
   if(!IsDouble()) return 0;
+  if(format.size()==1) return 1;
+  return atoi(format.substr(0,format.size()-1).c_str());
+}
+int specex::FitsColumnDescription::SizeOfVectorOfInt() const {
+  if(!IsInt()) return 0;
   if(format.size()==1) return 1;
   return atoi(format.substr(0,format.size()-1).c_str());
 }
@@ -288,18 +341,6 @@ bool specex::FitsTable::Write(fitsfile *fp) const {
 	
 
       }else if(column.IsDouble()) {
-	/*
-	double ** double_vals = new double*[nrows];
-	int nd = column.SizeOfVectorOfDouble();
-	for(int r=0;r<nrows;r++) {
-	  if(nd !=  int(data[r][column.col].double_vals.size())) SPECEX_ERROR("specex::FitsTable::Write inconsistent data size");
-	  double_vals[r] = new double[nd];
-	  for(int d=0;d<nd;d++) {
-	    double_vals[r][d] = data[r][column.col].double_vals(d);
-	    cout << r << " " << d << " " << double_vals[r][d] << endl;
-	  }
-	}
-	*/
 	
 	int nd = column.SizeOfVectorOfDouble();
 	
@@ -307,7 +348,7 @@ bool specex::FitsTable::Write(fitsfile *fp) const {
 	
 	for(int r=0;r<nrows;r++) {
 	  
-	  if(nd !=  int(data[r][column.col].double_vals.size())) SPECEX_ERROR("specex::FitsTable::Write inconsistent data size");
+	  if(nd !=  int(data[r][column.col].double_vals.size())) SPECEX_ERROR("specex::FitsTable::Write inconsistent data size " << nd << " != " << int(data[r][column.col].double_vals.size()));
 	  
 	  for(int d=0;d<nd;d++) {
 	    
@@ -322,27 +363,55 @@ bool specex::FitsTable::Write(fitsfile *fp) const {
 	
 	delete [] double_vals;
 
+      }else if(column.IsInt()) {
+	
+	int nd = column.SizeOfVectorOfInt();
+	
+	int * int_vals = new int[nrows*nd];
+	
+	for(int r=0;r<nrows;r++) {
+	  
+	  if(nd !=  int(data[r][column.col].int_vals.size())) SPECEX_ERROR("specex::FitsTable::Write inconsistent data size " << nd << " != " << int(data[r][column.col].int_vals.size()));
+	  
+	  for(int d=0;d<nd;d++) {
+	    
+	    int_vals[r*nd+d] = data[r][column.col].int_vals(d); // ordering checked with pyfits
+	    
+	  }
+	}
+	//SPECEX_INFO("specex::FitsTable::Write column " << column.col << " with " << nrows*nd << " data");
+	fits_write_col(fp, TINT, column.col+1, firstrow, firstelem, nrows*nd, int_vals, &status);
+	CHECKERROR;
+	
+	delete [] int_vals;
+
       }else{
 	SPECEX_ERROR("specex::FitsTable::Write format not yet implemented");
       }
     }
     return 0;
 }
-
-
 void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbose)  {
   int status = 0;
   fits_open_file(&fptr, filename.c_str() , READONLY, &status);
   CHECKERROR;
   fits_movrel_hdu(fptr, hdu_number, NULL, &status);
   CHECKERROR;
+  Read(fptr,verbose);
+}
+
+void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
+  fptr = fp;
+  int status = 0;
   
+  SPECEX_DEBUG("Starting specex::FitsTable::Read");
+
   // checking HDU TYPE
   int hdutype;
   fits_get_hdu_type(fptr, &hdutype, &status);
   CHECKERROR;
   if(hdutype != BINARY_TBL && hdutype != ASCII_TBL ) {
-    SPECEX_ERROR("FitsTable::Read file " << filename << " hdu " << hdu_number << " is not a table");
+    SPECEX_ERROR("FitsTable::Read : hdu is not a table");
   }
   
   long nrows;
@@ -398,6 +467,8 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
   
   data.resize(nrows);
   
+  SPECEX_DEBUG("specex::FitsTable::Read start reading rows");
+  
   // loop on rows
   for(int r=0; r<nrows; r++) {
     
@@ -441,12 +512,32 @@ void specex::FitsTable::Read(const string& filename, int hdu_number, bool verbos
 	if(r==0) {
 	  SPECEX_INFO("first FitsTableEntry col=" << it->first << " : " << entry.double_vals(0));
 	}
+      } else if(col.IsInt()) {
+	int nvals = col.SizeOfVectorOfInt();
+	
+	int *values = new int[nvals];
+	int nullval = 0;
+	
+	int anynul;
+	//fits_read_col(fptr, TDOUBLE, c+1, long(r+1), 1,nvals, &nullval, entry.double_vals.NonConstData(), &anynul, &status); 
+	fits_read_col(fptr, TINT, c+1, long(r+1), 1,nvals, &nullval, values, &anynul, &status); 
+	CHECKERROR;
+	
+	entry.int_vals.resize(nvals);
+	for(int i=0;i<nvals;i++)
+	  entry.int_vals(i)=values[i];
+	delete [] values;
+
+	if(r==0) {
+	  SPECEX_INFO("first FitsTableEntry col=" << it->first << " : " << entry.int_vals(0));
+	}
       } else {
 	SPECEX_ERROR("data type not implemented in FitsTable");
       }
     }
     
   }
+  SPECEX_DEBUG("specex::FitsTable::Read done reading rows");
   delete[] strptr[0];
   delete[] strptr;
 }

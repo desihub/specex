@@ -9,6 +9,7 @@
 #include <specex_linalg.h>
 #include <specex_message.h>
 #include <specex_spot_array.h>
+#include <specex_vector_utils.h>
 
 specex::Trace::Trace(int i_fiber) :
   fiber(i_fiber)
@@ -204,174 +205,59 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   synchronized = true;
   return true;
 }
-#warning check meaning of fibermask
+//#warning check meaning of fibermask
 bool specex::Trace::Off() const { return mask==3;} // I am guessing here?
 
-
-/* 
-void specex::Trace::write(ostream &os) const {
-  os << "Beginspecex::Trace" << endl;
-  os << fiber << endl;
-  X_vs_W.write(os);
-  Y_vs_W.write(os);
-  os << "Endspecex::Trace" << endl;
-}
-
-
-
-#define ERROR_MESSAGE {cout << "ERROR specex::Trace::read failed" << endl; abort();}
-
-bool specex::Trace::read(istream& is) {
-  string label;
-  if(! (is >> label)) ERROR_MESSAGE;
-  if(! (label=="Beginspecex::Trace")) ERROR_MESSAGE;
-
-  if(! (is >> fiber)) ERROR_MESSAGE;
-  if(! X_vs_W.read(is)) ERROR_MESSAGE;
-  if(! Y_vs_W.read(is)) ERROR_MESSAGE;
+int specex::eval_bundle_size(const specex::TraceSet& traceset) {
   
-  if(! (is >> label)) ERROR_MESSAGE;
-  if(! (label=="Endspecex::Trace")) ERROR_MESSAGE;
-  //cout << "INFO specex::Trace::read ok" << endl;
-  return true;
-}
-
-#undef ERROR_MESSAGE
-
-void specex::Trace::write(const std::string &FileName) const {
-  ofstream os(FileName.c_str());
-  write(os);
-  os.close();
-}
-
-bool specex::Trace::read(const std::string &FileName) {
-  ifstream is(FileName.c_str());
-  bool ok = read(is);
-  is.close();
-  return ok;
-}
-*/ 
-
-/* 
-#include <fitstable.h>
-bool specex::TraceSet::ReadSDSS_SingleSet_Fits(const string& filename, int hdu_number, TraceSetType ttype) {
-  FitsTable table(filename,hdu_number);
-
-  // test formatting
-  if(table.data.empty()) {cout << "ERROR specex::Trace::read_sdss_fits data empty" << endl; return false;}
-
-  double yjumplo=-12;
-  double yjumphi=-12;
-  double yjumpval=-12;
-
-  std::vector<FitsTableEntry>& data = table.data[0];
-  int data_size = data.size();
-  if(! (data_size == 4 || data_size == 7)) {cout << "ERROR specex::Trace::read_sdss_fits data has " << data.size() << " rows and I expect 4 or 7" << endl;  return false;}
-  if(data[0].string_val != "legendre") {cout << "ERROR specex::Trace::read_sdss_fits func is '" << data[0].string_val << "' and only legendre is implemented" << endl; return false;}
-  if(data[1].double_vals.size()  != 1 ) {cout << "ERROR specex::Trace::read_sdss_fits col. 2 has wrong size (not 1)" << endl; return false;}
-  if(data[2].double_vals.size()  != 1 ) {cout << "ERROR specex::Trace::read_sdss_fits col. 3 has wrong size (not 1)" << endl; return false;}
-  if(data_size==7) {
-    if(data[4].double_vals.size()  != 1 ) {cout << "ERROR specex::Trace::read_sdss_fits col. 5 has wrong size (not 1)" << endl; return false;}
-    if(data[5].double_vals.size()  != 1 ) {cout << "ERROR specex::Trace::read_sdss_fits col. 6 has wrong size (not 1)" << endl; return false;}
-    if(data[6].double_vals.size()  != 1 ) {cout << "ERROR specex::Trace::read_sdss_fits col. 7 has wrong size (not 1)" << endl; return false;}
+  SPECEX_DEBUG("Guess number of bundles from traces");
+  int nfibers = traceset.size();
   
-    
-    
-    for(int i=4;i<7;i++) {
-      const string& colname = table.columns[i].name;
-      FitsTableEntry& entry = data[i];
-      if(colname == "XJUMPLO") {
-	yjumplo = entry.double_vals(0);
-      }else if(colname == "XJUMPHI") {
-	yjumphi = entry.double_vals(0); 
-      }else if(colname == "XJUMPVAL") {
-	yjumpval = entry.double_vals(0);
-      }else{
-	cout << "ERROR specex::Trace::read_sdss_fits dont' know what to do with column named '" << colname << "'" << endl; return false;
-      }
-    }
-    cout << "INFO specex::Trace::read_sdss_fits, has y-jump : lo,hi,val = " << yjumplo << "," << yjumphi << "," << yjumpval << endl;
-    if(yjumplo==-12 || yjumphi==-12 || yjumpval==-12) {
-      cout << "ERROR specex::Trace::read_sdss_fits, missing something" << endl;
-      return false;
-    }
+  if(nfibers<30) return nfibers;
+  
+  double* central_waves = new double[nfibers];
+  for(int f=0;f<nfibers;f++)
+    central_waves[f]=(traceset.find(f)->second.X_vs_W.xmin+traceset.find(f)->second.X_vs_W.xmax)/2.;
+  double central_wave=DConstArrayMedian(central_waves,nfibers);
+  SPECEX_DEBUG("Central wavelength             = " << central_wave);
+  delete [] central_waves;
+  
+  double* spacing = new double[nfibers-1];
+  for(int f=0;f<nfibers-1;f++) {
+    spacing[f] = traceset.find(f+1)->second.X_vs_W.Value(central_wave)-traceset.find(f)->second.X_vs_W.Value(central_wave);
+    //SPECEX_DEBUG("Spacing=" << spacing[f]);
   }
-
-
-  int ntotcoeff = data[3].double_vals.size();
-  int ncoeff_per_fiber = ntotcoeff/NUMBER_OF_FIBERS_PER_CCD;
-  if(ntotcoeff%NUMBER_OF_FIBERS_PER_CCD!=0) {
-    cout << "ERROR specex::Trace::read_sdss_fits col. 3 has bizarre size " << ntotcoeff << endl; 
-    return false;
-  }
+  double median_spacing = DConstArrayMedian(spacing,nfibers-1);
+  SPECEX_INFO("Median distance between fibers = " << median_spacing);
   
-  
-  if(size()!=NUMBER_OF_FIBERS_PER_CCD) resize(NUMBER_OF_FIBERS_PER_CCD);
-  
-  const double& xmin = data[1].double_vals(0);
-  const double& xmax = data[2].double_vals(0);
-  const Vect & coefficients = data[3].double_vals;
-  
-  int index=0;
-  for(int fiber=0;fiber<NUMBER_OF_FIBERS_PER_CCD; fiber++) {
-
-    specex::Trace& trace = (*this)[fiber];
-    trace.fiber=fiber;
+  int number_of_bundles=0;
+  int bundle_size=0;
+  int first_fiber=0;
     
-    trace.yjumplo = yjumplo;
-    trace.yjumphi = yjumphi;
-    trace.yjumpval = yjumpval;
-    
-    Legendre1DPol* pol = 0;
-    switch(ttype) {
-    case WY : pol = &trace.W_vs_Y; break;
-    case XY : pol = &trace.X_vs_Y; break;
-    case YW : pol = &trace.Y_vs_W; break;
-    case XW : pol = &trace.X_vs_W; break;
-    default : {cout << "unknown TraceSetType " << ttype << endl; return false;};
-    }
-    
-    pol->xmin = xmin;
-    pol->xmax = xmax;
-    pol->deg = ncoeff_per_fiber-1;
-    pol->coeff.resize(ncoeff_per_fiber);
+  for(int f=0;f<nfibers-1;f++) {
+    if(spacing[f]>median_spacing*1.5) {
+      // we have a bundle
+      int current_bundle_size = f-first_fiber+1;
+      number_of_bundles += 1;
+      SPECEX_DEBUG("Bundle of size " << current_bundle_size);
       
-    for(int i=0;i<ncoeff_per_fiber;i++,index++) 
-      pol->coeff(i) = coefficients(index);
+      if(bundle_size==0) {
+	bundle_size = current_bundle_size;
+      }else{
+	if(current_bundle_size != bundle_size) {
+	  SPECEX_ERROR("cannot deal with varying bundle size");
+	}
+      }
+      first_fiber=f+1;
+    }
   }
-
-  cout <<"DEBUG specex::TraceSet::ReadSDSS_SingleSet_Fits successful" << endl;
-  return true;
-}
-
-
-bool specex::TraceSet::ReadSDSS_FullSet_Fits(const string& wave_vs_y_filename, int wave_vs_y_hdu_number,
-					   const string& x_vs_y_filename, int x_vs_y_hdu_number) {
-  
-  
-  cout << "INFO specex::TraceSet::ReadSDSS_FullSet_Fits starting" << endl;
-  cout << "INFO Reading " << wave_vs_y_filename << "[" << wave_vs_y_hdu_number << "]" << endl;
-  cout << "INFO Reading " << x_vs_y_filename << "[" << x_vs_y_hdu_number << "]" << endl;
-  
-  
-  bool ok;
-  ok=ReadSDSS_SingleSet_Fits(wave_vs_y_filename,wave_vs_y_hdu_number,WY);
-  if(!ok) return false;
-  
-  ok=ReadSDSS_SingleSet_Fits(x_vs_y_filename,x_vs_y_hdu_number,XY);
-  if(!ok) return false;
-  
-  for(int fiber=0;fiber<size();fiber++) {
-    
-    specex::Trace& trace = (*this)[fiber];
-    // first need to invert W_vs_Y
-    trace.Y_vs_W = trace.W_vs_Y.Invert(2); 
-    
-    // now compose
-    trace.X_vs_W = composed_pol(trace.X_vs_Y,trace.Y_vs_W);   
+  number_of_bundles += 1;
+  if(number_of_bundles==1) { // there is only one 
+    bundle_size = nfibers;
   }
-  cout << "INFO specex::TraceSet::ReadSDSS_FullSet_Fits done" << endl;
-  return true;
   
+  SPECEX_INFO("number of fibers per bundle    = " << bundle_size);
+  
+  delete[] spacing;
+  return bundle_size;
 }
-*/

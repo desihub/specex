@@ -65,7 +65,7 @@ namespace specex {
     int ndata;
     int ndata_in_core;
     int nparams;
-    int fit_status; // 0=ok 1=cholesky error 2=no convergence 3=nan in fit
+    int fit_status; // -1=no fit performed 0=ok 1=cholesky error 2=no convergence 3=nan in fit
     int nspots_in_fit;
 
 #define CONTINUUM
@@ -77,7 +77,7 @@ namespace specex {
 
   PSF_Params() : 
     bundle_id(0), fiber_min(0), fiber_max(0), 
-      chi2(0),ndata(0),fit_status(12), nspots_in_fit(0)
+      chi2(0),ndata(0),fit_status(-1), nspots_in_fit(0)
 #ifdef CONTINUUM
 , continuum_sigma_x(1)
 #endif
@@ -178,7 +178,7 @@ public :
     
   public :
 
-    std::map<int,Trace> FiberTraces; // fiber traces, one independent trace per fiber
+    TraceSet FiberTraces; // fiber traces, one independent trace per fiber
 
     const Trace& GetTrace(int fiber) const;
     Trace& GetTrace(int fiber);
@@ -310,7 +310,8 @@ public :
 
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
-    harp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    int GetBundleOfFiber(int fiber) const;
+    harp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
     harp::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
     harp::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
     harp::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;

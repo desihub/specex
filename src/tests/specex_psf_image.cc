@@ -24,7 +24,7 @@ namespace popts = boost::program_options;
 int main(int argc, char *argv[]) {
 
 
-  string psf_xml_filename = "";
+  string psf_filename = "";
   string output_fits_image_filename = "";
   int fiber = 0;
   double wavelength = 6000;
@@ -38,13 +38,14 @@ int main(int argc, char *argv[]) {
   popts::options_description desc ( "Allowed Options" );
   desc.add_options()
     ( "help,h", "display usage information" )
-    ( "psf", popts::value<string>( &psf_xml_filename ), "psf xml filename" )
+    ( "psf", popts::value<string>( &psf_filename ), "psf xml or fits filename" )
     ( "out", popts::value<string>( &output_fits_image_filename ), " output fits image file name")
     ( "fiber", popts::value<int>( &fiber ), "")
     ( "wavelength", popts::value<double>( &wavelength ), "")
     ( "oversampling", popts::value<int>( &oversampling ), "")
     ( "half_size_x", popts::value<int>( &half_size_x ), "half size of PSF stamp (full size is 2*half_size+1)")
     ( "half_size_y", popts::value<int>( &half_size_y ), "half size of PSF stamp (full size is 2*half_size+1)")
+    ( "debug", "debug mode" )
     ;
   
   popts::variables_map vm;
@@ -71,18 +72,17 @@ int main(int argc, char *argv[]) {
   try {
 
     specex_set_verbose(true);
+    specex_set_debug(vm.count("debug")>0);
     
     specex::PSF_p psf;
-    specex::read_psf_xml(psf,psf_xml_filename);
+    specex::read_psf(psf,psf_filename);
+    
   
     if(half_size_x>0) psf->hSizeX = half_size_x;
     if(half_size_y>0) psf->hSizeY = half_size_y;
     
-
-    int bundle = fiber/20; // to be modified
-
-    cout << "wavelength = " << wavelength << " fiber = " << fiber << " bundle = " << bundle << endl;
-    write_psf_fits_image(psf,output_fits_image_filename,fiber,wavelength,bundle,oversampling);
+    cout << "wavelength = " << wavelength << " fiber = " << fiber << endl;
+    write_psf_fits_image(psf,output_fits_image_filename,fiber,wavelength,oversampling);
     
   }catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;

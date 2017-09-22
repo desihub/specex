@@ -17,6 +17,7 @@ namespace lapack = boost::numeric::bindings::lapack;
 
 namespace specex {
   
+  
   //typedef boost::numeric::ublas::symmetric_matrix<double, boost::numeric::ublas::upper, boost::numeric::ublas::column_major> symmetric_matrix_double;
   
   // ! scalar product
@@ -32,7 +33,7 @@ namespace specex {
   void gemv(const double &alpha,  const harp::matrix_double &A,  const harp::vector_double& h, const double &beta, harp::vector_double& B);
 
   // ! C = alpha*A*B + beta*C if side='L' , C = alpha*B*A + beta*C if side='R', where A is a symmetric matrix
-  void symm(const char side, const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C);
+  // void symm(const char side, const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C);
   
   // ! C = alpha*A*B + beta*C if side='L' , C = alpha*B*A + beta*C if side='R', where A is a symmetric matrix
   void gemm(const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C);

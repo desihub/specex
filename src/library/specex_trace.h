@@ -8,7 +8,7 @@
 
 #include "specex_legendre.h"
 #include "specex_spot.h"
-
+#include <boost/serialization/map.hpp>
 
 namespace specex {
   
@@ -82,25 +82,10 @@ namespace specex {
 #define NUMBER_OF_FIBERS_PER_BUNDLE 20
   
   enum TraceSetType {WY = 0, XY = 1, YW = 2, XW = 3};
- 
-  class TraceSet : public std::vector<Trace> {
 
-    friend class boost::serialization::access;
+  typedef std::map<int, Trace> TraceSet;
 
-  private :
-    
-    
-    
-  public :
-    TraceSet() {};
-    ~TraceSet(){};
-    
-    template<class Archive>
-    void serialize(Archive & ar, const unsigned int version)
-    {
-      ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(std::vector<Trace>);
-    }
-  };
-  
+  int eval_bundle_size(const TraceSet& traceset);
+
 }
 #endif
