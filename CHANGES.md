@@ -2,7 +2,12 @@
 
 ## 0.5.0 (NA)
 
-* In Development
+* No changes yet
+
+## 0.5.0 (NA)
+
+* Major refactor of fitting and formats to be faster and more robust by
+  accepting any previous PSF as a starting point for the optimization (PR #21).
 
 ## 0.4.5 (2017-07-19)
 
