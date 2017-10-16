@@ -37,7 +37,7 @@ Example (in `bash`):
 
 ```
 for BUNDLE in `seq 0 19`; do
-  desi_psf_fit ... --first_bundle $BUNDLE --last_bundle $BUNDLE --out-psf psf-of-bundle-${BUNDLE}.fits &
+  desi_psf_fit ... --first-bundle $BUNDLE --last-bundle $BUNDLE --out-psf psf-of-bundle-${BUNDLE}.fits &
 done
 ```
 
