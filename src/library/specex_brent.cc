@@ -31,6 +31,7 @@ double brent(AnalyticFunction * f, double ax, double bx, double cx, double tol, 
   status=0;
   int iter;
   double a,b,d,etemp,fu,fv,fw,fx,p,q,r,tol1,tol2,u,v,w,x,xm;
+  d=0.;
   double e=0.0;  // This will be the distance moved on the step before last.
   a=(ax < cx ? ax : cx); //a and b must be in ascending order,
 
