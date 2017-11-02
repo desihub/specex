@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
   try {
     popts::store(popts::command_line_parser( argc, argv ).options(desc).run(), vm);
     popts::notify(vm);
-  }catch(std::exception e) {
+  }catch(std::exception) {
     cerr << "error in arguments" << endl;
     cerr << "try --help for options" << endl;
     return EXIT_FAILURE;

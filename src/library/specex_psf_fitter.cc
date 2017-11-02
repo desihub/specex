@@ -1219,8 +1219,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
      for now we register pairs if possible and say we do not ignore the paired spot for 
      which we cannot measure flux
    */
-
- std:map<int,int> indices_of_spots_to_pair;
+  
+  std::map<int,int> indices_of_spots_to_pair;
   if(n_to_attach>0) {
     SPECEX_DEBUG("Check whether need to attach " << n_to_attach << " spots");
     int n_attached = 0;

@@ -46,7 +46,7 @@ int main( int argc, char *argv[] ) {
       cerr << desc << endl;
       return EXIT_FAILURE;
     }
-  }catch(std::exception e) {
+  }catch(std::exception) {
     cerr << "error in arguments" << endl;
     cerr << endl;
     cerr << desc << endl;

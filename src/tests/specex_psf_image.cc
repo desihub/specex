@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
       cerr << desc << endl;
      return EXIT_FAILURE;
     }
-  }catch(std::exception e) {
+  }catch(std::exception) {
     cerr << "error in arguments" << endl;
     cerr << endl;
     cerr << desc << endl;
@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
   }catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;
     return EXIT_FAILURE;
-  }catch(std::exception e) {
+  }catch(std::exception) {
     cerr << "unknown error" << endl;
     return EXIT_FAILURE;
   }
