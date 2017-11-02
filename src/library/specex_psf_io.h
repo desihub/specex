@@ -24,12 +24,12 @@ namespace specex {
   void write_psf(const specex::PSF_p psf, const string& filename, std::vector<specex::Spot_p> *spots = NULL);
 
   // read routines
-  void read_xtrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu);
-  void read_ytrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu);
+  void read_xtrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu, int requested_deg=0);
+  void read_ytrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu, int requested_deg=0);
   void synchronize_traces(specex::PSF_p psf);
-  void read_traceset_fits(specex::PSF_p psf, fitsfile * fp);
-  void read_traceset_fits(specex::PSF_p psf, const string& filename);
-
+  void read_traceset_fits(specex::PSF_p psf, fitsfile * fp, int degx=0, int degy=0);
+  void read_traceset_fits(specex::PSF_p psf, const string& filename, int degx=0, int degy=0);
+  
   void read_psf_xml(specex::PSF_p& psf, const std::string& filename);
   void read_psf_fits(specex::PSF_p& psf, const string& filename);
   void read_psf(specex::PSF_p& psf, const string& filename);

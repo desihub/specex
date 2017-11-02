@@ -207,7 +207,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       string psftype; harp::fits::key_read(fp,"PSFTYPE",psftype);
       SPECEX_INFO("Input PSF type = " << psftype);
       use_input_specex_psf = (psftype=="GAUSS-HERMITE"); 
-    } catch (harp::exception e) {
+    } catch (harp::exception) {
       SPECEX_WARNING("Could not read PSF type in " << input_psf_filename);
     }
   }
@@ -248,7 +248,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 	cout << "priors[" << i << "]= " << pname << " " << val << " " << err << endl;
 	priors[pname]= new GaussianPrior(val,err);
       }
-    }catch(std::exception e) {
+    }catch(std::exception) {
       cerr << "error in parsing arguments of priors" << endl;
       cerr << "priors must be of the form 'name value error'" << endl;
       cerr << desc << endl;
@@ -258,7 +258,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   
 
 
-  //try {
+  try {
    
     
     specex_set_dump_core(vm.count("core")>0);
@@ -312,8 +312,9 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       
       psf->hSizeX = half_size_x;
       psf->hSizeY = half_size_y;
-      read_traceset_fits(psf,input_psf_filename);      
-            
+      SPECEX_INFO("trace_deg_x=" << trace_deg_x << " trace_deg_wave=" << trace_deg_wave);
+      read_traceset_fits(psf,input_psf_filename,trace_deg_x,trace_deg_wave);     
+      
     }else{ // use_input_specex_psf
       read_psf(psf,input_psf_filename);
     }
@@ -512,7 +513,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   // ending
   // --------------------------------------------
     
-    /*
+   
   } catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;
     return EXIT_FAILURE;
@@ -524,7 +525,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   }catch (...) {
     cerr << "FATAL ERROR (unknown)" << endl;
     return EXIT_FAILURE;
-    }*/
+ }
   
   return EXIT_SUCCESS;
 }

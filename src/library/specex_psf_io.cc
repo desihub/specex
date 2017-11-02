@@ -145,7 +145,7 @@ void specex::write_ytrace_fits(const specex::PSF& psf, fitsfile *fp) {
   return _write_trace(psf,fp,false); // Y 
 }
 
-void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx) {
+void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx, int requested_deg) {
   // read image of coefficients
   harp::fits::img_seek ( fp, hdu);
   size_t nrows,ncols;  
@@ -156,28 +156,31 @@ void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx) {
   int ncoefs  = coeff.n_cols();
   double WAVEMIN; harp::fits::key_read(fp,"WAVEMIN",WAVEMIN);
   double WAVEMAX; harp::fits::key_read(fp,"WAVEMAX",WAVEMAX);
-    
+  
+  int requested_ncoefs=ncoefs;
+  if(requested_deg>0)  requested_ncoefs=requested_deg+1;
+  
   for(int fiber=0;fiber<nfibers; fiber++) {
     // create or not the trace
     specex::Trace& trace = psf->FiberTraces[fiber];
     trace.fiber=fiber;
     trace.mask=0;
     trace.synchronized = false; // will do synchro after
-    specex::Legendre1DPol pol(ncoefs-1,WAVEMIN,WAVEMAX);
-    for(int i=0;i<ncoefs;i++)
+    specex::Legendre1DPol pol(requested_ncoefs-1,WAVEMIN,WAVEMAX);
+    for(int i=0;i<min(ncoefs,requested_ncoefs);i++)
       pol.coeff[i]=coeff(i,fiber);
     if(isx) trace.X_vs_W=pol;
     else trace.Y_vs_W=pol;
   }
 }
   
-void specex::read_xtrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu) {
+void specex::read_xtrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu, int requested_deg) {
   SPECEX_INFO("read XTRACE in HDU "<< hdu);
-  return _read_trace(psf,fp,hdu,true); // X 
+  return _read_trace(psf,fp,hdu,true,requested_deg); // X 
 }
-void specex::read_ytrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu) {
+void specex::read_ytrace_fits_hdu(specex::PSF_p psf, fitsfile *fp, int hdu, int requested_deg) {
   SPECEX_INFO("read YTRACE in HDU "<< hdu);
-  return _read_trace(psf,fp,hdu,false); // Y 
+  return _read_trace(psf,fp,hdu,false,requested_deg); // Y 
 }
 
 void specex::synchronize_traces(specex::PSF_p psf) {
@@ -202,6 +205,12 @@ void specex::synchronize_traces(specex::PSF_p psf) {
     trace.W_vs_Y = trace.Y_vs_W.Invert(ddeg);
     trace.synchronized=true;
     
+    if(it==psf->FiberTraces.begin()) {
+      SPECEX_INFO("X_vs_W deg=" << trace.X_vs_W.deg);
+      SPECEX_INFO("Y_vs_W deg=" << trace.Y_vs_W.deg);
+      SPECEX_INFO("X_vs_Y deg=" << trace.X_vs_Y.deg);
+      SPECEX_INFO("W_vs_Y deg=" << trace.W_vs_Y.deg);      
+    }
     
   }
 }
@@ -300,16 +309,16 @@ void specex::write_psf_fits(const specex::PSF_p psf, const string& path, std::ve
 }
 
 
-void specex::read_traceset_fits(specex::PSF_p psf, fitsfile * fp) {
-  read_xtrace_fits_hdu(psf,fp,find_hdu(fp,"XTRACE","XCOEFF"));
-  read_ytrace_fits_hdu(psf,fp,find_hdu(fp,"YTRACE","YCOEFF"));
+void specex::read_traceset_fits(specex::PSF_p psf, fitsfile * fp, int degx, int degy) {
+  read_xtrace_fits_hdu(psf,fp,find_hdu(fp,"XTRACE","XCOEFF"),degx);
+  read_ytrace_fits_hdu(psf,fp,find_hdu(fp,"YTRACE","YCOEFF"),degy);
   synchronize_traces(psf);
 }
 
-void specex::read_traceset_fits(specex::PSF_p psf, const string& filename) {
+void specex::read_traceset_fits(specex::PSF_p psf, const string& filename, int degx, int degy) {
   fitsfile * fp;
   harp::fits::open_read(fp,filename);
-  read_traceset_fits(psf,fp);
+  read_traceset_fits(psf,fp,degx,degy);
   harp::fits::close(fp);
   SPECEX_INFO("read trace set in " << filename);
 }
