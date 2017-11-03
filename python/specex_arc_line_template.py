@@ -34,6 +34,13 @@ wave=np.unique(waves)
 flux=np.zeros(wave.size)
 for i,w in enumerate(wave) :
     flux[i]=np.mean(fluxes[waves==w])
+
+print("ADD ONE KR LINE")
+wave=np.append(wave,[9754.435])
+flux=np.append(flux,0.3*flux[np.argmin(np.abs(wave-9660.5))]) # 1/3 of 9660A line
+i=np.argsort(wave)
+wave=wave[i]
+flux=flux[i]
 plt.plot(wave,flux,"+",c="r")
 
 data={}
