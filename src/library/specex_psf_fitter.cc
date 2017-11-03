@@ -2350,7 +2350,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   double chi2=1e30;
   int npix = 0;
   int niter = 0;
-  double min_snr_non_linear_terms = 10;
+  double min_snr_non_linear_terms = 5;
   double min_wave_dist_non_linear_terms = 4; // A 
   
   double min_snr_linear_terms = 3;
