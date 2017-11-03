@@ -63,6 +63,7 @@ static harp::vector_double coeffs_from_trace_x_vs_w(const double& wavemin, const
   return coeff;
 }
 
+/*
 static harp::vector_double coeffs_from_trace_x_vs_w(const specex::PSF& psf, int ncoeff, int NFIBERS) {
   
  harp::vector_double coeff(ncoeff*NFIBERS);
@@ -84,6 +85,7 @@ static harp::vector_double coeffs_from_trace_x_vs_w(const specex::PSF& psf, int 
  }
  return coeff;
 }
+*/
 
 static harp::vector_double coeffs_from_trace_y_vs_w(const double& wavemin, const double& wavemax, const specex::PSF& psf, int ncoeff_max, int NFIBERS, int delta_deg, int& ncoeff) {
   
@@ -121,6 +123,7 @@ static harp::vector_double coeffs_from_trace_y_vs_w(const double& wavemin, const
   return coeff;
 }
 
+/*
 static harp::vector_double coeffs_from_trace_y_vs_w(const specex::PSF& psf, int ncoeff, int NFIBERS) {
   
  harp::vector_double coeff(ncoeff*NFIBERS);
@@ -142,6 +145,8 @@ static harp::vector_double coeffs_from_trace_y_vs_w(const specex::PSF& psf, int 
  }
  return coeff;
 }
+*/
+
 
 #ifdef CONTINUUM
 static harp::vector_double coeffs_from_continuum(const double& wavemin, const double& wavemax, const specex::PSF& psf, int ncoeff_max, int NFIBERS, int& ncoeff) {
