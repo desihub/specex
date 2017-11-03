@@ -84,6 +84,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   int legendre_deg_x=0;
   int trace_deg_wave=0;
   int trace_deg_x=0;  
+  int trace_prior_deg=0;
   double psf_error=0;
   double psf_core_wscale=0;
   int max_number_of_lines=0; 
@@ -127,6 +128,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "verbose,v", "turn on verbose mode (deprecated, true by default)" )
     ( "quiet", "no info message, only warning" )
     ( "debug", "turn on debug mode" )
+    ( "trace-prior-deg", popts::value<int>( &trace_prior_deg )->default_value(0) , "force equal trace coeff in bundle starting at this degree")
     ( "lamplines", popts::value<string>( &lamp_lines_filename ), "lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_desi.txt)" )
     ( "core", "dump core files when harp exception is thrown" )
     ( "gauss-hermite-deg",  popts::value<int>( &gauss_hermite_deg )->default_value(6), "degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)")
@@ -276,7 +278,10 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     }
 
     bool write_tmp_results = (vm.count("tmp-results")>0);
+        
+    if(trace_prior_deg>0) SPECEX_INFO("Will apply a prior on the traces high order terms in a bundle");
     
+
 #ifdef EXTERNAL_TAIL
     bool fit_psf_tails = (vm.count("fit-psf-tails")>0);
 #endif
@@ -342,6 +347,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     fitter.psf->psf_error               = psf_error;
     fitter.corefootprint_weight_boost   = psf_core_wscale;
     fitter.write_tmp_results            = write_tmp_results;
+    fitter.trace_prior_deg              = trace_prior_deg;
     
 #ifdef EXTERNAL_TAIL
     fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;

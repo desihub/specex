@@ -115,7 +115,8 @@ class PSF_Fitter {
   bool sparse_pol;
   bool direct_simultaneous_fit;
   bool write_tmp_results;
-
+  int trace_prior_deg;
+  
   double chi2_precision;
   bool include_signal_in_weight;
   bool recompute_weight_in_fit;
@@ -131,6 +132,9 @@ class PSF_Fitter {
   Mask mask;
   
   std::map<std::string,Prior*> priors;
+  
+  std::map<int,int> tmp_trace_x_parameter;
+  std::map<int,int> tmp_trace_y_parameter;
   
  PSF_Fitter(PSF_p i_psf, const image_data& i_image, const image_data& i_weight, const image_data& i_readnoise) :
     
@@ -164,12 +168,15 @@ class PSF_Fitter {
     sparse_pol(true),
     direct_simultaneous_fit(false),
     write_tmp_results(false),
+    trace_prior_deg(0),
     fatal(true),
     parallelized(true),
         
     polynomial_degree_along_x(1),
     polynomial_degree_along_wave(4),
     max_number_of_lines(0)
+
+
       {
       };
     

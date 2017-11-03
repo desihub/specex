@@ -802,6 +802,146 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   }
   */
 
+  // trace priors 
+  if((trace_prior_deg>0) && fit_trace && begin_j == stamp.begin_j) {
+    //SPECEX_INFO("Adding trace prior");
+
+    // count fibers
+    int nfibers=0;
+    for(std::map<int,specex::Trace>::const_iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); ++it) {		
+      int fiber = it->first;
+      if(fiber < psf_params->fiber_min || fiber > psf_params->fiber_max) continue;	
+      if(it->second.Off()) continue; // not fitted
+      nfibers++;
+    }
+    
+    if(nfibers>=2) {
+      
+      for(std::map<int,specex::Trace>::const_iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); ++it) {		
+	int fiber = it->first;
+	if(fiber < psf_params->fiber_min || fiber > psf_params->fiber_max) continue;	
+	if(it->second.Off()) continue; // not fitted
+	
+	// prior that the high order coeffs of fiber is the same as the average of other fibers
+	
+	// chi2 = w*(ci - sum_{j!=i} cj/(n-1))**2
+	// B(i) = 1/2 * dchi2/di
+	// 
+	// A(i,j)   = 1/2 dchi2/didj 
+	// A(i,i) += w
+	// for i,j j!=i A(i,j) -= w/(n-1) ; A(j,j) += w/(n-1)**2
+
+      
+
+	double weight = 1.e8;
+
+	
+	// Y
+	for(int deg=trace_prior_deg;deg<=it->second.Y_vs_W.deg;deg+=1) {
+	
+	  // compute dcoef
+	  int i=tmp_trace_y_parameter.find(fiber)->second+deg;
+	  double dcoef = Params(i);
+	  for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
+	    int other_fiber = jt->first;
+	    if (other_fiber==fiber) continue;
+	    if(other_fiber < psf_params->fiber_min || other_fiber > psf_params->fiber_max) continue;	
+	    if(jt->second.Off()) continue; // not fitted	  
+	    int j=tmp_trace_y_parameter.find(other_fiber)->second+deg;
+	    dcoef -= Params(j)/(nfibers-1);
+	  }
+	  //if(fiber==0 && deg==it->second.Y_vs_W.deg) SPECEX_DEBUG("dcoef="<<dcoef);
+	  
+	  chi2 += weight*square(dcoef);
+	  
+	  if(compute_ab) {
+	    
+	    
+	    
+	    (*Ap)(i,i) += weight;
+	    (*Bp)(i)   -= weight*dcoef; // or opposite
+	    
+	    for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
+	      int other_fiber = jt->first;
+	      if (other_fiber==fiber) continue;
+	      if(other_fiber < psf_params->fiber_min || other_fiber > psf_params->fiber_max) continue;	
+	      if(jt->second.Off()) continue; // not fitted
+	      
+	      int j=tmp_trace_y_parameter.find(other_fiber)->second+deg;
+	      // first term > second term
+	      (*Ap)(i,j) -= weight/(nfibers-1);
+	      (*Ap)(j,i) -= weight/(nfibers-1);	      
+	      (*Bp)(j)   += weight*dcoef/(nfibers-1); // or opposite
+	      
+	      for(std::map<int,specex::Trace>::const_iterator kt=psf->FiberTraces.begin(); kt!=psf->FiberTraces.end(); ++kt) {	    
+		int yet_another_fiber = kt->first;
+		if (yet_another_fiber==fiber) continue;
+		if(yet_another_fiber < psf_params->fiber_min || yet_another_fiber > psf_params->fiber_max) continue;	
+		if(kt->second.Off()) continue; // not fitted
+		int k=tmp_trace_y_parameter.find(yet_another_fiber)->second+deg;
+		(*Ap)(j,k) += weight/square(nfibers-1);
+	      }
+	    }
+	  }
+	}
+	
+	
+	// X
+	for(int deg=trace_prior_deg;deg<=it->second.X_vs_W.deg;deg+=1) {
+	
+	  // compute dcoef
+	  int i=tmp_trace_x_parameter.find(fiber)->second+deg;
+	  double dcoef = Params(i);
+	  for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
+	    int other_fiber = jt->first;
+	    if (other_fiber==fiber) continue;
+	    if(other_fiber < psf_params->fiber_min || other_fiber > psf_params->fiber_max) continue;	
+	    if(jt->second.Off()) continue; // not fitted	  
+	    int j=tmp_trace_x_parameter.find(other_fiber)->second+deg;
+	    dcoef -= Params(j)/(nfibers-1);
+	  }
+	  //if(fiber==0 && deg==it->second.X_vs_W.deg) SPECEX_DEBUG("dcoef="<<dcoef);
+	  
+	  chi2 += weight*square(dcoef);
+	  
+	  if(compute_ab) {
+	    
+	    
+	    
+	    (*Ap)(i,i) += weight;
+	    (*Bp)(i)   -= weight*dcoef; // or opposite
+	    
+	    for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
+	      int other_fiber = jt->first;
+	      if (other_fiber==fiber) continue;
+	      if(other_fiber < psf_params->fiber_min || other_fiber > psf_params->fiber_max) continue;	
+	      if(jt->second.Off()) continue; // not fitted
+	      
+	      int j=tmp_trace_x_parameter.find(other_fiber)->second+deg;
+	      // first term > second term
+	      (*Ap)(i,j) -= weight/(nfibers-1);
+	      (*Ap)(j,i) -= weight/(nfibers-1);	      
+	      (*Bp)(j)   += weight*dcoef/(nfibers-1); // or opposite
+	      
+	      for(std::map<int,specex::Trace>::const_iterator kt=psf->FiberTraces.begin(); kt!=psf->FiberTraces.end(); ++kt) {	    
+		int yet_another_fiber = kt->first;
+		if (yet_another_fiber==fiber) continue;
+		if(yet_another_fiber < psf_params->fiber_min || yet_another_fiber > psf_params->fiber_max) continue;	
+		if(kt->second.Off()) continue; // not fitted
+		int k=tmp_trace_x_parameter.find(yet_another_fiber)->second+deg;
+		(*Ap)(j,k) += weight/square(nfibers-1);
+	      }
+	    }
+	  }
+	}
+		
+	
+      }      
+    }
+    // SPECEX_INFO("done adding trace prior");     
+  }
+  
+
   // psf priors , only once
   if(fit_psf && !(psf->Priors.empty()) && begin_j == stamp.begin_j) {
     
@@ -857,12 +997,12 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   return chi2;
 }
 
-   
+/*
 static double sign(const double& a, const double& b) {
   if(b>0) return fabs(a);
   return -fabs(a);
 }
-
+*/
 
 
 void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* npix) {
@@ -1121,8 +1261,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   Params.resize(nparTot);
   Params.clear();
 
-  map<int,int> tmp_trace_x_parameter;
-  map<int,int> tmp_trace_y_parameter;
+  tmp_trace_x_parameter.clear();
+  tmp_trace_y_parameter.clear();
   index_of_spots_parameters = 0;
   
   {
