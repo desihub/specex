@@ -79,7 +79,7 @@ int main ( int argc, char *argv[] ) {
       cerr << argv[0] << " --psf psf.xml  --spots spots.xml --in sdProc-b1-00108382.fits --fiber 20 --out res.list" << endl;
       return EXIT_FAILURE;
     }
-  }catch(std::exception e) {
+  }catch(std::exception) {
     cerr << "error in arguments" << endl;
     cerr << endl;
     cerr << desc << endl;
