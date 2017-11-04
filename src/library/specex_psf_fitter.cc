@@ -1480,7 +1480,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   //////////////////////////////////////////////////////////////////////////
   
   
-  while(true) { // minimization loop 
+  for(int loop=0; loop<15; loop++) { // minimization loop 
       
     oldChi2 = *psfChi2;
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots iter=" << *niter << " old chi2=" << oldChi2);
