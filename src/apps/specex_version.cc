@@ -7,5 +7,5 @@ using namespace specex;
 
 int main ( int argc, char *argv[] ) {
   cout << version() << endl;
-  return 0
+  return 0;
 }
