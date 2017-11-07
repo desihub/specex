@@ -45,4 +45,6 @@ In production, merging is done in ``` desispec.scripts.specex.merge_psf ``` , an
 
 ## License
 
-License information needed.
+specex is free software licensed under a 3-clause BSD-style license. For details see
+the `LICENSE.md` file.
+
