@@ -1,7 +1,7 @@
 
 DIRS = library plugin tests apps
 
-.PHONY : all install clean uninstall $(DIRS)
+.PHONY : all install clean uninstall version $(DIRS)
 
 all : $(DIRS)
 
@@ -25,3 +25,6 @@ uninstall :
 
 clean :
 	@ for d in $(DIRS); do $(MAKE) -C $$d clean; done
+
+version :
+	$(MAKE) -C library version
