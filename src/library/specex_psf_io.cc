@@ -228,9 +228,11 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   double x=psf->Xccd(fiber,wavelength);
   double y=psf->Yccd(fiber,wavelength);
   SPECEX_INFO("PSF center X Y = " << x << " " << y);
-  x = int(x);
-  y = int(y);
-  
+  bool force_center=false;
+  if (force_center) {
+    x = int(x);
+    y = int(y);
+  }
   harp::vector_double P=psf->AllLocalParamsFW(fiber,wavelength);
   
   SPECEX_INFO("PSF Params " << P);
@@ -249,8 +251,9 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
       int jb = (j-ny/2)/oversampling;
       double dx = (i-nx/2)/double(oversampling)-ib;
       double dy = (j-ny/2)/double(oversampling)-jb;
+      //if(j==0) SPECEX_INFO("x[" << i << "]=" << ib+dx << " y[" << j << "]=" << jb+dy);
       
-      img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x),jb+int(y),P,0,0);
+      img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x+0.5),jb+int(y+0.5),P,0,0);
       sum += img(i,j);
     }
   }
