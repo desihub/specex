@@ -51,7 +51,7 @@ PYSCRIPTS = specex_mean_psf.py
 #
 # This is a message to make that these targets are 'actions' not files.
 #
-.PHONY : all clean install uninstall
+.PHONY : all clean install uninstall version
 #
 # This should compile all code prior to it being installed.
 #
@@ -73,3 +73,9 @@ uninstall : ; $(NO_SPECEX_PREFIX)
 clean :
 	- $(RM) *~ core
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f clean ; done
+#
+# Enable 'make version' to update the version string.
+# Do make TAG=0.1.2 version to set the tag explicitly.
+#
+version :
+	$(MAKE) -C src version

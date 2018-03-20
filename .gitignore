@@ -10,5 +10,15 @@
 .waf*
 build*
 
+# compiled files
+src/apps/*
+!src/apps/*.cc
+!src/apps/Makefile
+!src/apps/wscript
+src/tests/*
+!src/tests/*.cc
+!src/tests/Makefile
+!src/tests/wscript
+
 # MacOS
 .DS_Store
