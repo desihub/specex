@@ -1,6 +1,10 @@
 # specex Change Log
 
-## 0.6.1 (unreleased)
+## 0.6.2 (unreleased)
+
+* No changes yet.
+
+## 0.6.1 (2018-03-29)
 
 * Versioning utilities
 

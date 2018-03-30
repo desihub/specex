@@ -55,3 +55,16 @@ Example :
 ./waf install
 
 ```
+
+## Tagging
+
+Update the tag version with
+```
+make version TAG=x.y.z
+```
+
+To automatically increment a dev tag:
+```
+make version
+```
+
