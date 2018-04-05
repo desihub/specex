@@ -37,14 +37,15 @@ clean :
 #
 # Enable 'make version' to update the version string.
 # Do make TAG=0.1.2 version to set the tag explicitly.
+# LASTTAG and COUNT are defined inside the recipe so they
+# only get defined when make version is invoked.
 #
-LASTTAG := $(shell git describe --tags --dirty --always | cut -d- -f1)
-COUNT := $(shell git rev-list --count HEAD)
 version :
 	- $(RM) version.h
+	$(eval LASTTAG := $$(shell git describe --tags --dirty --always | cut -d- -f1))
+	$(eval COUNT := $$(shell git rev-list --count HEAD))
 	@ if test -n "$(TAG)"; then v=$(TAG); else v=$(LASTTAG).dev$(COUNT); fi; \
 		echo "#define VERSION_STRING \"$$v\"" > version.h
 
 %.o : %.cc $(HEADERS)
 	$(CXX) $(CXXFLAGS) -I. -fPIC -o $@ -c $<
-
