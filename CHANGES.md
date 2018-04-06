@@ -1,10 +1,18 @@
 # specex Change Log
 
-## 0.5.0 (NA)
+## 0.6.2 (unreleased)
 
-* No changes yet
+* No changes yet.
 
-## 0.5.0 (NA)
+## 0.6.1 (2018-03-29)
+
+* Versioning utilities
+
+## 0.6.0 (2017-11-10)
+
+* Add a prior on high degree of traces in same bundle + several minor improvements in the trace fit 
+
+## 0.5.0 (2017-09-30)
 
 * Major refactor of fitting and formats to be faster and more robust by
   accepting any previous PSF as a starting point for the optimization (PR #21).
