@@ -12,6 +12,7 @@
 
 #include <specex_message.h>
 #include <specex_psf.h>
+#include <specex_psf_io.h>
 #include <specex_trace.h>
 #include <specex_spot.h>
 #include <specex_spot_array.h>
@@ -42,7 +43,7 @@ int main ( int argc, char *argv[] ) {
   // --------------------------------------------
   string spectrograph_name = "BOSS";
   
-  string psf_xml_filename="";
+  string psf_filename="";
   string spots_xml_filename="";
   string input_fits_image_filename="";
   string output_fits_image_filename="";  
@@ -57,7 +58,7 @@ int main ( int argc, char *argv[] ) {
   popts::options_description desc ( "Allowed Options" );
   desc.add_options()
     ( "help,h", "display usage information" )
-    ( "psf", popts::value<string>( &psf_xml_filename ), "psf xml filename" )
+    ( "psf", popts::value<string>( &psf_filename ), "psf xml or fits filename" )
     ( "spots", popts::value<string>( &spots_xml_filename ), "spots xml filename" )
     ( "in", popts::value<string>( &input_fits_image_filename ), " input fits image file name" )
     ( "out", popts::value<string>( &output_fits_image_filename ), " output fits image file name")
@@ -131,12 +132,7 @@ int main ( int argc, char *argv[] ) {
     // read PSF
     // --------------------------------------------
     specex::PSF_p psf;
-    {
-      std::ifstream is(psf_xml_filename.c_str());
-      boost::archive::xml_iarchive xml_ia ( is );
-      xml_ia >> BOOST_SERIALIZATION_NVP(psf);
-      is.close();
-    }
+    specex::read_psf(psf,psf_filename);
     
     
     // read spots
