@@ -2,7 +2,7 @@
 
 ## 0.6.2 (unreleased)
 
-* No changes yet.
+* A bug fix (when a spot is masked)
 
 ## 0.6.1 (2018-03-29)
 
