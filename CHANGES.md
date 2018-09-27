@@ -1,5 +1,9 @@
 # specex Change Log
 
+## 0.6.3 (unreleased)
+
+* No changes yet.
+
 ## 0.6.2 (2018-09-26)
 
 * A bug fix (when a spot is masked)
