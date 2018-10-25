@@ -2,7 +2,7 @@
 
 ## 0.6.3 (unreleased)
 
-* No changes yet.
+* Bring back xml I/O functionalities (were broken)
 
 ## 0.6.2 (2018-09-26)
 

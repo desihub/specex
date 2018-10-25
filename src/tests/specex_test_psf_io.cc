@@ -9,6 +9,7 @@
 #include "specex_psf_io.h"
 #include "specex_serialization.h"
 #include <boost/program_options.hpp>
+#include <specex_serialization_implement.h>
 
 namespace popts = boost::program_options;
 using namespace std;

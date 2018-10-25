@@ -15,6 +15,7 @@
 #include <specex_psf_io.h>
 #include <specex_message.h>
 #include <specex_serialization.h>
+#include <specex_serialization_implement.h>
 
 using namespace std;
 using namespace specex;

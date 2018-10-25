@@ -20,6 +20,7 @@
 #include <specex_serialization.h>
 #include <specex_image_data.h>
 #include <specex_stamp.h>
+#include <specex_serialization_implement.h>
 
 
 
