@@ -119,6 +119,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "ycoord-hdu", popts::value<int>( &ytrace_hdu )->default_value(-1), "hdu of y trace legendre polynomial of wavelength (default is extension YTRACE)" )
     ( "first-bundle", popts::value<int>( &first_fiber_bundle )->default_value(0), "first fiber bundle to fit")
     ( "last-bundle", popts::value<int>( &last_fiber_bundle )->default_value(0), "last fiber bundle to fit")
+    ( "single-bundle", "fit a single bundle with all fibers")
     ( "first-fiber", popts::value<int>( &first_fiber )->default_value(0), "first fiber (must be in bundle)")
     ( "last-fiber", popts::value<int>( &last_fiber )->default_value(100000), "last fiber (must be in bundle)")
     ( "half-size-x", popts::value<int>( &half_size_x )->default_value(8), "half size of PSF stamp (full size is 2*half_size+1)")
@@ -276,6 +277,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
       fit_sigmas = false;
       fit_psf    = false;      
     }
+    
+    bool single_bundle = (vm.count("single-bundle")>0);
 
     bool write_tmp_results = (vm.count("tmp-results")>0);
         
@@ -327,7 +330,12 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     psf->ccd_image_n_rows = image.n_rows();
       
     // bundle sizes
-    int number_of_fibers_per_bundle=eval_bundle_size(psf->FiberTraces);
+    int number_of_fibers_per_bundle=0;
+    if(single_bundle) {
+      number_of_fibers_per_bundle = psf->FiberTraces.size();
+    }else {
+      number_of_fibers_per_bundle = eval_bundle_size(psf->FiberTraces);
+    }
     int number_of_fiber_bundles_per_ccd=psf->FiberTraces.size()/number_of_fibers_per_bundle;          
     if(first_fiber_bundle<0 || first_fiber_bundle>= number_of_fiber_bundles_per_ccd) {
       SPECEX_ERROR("invalid first fiber bundle");
