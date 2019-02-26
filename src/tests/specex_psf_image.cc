@@ -15,6 +15,7 @@
 #include "specex_gauss_hermite_psf.h"
 #include "specex_image_data.h"
 #include "specex_serialization.h"
+#include <specex_serialization_implement.h>
 
 using namespace std;
 using namespace specex;

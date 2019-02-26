@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.6.2 (unreleased)
+## 0.6.3 (unreleased)
 
-* No changes yet.
+* Bring back xml I/O functionalities (were broken)
+
+## 0.6.2 (2018-09-26)
+
+* A bug fix (when a spot is masked)
 
 ## 0.6.1 (2018-03-29)
 
@@ -10,7 +14,7 @@
 
 ## 0.6.0 (2017-11-10)
 
-* Add a prior on high degree of traces in same bundle + several minor improvements in the trace fit 
+* Add a prior on high degree of traces in same bundle + several minor improvements in the trace fit
 
 ## 0.5.0 (2017-09-30)
 

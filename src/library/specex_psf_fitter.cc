@@ -290,7 +290,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
 
 void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
-
+  
 #ifdef CONTINUUM
   if(fit_continuum)
     ublas::noalias(psf_params->ContinuumPol.coeff) = ublas::project(Params,ublas::range(continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size()));
@@ -353,8 +353,6 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
       }
     }
   }
-
-
 
 }
 
@@ -1605,6 +1603,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	double max_step = log(100.);
 	for(size_t s=0;s<spot_tmp_data.size();s++) {
 	  SpotTmpData& tmp = spot_tmp_data[s];
+	  if(tmp.ignore) continue;
 	  double step = fabs(B(tmp.flux_parameter_index));
 	  if(step>max_step) B *= (max_step/step);
 	}
@@ -1642,7 +1641,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       // check the chi2 decrement is not good enought with step=1
       double best_chi2=compute_chi2_for_a_given_step(1,&bbox);      
       double best_step = 1;
-      
       if(fabs(best_chi2-*psfChi2)>brent_precision) { // really try brent now
 	best_step = brent((AnalyticFunction*)(compute_chi2_for_a_given_step),
 			  min_step,prefered_step,max_step,

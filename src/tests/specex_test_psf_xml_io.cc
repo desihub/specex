@@ -9,6 +9,7 @@
 #include "specex_psf_io.h"
 #include "specex_gauss_hermite_psf.h"
 #include "specex_serialization.h"
+#include <specex_serialization_implement.h>
 
 using namespace std;
 
