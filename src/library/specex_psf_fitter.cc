@@ -362,7 +362,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, harp::matrix_double* input_Ap, harp::vector_double* input_Bp, bool update_tmp_data) const  {
 
-    
+  
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
   
@@ -377,6 +377,10 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     if(Ap==0) Ap = & const_cast<specex::PSF_Fitter*>(this)->A_of_band[0];
     if(Bp==0) Bp = & const_cast<specex::PSF_Fitter*>(this)->B_of_band[0];
   }
+
+  cout << "stamp.begin_j,end_j= " << stamp.begin_j << "," <<  stamp.end_j << endl;
+  cout << "stamp.begin_i,end_i= " << stamp.begin_i << "," <<  stamp.end_i << endl;
+  
 
   //===============================================
 #define FASTER_THAN_SYR
@@ -1717,7 +1721,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     (*niter) ++;
     
     // ending tests
-
+    if( linear ) {
+      SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots quit loop because linear");
+      break;
+    }
     if( (*niter) > maxiter ) {
       SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots quit loop because max iterations reached");
       break;
@@ -1726,10 +1733,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots quit loop because dchi2 small");
       break;
     }
-    if( linear ) {
-      SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots quit loop because linear");
-      break;
-    }
+    
   } // end of minimization loop
     
   // We have to extract the weight matrix of the psf parameters (the first npar of params vector).
@@ -2084,8 +2088,8 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   // TURN OFF ALL MESSAGES HERE
   bool saved_debug = specex_is_debug();
   bool saved_info  = specex_is_verbose();
-  specex_set_debug(false);
-  specex_set_verbose(false);
+  //specex_set_debug(false);
+  //specex_set_verbose(false);
   
   
   fit_flux                 = true;
@@ -2107,6 +2111,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   int nok=0;
   int nfailed=0;
   for(size_t s=0;s<spots.size();s++) {
+    std::cout << "fitting " << s << "/" << spots.size() << std::endl;
     specex::Spot_p& spot = spots[s];    
     spot->eflux = 0;
     spot->flux = 0;	
