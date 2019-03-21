@@ -249,15 +249,11 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
     if( (fit_psf || fit_psf_tail) && tmp.flux<0) tmp.flux = 0.; // more robust
     tmp.frozen_flux = tmp.flux;
     
-    
-
-
-
     // stamp
     tmp.stamp = Stamp(image);
     SetStampLimitsFromPSF(tmp.stamp,psf,tmp.x,tmp.y);
     tmp.stamp = tmp.stamp.Intersection(stamp);
-    
+        
     tmp.can_measure_flux = true;
     if(spots.size()>1) {
       // check whether we can rely on the flux measurement of this spot
@@ -273,19 +269,18 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
       if(!tmp.can_measure_flux) tmp.ignore = true; // ignore by default
       if(!tmp.can_measure_flux) SPECEX_WARNING("cannot measure flux of spot " << s << " at x=" << tmp.x << " y=" << tmp.y);
     }
-    
+        
     // psf parameters
     tmp.psf_all_params = psf->AllLocalParamsXW(tmp.x,tmp.wavelength,psf_params->bundle_id);
     
     spot_tmp_data.push_back(tmp);
   }
 
-  
 #ifdef EXTERNAL_TAIL
   // compute this before parallel computing
   psf->TailProfile(0,0,psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
 #endif
-
+  
 }
 
 void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
@@ -360,7 +355,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, harp::matrix_double* input_Ap, harp::vector_double* input_Bp, bool update_tmp_data) const  {
 
-    
+  
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
   
@@ -1204,7 +1199,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   if(fit_trace && fit_position) {
     SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots cannot fit traces and spot positions at the same time");
   }
-
   // chi2 , iterations ...
   // ----------------------------------------------------
   double chi2_memory_slot = 0;
@@ -1222,20 +1216,23 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   if(*psfChi2<=0) *psfChi2 = 1e20;
   
   // ----------------------------------------------------
-    
+     
   int npar_psf = 0;
   if(fit_psf) npar_psf = psf->BundleNFitPar(psf_params->bundle_id);
   npar_trace = 0;
-  
   
   npar_fixed_coord = psf_params->FitParPolXW.size();
   npar_varying_coord = psf->BundleNFitPar(psf_params->bundle_id);
 
   nparTot  = NPar(spots.size());
 
+  
+ 
   ComputeWeigthImage(spots,npix);
+
   
   InitTmpData(spots);
+
   int n_to_attach = 0;
   for(size_t s=0;s<spot_tmp_data.size();s++) {
     SpotTmpData& tmp = spot_tmp_data[s];
@@ -1302,7 +1299,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	}
       }
     }
-
 #ifdef CONTINUUM
     if(fit_continuum) {
       continuum_index = index;
@@ -1313,12 +1309,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #endif
     index_of_spots_parameters = index;
   }
-
-
   
-
-
-
+  
   // ----------------------------------------------------
   
   //ComputeWeigthImage(spots,npix);
@@ -1715,7 +1707,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     (*niter) ++;
     
     // ending tests
-
+    if( linear ) {
+      SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots quit loop because linear");
+      break;
+    }
     if( (*niter) > maxiter ) {
       SPECEX_WARNING("specex::PSF_Fitter::FitSeveralSpots quit loop because max iterations reached");
       break;
@@ -1724,10 +1719,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots quit loop because dchi2 small");
       break;
     }
-    if( linear ) {
-      SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots quit loop because linear");
-      break;
-    }
+    
   } // end of minimization loop
     
   // We have to extract the weight matrix of the psf parameters (the first npar of params vector).
@@ -1891,7 +1883,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 };
  
 bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_iterations) {
-
   specex::Spot saved_spot = *spot;
 
   vector<specex::Spot_p> spots; 
@@ -2105,6 +2096,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   int nok=0;
   int nfailed=0;
   for(size_t s=0;s<spots.size();s++) {
+    //std::cout << "fitting " << s << "/" << spots.size() << std::endl;
     specex::Spot_p& spot = spots[s];    
     spot->eflux = 0;
     spot->flux = 0;	
@@ -2628,7 +2620,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	}
 	
 	// this is to readjust fiber positions
-	if(name=="GH-1-0" || name=="GH-0-1" || name=="GH-1-1" ) {
+	if( false && (name=="GH-1-0" || name=="GH-0-1" || name=="GH-1-1" )) {
 	  degx=number_of_fibers-1;
 	  if(number_of_fibers_with_dead_columns>0) {
 	    degx=max(0,degx-number_of_fibers_with_dead_columns);
