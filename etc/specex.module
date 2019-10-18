@@ -73,3 +73,5 @@ prepend-path LD_LIBRARY_PATH $PRODUCT_DIR/lib
 # Add any non-standard Module code below this point.
 #
 prepend-path HARP_PLUGIN_PATH $PRODUCT_DIR/lib
+setenv SPECEXDATA $PRODUCT_DIR/data
+
