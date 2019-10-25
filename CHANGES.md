@@ -1,6 +1,10 @@
 # specex Change Log
 
-## 0.6.3 (unreleased)
+## 0.6.4 (unreleased)
+
+* Set SPECEXDATA in module file
+
+## 0.6.3 (2019-05-30)
 
 * Bring back xml I/O functionalities (were broken)
 
