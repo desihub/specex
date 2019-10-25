@@ -173,7 +173,12 @@ void specex::read_DESI_preprocessed_image(const std::string& filename, image_dat
   std::vector<int> naxis2;
   for(int i=0;i<nhdus;i++) {
     int hdu=i+1; // starts at 1
-    harp::fits::img_seek ( fp, hdu);
+    try {
+      harp::fits::img_seek ( fp, hdu);
+    }catch(...) { 
+      SPECEX_DEBUG("hdu " << hdu << " is not an image hdu");
+      break;
+    }
     extname.push_back("");
     naxis.push_back(0);
     naxis1.push_back(0);
@@ -199,7 +204,7 @@ void specex::read_DESI_preprocessed_image(const std::string& filename, image_dat
       SPECEX_WARNING("could not read NAXIS2 in hdu " << hdu << " of " << filename);
     }
   }
-  
+  nhdus = naxis.size();
   int flux_hdu = -1;
   int ivar_hdu = -1;
   int mask_hdu = -1;
