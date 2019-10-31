@@ -1,8 +1,9 @@
 # specex Change Log
 
-## 0.6.4 (unreleased)
+## 0.6.4 (2019-10-31)
 
-* Set SPECEXDATA in module file
+* Do not fail on binary image HDUs.
+* Set SPECEXDATA in module file.
 
 ## 0.6.3 (2019-05-30)
 
