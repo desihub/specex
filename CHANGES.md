@@ -3,6 +3,7 @@
 ## 0.6.4 (unreleased)
 
 * Set SPECEXDATA in module file
+* Add broken fibers option
 
 ## 0.6.3 (2019-05-30)
 
