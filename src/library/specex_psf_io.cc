@@ -111,16 +111,23 @@ void _write_trace(const specex::PSF &psf, fitsfile *fp, bool is_x) {
       for(int c=0;c<pol->coeff.size();c++)
 	coeff2d(c,fiber-FIBERMIN)=pol->coeff(c);
     }else{ // need to refit
-      harp::vector_double wave(pol->coeff.size());
-      harp::vector_double x(pol->coeff.size());
-      for(int i=0;i<pol->coeff.size();i++) {
-	wave[i]=WAVEMIN+i*((WAVEMAX-WAVEMIN)/(pol->coeff.size()-1));
-	x[i]=pol->Value(wave[i]);
+      if(pol->coeff.size()>0) {
+	SPECEX_DEBUG("need to refit trace coeff.size=" << pol->coeff.size());
+	try {
+	  harp::vector_double wave(pol->coeff.size());
+	  harp::vector_double x(pol->coeff.size());
+	  for(int i=0;i<pol->coeff.size();i++) {
+	    wave[i]=WAVEMIN+i*((WAVEMAX-WAVEMIN)/(pol->coeff.size()-1));
+	    x[i]=pol->Value(wave[i]);
+	  }
+	  specex::Legendre1DPol npol(pol->coeff.size()-1,WAVEMIN,WAVEMAX);
+	  npol.Fit(wave,x,0,false);
+	  for(int c=0;c<npol.coeff.size();c++)
+	    coeff2d(c,fiber-FIBERMIN)=npol.coeff(c);
+	}catch(std::exception& e) {
+	  SPECEX_ERROR("Fit failed " << e.what());
+	}
       }
-      specex::Legendre1DPol npol(pol->coeff.size()-1,WAVEMIN,WAVEMAX);
-      npol.Fit(wave,x,0,false);
-      for(int c=0;c<npol.coeff.size();c++)
-	coeff2d(c,fiber-FIBERMIN)=npol.coeff(c);
     }
   }
   harp::fits::img_append < double > ( fp, coeff2d.n_rows(), coeff2d.n_cols() );
