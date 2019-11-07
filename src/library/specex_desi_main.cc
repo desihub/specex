@@ -51,7 +51,16 @@ namespace popts = boost::program_options;
   ELECTRONS = poisson(TRUE_ELECTRONS) + gaussian(rdnoise)
  */
 
-
+std::vector<std::string> split(const std::string& s, char delimiter) {
+  std::vector<std::string> tokens;
+  std::string token;
+  std::istringstream tokenStream(s);
+  while (std::getline(tokenStream, token, delimiter))
+    {
+      tokens.push_back(token);
+    }
+  return tokens;
+}
 
 int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   
@@ -88,6 +97,9 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   double psf_error=0;
   double psf_core_wscale=0;
   int max_number_of_lines=0; 
+
+  string broken_fibers_string="";
+  
   
   string lamp_lines_filename="";
   if(getenv("SPECEXDATA"))
@@ -141,6 +153,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     ( "trace-deg-x",  popts::value<int>( &trace_deg_x )->default_value(6), "degree of Legendre polynomials along x_ccd for fit of traces")
     ( "psf-error",  popts::value<double>( &psf_error )->default_value(0), "psf fractional uncertainty (default is 0.01, for weights in the fit)")
     ( "psf-core-wscale",  popts::value<double>( &psf_core_wscale ), "scale up the weight of pixels in 5x5 PSF core")
+    ( "broken-fibers", popts::value<string>( &broken_fibers_string ), "broken fibers (comma separated list)")
     
 #ifdef EXTERNAL_TAIL
     ( "fit-psf-tails", "unable fit of psf tails")
@@ -232,6 +245,18 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   }
   if(use_input_specex_psf) {
     SPECEX_INFO("will start from input psf parameters")
+  }
+
+
+  
+  vector<string> tokens = split(broken_fibers_string,',');
+  vector<int> broken_fibers;
+  for(size_t i=0;i<tokens.size();i++) {
+    broken_fibers.push_back(atoi(tokens[i].c_str())%500);
+  }
+  SPECEX_DEBUG("number of input broken fibers: " << broken_fibers.size());
+  for(size_t i=0;i<broken_fibers.size();i++) {
+   SPECEX_DEBUG("input broken fiber #" << broken_fibers[i]);
   }
   
   // dealing with priors
@@ -326,6 +351,14 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     }else{ // use_input_specex_psf
       read_psf(psf,input_psf_filename);
     }
+
+    // set broken fibers
+    for(size_t i=0;i<broken_fibers.size();i++) {
+      psf->FiberTraces[broken_fibers[i]].mask = 3;
+      SPECEX_DEBUG("Fiber trace " << broken_fibers[i] << " OFF=" << psf->FiberTraces[broken_fibers[i]].Off());
+    }
+    
+    
     psf->ccd_image_n_cols = image.n_cols();
     psf->ccd_image_n_rows = image.n_rows();
       
