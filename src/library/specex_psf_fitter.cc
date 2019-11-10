@@ -137,8 +137,8 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   band = 0;
   {
     int ref_fiber=(psf_params->fiber_min + psf_params->fiber_max)/2;
-    while(psf->FiberTraces.find(ref_fiber)==psf->FiberTraces.end()) {ref_fiber++;} // we check we don't choose a missing one
-    
+    while(psf->FiberTraces.find(ref_fiber)==psf->FiberTraces.end() || (psf->FiberTraces.find(ref_fiber)->second.Off()) ) {ref_fiber++;} // we check we don't choose a missing one
+
     vector<int> spots_j;
     for(size_t s=0;s<spot_tmp_data.size();s++) {
       const specex::SpotTmpData &tmp = spot_tmp_data[s];
