@@ -1,5 +1,9 @@
 # specex Change Log
 
+## 0.6.6 (unreleased)
+
+* No changes yet.
+
 ## 0.6.5 (2019-12-20)
 
 * Add broken fibers option.
