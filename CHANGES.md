@@ -1,8 +1,13 @@
 # specex Change Log
 
-## 0.6.5 (unreleased)
+## 0.6.6 (unreleased)
+
+* No changes yet.
+
+## 0.6.5 (2019-12-20)
 
 * Add broken fibers option.
+* Do not choose a reference fiber that is off.
 
 ## 0.6.4 (2019-10-31)
 
