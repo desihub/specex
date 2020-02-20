@@ -143,8 +143,8 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     for(size_t s=0;s<spot_tmp_data.size();s++) {
       const specex::SpotTmpData &tmp = spot_tmp_data[s];
       if(tmp.fiber != ref_fiber) continue;
-      if((tmp.y<0) || (tmp.y>=image.n_rows()))
-	SPECEX_ERROR("Spot is outside of image ??? y=" << tmp.y);
+      //if((tmp.y<0) || (tmp.y>=image.n_rows()))
+      //SPECEX_ERROR("Spot is outside of image ??? y=" << tmp.y);
       spots_j.push_back(int(tmp.y));
     }
     if(spots_j.empty()) {
