@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.6.6 (unreleased)
+## 0.6.7 (unreleased)
 
 * No changes yet.
+
+## 0.6.6 (2020-04-07)
+
+* Don't raise an error when spot is outside of image frame.
 
 ## 0.6.5 (2019-12-20)
 
