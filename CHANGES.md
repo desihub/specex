@@ -2,7 +2,7 @@
 
 ## 0.6.7 (unreleased)
 
-* No changes yet.
+* Added Xe line.
 
 ## 0.6.6 (2020-04-07)
 
