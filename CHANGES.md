@@ -1,6 +1,10 @@
 # specex Change Log
 
-## 0.6.7 (unreleased)
+## 0.6.8 (unreleased)
+
+* No changes yet
+
+## 0.6.7 (2020-04-15)
 
 * Added Xe line.
 
