@@ -574,6 +574,8 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     return EXIT_FAILURE;
  }
   
+  // may prevent crashing on non-floating point exceptions outside this function
+  fedisableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
   return EXIT_SUCCESS;
 }
 
