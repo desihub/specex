@@ -157,10 +157,11 @@ NeI 8856.298 2 27000
 NeI 8868.1905 1 15000
 NeI 8921.9496 1 6400
 NeI 8991.024 2 1800
-NeI 9414.90 1 100 # added by hand on 2020/09/18 from KPNO data inspection
+## NeI 9414.90 1 100 # this is in fact a Xe line at  9414.59
 NeI 9151.1829 1 12000
 NeI 9204.2841 1 8900
 NeI 9222.59 2 6000
+NeI 9224.1108 2 2200
 NeI 9278.0643 3 910
 NeI 9303.4053 2 7700
 NeI 9329.0663 2 6900
@@ -211,7 +212,8 @@ XeI 8954.7086 1 1000
 XeI 9047.9296 1 400
 XeI 9165.1667 1 500
 XeI 9170.04 1 100
-XeI 9376.59 1 10  # added by hand on 2020/09/18 from KPNO data inspection
+XeI 9377.33 1 100 # added by hand on 2020/09/22 from KPNO data inspection
+XeI 9414.59  1 60 # added by hand on 2020/09/22 from KPNO data inspection
 XeI 9447.93 1 80 # added by hand on 2020/09/18 from KPNO data inspection
 XeI 9515.987 1 2000 # added by hand on 2020/09/18 from KPNO data inspection
 XeI 9687.98 1 150 # added by hand on 2020/09/18 from KPNO data inspection
