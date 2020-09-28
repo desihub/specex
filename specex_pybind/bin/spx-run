@@ -1,0 +1,17 @@
+#!/usr/bin/env python
+"""
+Main specex entry point
+"""
+
+import sys
+
+from specex.scripts.specex_funcs import (test_specex)
+
+def main():
+    args = sys.argv    
+    test_specex(args)
+
+if __name__ == "__main__":
+    main()
+
+    
