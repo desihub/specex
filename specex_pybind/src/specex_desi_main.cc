@@ -329,9 +329,11 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
     // read PSF
     specex::PSF_p psf;    
     if( ! use_input_specex_psf ) {
-      SPECEX_INFO("Initializing a " << psf_model << " PSF");      
+      SPECEX_INFO("Initializing a " << psf_model << " PSF");
+      psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
+      /* REMOVING NON-GAUSSHERMITE OPTIONS IN REFACTOR 
       if(psf_model=="GAUSSHERMITE")
-	psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));
+	psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));	
       else if(psf_model=="GAUSSHERMITE2")
 	psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg2));
       else if(psf_model=="HATHERMITE")
@@ -342,6 +344,7 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
 	psf = PSF_p(new specex::DiskMoffatPSF(gauss_hermite_deg));
       else
 	SPECEX_ERROR("don't know this psf model");
+      */
       
       psf->hSizeX = half_size_x;
       psf->hSizeY = half_size_y;
