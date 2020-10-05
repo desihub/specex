@@ -23,8 +23,8 @@ from distutils.errors import CompileError
 # If this code is being run within the readthedocs environment, then we
 # need special steps.
 #
-# Longer story:  desimodel and desitarget are fiberassign build requirements
-# but these are not pip installable from a requirements file, due to the way
+# Longer story: specex is a desispec build requirement
+# but is not pip installable from a requirements file, due to the way
 # that pip handles recursive requirements files and the fact that desiutil is
 # required for obtaining even basic package info (egg_info).  Since this is
 # such a specialized case, we just check if this is running on readthedocs
