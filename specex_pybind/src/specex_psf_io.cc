@@ -16,7 +16,7 @@
 
 #include <specex_gauss_hermite_psf.h>
 #include <specex_gauss_hermite_two_psf.h>
-#include <specex_hat_hermite_psf.h>
+//#include <specex_hat_hermite_psf.h>
 
 #include "specex_psf_io_gauss_hermite_two_psf_fits_1.h"
 #include "specex_psf_io_gauss_hermite_two_psf_fits_2.h"
@@ -346,7 +346,7 @@ void specex::read_psf_fits(specex::PSF_p& psf, const string& filename) {
   // create PSF 
   if ( psftype=="GAUSS-HERMITE") psf = specex::PSF_p(new specex::GaussHermitePSF());
   else SPECEX_ERROR("read fits not implemented for psf " << psftype);
-  
+
   if(psfver<2) { // older formats, psf is in hdu 2 and there is no x y trace hdus
 
     if(psftype=="GAUSS-HERMITE" && psfver==2) read_gauss_hermite_psf_fits_version_2(psf,fp,2);
@@ -361,6 +361,7 @@ void specex::read_psf_fits(specex::PSF_p& psf, const string& filename) {
     else SPECEX_ERROR("read fits not implemented for psf " << psftype << " and I/O version " << psfver);
     
   }
+
   harp::fits::close(fp);
   SPECEX_INFO("read PSF in " << filename);
 }

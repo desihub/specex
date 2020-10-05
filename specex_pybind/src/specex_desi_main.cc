@@ -104,7 +104,9 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   string lamp_lines_filename="";
   if(getenv("SPECEXDATA"))
     lamp_lines_filename = string(getenv("SPECEXDATA"))+"/specex_linelist_desi.txt";
-   
+
+  std::cout << lamp_lines_filename << std::endl;
+
   // reading arguments
   // --------------------------------------------
   popts::options_description desc ( "Allowed Options" );
