@@ -226,14 +226,10 @@ class BuildExt(build_ext):
             ext.extra_link_args.extend(linkopts)
         build_ext.build_extensions(self)
 
-spec_incdir =  "/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec//aux/include"
+spec_incdir =  "/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/aux/include"
 
-spec_libdir = "/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec//aux/lib"
+spec_libdir = "/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/aux/lib"
 
-#spec_incdir = "./"
-#spec_libdir = "./"
-#spec_libs   = ""
-#g++  -O3 -fPIC -pthread -fPIC -DPIC -fopenmp -I/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec//aux/include -I/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec//aux/include  -I/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec//aux/include -I. -Wuninitialized -Wunused-value -Wunused-variable -I. -fPIC -o specex_desi_main.o -c specex_desi_main.cc
 ext_modules = [
     Extension(
         'specex._internal',
@@ -265,19 +261,7 @@ ext_modules = [
             'src/specex_mask.cc',
             'src/specex_lamp_lines_utils.cc',
             'src/specex_brent.cc'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
-            #'src/'#,
+            #'src/new_source_file_here.cc'#,
         ],
         include_dirs=[
             'src',
@@ -300,7 +284,6 @@ ext_modules = [
 ]
 
 setup_keywords['ext_modules'] = ext_modules
-#setup_keywords['cmdclass']['build_ext'] = BuildExt
 setup_keywords['cmdclass']['clean'] = RealClean
 
 #
