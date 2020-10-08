@@ -2,10 +2,42 @@
 #include <iostream>
 #include <specex_message.h>
 #include <specex_pyio.h>
+#include <specex_pyimage.h>
+#include <specex_psf_io.h>
 
 using namespace std;
 
-int specex::PyIO::check_input_psf(specex::Options opts){
+int specex::PyIO::read_img_data(specex::PyOptions opts, specex::PyImage& pyimg){
+
+  read_DESI_preprocessed_image(opts.arc_image_filename,pyimg.image,pyimg.weight,
+			       pyimg.mask,pyimg.rdnoise,pyimg.header);
+
+  return EXIT_SUCCESS;
+}
+
+int specex::PyIO::read_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf,
+				specex::PyIO pyio){
+
+  if( ! pyio.use_input_specex_psf ) {
+    SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
+    pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
+    
+    pypsf.psf->hSizeX = opts.half_size_x;
+    pypsf.psf->hSizeY = opts.half_size_y;
+    SPECEX_INFO("trace_deg_x=" << opts.trace_deg_x << " trace_deg_wave=" <<
+		opts.trace_deg_wave);
+    read_traceset_fits(pypsf.psf,opts.input_psf_filename,opts.trace_deg_x,
+		       opts.trace_deg_wave);     
+    
+  }else{ // use_input_specex_psf
+    read_psf(pypsf.psf,opts.input_psf_filename);
+  }
+    
+  return EXIT_SUCCESS;
+  
+}
+
+int specex::PyIO::check_input_psf(specex::PyOptions opts){
   
   // check input PSF type, can be from boot calib with only the traces
   if (opts.input_psf_filename.find(".xml") != std::string::npos) { // xml file

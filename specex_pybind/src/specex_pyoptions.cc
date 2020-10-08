@@ -1,13 +1,13 @@
 #include <string>
 #include <iostream>
-#include <specex_options.h>
+#include <specex_pyoptions.h>
 #include <boost/program_options.hpp>
 
 using namespace std;
 
 namespace popts = boost::program_options;
 
-int specex::Options::parse(int argc, char *argv[] ){
+int specex::PyOptions::parse(int argc, char *argv[] ){
 
   if(getenv("SPECEXDATA"))
     lamp_lines_filename =

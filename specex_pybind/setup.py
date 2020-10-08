@@ -234,10 +234,12 @@ ext_modules = [
     Extension(
         'specex._internal',
         [
+            'src/_pyspecex.cpp',
             'src/specex_desi_main.cc',
             'src/specex_pyio.cc',
-            'src/_pyspecex.cpp',
-            'src/specex_options.cc',
+            'src/specex_pyprior.cc',
+            'src/specex_tokens.cc',
+            'src/specex_pyoptions.cc',
             'src/mymath.cpp',
             'src/myargs.cpp',
             'src/ext.cpp',

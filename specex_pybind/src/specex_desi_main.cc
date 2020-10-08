@@ -15,7 +15,6 @@
 #include <specex_trace.h>
 #include <specex_spot.h>
 #include <specex_spot_array.h>
-//#include <specex_spectrograph.h>
 #include <specex_lamp_lines_utils.h>
 #include <specex_fits.h>
 #include <specex_desi_io.h>
@@ -23,8 +22,12 @@
 
 #include <specex_psf_io.h>
 
-#include <specex_options.h>
+#include <specex_tokens.h>
+
+#include <specex_pyoptions.h>
 #include <specex_pyio.h>
+#include <specex_pyprior.h>
+#include <specex_pyimage.h>
 
 using namespace std;
 using namespace specex;
@@ -51,70 +54,29 @@ using namespace specex;
   ELECTRONS = poisson(TRUE_ELECTRONS) + gaussian(rdnoise)
  */
 
-std::vector<std::string> split(const std::string& s, char delimiter) {
-  std::vector<std::string> tokens;
-  std::string token;
-  std::istringstream tokenStream(s);
-  while (std::getline(tokenStream, token, delimiter))
-    {
-      tokens.push_back(token);
-    }
-  return tokens;
-}
-
-int specex_desi_psf_fit_main ( specex::Options opts) {
+int specex_desi_psf_fit_main (
+			      specex::PyOptions opts,
+			      specex::PyIO      pyio,
+			      specex::PyPrior   pypr,
+			      specex::PyImage   pymg,
+			      specex::PyPSF     pyps
+			      ){
   
   // to crash when NaN
+
   feenableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
-  
+
+  // copy to local psf pointer (temporary for refactor)
+  specex::PSF_p psf = pyps.psf;
+
   // set logging info
+
   specex_set_debug(opts.vm.count("debug")>0);
   specex_set_verbose(opts.vm.count("quiet")==0);
 
-  // check input PSF type
-  specex::PyIO pyio;
-  pyio.check_input_psf(opts);
-
-  vector<string> tokens = split(opts.broken_fibers_string,',');
-  vector<int> broken_fibers;
-  for(size_t i=0;i<tokens.size();i++) {
-    broken_fibers.push_back(atoi(tokens[i].c_str())%500);
-  }
-  SPECEX_DEBUG("number of input broken fibers: " << broken_fibers.size());
-  for(size_t i=0;i<broken_fibers.size();i++) {
-   SPECEX_DEBUG("input broken fiber #" << broken_fibers[i]);
-  }
+  // main body
   
-  // dealing with priors
-  map<string,Prior*> priors;
-  {
-    int np=int(opts.argurment_priors.size());
-    if( ! (np%3==0) ) {
-      cerr << "error in parsing, priors must be of the form 'name value error' (np=" << np << ")" << endl;
-      cerr << opts.desc << endl;
-      return EXIT_FAILURE;
-    }
-    try {
-      for(int i=0;i<np/3;i++) {
-	string pname=opts.argurment_priors[3*i];
-	double val=atof(opts.argurment_priors[3*i+1].c_str());
-	double err=atof(opts.argurment_priors[3*i+2].c_str());
-	cout << "priors[" << i << "]= " << pname << " " << val << " " << err << endl;
-	priors[pname]= new GaussianPrior(val,err);
-      }
-    }catch(std::exception) {
-      cerr << "error in parsing arguments of priors" << endl;
-      cerr << "priors must be of the form 'name value error'" << endl;
-      cerr << opts.desc << endl;
-      return EXIT_FAILURE;
-    } 
-  }
-  
-
-
   try {
-   
-    
     specex_set_dump_core(opts.vm.count("core")>0);
     bool fit_traces = (opts.vm.count("no-trace-fit")==0);
     bool fit_sigmas = (opts.vm.count("no-sigma-fit")==0);
@@ -130,12 +92,11 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
     }
     
     bool single_bundle = (opts.vm.count("single-bundle")>0);
-
+    
     bool write_tmp_results = (opts.vm.count("tmp-results")>0);
         
     if(opts.trace_prior_deg>0) SPECEX_INFO("Will apply a prior on the traces high order terms in a bundle");
     
-
 #ifdef EXTERNAL_TAIL
     bool fit_psf_tails = (opts.vm.count("fit-psf-tails")>0);
 #endif
@@ -146,52 +107,26 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
     bool fit_individual_spots_position = opts.vm.count("positions");
     
     SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename); 
-    
-    // read data
-    map<string,string> header;
-    image_data image,weight,mask,rdnoise;
-    read_DESI_preprocessed_image(opts.arc_image_filename,image,weight,mask,rdnoise,header);
-        
-    // read PSF
-    specex::PSF_p psf;    
-    if( ! pyio.use_input_specex_psf ) {
-      SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
-      psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
-      /* REMOVING NON-GAUSSHERMITE OPTIONS IN REFACTOR 
-      if(psf_model=="GAUSSHERMITE")
-	psf = PSF_p(new specex::GaussHermitePSF(gauss_hermite_deg));	
-      else if(psf_model=="GAUSSHERMITE2")
-	psf = PSF_p(new specex::GaussHermite2PSF(gauss_hermite_deg,gauss_hermite_deg2));
-      else if(psf_model=="HATHERMITE")
-	psf = PSF_p(new specex::HatHermitePSF(gauss_hermite_deg));
-      else if(psf_model=="HATMOFFAT")
-	psf = PSF_p(new specex::HatMoffatPSF(gauss_hermite_deg));
-      else if(psf_model=="DISKMOFFAT")
-	psf = PSF_p(new specex::DiskMoffatPSF(gauss_hermite_deg));
-      else
-	SPECEX_ERROR("don't know this psf model");
-      */
-      
-      psf->hSizeX = opts.half_size_x;
-      psf->hSizeY = opts.half_size_y;
-      SPECEX_INFO("trace_deg_x=" << opts.trace_deg_x << " trace_deg_wave=" <<
-		  opts.trace_deg_wave);
-      read_traceset_fits(psf,opts.input_psf_filename,opts.trace_deg_x,
-			 opts.trace_deg_wave);     
-      
-    }else{ // use_input_specex_psf
-      read_psf(psf,opts.input_psf_filename);
-    }
-
+          
     // set broken fibers
+
+    vector<string> tokens = split(opts.broken_fibers_string,',');
+    vector<int> broken_fibers;
+    for(size_t i=0;i<tokens.size();i++) {
+      broken_fibers.push_back(atoi(tokens[i].c_str())%500);
+    }
+    SPECEX_DEBUG("number of input broken fibers: " << broken_fibers.size());
+    for(size_t i=0;i<broken_fibers.size();i++) {
+      SPECEX_DEBUG("input broken fiber #" << broken_fibers[i]);
+    }
+    
     for(size_t i=0;i<broken_fibers.size();i++) {
       psf->FiberTraces[broken_fibers[i]].mask = 3;
       SPECEX_DEBUG("Fiber trace " << broken_fibers[i] << " OFF=" << psf->FiberTraces[broken_fibers[i]].Off());
     }
-    
-    
-    psf->ccd_image_n_cols = image.n_cols();
-    psf->ccd_image_n_rows = image.n_rows();
+        
+    psf->ccd_image_n_cols = pymg.image.n_cols();
+    psf->ccd_image_n_rows = pymg.image.n_rows();
       
     // bundle sizes
     int number_of_fibers_per_bundle=0;
@@ -210,7 +145,7 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
     
     // init PSF fitter
     // -------------------------------------------- 
-    PSF_Fitter fitter(psf,image,weight,rdnoise);
+    PSF_Fitter fitter(psf,pymg.image,pymg.weight,pymg.rdnoise);
     
     fitter.polynomial_degree_along_x    = opts.legendre_deg_x;
     fitter.polynomial_degree_along_wave = opts.legendre_deg_wave;
@@ -238,24 +173,20 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
     fitter.psf->gain = 1; // images are already in electrons
     fitter.psf->readout_noise = 0; // readnoise is a property of image, not PSF
         
-    if(header.find("CAMERA") != header.end()) {
-      fitter.psf->camera_id = header["CAMERA"];
+    if(pymg.header.find("CAMERA") != pymg.header.end()) {
+      fitter.psf->camera_id = pymg.header["CAMERA"];
       SPECEX_INFO("CAMERA = " << fitter.psf->camera_id );
     }else{
       SPECEX_WARNING("CAMERA Id not found in header");
     }
     
-    fitter.priors = priors;
-    
-    
+    fitter.priors = pypr.priors;
+        
     fitter.mask.Clear();
 
-    
     SPECEX_INFO(
 		"PSF '" << opts.psf_model << "' stamp size = " 
-		<< psf->hSizeX << "x" << psf->hSizeY );
-    
-    
+		<< psf->hSizeX << "x" << psf->hSizeY );    
     
     int first_fitted_fiber=-1;
     int last_fitted_fiber=-1;
@@ -273,7 +204,6 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
 	psf->ParamsOfBundles[bundle].fiber_max = psf->ParamsOfBundles[bundle].fiber_min+number_of_fibers_per_bundle-1; // included
       }
       
-
       // now check mask ?
       if(psf->ParamsOfBundles[bundle].fiber_min < opts.first_fiber) {
 	psf->ParamsOfBundles[bundle].fiber_min = opts.first_fiber;
@@ -284,15 +214,13 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
 	SPECEX_INFO("restricting fiber range last fiber = " << opts.last_fiber);
       }
       
-      
       fitter.SelectFiberBundle(bundle);
-      
       
       // loading arc lamp spots belonging to this bundle
       // --------------------------------------------
       
       int ymin = 0; // range of usable CCD coordinates, hard coded for now
-      int ymax = image.n_rows(); // range of usable CCD coordinates, hard coded for now
+      int ymax = pymg.image.n_rows(); // range of usable CCD coordinates, hard coded for now
       
       /*
       SPECEX_WARNING("RESTRICTING Y RANGE !!!!!");
@@ -321,33 +249,27 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
       if(write_tmp_results)
 	write_spots_xml(spots,"spots-init.xml");
       
-      /* DEBUGGING
-      {
-	for(int fiber=psf->ParamsOfBundles[bundle].fiber_min; fiber <= psf->ParamsOfBundles[bundle].fiber_max ;fiber ++) {
-	  cout << "DEBUGGING check trace in fiber " << fiber << endl;
-	  cout<< "X_vs_W xmin,xmax,deg " << psf->GetTrace(fiber).X_vs_W.xmin << " " << psf->GetTrace(fiber).X_vs_W.xmax << " " << psf->GetTrace(fiber).X_vs_W.deg << endl;
-	  cout<< "Y_vs_W xmin,xmax,deg " << psf->GetTrace(fiber).Y_vs_W.xmin << " " << psf->GetTrace(fiber).Y_vs_W.xmax << " " << psf->GetTrace(fiber).Y_vs_W.deg << endl;
-	  cout<< "X_vs_Y xmin,xmax,deg " << psf->GetTrace(fiber).X_vs_Y.xmin << " " << psf->GetTrace(fiber).X_vs_Y.xmax << " " << psf->GetTrace(fiber).X_vs_Y.deg << endl;
-	  cout<< "W_vs_Y xmin,xmax,deg " << psf->GetTrace(fiber).W_vs_Y.xmin << " " << psf->GetTrace(fiber).W_vs_Y.xmax << " " << psf->GetTrace(fiber).W_vs_Y.deg << endl;
-	}
-	exit(12);
-      }
-      */
-      
-
       // starting fit
       // --------------------------------------------
       bool init_psf = (!pyio.use_input_specex_psf);
       fitter.FitEverything(spots,init_psf);
 
       int ndf = psf->ParamsOfBundles[bundle].ndata - psf->ParamsOfBundles[bundle].nparams;
-      SPECEX_INFO("Bundle " << bundle << " PSF fit status   = "<< psf->ParamsOfBundles[bundle].fit_status);
-      SPECEX_INFO("Bundle " << bundle << " PSF fit chi2/ndf = "<< psf->ParamsOfBundles[bundle].chi2 << "/" << ndf << " = " << psf->ParamsOfBundles[bundle].chi2/ndf);
-      SPECEX_INFO("Bundle " << bundle << " PSF fit ndata    = "<< psf->ParamsOfBundles[bundle].ndata);
-      SPECEX_INFO("Bundle " << bundle << " PSF fit nspots   = "<< psf->ParamsOfBundles[bundle].nspots_in_fit);
-      SPECEX_INFO("Bundle " << bundle << " PSF fit chi2/ndata (core) = "<< psf->ParamsOfBundles[bundle].chi2_in_core << "/" << psf->ParamsOfBundles[bundle].ndata_in_core << " = " << psf->ParamsOfBundles[bundle].chi2_in_core/psf->ParamsOfBundles[bundle].ndata_in_core);
+      SPECEX_INFO("Bundle " << bundle << " PSF fit status   = " <<
+		  psf->ParamsOfBundles[bundle].fit_status);
+      SPECEX_INFO("Bundle " << bundle << " PSF fit chi2/ndf = " <<
+		  psf->ParamsOfBundles[bundle].chi2 << "/" << ndf <<
+		  " = " << psf->ParamsOfBundles[bundle].chi2/ndf);
+      SPECEX_INFO("Bundle " << bundle << " PSF fit ndata    = "<<
+		  psf->ParamsOfBundles[bundle].ndata);
+      SPECEX_INFO("Bundle " << bundle << " PSF fit nspots   = "<<
+		  psf->ParamsOfBundles[bundle].nspots_in_fit);
+      SPECEX_INFO("Bundle " << bundle << " PSF fit chi2/ndata (core) = "<<
+		  psf->ParamsOfBundles[bundle].chi2_in_core << "/" <<
+		  psf->ParamsOfBundles[bundle].ndata_in_core << " = " <<
+		  psf->ParamsOfBundles[bundle].chi2_in_core /
+		  psf->ParamsOfBundles[bundle].ndata_in_core);
       
-
       if(bundle == opts.first_fiber_bundle) {
 	first_fitted_fiber=psf->ParamsOfBundles[bundle].fiber_min;
 	last_fitted_fiber=psf->ParamsOfBundles[bundle].fiber_max;
@@ -355,19 +277,13 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
       
       first_fitted_fiber=min(first_fitted_fiber,psf->ParamsOfBundles[bundle].fiber_min);
       last_fitted_fiber=max(last_fitted_fiber,psf->ParamsOfBundles[bundle].fiber_max);
-      
-      
+          
       for(size_t s=0;s<spots.size();s++) {
 	fitted_spots.push_back(spots[s]);
       }
 
-
-      
-
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
-
-      
 
     } // end of loop on bundles
     
@@ -379,19 +295,8 @@ int specex_desi_psf_fit_main ( specex::Options opts) {
     if(opts.output_spots_filename != "")
       write_spots_xml(fitted_spots,opts.output_spots_filename);
     
-
-
-    //write_psf_fits_image(fitter.psf,"psf.fits",500,2000,1,4);
-
-
-    
-    
-    
-    
-    
   // ending
-  // --------------------------------------------
-    
+  // --------------------------------------------   
    
   } catch(harp::exception e) {
     cerr << "FATAL ERROR (harp) " << e.what() << endl;

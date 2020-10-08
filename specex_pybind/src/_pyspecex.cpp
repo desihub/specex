@@ -13,8 +13,9 @@
 #include <ext.h>
 #include <specex_desi.h>
 
-#include <specex_options.h>
+#include <specex_pyoptions.h>
 #include <specex_pyio.h>
+#include <specex_pyimage.h>
 
 namespace spx = specex;
 namespace py  = pybind11;
@@ -31,20 +32,14 @@ PYBIND11_MODULE(_internal, m) {
     everywhere.
     )";
 
-    //m.def("specex_desi_psf_fit_main",&specex_desi_psf_fit_main);
-    m.def("specex_desi_psf_fit_main", [](spx::Options opts){
-	return specex_desi_psf_fit_main(opts);
+    m.def("specex_desi_psf_fit_main", [](spx::PyOptions opts,
+					 spx::PyIO      pyio,
+					 spx::PyPrior   pypr,
+					 spx::PyImage   pymg,
+					 spx::PyPSF     pyps){
+	    return specex_desi_psf_fit_main(opts,pyio,pypr,pymg,pyps);
     }
     );
-    /*
-    m.def("specex_desi_psf_fit_main", [](std::vector<std::string> args){
-	    std::vector<char *> cstrs;
-	    cstrs.reserve(args.size());
-	    for (auto &s : args) cstrs.push_back(const_cast<char *>(s.c_str()));
-	    return specex_desi_psf_fit_main(cstrs.size(), cstrs.data());
-    }
-    );
-    */
     
     // wrap the valid static definitions
 
@@ -53,11 +48,11 @@ PYBIND11_MODULE(_internal, m) {
 
     // classes
     
-    py::class_ <spx::Options, spx::Options::pshr > (m, "Options", R"(
+    py::class_ <spx::PyOptions, spx::PyOptions::pshr > (m, "PyOptions", R"(
         Class for storing and processing input options to specex.
         )")
         .def(py::init ())
-        .def("parse", [](spx::Options &self, std::vector<std::string> args){
+        .def("parse", [](spx::PyOptions &self, std::vector<std::string> args){
 	    std::vector<char *> cstrs;
 	    cstrs.reserve(args.size());
 	    for (auto &s : args) cstrs.push_back(const_cast<char *>(s.c_str()));
@@ -65,15 +60,44 @@ PYBIND11_MODULE(_internal, m) {
 	}
 	);
     
+    py::class_ <spx::PyImage, spx::PyImage::pshr > (m, "PyImage", R"(
+        Class for specex image interchangeable with python implementations
+        )")
+        .def(py::init ());
+
+    py::class_ <spx::PyPSF, spx::PyPSF::pshr > (m, "PyPSF", R"(
+        Class for specex PSF interchangeable with python implementations
+        )")
+        .def(py::init ());
+
     py::class_ <spx::PyIO, spx::PyIO::pshr > (m, "PyIO", R"(
         Class for specex IO interchangeable with python implementations
         )")
         .def(py::init ())
-        .def("check_input_psf", [](spx::PyIO &self, spx::Options opts){
+        .def("check_input_psf", [](spx::PyIO &self, spx::PyOptions opts){
 	    return self.check_input_psf(opts);
 	}
+	)
+        .def("read_img_data", [](spx::PyIO &self, spx::PyOptions opts,
+				   spx::PyImage& pyimg){
+	    return self.read_img_data(opts,pyimg);
+	}
+	)
+        .def("read_psf_data", [](spx::PyIO &self, spx::PyOptions opts,
+				 spx::PyPSF& pypsf, spx::PyIO pyio){
+	    return self.read_psf_data(opts,pypsf,pyio);
+	}
 	);
-    
+
+    py::class_ <spx::PyPrior, spx::PyPrior::pshr > (m, "PyPrior", R"(
+        Class for specex priors interchangeable with python implementations
+        )")
+      .def(py::init ())
+      .def("deal_with_priors", [](spx::PyPrior &self, spx::PyOptions opts){
+	  return self.deal_with_priors(opts);
+	}
+	);
+
     py::class_ <spx::MyMath, spx::MyMath::pshr > (m, "MyMath", R"(
         Simple mymath class.
 

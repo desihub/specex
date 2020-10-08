@@ -7,7 +7,11 @@
 
 #include <harp.hpp>
 
-#include <specex_options.h>
+#include <specex_desi_io.h>
+
+#include <specex_pyoptions.h>
+#include <specex_pyimage.h>
+#include <specex_pypsf.h>
 
 namespace specex {
   
@@ -20,8 +24,11 @@ namespace specex {
     bool use_input_specex_psf;
     bool psf_change_req;
 
-    int check_input_psf(specex::Options opts);
-
+    int check_input_psf(specex::PyOptions);
+    int read_img_data(specex::PyOptions, specex::PyImage&);
+    int read_psf_data(specex::PyOptions, specex::PyPSF&,
+		      specex::PyIO);
+    
     PyIO()
       : use_input_specex_psf(false)
       , psf_change_req(false)

@@ -1,5 +1,5 @@
-#ifndef SPECEX_OPTIONS__H
-#define SPECEX_OPTIONS__H
+#ifndef SPECEX_PYOPTIONS__H
+#define SPECEX_PYOPTIONS__H
 
 #include <boost/program_options.hpp>
 #include <vector>
@@ -11,11 +11,11 @@ namespace popts = boost::program_options;
 
 namespace specex {
   
-  class Options : public std::enable_shared_from_this <Options> {
+  class PyOptions : public std::enable_shared_from_this <PyOptions> {
 
   public :
 
-    typedef std::shared_ptr <Options> pshr;
+    typedef std::shared_ptr <PyOptions> pshr;
 
     std::string arc_image_filename;
     std::string input_psf_filename; 
@@ -59,8 +59,8 @@ namespace specex {
 
     int parse(int argc, char *argv[] ); 
 
-    Options()
-      : desc(popts::options_description(" Options")) 
+    PyOptions()
+      : desc(popts::options_description("Options")) 
       {
         
       arc_image_filename="";
