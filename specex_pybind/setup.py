@@ -234,11 +234,13 @@ ext_modules = [
     Extension(
         'specex._internal',
         [
+            'src/specex_desi_main.cc',
+            'src/specex_pyio.cc',
             'src/_pyspecex.cpp',
+            'src/specex_options.cc',
             'src/mymath.cpp',
             'src/myargs.cpp',
             'src/ext.cpp',
-            'src/specex_desi_main.cc',
             'src/specex_gauss_hermite_psf.cc',
             'src/specex_psf.cc',
             'src/specex_psf_fitter.cc',

@@ -13,6 +13,9 @@
 #include <ext.h>
 #include <specex_desi.h>
 
+#include <specex_options.h>
+#include <specex_pyio.h>
+
 namespace spx = specex;
 namespace py  = pybind11;
 
@@ -29,6 +32,11 @@ PYBIND11_MODULE(_internal, m) {
     )";
 
     //m.def("specex_desi_psf_fit_main",&specex_desi_psf_fit_main);
+    m.def("specex_desi_psf_fit_main", [](spx::Options opts){
+	return specex_desi_psf_fit_main(opts);
+    }
+    );
+    /*
     m.def("specex_desi_psf_fit_main", [](std::vector<std::string> args){
 	    std::vector<char *> cstrs;
 	    cstrs.reserve(args.size());
@@ -36,12 +44,36 @@ PYBIND11_MODULE(_internal, m) {
 	    return specex_desi_psf_fit_main(cstrs.size(), cstrs.data());
     }
     );
+    */
     
-    // Wrap the valid static definitions
+    // wrap the valid static definitions
 
     m.attr("MYMATH_INT") = py::int_(MYMATH_INT);
     m.attr("MYARGS_INT") = py::int_(MYARGS_INT);
 
+    // classes
+    
+    py::class_ <spx::Options, spx::Options::pshr > (m, "Options", R"(
+        Class for storing and processing input options to specex.
+        )")
+        .def(py::init ())
+        .def("parse", [](spx::Options &self, std::vector<std::string> args){
+	    std::vector<char *> cstrs;
+	    cstrs.reserve(args.size());
+	    for (auto &s : args) cstrs.push_back(const_cast<char *>(s.c_str()));
+	    return self.parse(cstrs.size(), cstrs.data());
+	}
+	);
+    
+    py::class_ <spx::PyIO, spx::PyIO::pshr > (m, "PyIO", R"(
+        Class for specex IO interchangeable with python implementations
+        )")
+        .def(py::init ())
+        .def("check_input_psf", [](spx::PyIO &self, spx::Options opts){
+	    return self.check_input_psf(opts);
+	}
+	);
+    
     py::class_ <spx::MyMath, spx::MyMath::pshr > (m, "MyMath", R"(
         Simple mymath class.
 
@@ -49,7 +81,7 @@ PYBIND11_MODULE(_internal, m) {
         )")
         .def(py::init <int> ())
         .def("add", &spx::MyMath::add);
-
+    
     py::class_ <spx::MyArgs, spx::MyArgs::pshr > (m, "MyArgs", R"(
         Simple myargs class.
 
