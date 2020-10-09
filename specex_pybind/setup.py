@@ -235,7 +235,7 @@ ext_modules = [
         'specex._internal',
         [
             'src/_pyspecex.cpp',
-            'src/specex_desi_main.cc',
+            'src/specex_fit_psf.cc'
             'src/specex_pyio.cc',
             'src/specex_pyprior.cc',
             'src/specex_tokens.cc',

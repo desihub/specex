@@ -32,12 +32,12 @@ PYBIND11_MODULE(_internal, m) {
     everywhere.
     )";
 
-    m.def("specex_desi_psf_fit_main", [](spx::PyOptions opts,
+    m.def("fit_psf", [](spx::PyOptions opts,
 					 spx::PyIO      pyio,
 					 spx::PyPrior   pypr,
 					 spx::PyImage   pymg,
 					 spx::PyPSF     pyps){
-	    return specex_desi_psf_fit_main(opts,pyio,pypr,pymg,pyps);
+	    return fit_psf(opts,pyio,pypr,pymg,pyps);
     }
     );
     

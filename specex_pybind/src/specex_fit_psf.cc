@@ -54,7 +54,7 @@ using namespace specex;
   ELECTRONS = poisson(TRUE_ELECTRONS) + gaussian(rdnoise)
  */
 
-int specex_desi_psf_fit_main (
+int fit_psf (
 			      specex::PyOptions opts,
 			      specex::PyIO      pyio,
 			      specex::PyPrior   pypr,
@@ -73,76 +73,76 @@ int specex_desi_psf_fit_main (
 
   specex_set_debug(opts.vm.count("debug")>0);
   specex_set_verbose(opts.vm.count("quiet")==0);
+  specex_set_dump_core(opts.vm.count("core")>0);
 
+  bool fit_traces = (opts.vm.count("no-trace-fit")==0);
+  bool fit_sigmas = (opts.vm.count("no-sigma-fit")==0);
+  bool fit_psf    = (opts.vm.count("no-psf-fit")==0);
+  if (opts.vm.count("only-trace-fit")>0) {
+    if (opts.vm.count("no-trace-fit")>0) {
+      SPECEX_ERROR("cannot have both options --only-trace-fit and --no-trace-fit");
+      return EXIT_FAILURE;
+    }
+    fit_traces = true;
+    fit_sigmas = false;
+    fit_psf    = false;      
+  }
+  
+  bool single_bundle = (opts.vm.count("single-bundle")>0);
+  
+  bool write_tmp_results = (opts.vm.count("tmp-results")>0);
+  
+  if(opts.trace_prior_deg>0) SPECEX_INFO("Will apply a prior on the traces high order terms in a bundle");
+    
+#ifdef EXTERNAL_TAIL
+  bool fit_psf_tails = (opts.vm.count("fit-psf-tails")>0);
+#endif
+#ifdef CONTINUUM
+  bool fit_continuum = (opts.vm.count("fit-continuum")>0);
+#endif
+  bool use_variance_model = (opts.vm.count("variance-model")>0);
+  bool fit_individual_spots_position = opts.vm.count("positions");
+  
+  SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename); 
+  
+  // set broken fibers
+  
+  vector<string> tokens = split(opts.broken_fibers_string,',');
+  vector<int> broken_fibers;
+  for(size_t i=0;i<tokens.size();i++) {
+    broken_fibers.push_back(atoi(tokens[i].c_str())%500);
+  }
+  SPECEX_DEBUG("number of input broken fibers: " << broken_fibers.size());
+  for(size_t i=0;i<broken_fibers.size();i++) {
+    SPECEX_DEBUG("input broken fiber #" << broken_fibers[i]);
+  }
+  
+  for(size_t i=0;i<broken_fibers.size();i++) {
+    psf->FiberTraces[broken_fibers[i]].mask = 3;
+    SPECEX_DEBUG("Fiber trace " << broken_fibers[i] << " OFF=" << psf->FiberTraces[broken_fibers[i]].Off());
+  }
+        
+  psf->ccd_image_n_cols = pymg.image.n_cols();
+  psf->ccd_image_n_rows = pymg.image.n_rows();
+  
+  // bundle sizes
+  int number_of_fibers_per_bundle=0;
+  if(single_bundle) {
+    number_of_fibers_per_bundle = psf->FiberTraces.size();
+  }else {
+    number_of_fibers_per_bundle = eval_bundle_size(psf->FiberTraces);
+  }
+  int number_of_fiber_bundles_per_ccd=psf->FiberTraces.size()/number_of_fibers_per_bundle;          
+  if(opts.first_fiber_bundle<0 || opts.first_fiber_bundle>= number_of_fiber_bundles_per_ccd) {
+    SPECEX_ERROR("invalid first fiber bundle");
+  }
+  if(opts.last_fiber_bundle<opts.first_fiber_bundle || opts.last_fiber_bundle>= number_of_fiber_bundles_per_ccd) {
+    SPECEX_ERROR("invalid last fiber bundle");
+  }   
+    
   // main body
   
   try {
-    specex_set_dump_core(opts.vm.count("core")>0);
-    bool fit_traces = (opts.vm.count("no-trace-fit")==0);
-    bool fit_sigmas = (opts.vm.count("no-sigma-fit")==0);
-    bool fit_psf    = (opts.vm.count("no-psf-fit")==0);
-    if (opts.vm.count("only-trace-fit")>0) {
-      if (opts.vm.count("no-trace-fit")>0) {
-	SPECEX_ERROR("cannot have both options --only-trace-fit and --no-trace-fit");
-	return EXIT_FAILURE;
-      }
-      fit_traces = true;
-      fit_sigmas = false;
-      fit_psf    = false;      
-    }
-    
-    bool single_bundle = (opts.vm.count("single-bundle")>0);
-    
-    bool write_tmp_results = (opts.vm.count("tmp-results")>0);
-        
-    if(opts.trace_prior_deg>0) SPECEX_INFO("Will apply a prior on the traces high order terms in a bundle");
-    
-#ifdef EXTERNAL_TAIL
-    bool fit_psf_tails = (opts.vm.count("fit-psf-tails")>0);
-#endif
-#ifdef CONTINUUM
-    bool fit_continuum = (opts.vm.count("fit-continuum")>0);
-#endif
-    bool use_variance_model = (opts.vm.count("variance-model")>0);
-    bool fit_individual_spots_position = opts.vm.count("positions");
-    
-    SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename); 
-          
-    // set broken fibers
-
-    vector<string> tokens = split(opts.broken_fibers_string,',');
-    vector<int> broken_fibers;
-    for(size_t i=0;i<tokens.size();i++) {
-      broken_fibers.push_back(atoi(tokens[i].c_str())%500);
-    }
-    SPECEX_DEBUG("number of input broken fibers: " << broken_fibers.size());
-    for(size_t i=0;i<broken_fibers.size();i++) {
-      SPECEX_DEBUG("input broken fiber #" << broken_fibers[i]);
-    }
-    
-    for(size_t i=0;i<broken_fibers.size();i++) {
-      psf->FiberTraces[broken_fibers[i]].mask = 3;
-      SPECEX_DEBUG("Fiber trace " << broken_fibers[i] << " OFF=" << psf->FiberTraces[broken_fibers[i]].Off());
-    }
-        
-    psf->ccd_image_n_cols = pymg.image.n_cols();
-    psf->ccd_image_n_rows = pymg.image.n_rows();
-      
-    // bundle sizes
-    int number_of_fibers_per_bundle=0;
-    if(single_bundle) {
-      number_of_fibers_per_bundle = psf->FiberTraces.size();
-    }else {
-      number_of_fibers_per_bundle = eval_bundle_size(psf->FiberTraces);
-    }
-    int number_of_fiber_bundles_per_ccd=psf->FiberTraces.size()/number_of_fibers_per_bundle;          
-    if(opts.first_fiber_bundle<0 || opts.first_fiber_bundle>= number_of_fiber_bundles_per_ccd) {
-      SPECEX_ERROR("invalid first fiber bundle");
-    }
-    if(opts.last_fiber_bundle<opts.first_fiber_bundle || opts.last_fiber_bundle>= number_of_fiber_bundles_per_ccd) {
-      SPECEX_ERROR("invalid last fiber bundle");
-    }   
-    
     // init PSF fitter
     // -------------------------------------------- 
     PSF_Fitter fitter(psf,pymg.image,pymg.weight,pymg.rdnoise);
