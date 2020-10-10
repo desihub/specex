@@ -1,6 +1,8 @@
 #include <string>
 #include <iostream>
 #include <specex_message.h>
+#include <specex_spot.h>
+
 #include <specex_pyio.h>
 #include <specex_pyimage.h>
 #include <specex_psf_io.h>
@@ -15,10 +17,33 @@ int specex::PyIO::read_img_data(specex::PyOptions opts, specex::PyImage& pyimg){
   return EXIT_SUCCESS;
 }
 
-int specex::PyIO::read_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf,
-				specex::PyIO pyio){
+int specex::PyIO::write_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf){
 
-  if( ! pyio.use_input_specex_psf ) {
+  vector <Spot_p> fitted_spots = pypsf.fitted_spots;
+  
+  if(opts.output_xml_filename != "")
+    write_psf_xml(pypsf.psf,opts.output_xml_filename);
+  if(opts.output_fits_filename != "")
+    write_psf_fits(pypsf.psf,opts.output_fits_filename,&fitted_spots);
+  
+  return EXIT_SUCCESS;
+
+}
+
+int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
+
+  vector <Spot_p> fitted_spots = pypsf.fitted_spots;
+
+  if(opts.output_spots_filename != "")
+    write_spots_xml(fitted_spots,opts.output_spots_filename);    
+  
+  return EXIT_SUCCESS;
+
+}
+
+int specex::PyIO::read_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf){
+
+  if( ! use_input_specex_psf ) {
     SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
     pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
     

@@ -8,6 +8,8 @@
 #include <harp.hpp>
 
 #include <specex_psf.h>
+#include <specex_spot.h>
+
 #include <specex_gauss_hermite_psf.h>
 
 #include <specex_pyoptions.h>
@@ -21,7 +23,8 @@ namespace specex {
     typedef std::shared_ptr <PyPSF> pshr;
 
     specex::PSF_p psf;
-    
+    vector<Spot_p> fitted_spots;
+
     PyPSF(){}
     
   };

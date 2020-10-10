@@ -28,6 +28,7 @@
 #include <specex_pyio.h>
 #include <specex_pyprior.h>
 #include <specex_pyimage.h>
+#include <specex_pyfitting.h>
 
 using namespace std;
 using namespace specex;
@@ -54,12 +55,12 @@ using namespace specex;
   ELECTRONS = poisson(TRUE_ELECTRONS) + gaussian(rdnoise)
  */
 
-int fit_psf (
+int specex::PyFitting::fit_psf(
 			      specex::PyOptions opts,
 			      specex::PyIO      pyio,
 			      specex::PyPrior   pypr,
 			      specex::PyImage   pymg,
-			      specex::PyPSF     pyps
+			      specex::PyPSF&    pyps
 			      ){
   
   // to crash when NaN
@@ -77,7 +78,7 @@ int fit_psf (
 
   bool fit_traces = (opts.vm.count("no-trace-fit")==0);
   bool fit_sigmas = (opts.vm.count("no-sigma-fit")==0);
-  bool fit_psf    = (opts.vm.count("no-psf-fit")==0);
+  bool fit_thepsf = (opts.vm.count("no-psf-fit")==0);
   if (opts.vm.count("only-trace-fit")>0) {
     if (opts.vm.count("no-trace-fit")>0) {
       SPECEX_ERROR("cannot have both options --only-trace-fit and --no-trace-fit");
@@ -85,7 +86,7 @@ int fit_psf (
     }
     fit_traces = true;
     fit_sigmas = false;
-    fit_psf    = false;      
+    fit_thepsf = false;      
   }
   
   bool single_bundle = (opts.vm.count("single-bundle")>0);
@@ -166,7 +167,7 @@ int fit_psf (
     
     fitter.scheduled_fit_of_traces      = fit_traces;
     fitter.scheduled_fit_of_sigmas      = fit_sigmas;
-    fitter.scheduled_fit_of_psf         = fit_psf;
+    fitter.scheduled_fit_of_psf         = fit_thepsf;
     fitter.direct_simultaneous_fit      = true; // use_input_specex_psf;
     fitter.max_number_of_lines          = opts.max_number_of_lines;
     
@@ -190,7 +191,6 @@ int fit_psf (
     
     int first_fitted_fiber=-1;
     int last_fitted_fiber=-1;
-    vector<Spot_p> fitted_spots;
     
     // loop on fiber bundles 
     // -------------------------------------------- 
@@ -279,21 +279,18 @@ int fit_psf (
       last_fitted_fiber=max(last_fitted_fiber,psf->ParamsOfBundles[bundle].fiber_max);
           
       for(size_t s=0;s<spots.size();s++) {
-	fitted_spots.push_back(spots[s]);
+	pyps.fitted_spots.push_back(spots[s]);
       }
 
       if(fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
 
     } // end of loop on bundles
-    
-    
-    if(opts.output_xml_filename != "")
-      write_psf_xml(fitter.psf,opts.output_xml_filename);
-    if(opts.output_fits_filename != "")
-      write_psf_fits(fitter.psf,opts.output_fits_filename,&fitted_spots);
-    if(opts.output_spots_filename != "")
-      write_spots_xml(fitted_spots,opts.output_spots_filename);
+
+    pyps.psf = fitter.psf;
+
+    //if(opts.output_spots_filename != "")
+    //  write_spots_xml(pyps.fitted_spots,opts.output_spots_filename);    
     
   // ending
   // --------------------------------------------   

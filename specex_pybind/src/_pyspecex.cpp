@@ -8,11 +8,7 @@
 
 #include <pybind11/stl_bind.h>
 
-#include <mymath.h>
-#include <myargs.h>
-#include <ext.h>
-#include <specex_desi.h>
-
+#include <specex_pyfitting.h>
 #include <specex_pyoptions.h>
 #include <specex_pyio.h>
 #include <specex_pyimage.h>
@@ -31,7 +27,8 @@ PYBIND11_MODULE(_internal, m) {
     modifying this code, it is critical that shared_ptrs are used consistently
     everywhere.
     )";
-
+    
+    /*
     m.def("fit_psf", [](spx::PyOptions opts,
 					 spx::PyIO      pyio,
 					 spx::PyPrior   pypr,
@@ -40,14 +37,15 @@ PYBIND11_MODULE(_internal, m) {
 	    return fit_psf(opts,pyio,pypr,pymg,pyps);
     }
     );
+    */
     
-    // wrap the valid static definitions
+    // wrap any valid static definitions
 
-    m.attr("MYMATH_INT") = py::int_(MYMATH_INT);
-    m.attr("MYARGS_INT") = py::int_(MYARGS_INT);
+    // m.attr("SOMEDEF_INT"  ) = py::int_(  SOMEDEF_INT  );
+    // m.attr("SOMEDEF_FLOAT") = py::float_(SOMEDEF_FLOAT);
 
     // classes
-    
+
     py::class_ <spx::PyOptions, spx::PyOptions::pshr > (m, "PyOptions", R"(
         Class for storing and processing input options to specex.
         )")
@@ -84,41 +82,43 @@ PYBIND11_MODULE(_internal, m) {
 	}
 	)
         .def("read_psf_data", [](spx::PyIO &self, spx::PyOptions opts,
-				 spx::PyPSF& pypsf, spx::PyIO pyio){
-	    return self.read_psf_data(opts,pypsf,pyio);
+				 spx::PyPSF& pypsf){
+	    return self.read_psf_data(opts,pypsf);
+	}
+	)
+        .def("write_psf_data",[](spx::PyIO &self, spx::PyOptions opts,
+				 spx::PyPSF& pypsf){
+	    return self.write_psf_data(opts,pypsf);
+	}
+	)
+        .def("write_spots",   [](spx::PyIO &self, spx::PyOptions opts,
+				 spx::PyPSF& pypsf){
+	    return self.write_spots(opts,pypsf);
 	}
 	);
 
     py::class_ <spx::PyPrior, spx::PyPrior::pshr > (m, "PyPrior", R"(
         Class for specex priors interchangeable with python implementations
         )")
-      .def(py::init ())
-      .def("deal_with_priors", [](spx::PyPrior &self, spx::PyOptions opts){
+        .def(py::init ())
+        .def("deal_with_priors", [](spx::PyPrior &self, spx::PyOptions opts){
 	  return self.deal_with_priors(opts);
 	}
 	);
 
-    py::class_ <spx::MyMath, spx::MyMath::pshr > (m, "MyMath", R"(
-        Simple mymath class.
-
-        This class is just a mymath to do math type tests.
+    py::class_ <spx::PyFitting, spx::PyFitting::pshr > (m, "PyFitting", R"(
+        Class for fitting PSFs in specex.
         )")
-        .def(py::init <int> ())
-        .def("add", &spx::MyMath::add);
-    
-    py::class_ <spx::MyArgs, spx::MyArgs::pshr > (m, "MyArgs", R"(
-        Simple myargs class.
-
-        This class is just a myargs to do args type tests.
-        )")
-        .def(py::init <int> ())
-        .def("print_args", &spx::MyArgs::print_args)
-        .def("get_args", [](spx::MyArgs &self, std::vector<std::string> args){
-	    std::vector<char *> cstrs;
-	    cstrs.reserve(args.size());
-	    for (auto &s : args) cstrs.push_back(const_cast<char *>(s.c_str()));
-	    return self.get_args(cstrs.size(), cstrs.data());
+        .def(py::init ())
+        .def("fit_psf", [](spx::PyFitting &self,
+			   spx::PyOptions opts,
+			   spx::PyIO      pyio,
+			   spx::PyPrior   pypr,
+			   spx::PyImage   pymg,
+			   spx::PyPSF     pyps){
+	       return self.fit_psf(opts,pyio,pypr,pymg,pyps);
 	}
 	);
+    
 
 }
