@@ -289,9 +289,6 @@ int specex::PyFitting::fit_psf(
 
     pyps.psf = fitter.psf;
 
-    //if(opts.output_spots_filename != "")
-    //  write_spots_xml(pyps.fitted_spots,opts.output_spots_filename);    
-    
   // ending
   // --------------------------------------------   
    

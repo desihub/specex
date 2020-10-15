@@ -158,7 +158,6 @@ Header read_header(const std::string& filename, int hdu) {
   return head;
 }
 
-
 void specex::read_DESI_preprocessed_image(const std::string& filename, image_data &image, image_data &weight, image_data &mask, image_data &rdnoise, std::map<std::string,std::string>& header) {
   
   SPECEX_INFO("Reading DESI preprocessed image in " << filename);

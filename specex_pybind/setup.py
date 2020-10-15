@@ -234,8 +234,9 @@ ext_modules = [
     Extension(
         'specex._internal',
         [
-            'src/specex_pyio.cc',
             'src/_pyspecex.cpp',
+            'src/specex_pyimage.cc',
+            'src/specex_pyio.cc',
             'src/specex_pyfitting.cc',
             'src/specex_pyprior.cc',
             'src/specex_tokens.cc',

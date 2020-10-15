@@ -16,6 +16,8 @@
 namespace spx = specex;
 namespace py  = pybind11;
 
+PYBIND11_MAKE_OPAQUE(std::map<std::string,std::string>);
+
 using ShapeContainer = py::detail::any_container<ssize_t>;
 
 PYBIND11_MODULE(_internal, m) {
@@ -28,21 +30,9 @@ PYBIND11_MODULE(_internal, m) {
     everywhere.
     )";
     
-    /*
-    m.def("fit_psf", [](spx::PyOptions opts,
-					 spx::PyIO      pyio,
-					 spx::PyPrior   pypr,
-					 spx::PyImage   pymg,
-					 spx::PyPSF     pyps){
-	    return fit_psf(opts,pyio,pypr,pymg,pyps);
-    }
-    );
-    */
-    
-    // wrap any valid static definitions
-
-    // m.attr("SOMEDEF_INT"  ) = py::int_(  SOMEDEF_INT  );
-    // m.attr("SOMEDEF_FLOAT") = py::float_(SOMEDEF_FLOAT);
+    // stl bindings
+   
+    py::bind_map<std::map<std::string, std::string>>(m, "MapStringString");
 
     // classes
 
@@ -50,6 +40,7 @@ PYBIND11_MODULE(_internal, m) {
         Class for storing and processing input options to specex.
         )")
         .def(py::init ())
+        .def_readwrite("arc_image_filename", &spx::PyOptions::arc_image_filename)
         .def("parse", [](spx::PyOptions &self, std::vector<std::string> args){
 	    std::vector<char *> cstrs;
 	    cstrs.reserve(args.size());
@@ -61,7 +52,15 @@ PYBIND11_MODULE(_internal, m) {
     py::class_ <spx::PyImage, spx::PyImage::pshr > (m, "PyImage", R"(
         Class for specex image interchangeable with python implementations
         )")
-        .def(py::init ());
+        .def(py::init ())
+        .def(py::init<py::array,py::array,py::array,py::array,
+	     std::map<std::string,std::string>>())
+        .def("get_header", &spx::PyImage::get_header)
+        .def("get_data", [](spx::PyImage &self, std::string tag){
+	  auto v = self.get_data(tag);
+	  return py::array(v.size(),v.data());
+	}
+	);
 
     py::class_ <spx::PyPSF, spx::PyPSF::pshr > (m, "PyPSF", R"(
         Class for specex PSF interchangeable with python implementations

@@ -17,6 +17,21 @@ int specex::PyIO::read_img_data(specex::PyOptions opts, specex::PyImage& pyimg){
   return EXIT_SUCCESS;
 }
 
+int specex::PyIO::read_img_datam(specex::PyOptions opts,
+				 specex::image_data& image,
+				 specex::image_data& weight,
+				 specex::image_data& mask,
+				 specex::image_data& rdnoise,
+				 std::map<std::string,std::string>& header
+				 )
+				 {
+
+  read_DESI_preprocessed_image(opts.arc_image_filename,image,weight,
+			       mask,rdnoise,header);
+
+  return EXIT_SUCCESS;
+}
+
 int specex::PyIO::write_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   vector <Spot_p> fitted_spots = pypsf.fitted_spots;

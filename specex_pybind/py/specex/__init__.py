@@ -17,6 +17,7 @@ from __future__ import absolute_import, division, print_function
 
 from ._version import __version__
 
+from ._internal import MapStringString
 from ._internal import PyOptions
 from ._internal import PyIO
 from ._internal import PyPrior
