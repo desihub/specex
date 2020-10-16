@@ -1,18 +1,15 @@
 
-specex
-==============
+# specex
 
 This repository contains code for PSF measurement in fiber-fed spectrograph (BOSS data, DESI simulations).
 
-pip installation
-================ 
+## pip installation
 
 git clone --single-branch --branch io_refactor https://github.com/marcelo-alvarez/specex
 
 pip -v install ./specex/specex_pybind
 
-cmake build
-===========
+## cmake build
 
 git clone --single-branch --branch io_refactor https://github.com/marcelo-alvarez/specex
 
