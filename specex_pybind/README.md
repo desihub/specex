@@ -16,6 +16,7 @@ cd specex/specex_pybind
 mkdir build
 cd build
 cmake ../
+make -j8
 mv specex.cpython*so ../
 cd ..
 export PYTHONPATH=$PWD:$PYTHONPATH
