@@ -5,6 +5,7 @@ find_package (Python 3.8 EXACT REQUIRED)
 find_package (PythonInterp 3.8 EXACT REQUIRED)
 find_package (PythonLibs 3.8 EXACT REQUIRED)
 add_subdirectory(pybind11)
+add_compile_options(-std=c++17 -std=c++14 -std=c++11 -pthread -B /global/common/cori_cle7/software/python/3.7-anaconda-2019.10/compiler_compat -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -fPIC)
 find_library(BOOSTHARP
 	NAMES harp boost_regex-mt boost_program_options-mt
 	      boost_serialization-mt
