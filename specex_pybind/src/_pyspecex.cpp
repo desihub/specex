@@ -16,11 +16,12 @@
 namespace spx = specex;
 namespace py  = pybind11;
 
-PYBIND11_MAKE_OPAQUE(std::map<std::string,std::string>);
+using string_double_map = std::map<std::string,std::string>;
+PYBIND11_MAKE_OPAQUE(string_double_map);
 
 using ShapeContainer = py::detail::any_container<ssize_t>;
 
-PYBIND11_MODULE(_internal, m) {
+PYBIND11_MODULE(specex, m) {
     m.doc() = R"(
     Internal wrapper around compiled specex code.
 
