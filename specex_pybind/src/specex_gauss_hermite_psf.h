@@ -17,6 +17,8 @@ namespace specex {
     int degree;
     
   public :
+
+    typedef std::shared_ptr <GaussHermitePSF> pshr;
     
     GaussHermitePSF(int ideg=3);
     virtual ~GaussHermitePSF(){}; 

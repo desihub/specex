@@ -26,6 +26,8 @@ namespace specex {
     vector<Spot_p> fitted_spots;
 
     PyPSF(){}
+
+    specex::image_data get_trace(std::string);
     
   };
   

@@ -38,7 +38,7 @@ void specex::read_psf(specex::PSF_p& psf, const std::string& filename) {
     SPECEX_ERROR("not sure how to read this file (expect xxx.fits or xxx.xml) " << filename);
   }
 }
-void specex::write_psf(const specex::PSF_p psf, const std::string& filename, std::vector<specex::Spot_p> *spots) {
+void specex::write_psf(specex::PSF_p psf, const std::string& filename, std::vector<specex::Spot_p> *spots) {
   
   if (filename.find(".xml") != std::string::npos) {
     SPECEX_INFO("write xml file " << filename);
@@ -72,12 +72,12 @@ void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
   
 }
 
-void _write_trace(const specex::PSF &psf, fitsfile *fp, bool is_x) {
+void _write_trace(specex::PSF_p psf, fitsfile *fp, bool is_x) {
   
   int ncoeff=0;
   double WAVEMIN=0;
   double WAVEMAX=0;
-  for(std::map<int,specex::Trace>::const_iterator it=psf.FiberTraces.begin(); it!=psf.FiberTraces.end(); it++) {
+  for(std::map<int,specex::Trace>::const_iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); it++) {
     const specex::Legendre1DPol *pol=0;
     if(is_x) pol = &(it->second.X_vs_W);
     else pol = &(it->second.Y_vs_W);
@@ -90,18 +90,19 @@ void _write_trace(const specex::PSF &psf, fitsfile *fp, bool is_x) {
   }
   WAVEMIN=floor(WAVEMIN);
   WAVEMAX=floor(WAVEMAX);
-
+  
   int FIBERMIN=100000;
   int FIBERMAX=0;
-  for(std::map<int,specex::Trace>::const_iterator it=psf.FiberTraces.begin(); it!=psf.FiberTraces.end(); it++) {
+  for(std::map<int,specex::Trace>::const_iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); it++) {
     FIBERMIN=min(FIBERMIN,it->second.fiber);
     FIBERMAX=max(FIBERMAX,it->second.fiber);
     
   }
   int NFIBERS=(FIBERMAX-FIBERMIN+1);
-  
+
   specex::image_data coeff2d(ncoeff,NFIBERS);
-  for(std::map<int,specex::Trace>::const_iterator it=psf.FiberTraces.begin(); it!=psf.FiberTraces.end(); it++) {
+  
+  for(std::map<int,specex::Trace>::const_iterator it=psf->FiberTraces.begin(); it!=psf->FiberTraces.end(); it++) {
     int fiber = it->second.fiber;
     const specex::Legendre1DPol *pol=0;
     if(is_x) pol = &(it->second.X_vs_W);
@@ -141,13 +142,32 @@ void _write_trace(const specex::PSF &psf, fitsfile *fp, bool is_x) {
   harp::fits::key_write(fp,"WAVEMIN",WAVEMIN,"");
   harp::fits::key_write(fp,"WAVEMAX",WAVEMAX,"");
   SPECEX_DEBUG("done write trace in HDU ");
+
+  // save keys into tracekeys
+  psf->pydata.FIBERMIN = FIBERMIN;
+  psf->pydata.FIBERMAX = FIBERMAX;
+  psf->pydata.WAVEMIN  =  WAVEMIN;
+  psf->pydata.WAVEMAX  =  WAVEMAX;
+
+  cout << "FIBERMIN, FIBERMAX, WAVEMIN, WAVEMAX: " << FIBERMIN << " " << FIBERMAX << " "
+       << WAVEMIN << " " << WAVEMAX << endl;
+    
+  // save value of coeff2d 
+  // specex::PSF_p psfp = psf;
+  psf->SetCoeff2d(coeff2d,is_x);
+  if(is_x){
+    cout << "first element of psf->coeff2d.data (x) is " << psf->pydata.coeff2d_x.data[0] << endl;
+  }else{
+    cout << "first element of psf->coeff2d.data (y) is " << psf->pydata.coeff2d_y.data[0] << endl;
+  }
+  
 }
   
-void specex::write_xtrace_fits(const specex::PSF& psf, fitsfile *fp) {
+void specex::write_xtrace_fits(specex::PSF_p psf, fitsfile *fp) {
   SPECEX_INFO("write XTRACE");
   return _write_trace(psf,fp,true); // X 
 }
-void specex::write_ytrace_fits(const specex::PSF& psf, fitsfile *fp) {
+void specex::write_ytrace_fits(specex::PSF_p psf, fitsfile *fp) {
   SPECEX_INFO("write YTRACE");
   return _write_trace(psf,fp,false); // Y 
 }
@@ -221,7 +241,7 @@ void specex::synchronize_traces(specex::PSF_p psf) {
     
   }
 }
-
+  
 void specex::write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename) {
   std::ofstream os(filename.c_str());
   boost::archive::xml_oarchive xml_oa ( os );
@@ -285,15 +305,24 @@ void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filenam
   specex::write_new_fits_image(filename,img);
 }
 
-  
+void specex::write_psf_fits_dummy(const std::string& path){
+  fitsfile * fp;
+  int status = 0;
+  long naxes[2];
+  double dummy;
+  naxes[0] = 10;
+  naxes[1] = 15;
+  harp::fits::create(fp,path);  
+  fits_create_img(fp,-64, 2, naxes, &status);
+  harp::fits::close(fp);
+}
 
-
-void specex::write_psf_fits(const specex::PSF_p psf, const string& path, std::vector<specex::Spot_p> *spots) {
+void specex::write_psf_fits(specex::PSF_p psf, const string& path, std::vector<specex::Spot_p> *spots) {
   fitsfile * fp;  
   harp::fits::create(fp,path);
   int status=0;
- 
-
+  
+  
   string psftype;
   if( psf->Name()=="GaussHermitePSF") psftype=="GAUSS-HERMITE";
   else if ( psf->Name()=="GaussHermite2PSF") psftype=="GAUSS-HERMITE2";
@@ -301,13 +330,13 @@ void specex::write_psf_fits(const specex::PSF_p psf, const string& path, std::ve
   
   int psfver=3;
   
-  specex::write_xtrace_fits(*psf,fp);
+  specex::write_xtrace_fits(psf,fp);
 
   harp::fits::key_write(fp,"PSFTYPE","GAUSS-HERMITE","");
   harp::fits::key_write(fp,"PSFVER",psfver,"");
   fits_write_comment(fp,"PSF generated by specex, https://github.com/desihub/specex",&status);
   
-  specex::write_ytrace_fits(*psf,fp);
+  specex::write_ytrace_fits(psf,fp);
   
   if(psf->Name()=="GaussHermitePSF" && psfver==3)
     write_gauss_hermite_psf_fits_version_3((const specex::GaussHermitePSF&)*psf,fp); // ,spots);

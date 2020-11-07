@@ -10,6 +10,8 @@
 #include "specex_linalg.h"
 #include "specex_image_data.h"
 
+#include "specex_psfpy.h"
+
 #define PSF_NAN_VALUE 9999999
 
 #define EXTERNAL_TAIL
@@ -46,9 +48,7 @@ namespace specex {
     friend class boost::serialization::access;
 
   public :
-
     
-
     // those are polynomials of x_cdd and lambda to allow continuous variation in CCD and at the same time
     // and easy projection per fiber for subsequent use
     
@@ -106,8 +106,8 @@ namespace specex {
 
     }
   };
-
-  class PSF {
+  
+  class PSF : public std::enable_shared_from_this <PSF> {
 
     friend class boost::serialization::access;
 
@@ -115,12 +115,22 @@ namespace specex {
     // BEGIN WAS BEFORE IN ANALYTIC PSF
     // ==================================================
 
-  
- 
+  public:
 
+    // =======================================   
+    // begin added as part of pybind refactor
+    
+    typedef std::shared_ptr <PSF> pshr;    
 
+    PSFPy pydata;
 
-
+    specex::image_data coeff2d_x, coeff2d_y;
+    void SetCoeff2d(specex::image_data, bool);
+    specex::image_data GetCoeff2d(bool);
+    
+    // end added as part of pybind refactor
+    // =======================================
+    
 #ifdef EXTERNAL_TAIL
     
   public :
