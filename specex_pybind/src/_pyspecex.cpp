@@ -43,13 +43,19 @@ py::array_t<double>  image_data2nparray(spx::image_data image_data){
   
 }
 
-using string_double_map = std::map<std::string,std::string>;
+using string_double_map  = std::map<std::string,std::string>;
 using string_vstring_map = std::map<std::string,std::vector<std::string>>;
+using string_vint_map    = std::map<std::string,std::vector<int>>;
+using string_vdouble_map = std::map<std::string,std::vector<double>>;
+
 using vec_double = std::vector<double>;
 using vec_int    = std::vector<int>;
 
 PYBIND11_MAKE_OPAQUE(string_double_map);
 PYBIND11_MAKE_OPAQUE(string_vstring_map);
+PYBIND11_MAKE_OPAQUE(string_vint_map);
+PYBIND11_MAKE_OPAQUE(string_vdouble_map);
+
 PYBIND11_MAKE_OPAQUE(vec_double);
 PYBIND11_MAKE_OPAQUE(vec_int);
 
@@ -69,10 +75,35 @@ PYBIND11_MODULE(specex, m) {
     
     py::bind_map<std::map<std::string,             std::string>> (m, "MapStringString");
     py::bind_map<std::map<std::string, std::vector<std::string>>>(m, "MapStringVString");
+    py::bind_map<std::map<std::string, std::vector<int        >>>(m, "MapStringVInt");
+    py::bind_map<std::map<std::string, std::vector<double     >>>(m, "MapStringVDouble");
     py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
     py::bind_vector<std::vector<int>>                            (m, "VectorInt");
 
     // data interface functions
+
+    m.def("get_tablekeys", [](spx::PyPSF pyps,
+			      std::map<std::string, std::string> &tablekeys_comment,
+			      std::map<std::string, std::string> &tablekeys_string,
+			      std::map<std::string, int>         &tablekeys_int,
+			      std::map<std::string, double>      &tablekeys_double) {
+
+	    tablekeys_comment = pyps.psf->pydata.tablekeys_comment;
+	    tablekeys_string  = pyps.psf->pydata.tablekeys_string;
+	    tablekeys_int     = pyps.psf->pydata.tablekeys_int;
+	    tablekeys_double  = pyps.psf->pydata.tablekeys_double;
+	    
+    });
+
+    m.def("get_table",     [](spx::PyPSF pyps,
+			      std::map<std::string, std::string>         &tableentries_string,
+			      std::map<std::string, std::vector<int>>    &tableentries_int,
+			      std::map<std::string, std::vector<double>> &tableentries_double) {
+	    tableentries_string = pyps.psf->pydata.tableentries_string;
+	    tableentries_int    = pyps.psf->pydata.tableentries_int;
+	    tableentries_double = pyps.psf->pydata.tableentries_double;
+	    
+    });
     
     m.def("get_tracekeys", [](spx::PyPSF pyps,
 			      std::vector<int>    &fiberkeys,

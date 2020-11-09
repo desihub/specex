@@ -154,7 +154,7 @@ void _write_trace(specex::PSF_p psf, fitsfile *fp, bool is_x) {
     
   // save value of coeff2d 
   // specex::PSF_p psfp = psf;
-  psf->SetCoeff2d(coeff2d,is_x);
+  psf->pydata.SetCoeff2d(coeff2d,is_x);
   if(is_x){
     cout << "first element of psf->coeff2d.data (x) is " << psf->pydata.coeff2d_x.data[0] << endl;
   }else{

@@ -243,7 +243,7 @@ void write_gauss_hermite_psf_fits_version_3(const specex::GaussHermitePSF& psf, 
     fits_write_comment(fp,"PSF_core is integrated in pixel",&status); harp::fits::check ( status );
     fits_write_comment(fp,"PSF_tail is not, it is evaluated at center of pixel",&status); harp::fits::check ( status );
     fits_write_comment(fp,"------------------------------------------------------------------------",&status); harp::fits::check ( status );   
-    harp::fits::key_write(fp,"EXTNAME","PSF","");
+    harp::fits::key_write(fp,"EXTNAME","PSF","");    
     harp::fits::key_write(fp,"PSFTYPE","GAUSS-HERMITE","");
     harp::fits::key_write(fp,"PSFVER",PSFVER,"");
     
