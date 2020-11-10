@@ -123,10 +123,6 @@ namespace specex {
     typedef std::shared_ptr <PSF> pshr;    
 
     PSFPy pydata;
-
-    specex::image_data coeff2d_x, coeff2d_y;
-    void SetCoeff2d(specex::image_data, bool);
-    specex::image_data GetCoeff2d(bool);
     
     // end added as part of pybind refactor
     // =======================================
