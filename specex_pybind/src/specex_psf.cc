@@ -119,21 +119,6 @@ specex::PSF::PSF() {
 #define NY_TAIL_PROFILE 8000
 #define TAIL_OVERSAMPLING 2.
 
-void specex::PSF::SetCoeff2d(specex::image_data coeff2d, bool is_x){
-  if(is_x){
-    this->pydata.coeff2d_x = coeff2d;
-  } else{
-    this->pydata.coeff2d_y = coeff2d;
-  }
-}
-
-specex::image_data specex::PSF::GetCoeff2d(bool is_x){
-  if(is_x){
-    return pydata.coeff2d_x;
-  }else{
-    return pydata.coeff2d_y;
-  }
-}
 double specex::PSF::TailProfileValue(const double& dx, const double &dy) const {
   double r2 = square(dx*r_tail_x_scale)+square(dy*r_tail_y_scale);
   return r2/(r2_tail_core_size+r2)*pow(r2_tail_core_size+r2,-r_tail_power_law_index/2.);
