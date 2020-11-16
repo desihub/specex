@@ -29,10 +29,10 @@ namespace specex {
 
     specex::image_data get_trace(std::string);
 
-    std::vector<std::string>         get_tablestring();
-    std::vector<std::vector<int>>    get_tableint();
-    std::vector<std::vector<double>> get_tabledouble();
-
+    void get_table(std::vector<std::string> &table_string,
+		   std::vector<std::vector<int>> &table_int,
+		   std::vector<std::vector<double>> &table_double);
+    
   };
   
 }

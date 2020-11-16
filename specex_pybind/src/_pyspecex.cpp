@@ -15,6 +15,7 @@
 #include <specex_gauss_hermite_psf.h>
 #include <specex_psf_io.h>
 #include <specex_image_data.h>
+#include <specex_pypsf.h>
 
 namespace spx = specex;
 namespace py  = pybind11;
@@ -48,16 +49,20 @@ using string_vstring_map = std::map<std::string,std::vector<std::string>>;
 using string_vint_map    = std::map<std::string,std::vector<int>>;
 using string_vdouble_map = std::map<std::string,std::vector<double>>;
 
-using vec_double = std::vector<double>;
-using vec_int    = std::vector<int>;
+using    vec_int    = std::vector<int>;
+using    vec_double = std::vector<double>;
+using vecvec_int    = std::vector<std::vector<int>>;
+using vecvec_double = std::vector<std::vector<double>>;
 
 PYBIND11_MAKE_OPAQUE(string_double_map);
 PYBIND11_MAKE_OPAQUE(string_vstring_map);
 PYBIND11_MAKE_OPAQUE(string_vint_map);
 PYBIND11_MAKE_OPAQUE(string_vdouble_map);
 
-PYBIND11_MAKE_OPAQUE(vec_double);
 PYBIND11_MAKE_OPAQUE(vec_int);
+PYBIND11_MAKE_OPAQUE(vec_double);
+PYBIND11_MAKE_OPAQUE(vecvec_int);
+PYBIND11_MAKE_OPAQUE(vecvec_double);
 
 using ShapeContainer = py::detail::any_container<ssize_t>;
 
@@ -77,8 +82,10 @@ PYBIND11_MODULE(specex, m) {
     py::bind_map<std::map<std::string, std::vector<std::string>>>(m, "MapStringVString");
     py::bind_map<std::map<std::string, std::vector<int        >>>(m, "MapStringVInt");
     py::bind_map<std::map<std::string, std::vector<double     >>>(m, "MapStringVDouble");
-    py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
     py::bind_vector<std::vector<int>>                            (m, "VectorInt");
+    py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
+    py::bind_vector<std::vector<std::vector<int>>>               (m, "VectorVectorInt");
+    py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
 
     // data interface functions
 
@@ -116,13 +123,13 @@ PYBIND11_MODULE(specex, m) {
     });
 
     m.def("get_table", [](spx::PyPSF  pyps,
-	                  std::vector<std::string>         &table_string,
 			  std::vector<std::vector<int>>    &table_int,
 			  std::vector<std::vector<double>> &table_double) {
 
-	 table_string = pyps.get_tablestring();
-	 table_int    = pyps.get_tableint();
-	 table_double = pyps.get_tabledouble();
+	 std::vector<std::string> table_string;
+	 pyps.get_table(table_string, table_int, table_double);
+
+	 return table_string;
 	    
     });
     
