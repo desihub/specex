@@ -339,7 +339,7 @@ void specex::write_psf_fits(specex::PSF_p psf, const string& path, std::vector<s
   specex::write_ytrace_fits(psf,fp);
   
   if(psf->Name()=="GaussHermitePSF" && psfver==3)
-    write_gauss_hermite_psf_fits_version_3((const specex::GaussHermitePSF&)*psf,fp); // ,spots);
+    write_gauss_hermite_psf_fits_version_3((specex::GaussHermitePSF&)*psf,fp); // ,spots);
   else 
     SPECEX_ERROR("specex::write_psf_fits not implemented for PSF '" << psf->Name() << "' and I/O version " << psfver);
   

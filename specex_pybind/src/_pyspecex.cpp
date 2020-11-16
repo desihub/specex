@@ -82,29 +82,6 @@ PYBIND11_MODULE(specex, m) {
 
     // data interface functions
 
-    m.def("get_tablekeys", [](spx::PyPSF pyps,
-			      std::map<std::string, std::string> &tablekeys_comment,
-			      std::map<std::string, std::string> &tablekeys_string,
-			      std::map<std::string, int>         &tablekeys_int,
-			      std::map<std::string, double>      &tablekeys_double) {
-
-	    tablekeys_comment = pyps.psf->pydata.tablekeys_comment;
-	    tablekeys_string  = pyps.psf->pydata.tablekeys_string;
-	    tablekeys_int     = pyps.psf->pydata.tablekeys_int;
-	    tablekeys_double  = pyps.psf->pydata.tablekeys_double;
-	    
-    });
-
-    m.def("get_table",     [](spx::PyPSF pyps,
-			      std::map<std::string, std::string>         &tableentries_string,
-			      std::map<std::string, std::vector<int>>    &tableentries_int,
-			      std::map<std::string, std::vector<double>> &tableentries_double) {
-	    tableentries_string = pyps.psf->pydata.tableentries_string;
-	    tableentries_int    = pyps.psf->pydata.tableentries_int;
-	    tableentries_double = pyps.psf->pydata.tableentries_double;
-	    
-    });
-    
     m.def("get_tracekeys", [](spx::PyPSF pyps,
 			      std::vector<int>    &fiberkeys,
 			      std::vector<double> &wavekeys) {
@@ -122,6 +99,30 @@ PYBIND11_MODULE(specex, m) {
 
 	 specex::image_data trace = pyps.get_trace(axis);
 	 return image_data2nparray(trace);
+	    
+    });
+    
+    m.def("get_tablekeys", [](spx::PyPSF pyps,
+			      std::map<std::string, std::string> &tablekeys_comment,
+			      std::map<std::string, std::string> &tablekeys_string,
+			      std::map<std::string, int>         &tablekeys_int,
+			      std::map<std::string, double>      &tablekeys_double) {
+
+	    tablekeys_comment = pyps.psf->pydata.tablekeys_comment;
+	    tablekeys_string  = pyps.psf->pydata.tablekeys_string;
+	    tablekeys_int     = pyps.psf->pydata.tablekeys_int;
+	    tablekeys_double  = pyps.psf->pydata.tablekeys_double;
+	    
+    });
+
+    m.def("get_table", [](spx::PyPSF  pyps,
+	                  std::vector<std::string>         &table_string,
+			  std::vector<std::vector<int>>    &table_int,
+			  std::vector<std::vector<double>> &table_double) {
+
+	 table_string = pyps.get_tablestring();
+	 table_int    = pyps.get_tableint();
+	 table_double = pyps.get_tabledouble();
 	    
     });
     

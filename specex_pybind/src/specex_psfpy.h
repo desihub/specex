@@ -6,6 +6,7 @@
 #include <string>
 
 #include <harp.hpp>
+#include "specex_fits.h"
 #include "specex_image_data.h"
 
 namespace specex {
@@ -20,15 +21,13 @@ namespace specex {
     int    FIBERMIN, FIBERMAX;
     double  WAVEMIN,  WAVEMAX;
 
+    specex::FitsTable table;
+
     std::map<std::string, std::string> tablekeys_comment;
     std::map<std::string, std::string> tablekeys_string;
     std::map<std::string, int>         tablekeys_int;
     std::map<std::string, double>      tablekeys_double;
     
-    std::map<std::string, std::string>         tableentries_string;
-    std::map<std::string, std::vector<int>>    tableentries_int;
-    std::map<std::string, std::vector<double>> tableentries_double;
-
     specex::image_data GetCoeff2d(bool);  
     
     void SetCoeff2d(specex::image_data, bool);    

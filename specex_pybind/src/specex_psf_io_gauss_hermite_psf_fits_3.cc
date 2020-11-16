@@ -17,7 +17,7 @@ static void AddRow2(specex::FitsTable& table,const string& PARAM, harp::vector_d
 }
 
 
-void write_gauss_hermite_psf_fits_version_3(const specex::GaussHermitePSF& psf, fitsfile* fp) {
+void write_gauss_hermite_psf_fits_version_3(specex::GaussHermitePSF& psf, fitsfile* fp) {
   
   SPECEX_INFO("write PSF");
   SPECEX_DEBUG("write_gauss_hermite_psf_fits_version_3");
@@ -202,7 +202,9 @@ void write_gauss_hermite_psf_fits_version_3(const specex::GaussHermitePSF& psf, 
     
   // write table
   table.Write(fp);
-  
+
+  // copy table to pydata object for export to python
+  psf.pydata.table = table;
   
   // write keywords
   {
