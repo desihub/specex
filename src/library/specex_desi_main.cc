@@ -75,12 +75,13 @@ int specex_desi_psf_fit_main ( int argc, char *argv[] ) {
   // read arguments to look for timing option
   int timeout=0;
   for(int i=1;i<argc;i++) {
-    if(string(argv[i]).find("timeout") != std::string::npos) {
-      if(i==(argc-1)) {
-	throw std::runtime_error("error, need a value in seconds after argument timeout");
-      }
-      timeout=atoi(argv[i+1]);
-      break;
+    //if(string(argv[i]).find("timeout") != std::string::npos) {
+    if(strstr(argv[i],"timeout")) {
+	if(i==(argc-1)) {
+	  throw std::runtime_error("error, need a value in seconds after argument timeout");
+	}
+	timeout=atoi(argv[i+1]);
+	break;
     }
   }
 
