@@ -23,11 +23,6 @@ namespace specex {
 
     specex::FitsTable table;
 
-    std::map<std::string, std::string> tablekeys_comment;
-    std::map<std::string, std::string> tablekeys_string;
-    std::map<std::string, int>         tablekeys_int;
-    std::map<std::string, double>      tablekeys_double;
-    
     specex::image_data GetCoeff2d(bool);  
     
     void SetCoeff2d(specex::image_data, bool);    
