@@ -68,7 +68,8 @@ void write_gauss_hermite_psf_fits_version_3(specex::GaussHermitePSF& psf, fitsfi
     }
   }
   SPECEX_DEBUG("ncoeff = " << ncoeff);
-
+  psf.ncoeff = ncoeff;
+  
   specex::FitsTable table;
   
   { // column description

@@ -16,6 +16,7 @@
 #include <specex_psf_io.h>
 #include <specex_image_data.h>
 #include <specex_pypsf.h>
+#include <specex_fits.h>
 
 namespace spx = specex;
 namespace py  = pybind11;
@@ -44,25 +45,41 @@ py::array_t<double>  image_data2nparray(spx::image_data image_data){
   
 }
 
+template <class T>
+std::vector<T> vecassign(T var){
+  std::vector<T> varvec;
+  T vararr[] = { var } ;
+  varvec.assign(vararr,vararr+1);
+  return varvec;
+}
+
 using string_double_map  = std::map<std::string,std::string>;
 using string_vstring_map = std::map<std::string,std::vector<std::string>>;
 using string_vint_map    = std::map<std::string,std::vector<int>>;
 using string_vdouble_map = std::map<std::string,std::vector<double>>;
 
-using    vec_int    = std::vector<int>;
-using    vec_double = std::vector<double>;
-using vecvec_int    = std::vector<std::vector<int>>;
-using vecvec_double = std::vector<std::vector<double>>;
+using    vec_string   = std::vector<std::string>;
+using    vec_int      = std::vector<int>;
+using    vec_double   = std::vector<double>;
+using    vec_longlong = std::vector<long long>;
+using vecvec_int      = std::vector<std::vector<int>>;
+using vecvec_double   = std::vector<std::vector<double>>;
 
 PYBIND11_MAKE_OPAQUE(string_double_map);
 PYBIND11_MAKE_OPAQUE(string_vstring_map);
 PYBIND11_MAKE_OPAQUE(string_vint_map);
 PYBIND11_MAKE_OPAQUE(string_vdouble_map);
 
+PYBIND11_MAKE_OPAQUE(vec_string);
 PYBIND11_MAKE_OPAQUE(vec_int);
+PYBIND11_MAKE_OPAQUE(vec_longlong);
 PYBIND11_MAKE_OPAQUE(vec_double);
 PYBIND11_MAKE_OPAQUE(vecvec_int);
 PYBIND11_MAKE_OPAQUE(vecvec_double);
+
+//PYBIND11_MAKE_OPAQUE(varstring);
+//PYBIND11_MAKE_OPAQUE(varlonglong);
+//PYBIND11_MAKE_OPAQUE(vardouble);
 
 using ShapeContainer = py::detail::any_container<ssize_t>;
 
@@ -82,11 +99,12 @@ PYBIND11_MODULE(specex, m) {
     py::bind_map<std::map<std::string, std::vector<std::string>>>(m, "MapStringVString");
     py::bind_map<std::map<std::string, std::vector<int        >>>(m, "MapStringVInt");
     py::bind_map<std::map<std::string, std::vector<double     >>>(m, "MapStringVDouble");
+    py::bind_vector<std::vector<std::string                    >>(m, "VectorString");
     py::bind_vector<std::vector<int>>                            (m, "VectorInt");
+    py::bind_vector<std::vector<long long>>                      (m, "VectorLongLong");
     py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
-    py::bind_vector<std::vector<std::vector<int>>>               (m, "VectorVectorInt");
+    py::bind_vector<std::vector<std::vector<int               >>>(m, "VectorVectorInt");
     py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
-
     // data interface functions
 
     m.def("get_tracekeys", [](spx::PyPSF pyps,
@@ -109,28 +127,72 @@ PYBIND11_MODULE(specex, m) {
 	    
     });
     
-    m.def("get_tablekeys", [](spx::PyPSF pyps,
-			      std::map<std::string, std::string> &tablekeys_comment,
-			      std::map<std::string, std::string> &tablekeys_string,
-			      std::map<std::string, int>         &tablekeys_int,
-			      std::map<std::string, double>      &tablekeys_double) {
+    m.def("get_tablekeys", [](spx::PyPSF     pyps,
+			      std::vector<long long> &mjd,
+			      std::vector<long long>&   plate_id,
+			      std::vector<std::string>& camera_id,
+			      std::vector<long long>&   arc_exposure_id,
+			      std::vector<long long>&   NPIX_X,
+			      std::vector<long long>&   NPIX_Y,
+			      std::vector<long long>&   hSizeX,
+			      std::vector<long long>&   hSizeY,
+			      std::vector<long long>&   nparams_all,
+			      std::vector<long long>&   ncoeff,
+			      std::vector<long long>&   GHDEGX,
+			      std::vector<long long>&   GHDEGY,
+			      std::vector<   double>&   psf_error,
+			      std::vector<   double>&   readout_noise,
+			      std::vector<   double>&   gain) {
 
-	    tablekeys_comment = pyps.psf->pydata.tablekeys_comment;
-	    tablekeys_string  = pyps.psf->pydata.tablekeys_string;
-	    tablekeys_int     = pyps.psf->pydata.tablekeys_int;
-	    tablekeys_double  = pyps.psf->pydata.tablekeys_double;
-	    
+	mjd             = vecassign((long long  )pyps.psf->mjd);
+	plate_id        = vecassign((long long  )pyps.psf->plate_id);
+	camera_id       = vecassign((std::string)pyps.psf->camera_id);
+	arc_exposure_id = vecassign((long long)pyps.psf->arc_exposure_id);
+	NPIX_X          = vecassign((long long)pyps.psf->ccd_image_n_cols);
+	NPIX_Y          = vecassign((long long)pyps.psf->ccd_image_n_rows);
+	hSizeX          = vecassign((long long)pyps.psf->hSizeX);
+	hSizeY          = vecassign((long long)pyps.psf->hSizeY);
+	nparams_all     = vecassign((long long)(pyps.psf->LocalNAllPar()+2));
+	ncoeff          = vecassign((long long)pyps.psf->ncoeff);
+	GHDEGX          = vecassign((long long)pyps.psf->Degree());
+	GHDEGY          = vecassign((long long)pyps.psf->Degree());
+	psf_error       = vecassign((double   )pyps.psf->psf_error);
+	readout_noise   = vecassign((double   )pyps.psf->readout_noise);
+	gain            = vecassign((double   )pyps.psf->gain);
+
     });
-
+ 
     m.def("get_table", [](spx::PyPSF  pyps,
-			  std::vector<std::vector<int>>    &table_int,
-			  std::vector<std::vector<double>> &table_double) {
-
-	 std::vector<std::string> table_string;
-	 pyps.get_table(table_string, table_int, table_double);
-
-	 return table_string;
+			  std::vector<std::string> &table_col0,
+			  std::vector<double>      &table_col1,
+			  std::vector<int>         &table_col2,
+			  std::vector<int>         &table_col3) {
 	    
+	spx::FitsTable table = pyps.psf->pydata.table;
+        int nrows = table.data.size();
+	std::map<std::string,spx::FitsColumnDescription>::const_iterator c1 =
+	  table.columns.begin();
+
+	for(int r=0;r<nrows;r++){
+
+	  // row0, PARAM
+	  const char *input_val = table.data[r][0].string_val.c_str();	  
+	  table_col0.push_back(std::string(input_val));
+
+	  // row2, COEFF	  
+	  const spx::FitsColumnDescription& column = c1->second;
+	  int nd = column.SizeOfVectorOfDouble();
+	  double* double_vals = new double[nd];
+	  for(int d=0;d<nd;d++) table_col1.push_back(table.data[r][1].double_vals(d));
+
+	  // row3, LEGDEGX
+	  table_col2.push_back(table.data[r][2].int_vals(0));
+
+	  // row4, LEGDEGW
+	  table_col3.push_back(table.data[r][3].int_vals(0));
+	  
+	}
+	
     });
     
     // classes
@@ -151,7 +213,7 @@ PYBIND11_MODULE(specex, m) {
         .def_readwrite("arc_image_filename", &spx::PyOptions::arc_image_filename)
         .def_readwrite("input_psf_filename", &spx::PyOptions::input_psf_filename)
         .def_readwrite("output_fits_filename", &spx::PyOptions::output_fits_filename)
-        .def("parse", [](spx::PyOptions &self, std::vector<std::string> args){
+        .def("parse", [](spx::PyOptions &self, std::vector<std::string>& args){
 	    std::vector<char *> cstrs;
 	    cstrs.reserve(args.size());
 	    for (auto &s : args) cstrs.push_back(const_cast<char *>(s.c_str()));

@@ -173,8 +173,6 @@ public :
     
   protected :
     
-    
-    
     //harp::vector_double TmpParamDer;
     std::string name;
 
@@ -193,7 +191,7 @@ public :
     double Xccd(int fiber, const double& wave) const;
     double Yccd(int fiber, const double& wave) const;
     
-    
+    int ncoeff;
     long long int arc_exposure_id;
     long long int mjd;
     long long int plate_id;
@@ -274,6 +272,7 @@ public :
   
     
     virtual int LocalNAllPar() const = 0; // number of all the parameters parameters needed to describe psf at fixed ccd position
+    virtual double Degree() const = 0; 
     int BundleNFitPar(int bundle_id) const; // number of parameters to be fitted  needed to describe psf varying with xy ccd coordinates
     int BundleNAllPar(int bundle_id) const; // number of all the parameters needed to describe psf varying with xy ccd coordinates
     int TracesNPar() const;
