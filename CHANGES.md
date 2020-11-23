@@ -2,7 +2,7 @@
 
 ## 0.6.8 (unreleased)
 
-* No changes yet
+* Added timeout option
 
 ## 0.6.7 (2020-04-15)
 
