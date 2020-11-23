@@ -23,7 +23,6 @@ namespace py  = pybind11;
 
 py::array_t<double>  image_data2nparray(spx::image_data image_data){
   auto v = image_data.data;
-  cout << "size in get_pyps_image: " << v.size() << endl;
   size_t size = v.size();
   double *foo = new double[size];
   for (unsigned i = 0; i < v.size(); i++) foo[i]=v[i];	
@@ -32,8 +31,6 @@ py::array_t<double>  image_data2nparray(spx::image_data image_data){
   // memory when destroyed:
   py::capsule free_when_done(foo, [](void *f) {
       double *foo = reinterpret_cast<double *>(f);
-      std::cerr << "Element [0] = " << foo[0] << "\n";
-      std::cerr << "freeing memory @ " << f << "\n";
       delete[] foo;
     });
   
