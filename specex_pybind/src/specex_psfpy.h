@@ -18,15 +18,16 @@ namespace specex {
     typedef std::shared_ptr <PSFPy> pshr;
     
     specex::image_data coeff2d_x, coeff2d_y;
-    int    FIBERMIN, FIBERMAX;
-    double  WAVEMIN,  WAVEMAX;
+    int         FIBERMIN,       FIBERMAX;
+    double trace_WAVEMIN,  trace_WAVEMAX;
+    double table_WAVEMIN,  table_WAVEMAX;
 
     specex::FitsTable table;
 
     specex::image_data GetCoeff2d(bool);  
     
     void SetCoeff2d(specex::image_data, bool);    
-    
+    void SetParamsOfBundle();
     PSFPy(){}
 
   };

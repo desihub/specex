@@ -25,7 +25,25 @@ void specex::PyPSF::get_table(std::vector<std::string>         &table_string,
 
   cout << "nrows in get_tablestring = " << nrows << endl;
   cout << "ncols in get_tablestring = " << ncols << endl;
+  
+}
 
-  
-  
+void specex::PyPSF::SetParamsOfBundle(){
+
+  for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = this->psf->ParamsOfBundles.begin();
+      bundle_it != this->psf->ParamsOfBundles.end(); ++bundle_it) {
+      
+    const specex::PSF_Params & params_of_bundle = bundle_it->second;
+      
+    int ndf = params_of_bundle.ndata - params_of_bundle.nparams;
+    double chi2pdf = 0;
+    
+    if(ndf>0) chi2pdf = params_of_bundle.chi2/ndf;
+
+    bundle_id.push_back(params_of_bundle.bundle_id);
+    bundle_ndata.push_back(params_of_bundle.ndata);
+    bundle_nparams.push_back(params_of_bundle.nparams);
+    bundle_chi2pdf.push_back(chi2pdf);
+    
+  }
 }

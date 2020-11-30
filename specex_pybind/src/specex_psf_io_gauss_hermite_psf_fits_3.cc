@@ -204,7 +204,11 @@ void write_gauss_hermite_psf_fits_version_3(specex::GaussHermitePSF& psf, fitsfi
   // write table
   table.Write(fp);
 
-  // copy table to pydata object for export to python
+  // save key data
+  psf.pydata.table_WAVEMIN = WAVEMIN;
+  psf.pydata.table_WAVEMAX = WAVEMAX;
+  
+  // save table in pydata object for export to python
   psf.pydata.table = table;
   
   // write keywords

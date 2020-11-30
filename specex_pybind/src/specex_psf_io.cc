@@ -143,23 +143,14 @@ void _write_trace(specex::PSF_p psf, fitsfile *fp, bool is_x) {
   harp::fits::key_write(fp,"WAVEMAX",WAVEMAX,"");
   SPECEX_DEBUG("done write trace in HDU ");
 
-  // save keys into tracekeys
+  // save key data 
   psf->pydata.FIBERMIN = FIBERMIN;
   psf->pydata.FIBERMAX = FIBERMAX;
-  psf->pydata.WAVEMIN  =  WAVEMIN;
-  psf->pydata.WAVEMAX  =  WAVEMAX;
-
-  cout << "FIBERMIN, FIBERMAX, WAVEMIN, WAVEMAX: " << FIBERMIN << " " << FIBERMAX << " "
-       << WAVEMIN << " " << WAVEMAX << endl;
+  psf->pydata.trace_WAVEMIN = WAVEMIN;
+  psf->pydata.trace_WAVEMAX = WAVEMAX;
     
   // save value of coeff2d 
-  // specex::PSF_p psfp = psf;
   psf->pydata.SetCoeff2d(coeff2d,is_x);
-  if(is_x){
-    cout << "first element of psf->coeff2d.data (x) is " << psf->pydata.coeff2d_x.data[0] << endl;
-  }else{
-    cout << "first element of psf->coeff2d.data (y) is " << psf->pydata.coeff2d_y.data[0] << endl;
-  }
   
 }
   

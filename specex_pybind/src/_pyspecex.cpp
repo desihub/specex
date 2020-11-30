@@ -104,69 +104,66 @@ PYBIND11_MODULE(specex, m) {
     py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
     // data interface functions
 
-    m.def("get_tracekeys", [](spx::PyPSF pyps,
-			      std::vector<int>    &fiberkeys,
-			      std::vector<double> &wavekeys) {
+    m.def("tablewrite_init", [](spx::PyPSF&          pyps) {
 
-	int   fiberarr[] = { pyps.psf->pydata.FIBERMIN, pyps.psf->pydata.FIBERMAX };
-	double wavearr[] = { pyps.psf->pydata.WAVEMIN,  pyps.psf->pydata.WAVEMAX  };
+	pyps.FIBERMIN = pyps.psf->pydata.FIBERMIN;
+	pyps.FIBERMAX = pyps.psf->pydata.FIBERMAX;
 	
-	fiberkeys.assign(fiberarr,fiberarr+2);
-	wavekeys.assign(  wavearr, wavearr+2);
+	pyps.trace_WAVEMIN  = pyps.psf->pydata.trace_WAVEMIN;
+	pyps.trace_WAVEMAX  = pyps.psf->pydata.trace_WAVEMAX;
+	pyps.table_WAVEMIN  = pyps.psf->pydata.table_WAVEMIN;
+	pyps.table_WAVEMAX  = pyps.psf->pydata.table_WAVEMAX;
+
+	pyps.nfibers = pyps.FIBERMAX - pyps.FIBERMIN + 1;
 	
+	pyps.mjd = (long long)pyps.psf->mjd;
+	pyps.plate_id = (long long)pyps.psf->plate_id;
+	pyps.camera_id       = (std::string)pyps.psf->camera_id;
+	pyps.arc_exposure_id = (long long)pyps.psf->arc_exposure_id;
+	pyps.NPIX_X          = (long long)pyps.psf->ccd_image_n_cols;
+	pyps.NPIX_Y          = (long long)pyps.psf->ccd_image_n_rows;
+	pyps.hSizeX          = (long long)pyps.psf->hSizeX;
+	pyps.hSizeY          = (long long)pyps.psf->hSizeY;
+	pyps.nparams_all     = (long long)(pyps.psf->LocalNAllPar()+2);
+	pyps.ncoeff          = (long long)pyps.psf->ncoeff;
+	pyps.GHDEGX          = (long long)pyps.psf->Degree();
+	pyps.GHDEGY          = (long long)pyps.psf->Degree();
+	pyps.psf_error       = (double   )pyps.psf->psf_error;
+	pyps.readout_noise   = (double   )pyps.psf->readout_noise;
+	pyps.gain            = (double   )pyps.psf->gain;	
     });
-    
-    m.def("get_trace", [](spx::PyPSF  pyps,
-			  std::string axis) {
 
-	 specex::image_data trace = pyps.get_trace(axis);
-	 return image_data2nparray(trace);
+    m.def("get_trace", [](spx::PyPSF& pyps,
+			  std::string axis) {
+	    
+	specex::image_data trace = pyps.get_trace(axis);
+	pyps.trace_ncoeff  = trace.n_cols();
+	return image_data2nparray(trace);
 	    
     });
     
-    m.def("get_tablekeys", [](spx::PyPSF     pyps,
-			      std::vector<long long> &mjd,
-			      std::vector<long long>&   plate_id,
-			      std::vector<std::string>& camera_id,
-			      std::vector<long long>&   arc_exposure_id,
-			      std::vector<long long>&   NPIX_X,
-			      std::vector<long long>&   NPIX_Y,
-			      std::vector<long long>&   hSizeX,
-			      std::vector<long long>&   hSizeY,
-			      std::vector<long long>&   nparams_all,
-			      std::vector<long long>&   ncoeff,
-			      std::vector<long long>&   GHDEGX,
-			      std::vector<long long>&   GHDEGY,
-			      std::vector<   double>&   psf_error,
-			      std::vector<   double>&   readout_noise,
-			      std::vector<   double>&   gain) {
-
-	mjd             = vecassign((long long  )pyps.psf->mjd);
-	plate_id        = vecassign((long long  )pyps.psf->plate_id);
-	camera_id       = vecassign((std::string)pyps.psf->camera_id);
-	arc_exposure_id = vecassign((long long)pyps.psf->arc_exposure_id);
-	NPIX_X          = vecassign((long long)pyps.psf->ccd_image_n_cols);
-	NPIX_Y          = vecassign((long long)pyps.psf->ccd_image_n_rows);
-	hSizeX          = vecassign((long long)pyps.psf->hSizeX);
-	hSizeY          = vecassign((long long)pyps.psf->hSizeY);
-	nparams_all     = vecassign((long long)(pyps.psf->LocalNAllPar()+2));
-	ncoeff          = vecassign((long long)pyps.psf->ncoeff);
-	GHDEGX          = vecassign((long long)pyps.psf->Degree());
-	GHDEGY          = vecassign((long long)pyps.psf->Degree());
-	psf_error       = vecassign((double   )pyps.psf->psf_error);
-	readout_noise   = vecassign((double   )pyps.psf->readout_noise);
-	gain            = vecassign((double   )pyps.psf->gain);
-
-    });
- 
-    m.def("get_table", [](spx::PyPSF  pyps,
+    m.def("get_table", [](spx::PyPSF&  pyps,
 			  std::vector<std::string> &table_col0,
 			  std::vector<double>      &table_col1,
 			  std::vector<int>         &table_col2,
-			  std::vector<int>         &table_col3) {
+			  std::vector<int>         &table_col3,
+			  std::vector<int>         &bundle_id,
+			  std::vector<int>         &bundle_ndata,
+			  std::vector<int>         &bundle_nparams,
+			  std::vector<double>      &bundle_chi2pdf
+			  ) {
+
+	pyps.SetParamsOfBundle();
+
+	bundle_id      = pyps.bundle_id;
+	bundle_ndata   = pyps.bundle_ndata;
+	bundle_nparams = pyps.bundle_nparams;
+	bundle_chi2pdf = pyps.bundle_chi2pdf;
 	    
 	spx::FitsTable table = pyps.psf->pydata.table;
-        int nrows = table.data.size();
+	pyps.table_nrows = table.data.size();
+	int nrows = pyps.table_nrows;
+	
 	std::map<std::string,spx::FitsColumnDescription>::const_iterator c1 =
 	  table.columns.begin();
 
@@ -235,7 +232,36 @@ PYBIND11_MODULE(specex, m) {
         Class for specex PSF interchangeable with python implementations
         )")
         .def(py::init ())
-        .def_readwrite("psf", &spx::PyPSF::psf);
+
+        .def_readwrite("psf", &spx::PyPSF::psf)
+
+        .def_readwrite("nfibers",          &spx::PyPSF::nfibers)    
+
+        .def_readwrite("table_nrows",      &spx::PyPSF::table_nrows)    
+        .def_readwrite("trace_ncoeff",     &spx::PyPSF::trace_ncoeff)
+    
+        .def_readwrite("FIBERMIN",         &spx::PyPSF::FIBERMIN)
+        .def_readwrite("FIBERMAX",         &spx::PyPSF::FIBERMAX)
+        .def_readwrite("trace_WAVEMIN",    &spx::PyPSF::trace_WAVEMIN)
+        .def_readwrite("trace_WAVEMAX",    &spx::PyPSF::trace_WAVEMAX)
+        .def_readwrite("table_WAVEMIN",    &spx::PyPSF::table_WAVEMIN)
+        .def_readwrite("table_WAVEMAX",    &spx::PyPSF::table_WAVEMAX)
+      
+        .def_readwrite("mjd",              &spx::PyPSF::mjd)
+        .def_readwrite("plate_id",         &spx::PyPSF::plate_id)
+        .def_readwrite("arc_exposure_id",  &spx::PyPSF::arc_exposure_id)
+        .def_readwrite("NPIX_X",           &spx::PyPSF::NPIX_X)
+        .def_readwrite("NPIX_Y",           &spx::PyPSF::NPIX_Y)
+        .def_readwrite("hSizeX",           &spx::PyPSF::hSizeX)
+        .def_readwrite("hSizeY",           &spx::PyPSF::hSizeY)
+        .def_readwrite("nparams_all",      &spx::PyPSF::nparams_all)
+        .def_readwrite("ncoeff",           &spx::PyPSF::ncoeff)
+        .def_readwrite("GHDEGX",           &spx::PyPSF::GHDEGX)
+        .def_readwrite("GHDEGY",           &spx::PyPSF::GHDEGY)
+        .def_readwrite("camera_id",        &spx::PyPSF::camera_id)
+        .def_readwrite("psf_error",        &spx::PyPSF::psf_error)
+        .def_readwrite("readout_noise",    &spx::PyPSF::readout_noise)
+        .def_readwrite("gain",             &spx::PyPSF::gain);
 
     py::class_ <spx::PyIO, spx::PyIO::pshr > (m, "PyIO", R"(
         Class for specex IO interchangeable with python implementations
