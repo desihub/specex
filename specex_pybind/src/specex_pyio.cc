@@ -32,7 +32,7 @@ int specex::PyIO::read_img_datam(specex::PyOptions opts,
   return EXIT_SUCCESS;
 }
 
-int specex::PyIO::write_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf){
+int specex::PyIO::prepare_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   vector <Spot_p> fitted_spots = pypsf.fitted_spots;
   
