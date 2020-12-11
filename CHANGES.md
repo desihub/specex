@@ -1,8 +1,14 @@
 # specex Change Log
 
-## 0.6.8 (unreleased)
+## 0.6.9 (unreleased)
 
-* Added timeout option
+* No changes yet
+
+## 0.6.8 (2020-12-11)
+
+* Fixed floating point exception crash (PR #33)
+* Adjusted lines based upon inspection of arc lamp data (0e48b41 and 809c554)
+* Added timeout option (PR #34)
 
 ## 0.6.7 (2020-04-15)
 
