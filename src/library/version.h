@@ -1,1 +1,1 @@
-#define VERSION_STRING "0.6.8"
+#define VERSION_STRING "0.6.8.dev578"
