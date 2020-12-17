@@ -14,7 +14,7 @@ Ensure that HARP is installed and that the harpconfig script is in your $PATH.
 Next decide where to install specex.  We will call that directory `$WHERE`.
 Make all software and install it by doing:
 
-`SPECEX_PREFIX=$WHERE make install`
+`SPECEX_PREFIX=$WHERE make -j 8 install`
 
 In order to use the specex plugin with HARP, you need to append location of
 the plugin to the search path that HARP uses by doing:

@@ -61,7 +61,8 @@ all : ; $(NO_CXX)
 install : all ; $(NO_SPECEX_PREFIX)
 	@ for f in $(SUBDIRS); do $(MAKE) -C $$f install; done
 	@ for f in $(PYSCRIPTS); do cp python/$$f $(SPECEX_PREFIX)/bin; done
-	@ cp -a data $(SPECEX_PREFIX)/
+	# support in-place installation to current directory
+	@ if [ $(SPECEX_PREFIX) != '.' ] && [ $(SPECEX_PREFIX) != $(PWD) ]; then cp -a data $(SPECEX_PREFIX)/; fi
 	@ chmod +x $(SPECEX_PREFIX)/bin/specex*
 
 uninstall : ; $(NO_SPECEX_PREFIX)
