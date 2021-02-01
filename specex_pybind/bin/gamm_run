@@ -1,4 +1,0 @@
-#!/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/conda/bin/python
-# EASY-INSTALL-SCRIPT: 'specex===dummy-version-string','gamm_run'
-__requires__ = 'specex===dummy-version-string'
-__import__('pkg_resources').run_script('specex===dummy-version-string', 'gamm_run')

@@ -1,16 +1,11 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(specex)
-set(Python_ROOT_DIR "/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/conda")
+set(Python_ROOT_DIR $ENV{DESICONDA})
 find_package (Python 3.8 EXACT REQUIRED)
 find_package (PythonInterp 3.8 EXACT REQUIRED)
 find_package (PythonLibs 3.8 EXACT REQUIRED)
 add_subdirectory(pybind11)
-add_compile_options(-pthread -B /global/common/cori_cle7/software/python/3.7-anaconda-2019.10/compiler_compat -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes)
-find_library(BOOSTHARP
-	NAMES harp boost_regex-mt boost_program_options-mt
-	      boost_serialization-mt
-	PATHS /global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/aux/lib
-)
+add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes)
 pybind11_add_module(specex NO_EXTRAS 
 	    src/_pyspecex.cpp
 	    src/specex_psfpy.cc
@@ -49,11 +44,11 @@ pybind11_add_module(specex NO_EXTRAS
 target_include_directories(specex
 	PUBLIC
 	src
-	/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/aux/include)
+	)
+
 target_link_directories(specex
-	PUBLIC
-	/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/aux/lib)
-target_link_libraries(specex PUBLIC "${BOOSTHARP}")
+	PUBLIC)
+target_link_libraries(specex PUBLIC "-lharp -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt")
 set(INTERPROCEDURAL_OPTIMIZATION FALSE)
 set(INTERPROCEDURAL_OPTIMIZATION_<CONFIG> FALSE)
 set(CMAKE_C_COMPILE_OPTIONS_IPO "")
