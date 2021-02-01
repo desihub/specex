@@ -13,7 +13,7 @@ The installation procedure is described in the [INSTALL file](INSTALL.md), as we
 ## Using specex for DESI
 
 Access to specex in python is through a shard object library and desi_compute_psf
-See desispec.scripts.desi_compute_psf for more details on how to run specex for multiple bundles in serial or parallel and then merge. Here is an example:
+See [desispec.scripts.specex](https://github.com/desihub/desispec/blob/spx_io_refactor/py/desispec/scripts/specex.py) for more details on how to run specex for multiple bundles in serial or parallel and then merge. Here is an example:
 ```
 from desispec.psfio import run_specex
 
@@ -30,7 +30,7 @@ com.extend(['--legendre-deg-wave', '1'])
 
 retval = run_specex(com)
 ```
-This should produce a file fit-psf-b1-00068217-00.fits in the same directory.
+This should produce a file `fit-psf-b1-00068217-00.fits` in the same directory.
 
 ## installation
 ```
