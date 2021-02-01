@@ -15,7 +15,7 @@ The installation procedure is described in the [INSTALL file](INSTALL.md), as we
 Access to specex in python is through a shard object library and desi_compute_psf
 See [desispec.scripts.specex](https://github.com/desihub/desispec/blob/spx_io_refactor/py/desispec/scripts/specex.py) for more details on how to run specex for multiple bundles in serial or parallel and then merge. Here is an example:
 ```
-from desispec.psfio import run_specex
+from desispec.pybindspecex import run_specex
 
 com = ['desi_psf_fit']
 com.extend(['-a',
