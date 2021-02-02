@@ -10,6 +10,26 @@ This package is intended to be used with [HARP](https://github.com/tskisner/HARP
 /or [specter](https://github.com/desihub/specter) extraction codes.
 The installation procedure is described in the [INSTALL file](INSTALL.md), as well as below. The code depends on HARP.
 
+## Installation
+
+```
+
+# uncomment below for consistency with current harpconfig compiler (gcc)
+# used to compile specex master branch running at nersc
+# this should give identical results for the psf
+# export CC=gcc
+# export CXX=gcc
+
+git clone --single-branch --branch io_refactor https://github.com/desihub/specex
+cd specex
+mkdir build
+cd build
+cmake ../
+make -j8
+export PYTHONPATH=$PWD:$PYTHONPATH
+
+```
+
 ## Using specex for DESI
 
 Access to specex in python is through a shard object library and desi_compute_psf
@@ -32,21 +52,3 @@ retval = run_specex(com)
 ```
 This should produce a file `fit-psf-b1-00068217-00.fits` in the same directory.
 
-## installation
-```
-
-# uncomment below for consistency with current harpconfig compiler (gcc)
-# used to compile specex master branch running at nersc
-# this should give identical results for the psf
-# export CC=gcc
-# export CXX=gcc
-
-git clone --single-branch --branch io_refactor https://github.com/desihub/specex
-cd specex
-mkdir build
-cd build
-cmake ../
-make -j8
-export PYTHONPATH=$PWD:$PYTHONPATH
-
-```
