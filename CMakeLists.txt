@@ -4,7 +4,7 @@ set(Python_ROOT_DIR $ENV{DESICONDA})
 find_package (Python 3.8 EXACT REQUIRED)
 find_package (PythonInterp 3.8 EXACT REQUIRED)
 find_package (PythonLibs 3.8 EXACT REQUIRED)
-add_subdirectory(pybind11)
+add_subdirectory(src/pybind11)
 add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes)
 pybind11_add_module(specex NO_EXTRAS 
 	    src/_pyspecex.cpp

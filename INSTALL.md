@@ -14,9 +14,7 @@ This repository contains code for PSF measurement in fiber-fed spectrograph for 
 
 git clone --single-branch --branch io_refactor https://github.com/desihub/specex
 cd specex
-mkdir build
-cd build
-cmake ../
+cmake .
 make -j8
 export PYTHONPATH=$PWD:$PYTHONPATH
 
