@@ -66,6 +66,7 @@ setup(
     author='DESI Collaboration',
     author_email='desi-data@desi.lbl.gov',
     license='BSD',
+    zip_safe=False,
     version=pkg_version,
     ext_modules=[CMakeExtension('specex')],
     cmdclass={
