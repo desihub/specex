@@ -16,25 +16,27 @@ class build_ext(build_ext_orig):
     def run(self):
         for ext in self.extensions:
             self.build_cmake(ext)
-        super().run()
 
     def build_cmake(self, ext):
         cwd = pathlib.Path().absolute()
 
+        print('name is',ext.name)
+    
         # these dirs will be created in build_py, so if you don't have
         # any python sources to bundle, the dirs will be missing
         build_temp = pathlib.Path(self.build_temp)
         build_temp.mkdir(parents=True, exist_ok=True)
         extdir = pathlib.Path(self.get_ext_fullpath(ext.name))
         extdir.parent.mkdir(parents=True, exist_ok=True)
-
+        print('extdir is ',extdir)
+        print('build_temp is',build_temp)
         # example of cmake args
         config = 'Debug' if self.debug else 'Release'
         cmake_args = [
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + str(extdir.parent.absolute()),
             '-DCMAKE_BUILD_TYPE=' + config
         ]
-
+        print('cmake_args is ',cmake_args)
         # example of build args
         build_args = [
             '--config', config,
@@ -45,8 +47,6 @@ class build_ext(build_ext_orig):
         self.spawn(['cmake', str(cwd)] + cmake_args)
         if not self.dry_run:
             self.spawn(['cmake', '--build', '.'] + build_args)
-        # Troubleshooting: if fail on line above then delete all possible 
-        # temporary CMake files including "CMakeCache.txt" in top level dir.
         os.chdir(str(cwd))
 
 from desiutil.setup import DesiTest, DesiVersion, get_version
@@ -67,7 +67,7 @@ setup(
     author_email='desi-data@desi.lbl.gov',
     license='BSD',
     version=pkg_version,
-    ext_modules=[CMakeExtension('_specex')],
+    ext_modules=[CMakeExtension('specex')],
     cmdclass={
         'build_ext': build_ext,
         'version': DesiVersion
