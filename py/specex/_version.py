@@ -1,1 +1,1 @@
-__version__ = 'dummy-version-string'
+__version__ = '0.6.7.dev609'

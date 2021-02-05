@@ -3,7 +3,7 @@
 
 This repository contains code for PSF measurement in fiber-fed spectrograph for DESI.
 
-## cmake build
+## Installation
 ```
 
 # uncomment below for consistency with current harpconfig compiler (gcc)
@@ -14,8 +14,6 @@ This repository contains code for PSF measurement in fiber-fed spectrograph for 
 
 git clone --single-branch --branch io_refactor https://github.com/desihub/specex
 cd specex
-cmake .
-make -j8
-export PYTHONPATH=$PWD:$PYTHONPATH
+python setup.py install --prefix .
 
 ```

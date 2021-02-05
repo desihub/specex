@@ -13,7 +13,6 @@ The installation procedure is described in the [INSTALL file](INSTALL.md), as we
 ## Installation
 
 ```
-
 # uncomment below for consistency with current harpconfig compiler (gcc)
 # used to compile specex master branch running at nersc
 # this should give identical results for the psf
@@ -22,11 +21,7 @@ The installation procedure is described in the [INSTALL file](INSTALL.md), as we
 
 git clone --single-branch --branch io_refactor https://github.com/desihub/specex
 cd specex
-mkdir build
-cd build
-cmake ../
-make -j8
-export PYTHONPATH=$PWD:$PYTHONPATH
+python setup.py	install	--prefix .
 
 ```
 
