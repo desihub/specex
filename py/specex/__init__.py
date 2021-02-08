@@ -17,10 +17,3 @@ from __future__ import absolute_import, division, print_function
 
 from ._version import __version__
 
-from specex import MapStringString
-from specex import PyOptions
-from specex import PyIO
-from specex import PyPrior
-from specex import PyImage
-from specex import PyPSF
-from specex import PyFitting

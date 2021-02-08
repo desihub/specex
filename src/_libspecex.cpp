@@ -80,7 +80,7 @@ PYBIND11_MAKE_OPAQUE(vecvec_double);
 
 using ShapeContainer = py::detail::any_container<ssize_t>;
 
-PYBIND11_MODULE(specex, m) {
+PYBIND11_MODULE(_libspecex, m) {
     m.doc() = R"(
     Internal wrapper around compiled specex code.
 
