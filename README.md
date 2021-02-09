@@ -27,10 +27,9 @@ python setup.py	install	--prefix .
 
 ## Using specex for DESI
 
-Access to specex in python is through a shared object library extension, `specex._libspecex`:
+Access to specex in python is through a wrapper `specex.specex.run_specex`:
 ```
-import specex
-from specex._libspecex import run_specex
+from specex.specex import run_specex
 
 com = ['desi_psf_fit']
 com.extend(['-a',
