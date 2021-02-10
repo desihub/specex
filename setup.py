@@ -45,6 +45,10 @@ class build_ext(build_ext_orig):
             self.spawn(['cmake', '--build', '.'] + build_args)
         os.chdir(str(cwd))
 
+        for ext in self.extensions:
+            dest_path = pathlib.Path(self.get_ext_fullpath(ext.name)).resolve()
+            print('dest_path:',dest_path)
+            
 from desiutil.setup import DesiTest, DesiVersion, get_version
 #
 # Begin setup
@@ -67,5 +71,8 @@ setup(
     cmdclass={
         'build_ext': build_ext,
         'version': DesiVersion
+    },
+    package_data={
+        pname: ["data/*"]
     }
 )
