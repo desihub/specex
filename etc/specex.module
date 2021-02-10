@@ -66,7 +66,9 @@ setenv [string toupper $product] $PRODUCT_DIR
 # The lines below set various other environment variables.  They assume the
 # template product layout.  These will be set or commented as needed by the
 # desiInstall script.
-#
+
+### prepend-path PATH $PRODUCT_DIR/bin
+prepend-path PYTHONPATH $PRODUCT_DIR/lib/python3.8/site-packages
 #
 # Add any non-standard Module code below this point.
 #
