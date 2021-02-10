@@ -9,10 +9,6 @@ namespace popts = boost::program_options;
 
 int specex::PyOptions::parse(int argc, char *argv[] ){
 
-  if(getenv("SPECEXDATA"))
-    lamp_lines_filename =
-      string(getenv("SPECEXDATA"))+"/specex_linelist_desi.txt";
-
   // reading arguments
   // --------------------------------------------
 
