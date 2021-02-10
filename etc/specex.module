@@ -72,4 +72,6 @@ prepend-path PYTHONPATH $PRODUCT_DIR/lib/python3.8/site-packages
 #
 # Add any non-standard Module code below this point.
 #
-setenv SPECEXDATA $PRODUCT_DIR/data
+# desispec python wrapper now finds this dir automatically
+### setenv SPECEXDATA $PRODUCT_DIR/data
+
