@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.6.9 (unreleased)
+## 0.7.0 (unreleased)
 
 * No changes yet
+
+## 0.6.9 (2021-02-10)
+
+* Comment out blended and faint lines; add missing lines (PR #37)
 
 ## 0.6.8 (2020-12-11)
 
