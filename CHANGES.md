@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.7.0 (unreleased)
+## 0.7.1 (unreleased)
 
 * No changes yet
+
+## 0.7.0 (2021-02-10)
+
+* Major refactor: move all I/O to python and change build method (PR #36)
 
 ## 0.6.9 (2021-02-10)
 
