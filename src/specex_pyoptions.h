@@ -7,6 +7,8 @@
 
 #include <harp.hpp>
 
+#include <specex_psf_fitter.h>
+
 namespace popts = boost::program_options;
 
 namespace specex {
