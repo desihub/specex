@@ -44,6 +44,7 @@ pybind11_add_module(_libspecex NO_EXTRAS
 target_include_directories(_libspecex
 	PUBLIC
 	src
+	src/deboosted
 	)
 
 target_link_directories(_libspecex

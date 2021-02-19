@@ -26,7 +26,7 @@
 
 
 
-void specex::read_psf(specex::PSF_p& psf, const std::string& filename) {
+void specex::read_psf_gen(specex::PSF_p& psf, const std::string& filename) {
   
   if (filename.find(".xml") != std::string::npos) {
     SPECEX_INFO("read xml file " << filename);

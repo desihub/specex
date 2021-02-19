@@ -19,7 +19,7 @@ namespace specex {
 
     map<string,Prior*> priors;
     
-    int deal_with_priors( specex::PyOptions );
+    int set_priors( specex::PyOptions );
 
     PyPrior(){}
     

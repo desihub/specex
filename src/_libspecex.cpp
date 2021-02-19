@@ -267,18 +267,18 @@ PYBIND11_MODULE(_libspecex, m) {
         Class for specex IO interchangeable with python implementations
         )")
         .def(py::init ())
-        .def("check_input_psf", [](spx::PyIO &self, spx::PyOptions opts){
-	    return self.check_input_psf(opts);
+        .def("set_inputpsf", [](spx::PyIO &self, spx::PyOptions opts){
+	    return self.set_inputpsf(opts);
 	}
 	)
-        .def("read_img_data", [](spx::PyIO &self, spx::PyOptions opts,
+        .def("read_preproc", [](spx::PyIO &self, spx::PyOptions opts,
 				   spx::PyImage& pyimg){
-	    return self.read_img_data(opts,pyimg);
+	    return self.read_preproc(opts,pyimg);
 	}
 	)
-        .def("read_psf_data", [](spx::PyIO &self, spx::PyOptions opts,
+        .def("read_psf", [](spx::PyIO &self, spx::PyOptions opts,
 				 spx::PyPSF& pypsf){
-	    return self.read_psf_data(opts,pypsf);
+	    return self.read_psf(opts,pypsf);
 	}
 	)
         .def("prepare_psf",[](spx::PyIO &self, spx::PyOptions opts,
@@ -296,8 +296,8 @@ PYBIND11_MODULE(_libspecex, m) {
         Class for specex priors interchangeable with python implementations
         )")
         .def(py::init ())
-        .def("deal_with_priors", [](spx::PyPrior &self, spx::PyOptions opts){
-	  return self.deal_with_priors(opts);
+        .def("set_priors", [](spx::PyPrior &self, spx::PyOptions opts){
+	  return self.set_priors(opts);
 	}
 	);
 

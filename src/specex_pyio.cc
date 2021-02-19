@@ -9,7 +9,7 @@
 
 using namespace std;
 
-int specex::PyIO::read_img_data(specex::PyOptions opts, specex::PyImage& pyimg){
+int specex::PyIO::read_preproc(specex::PyOptions opts, specex::PyImage& pyimg){
 
   read_DESI_preprocessed_image(opts.arc_image_filename,pyimg.image,pyimg.weight,
 			       pyimg.mask,pyimg.rdnoise,pyimg.header);
@@ -56,7 +56,7 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
 }
 
-int specex::PyIO::read_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf){
+int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   if( ! use_input_specex_psf ) {
     SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
@@ -70,14 +70,14 @@ int specex::PyIO::read_psf_data(specex::PyOptions opts, specex::PyPSF& pypsf){
 		       opts.trace_deg_wave);     
     
   }else{ // use_input_specex_psf
-    read_psf(pypsf.psf,opts.input_psf_filename);
+    read_psf_gen(pypsf.psf,opts.input_psf_filename);
   }
     
   return EXIT_SUCCESS;
   
 }
 
-int specex::PyIO::check_input_psf(specex::PyOptions opts){
+int specex::PyIO::set_inputpsf(specex::PyOptions opts){
   
   // check input PSF type, can be from boot calib with only the traces
   if (opts.input_psf_filename.find(".xml") != std::string::npos) { // xml file

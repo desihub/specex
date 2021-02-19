@@ -221,7 +221,7 @@ def meta2header(meta):
 
     return header
 
-def read_desi_ppimage(opts):
+def read_preproc(opts):
     import desispec.io.image
 
     # read images from fits file

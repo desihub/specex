@@ -67,7 +67,7 @@ int specex::PyFitting::fit_psf(
 
   feenableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
 
-  // copy to local psf pointer (temporary for refactor)
+  // copy to local psf pointer 
   specex::PSF_p psf = pyps.psf;
 
   // set logging info
