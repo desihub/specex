@@ -54,19 +54,16 @@ void specex::write_psf(specex::PSF_p psf, const std::string& filename, std::vect
 
 
 void specex::write_psf_xml(const specex::PSF_p psf, const std::string& filename) {
-  
+  // this function is no longer functional as xml serialization is removed
   std::ofstream os(filename.c_str());
-  //boost::archive::xml_oarchive xml_oa ( os );
-  //xml_oa << BOOST_SERIALIZATION_NVP(psf);
   os.close();
   SPECEX_INFO("wrote psf in " << filename);
 }
 
 void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
   
+  // this function is no longer functional as xml serialization is removed
   std::ifstream is(filename.c_str());
-  //boost::archive::xml_iarchive xml_ia ( is );
-  //xml_ia >> BOOST_SERIALIZATION_NVP(psf);
   is.close();
   SPECEX_INFO("read psf in " << filename);
   
@@ -234,9 +231,9 @@ void specex::synchronize_traces(specex::PSF_p psf) {
 }
   
 void specex::write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename) {
+
+  // this function is no longer functional as xml serialization is removed
   std::ofstream os(filename.c_str());
-  //boost::archive::xml_oarchive xml_oa ( os );
-  //xml_oa << BOOST_SERIALIZATION_NVP(spots);
   os.close();
   SPECEX_INFO("wrote spots in " << filename);
 }
