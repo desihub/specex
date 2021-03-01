@@ -6,9 +6,9 @@
 // file containing main(), or in the main entry point of
 // the loadable module.
 
-BOOST_CLASS_EXPORT(specex::PSF_Params)
-BOOST_CLASS_EXPORT(specex::PSF)
-BOOST_CLASS_EXPORT(specex::GaussHermitePSF)
+//BOOST_CLASS_EXPORT(specex::PSF_Params)
+//BOOST_CLASS_EXPORT(specex::PSF)
+//BOOST_CLASS_EXPORT(specex::GaussHermitePSF)
 //BOOST_CLASS_EXPORT(specex::GaussHermite2PSF)
 //BOOST_CLASS_EXPORT(specex::HatHermitePSF)
 //BOOST_CLASS_EXPORT(specex::HatMoffatPSF)

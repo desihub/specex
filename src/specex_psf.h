@@ -45,7 +45,7 @@ namespace specex {
   
   class PSF_Params  {
 
-    friend class boost::serialization::access;
+//    friend class boost::serialization::access;
 
   public :
     
@@ -82,7 +82,7 @@ namespace specex {
 , continuum_sigma_x(1)
 #endif
       {};
-  
+    /*
   private :
 
     template < class Archive >
@@ -105,11 +105,12 @@ namespace specex {
 #endif 
 
     }
+    */
   };
   
   class PSF : public std::enable_shared_from_this <PSF> {
 
-    friend class boost::serialization::access;
+//    friend class boost::serialization::access;
 
     // AnalyticPSF* analyticPSF;
     // BEGIN WAS BEFORE IN ANALYTIC PSF
@@ -337,11 +338,12 @@ public :
     virtual void ReadFits(const std::string& filename, int first_hdu=1);
     */
 
-    virtual void Append(const boost::shared_ptr < specex::PSF > other) = 0;
+//    virtual void Append(const boost::shared_ptr < specex::PSF > other) = 0;
+    virtual void Append(const std::shared_ptr < specex::PSF > other) = 0;
     
 
     ~PSF();
-    
+    /*
   private :
 
     template < class Archive >
@@ -366,16 +368,18 @@ public :
       return;
     }
     
-    
+    */
     
   };
   
-  BOOST_SERIALIZATION_ASSUME_ABSTRACT(PSF)
+  //BOOST_SERIALIZATION_ASSUME_ABSTRACT(PSF)
   
-  BOOST_SERIALIZATION_SHARED_PTR(PSF)  
+  //BOOST_SERIALIZATION_SHARED_PTR(PSF)  
     
-  typedef boost::shared_ptr < specex::PSF > PSF_p;
-  typedef boost::weak_ptr < specex::PSF > PSF_wp;
+//  typedef boost::shared_ptr < specex::PSF > PSF_p;
+//  typedef boost::weak_ptr < specex::PSF > PSF_wp;
+  typedef std::shared_ptr < specex::PSF > PSF_p;
+  typedef std::weak_ptr   < specex::PSF > PSF_wp;
 
 };
 

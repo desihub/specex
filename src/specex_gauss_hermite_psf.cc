@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <ctime>
 
+//#include "harp_tdefs.h"
 #include <harp.hpp>
 
 #include "specex_hermite.h"
@@ -13,8 +14,6 @@
 #include "specex_psf.h"
 
 using namespace std;
-
-
 
 specex::GaussHermitePSF::GaussHermitePSF(int ideg) : PSF() 
 {

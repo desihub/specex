@@ -3,8 +3,9 @@
 
 #include <vector>
 #include <string>
+#include <memory>
 
-#include <harp.hpp>
+//#include <harp.hpp>
 
 //#include "spec2dpsf.h"
 
@@ -12,7 +13,7 @@ namespace specex {
   
   class Spot {
 
-    friend class boost::serialization::access;
+//    friend class boost::serialization::access;
     
   public :
     
@@ -56,6 +57,7 @@ namespace specex {
     
 private :
 
+    /*
     template < class Archive >
       void serialize ( Archive & ar, const unsigned int version ) {
       ar & BOOST_SERIALIZATION_NVP(wavelength);
@@ -73,12 +75,14 @@ private :
       
       return;
     }
-
+    */
   };
 
-  BOOST_SERIALIZATION_SHARED_PTR(Spot)  
-    typedef boost::shared_ptr < specex::Spot > Spot_p;
-  typedef boost::weak_ptr < specex::Spot > Spot_wp;
+  // BOOST_SERIALIZATION_SHARED_PTR(Spot)  
+//    typedef boost::shared_ptr < specex::Spot > Spot_p;
+//  typedef boost::weak_ptr < specex::Spot > Spot_wp;
+  typedef std::shared_ptr < specex::Spot > Spot_p;
+  typedef std::weak_ptr   < specex::Spot > Spot_wp;
 }
 
 

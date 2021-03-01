@@ -1,7 +1,8 @@
 #ifndef SPECEX_STAMP__H
 #define SPECEX_STAMP__H
 
-#include <harp.hpp>
+//#include <harp.hpp>
+#include <harp/image.hpp>
 
 //#include "specex_psf.h"
 #include <iostream>
