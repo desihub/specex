@@ -3,7 +3,7 @@
 #include <string>
 #include <sstream>
 
-#include <harp.hpp>
+//#include <harp.hpp>
 
 #include <specex_image_data.h>
 #include <specex_fits.h>

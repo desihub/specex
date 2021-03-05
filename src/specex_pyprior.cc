@@ -5,7 +5,7 @@
 
 using namespace std;
 
-int specex::PyPrior::deal_with_priors(specex::PyOptions opts){
+int specex::PyPrior::set_priors(specex::PyOptions opts){
 
   map<string,Prior*> priors;
   {

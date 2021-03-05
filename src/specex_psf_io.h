@@ -33,7 +33,7 @@ namespace specex {
   
   void read_psf_xml(specex::PSF_p& psf, const std::string& filename);
   void read_psf_fits(specex::PSF_p& psf, const string& filename);
-  void read_psf(specex::PSF_p& psf, const string& filename);
+  void read_psf_gen(specex::PSF_p& psf, const string& filename);
   
   
 }

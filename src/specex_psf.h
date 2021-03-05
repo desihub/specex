@@ -45,7 +45,7 @@ namespace specex {
   
   class PSF_Params  {
 
-    friend class boost::serialization::access;
+//    friend class boost::serialization::access;
 
   public :
     
@@ -82,34 +82,10 @@ namespace specex {
 , continuum_sigma_x(1)
 #endif
       {};
-  
-  private :
 
-    template < class Archive >
-      void serialize ( Archive & ar, const unsigned int version ) {
-      ar & BOOST_SERIALIZATION_NVP(AllParPolXW);
-      ar & BOOST_SERIALIZATION_NVP(bundle_id);
-      ar & BOOST_SERIALIZATION_NVP(fiber_min);
-      ar & BOOST_SERIALIZATION_NVP(fiber_max);
-      ar & BOOST_SERIALIZATION_NVP(chi2);
-      ar & BOOST_SERIALIZATION_NVP(ndata);
-      ar & BOOST_SERIALIZATION_NVP(chi2_in_core);
-      ar & BOOST_SERIALIZATION_NVP(ndata_in_core);
-      ar & BOOST_SERIALIZATION_NVP(nparams);
-      ar & BOOST_SERIALIZATION_NVP(fit_status);
-      ar & BOOST_SERIALIZATION_NVP(nspots_in_fit);
-
-#ifdef CONTINUUM
-      ar & BOOST_SERIALIZATION_NVP(ContinuumPol);
-      ar & BOOST_SERIALIZATION_NVP(continuum_sigma_x);
-#endif 
-
-    }
   };
   
   class PSF : public std::enable_shared_from_this <PSF> {
-
-    friend class boost::serialization::access;
 
     // AnalyticPSF* analyticPSF;
     // BEGIN WAS BEFORE IN ANALYTIC PSF
@@ -337,45 +313,16 @@ public :
     virtual void ReadFits(const std::string& filename, int first_hdu=1);
     */
 
-    virtual void Append(const boost::shared_ptr < specex::PSF > other) = 0;
+//    virtual void Append(const boost::shared_ptr < specex::PSF > other) = 0;
+    virtual void Append(const std::shared_ptr < specex::PSF > other) = 0;
     
 
     ~PSF();
-    
-  private :
 
-    template < class Archive >
-      void serialize ( Archive & ar, const unsigned int version ) {
-      ar & BOOST_SERIALIZATION_NVP(name);
-      ar & BOOST_SERIALIZATION_NVP(hSizeX);
-      ar & BOOST_SERIALIZATION_NVP(hSizeY);
-      ar & BOOST_SERIALIZATION_NVP(ParamsOfBundles);
-      ar & BOOST_SERIALIZATION_NVP(FiberTraces);
-      ar & BOOST_SERIALIZATION_NVP(arc_exposure_id);
-      ar & BOOST_SERIALIZATION_NVP(mjd);
-      ar & BOOST_SERIALIZATION_NVP(plate_id);
-      ar & BOOST_SERIALIZATION_NVP(camera_id);
-      ar & BOOST_SERIALIZATION_NVP(ccd_image_n_cols);
-      ar & BOOST_SERIALIZATION_NVP(ccd_image_n_rows);
-
-      ar & BOOST_SERIALIZATION_NVP(gain);
-      ar & BOOST_SERIALIZATION_NVP(readout_noise);
-      ar & BOOST_SERIALIZATION_NVP(psf_error);
-
- 
-      return;
-    }
-    
-    
-    
   };
   
-  BOOST_SERIALIZATION_ASSUME_ABSTRACT(PSF)
-  
-  BOOST_SERIALIZATION_SHARED_PTR(PSF)  
-    
-  typedef boost::shared_ptr < specex::PSF > PSF_p;
-  typedef boost::weak_ptr < specex::PSF > PSF_wp;
+  typedef std::shared_ptr < specex::PSF > PSF_p;
+  typedef std::weak_ptr   < specex::PSF > PSF_wp;
 
 };
 

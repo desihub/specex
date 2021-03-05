@@ -4,6 +4,7 @@
 #include <specex_fits.h>
 #include <specex_trace.h>
 #include <specex_gauss_hermite_psf.h>
+#include <specex_string.h>
 
 using namespace std ;
 
@@ -516,7 +517,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   std::map<std::string,harp::vector_double > param_coeff;
   for(int i=0;i<table.data.size();i++) { 
     std::string pname=table.data[i][param_col].string_val;
-    boost::trim(pname);
+    trim(pname);
     SPECEX_DEBUG("read_gauss_hermite_psf " << i << " '" << pname << "'");
     params.push_back(pname);
     param_row[pname]=i;

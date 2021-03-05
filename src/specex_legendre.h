@@ -11,7 +11,7 @@ namespace specex {
 class Legendre1DPol
 {
 
-friend class boost::serialization::access;
+//friend class boost::serialization::access;
  
  public :
  string name;
@@ -26,7 +26,7 @@ friend class boost::serialization::access;
   
   bool Fit(const harp::vector_double& x, const harp::vector_double& y, const harp::vector_double* ey=0, bool set_range = true);
   Legendre1DPol Invert(int add_degree=0) const;
-  
+  /*  
   private :
 
     template < class Archive >
@@ -38,10 +38,11 @@ friend class boost::serialization::access;
       ar & BOOST_SERIALIZATION_NVP(xmax);
       return;
     }
-
+  */
 };
-BOOST_SERIALIZATION_SHARED_PTR(Legendre1DPol)
-typedef boost::shared_ptr < specex::Legendre1DPol > Legendre1DPol_p;
+//BOOST_SERIALIZATION_SHARED_PTR(Legendre1DPol)
+//typedef boost::shared_ptr < specex::Legendre1DPol > Legendre1DPol_p;
+typedef std::shared_ptr < specex::Legendre1DPol > Legendre1DPol_p;
   
 Legendre1DPol composed_pol(const Legendre1DPol& pol1, const Legendre1DPol& pol2);
  
@@ -49,7 +50,7 @@ Legendre1DPol composed_pol(const Legendre1DPol& pol1, const Legendre1DPol& pol2)
 class Legendre2DPol
 {
 
-  friend class boost::serialization::access;
+//  friend class boost::serialization::access;
 
  public :
   string name;
@@ -63,7 +64,7 @@ class Legendre2DPol
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   void Fill();
-  
+  /*
   private :
 
     template < class Archive >
@@ -78,16 +79,16 @@ class Legendre2DPol
       ar & BOOST_SERIALIZATION_NVP(ymax);
       return;
     }
-
+  */
 };
-BOOST_SERIALIZATION_SHARED_PTR(Legendre2DPol)
+// BOOST_SERIALIZATION_SHARED_PTR(Legendre2DPol)
 
 
 
 class SparseLegendre2DPol
 {
 
-  friend class boost::serialization::access;
+//  friend class boost::serialization::access;
 
  protected :
   std::vector<int> non_zero_indices;
@@ -107,7 +108,7 @@ class SparseLegendre2DPol
   
   harp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
-  
+  /*
   private :
 
     template < class Archive >
@@ -123,13 +124,14 @@ class SparseLegendre2DPol
       ar & BOOST_SERIALIZATION_NVP(non_zero_indices);
       return;
     }
-
+  */
 };
-BOOST_SERIALIZATION_SHARED_PTR(SparseLegendre2DPol)
+//BOOST_SERIALIZATION_SHARED_PTR(SparseLegendre2DPol)
 
 // this if for convenience in the rest of the code
 typedef specex::SparseLegendre2DPol Pol;
-typedef boost::shared_ptr < specex::SparseLegendre2DPol > Pol_p;
+//typedef boost::shared_ptr < specex::SparseLegendre2DPol > Pol_p;
+typedef std::shared_ptr < specex::SparseLegendre2DPol > Pol_p;
 
 }
   

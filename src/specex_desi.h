@@ -13,8 +13,6 @@ int fit_psf(
 			     specex::PyImage,
 			     specex::PyPSF
 			      );
-// int specex_desi_psf_fit_main(int argc, char *argv[]);
-//int specex_desi_psf_fit_main();
 
 #endif
 
