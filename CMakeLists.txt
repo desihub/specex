@@ -5,7 +5,7 @@ find_package (Python 3.8 EXACT REQUIRED)
 find_package (PythonInterp 3.8 EXACT REQUIRED)
 find_package (PythonLibs 3.8 EXACT REQUIRED)
 add_subdirectory(src/pybind11)
-add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall)
+add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -mkl)
 pybind11_add_module(_libspecex NO_EXTRAS 
 	    src/_libspecex.cpp
 	    src/specex_psfpy.cc
@@ -37,7 +37,8 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/deboosted/specex_brent.cc
 	    src/deboosted/specex_desi_io.cc
 	    src/deboosted/specex_tokens.cc
-	    src/deboosted/specex_vector_utils.cc)
+	    src/deboosted/specex_vector_utils.cc
+	    src/specex_mkllinalg.c)
 target_include_directories(_libspecex
 	PUBLIC
 	src

@@ -1,19 +1,22 @@
 #include <specex_linalg.h>
-
+#include <specex_message.h>
+extern "C" {
+#include <specex_mkllinalg.h>
+}
 
 //#define CHECK_BOUNDS
 
 double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2) {
 #ifdef CHECK_BOUNDS
   if(v1.size() != v2.size())
-    HARP_THROW("not same size");
+    SPECEX_ERROR("vectors not same size in dot");
 #endif
-  return blas::dot(v1,v2);
+  //int n = v1.size();
+    
+  return specex_dot(v1.size(), &v1[0], &v2[0]);
+  //return blas::dot(v1,v2);
 }
   
-
-
-
 // !  A += w*h*h.transposed(), where A is a symmetric matrx (only lower half is filled!)
 // see http://svn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_2_blas/syr.html
 void specex::syr(const double& w, const harp::vector_double& h, harp::matrix_double& A) {
