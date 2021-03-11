@@ -11,8 +11,7 @@ double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2)
   if(v1.size() != v2.size())
     SPECEX_ERROR("vectors not same size in dot");
 #endif
-  //int n = v1.size();
-    
+  
   return specex_dot(v1.size(), &v1[0], &v2[0]);
   //return blas::dot(v1,v2);
 }

@@ -5,7 +5,14 @@ find_package (Python 3.8 EXACT REQUIRED)
 find_package (PythonInterp 3.8 EXACT REQUIRED)
 find_package (PythonLibs 3.8 EXACT REQUIRED)
 add_subdirectory(src/pybind11)
-add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -mkl)
+set(MKLROOT /opt/intel/mkl)
+
+set(MKLLINK "-Wl,--start-group ${MKLROOT}/lib/intel64/libmkl_intel_ilp64.a ${MKLROOT}/lib/intel64/libmkl_intel_thread.a ${MKLROOT}/lib/intel64/libmkl_core.a -Wl,--end-group -liomp5 -lpthread -lm -ldl")
+
+set(MKLCOMPILE -DMKL_ILP64  -I${MKLROOT}/include)
+
+add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall ${MKLCOMPILE})
+
 pybind11_add_module(_libspecex NO_EXTRAS 
 	    src/_libspecex.cpp
 	    src/specex_psfpy.cc
@@ -48,6 +55,7 @@ target_include_directories(_libspecex
 target_link_directories(_libspecex
 	PUBLIC)
 target_link_libraries(_libspecex PUBLIC "-lharp -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt")
+set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} ${MKLLINK})
 set(INTERPROCEDURAL_OPTIMIZATION FALSE)
 set(INTERPROCEDURAL_OPTIMIZATION_<CONFIG> FALSE)
 set(CMAKE_C_COMPILE_OPTIONS_IPO "")
