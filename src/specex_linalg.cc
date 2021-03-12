@@ -1,8 +1,6 @@
 #include <specex_linalg.h>
 #include <specex_message.h>
-extern "C" {
-#include <specex_mkllinalg.h>
-}
+#include <specex_blas.h>
 
 //#define CHECK_BOUNDS
 

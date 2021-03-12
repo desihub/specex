@@ -45,7 +45,7 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/deboosted/specex_desi_io.cc
 	    src/deboosted/specex_tokens.cc
 	    src/deboosted/specex_vector_utils.cc
-	    src/specex_mkllinalg.c)
+	    src/specex_blas.c)
 target_include_directories(_libspecex
 	PUBLIC
 	src
