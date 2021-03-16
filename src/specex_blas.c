@@ -1,6 +1,4 @@
-#define MKLBLAS
-
-#ifdef MKLBLAS
+#ifdef USE_MKL
 #include <mkl.h>
 #endif
 
