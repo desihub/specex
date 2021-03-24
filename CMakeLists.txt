@@ -45,48 +45,42 @@ pybind11_add_module(_libspecex NO_EXTRAS
 # look for BLAS/LAPACK with MKL first
 
 set(BLA_VENDOR Intel10_64lp)
-#set(BLA_VENDOR Intel10_64_dyn)
 find_package (BLAS)
 find_package (LAPACK)
-
 if(BLAS_FOUND)
 
-	# this also means MKL was found
-	# currently only "standard" MKL location supported
-	set(MKL_FOUND TRUE)
-	set(MKL_INCLUDE /opt/intel/mkl/include)
-	target_compile_definitions(_libspecex PUBLIC USE_MKL)
-	
-else()
-
-	# otherwise look for generic BLAS/LAPACK
-	
-	set(BLA_VENDOR "Generic")
-	set(BLA_VENDOR OpenBLAS)
-	find_package (BLAS)
-	find_package (LAPACK)	
+	# this also means MKL with BLAS libraries were found
+	# now see if MKL include file can be found as well
+	if(EXISTS "$ENV{DESICONDA}/include/mkl.h")
+	    set(MKL_FOUND TRUE)
+	    set(MKL_INCLUDE "$ENV{DESICONDA}/include")
+	    target_compile_definitions(_libspecex PUBLIC USE_MKL)
+	elseif(EXISTS "/opt/intel/mkl/include/mkl.h")
+	    set(MKL_FOUND TRUE)
+	    set(MKL_INCLUDE "/opt/intel/mkl/include")
+	    target_compile_definitions(_libspecex PUBLIC USE_MKL)
+	endif()
 
 endif()
 
-#	message ("BLAS found: ${BLAS_FOUND}")
-	message ("BLAS libraries: ${BLAS_LIBRARIES}")
-#	message ("BLAS linker flags: ${BLAS_LINKER_FLAGS}")
+if(NOT MKL_FOUND)
 
-#	message ("LAPACK found: ${LAPACK_FOUND}")
-	message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
-#	message ("LAPACK linker flags: ${LAPACK_LINKER_FLAGS}")
+	# if MKL BLAS and mkl.h not both found, look for OpenBLAS/LAPACK
+	set(BLAS_FOUND FALSE)
+	set(BLA_VENDOR OpenBLAS)
+	find_package (BLAS)
+	find_package (LAPACK)
+
+endif()
 
 if(NOT BLAS_FOUND)
        message (FATAL_ERROR "BLAS not found, CMake will exit.")
 endif()
 
-#set(MKLROOT /opt/intel/mkl)
-
-#set(MKLLINK "-Wl,--start-group ${MKLROOT}/lib/intel64/libmkl_intel_ilp64.a ${MKLROOT}/lib/intel64/libmkl_intel_thread.a ${MKLROOT}/lib/intel64/libmkl_core.a -Wl,--end-group -liomp5 -lpthread -lm -ldl")
-
-#set(MKLCOMPILE -DMKL_ILP64  -I${MKLROOT}/include)
-
-#add_compile_options(-pthread -Wl,--sysroot=/ -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall ${MKLCOMPILE})
+message ("MKL found: ${MKL_FOUND}")
+message ("MKL include: ${MKL_INCLUDE}")
+message ("BLAS libraries: ${BLAS_LIBRARIES}")
+message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
 
 target_include_directories(_libspecex
 	PUBLIC
@@ -97,9 +91,11 @@ target_include_directories(_libspecex
 
 target_link_directories(_libspecex
 	PUBLIC)
+	
 target_link_libraries(_libspecex PUBLIC "-lharp -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt" ${BLAS_LIBRARIES})
-set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} ${BLAS_LINKER_FLAGS})
-#set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} ${MKLLINK})
+
+set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
+
 set(INTERPROCEDURAL_OPTIMIZATION FALSE)
 set(INTERPROCEDURAL_OPTIMIZATION_<CONFIG> FALSE)
 set(CMAKE_C_COMPILE_OPTIONS_IPO "")

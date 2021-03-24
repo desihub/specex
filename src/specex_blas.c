@@ -1,5 +1,7 @@
 #ifdef USE_MKL
 #include <mkl.h>
+#else
+#include <cblas.h>
 #endif
 
 double specex_dot(int n, const double *x, const double *y){
