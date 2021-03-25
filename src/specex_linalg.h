@@ -10,14 +10,12 @@
 // in harp :
 // typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
 
-
 namespace ublas  = boost::numeric::ublas;
 namespace blas   = boost::numeric::bindings::blas;
 namespace lapack = boost::numeric::bindings::lapack;
 
 namespace specex {
-  
-  
+    
   //typedef boost::numeric::ublas::symmetric_matrix<double, boost::numeric::ublas::upper, boost::numeric::ublas::column_major> symmetric_matrix_double;
   
   // ! scalar product
