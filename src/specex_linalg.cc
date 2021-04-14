@@ -17,7 +17,8 @@ double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2)
 // !  A += w*h*h.transposed(), where A is a symmetric matrx (only lower half is filled!)
 // see http://svn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_2_blas/syr.html
 void specex::syr(const double& w, const harp::vector_double& h, harp::matrix_double& A) {
-  blas::syr(w,h,boost::numeric::bindings::lower(A));
+  specex_syr(h.size(), A.size1(), &w, &h[0], &A(0,0)); // boost::numeric::bindings::lower(A));
+  //blas::syr(w,h,boost::numeric::bindings::lower(A));
 }
 
 // ! B += a*h;
@@ -25,6 +26,7 @@ void specex::syr(const double& w, const harp::vector_double& h, harp::matrix_dou
 void specex::axpy(const double &a, const harp::vector_double& h,  harp::vector_double& B) {
   blas::axpy(a,h,B);
 }
+
 // ! B := alpha*A*h + beta*B (B += alpha*A*h for beta=1)
 void specex::gemv(const double &alpha,  const harp::matrix_double &A,  const harp::vector_double& h, const double &beta, harp::vector_double& B) {
   blas::gemv(alpha,A,h,beta,B);
