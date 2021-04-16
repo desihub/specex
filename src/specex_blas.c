@@ -4,7 +4,8 @@
 #include <cblas.h>
 #endif
 
-// contains all calls to C-interface BLAS and LAPACK functions
+// contains all calls to C-interface BLAS functions
+// e.g. http://www.netlib.org/lapack/explore-html/d1/dff/cblas__example1_8c_source.html
 
 // returns the dot product of x and y
 // http://www.netlib.org/lapack/explore-html/d5/df6/ddot_8f_source.html
