@@ -1,6 +1,7 @@
 #include <specex_linalg.h>
 #include <specex_message.h>
 #include <specex_blas.h>
+#include <specex_lapack.h>
 
 // contains all calls to C-wrappers (specex_*) calling C-interface BLAS and LAPACK functions 
 
@@ -34,14 +35,16 @@ void specex::gemm(const double& alpha, const harp::matrix_double &A, const harp:
   specex_gemm(A.size1(), B.size2(), A.size2(), &alpha, &A(0,0), &B(0,0), &beta, &C(0,0));  
 }
 
-// returns 
-int specex::cholesky_solve(harp::matrix_double& A, harp::vector_double& B) { 
-  return lapack::posv(boost::numeric::bindings::lower(A),B);
+// returns the solution, x, to a real system of linear equations
+//   A * x = b,
+// solution is returned in b, i.e. b --> x, for return value 0
+int specex::cholesky_solve(harp::matrix_double& A, harp::vector_double& b) {
+  return specex_posv(b.size(),&A(0,0),&b[0]);
 }
 
-// ! assumes A has been through cholesky_solve before
+// invert matrix A in place; A := inv(A)
 int specex::cholesky_invert_after_decomposition(harp::matrix_double& A) {
-  return lapack::potri(boost::numeric::bindings::lower(A));
+  return specex_potri(A.size1(),&A(0,0));
 }
 
 // min and max of vector
@@ -54,6 +57,7 @@ void specex::minmax(const harp::vector_double& v, double& minv, double& maxv) {
   }
 }
 
+// square of scalar
 double specex::square(const double& x) {
   return x*x;
 }

@@ -1,5 +1,5 @@
-#ifndef SPECEX_MKLLINALG_H_
-#define SPECEX_MKLLINALG_H_
+#ifndef SPECEX_BLAS_H_
+#define SPECEX_BLAS_H_
 
 extern "C" {
   
