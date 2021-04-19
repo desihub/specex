@@ -1,54 +1,53 @@
 #include <specex_linalg.h>
 #include <specex_message.h>
 #include <specex_blas.h>
+#include <specex_lapack.h>
 
-//#define CHECK_BOUNDS
+// contains all calls to C-wrappers (specex_*) calling C-interface BLAS and LAPACK functions 
 
-double specex::dot(const harp::vector_double& v1, const harp::vector_double& v2) {
-#ifdef CHECK_BOUNDS
-  if(v1.size() != v2.size())
-    SPECEX_ERROR("vectors not same size in dot");
-#endif
-  
-  return specex_dot(v1.size(), &v1[0], &v2[0]);
-  //return blas::dot(v1,v2);
+// returns the dot product of x and y
+double specex::dot(const harp::vector_double& x, const harp::vector_double& y) {  
+  return specex_dot(x.size(), &x[0], &y[0]);  
 }
   
-// !  A += w*h*h.transposed(), where A is a symmetric matrx (only lower half is filled!)
-// see http://svn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_2_blas/syr.html
-void specex::syr(const double& w, const harp::vector_double& h, harp::matrix_double& A) {
-  blas::syr(w,h,boost::numeric::bindings::lower(A));
+// y += alpha*x
+void specex::axpy(const double &alpha, const harp::vector_double& x,  harp::vector_double& y) {  
+  specex_axpy(x.size(), &alpha, &x[0], &y[0]);
 }
 
-// ! B += a*h;
-// see http://svn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_1_blas/axpy.html
-void specex::axpy(const double &a, const harp::vector_double& h,  harp::vector_double& B) {
-  blas::axpy(a,h,B);
-}
-// ! B := alpha*A*h + beta*B (B += alpha*A*h for beta=1)
-void specex::gemv(const double &alpha,  const harp::matrix_double &A,  const harp::vector_double& h, const double &beta, harp::vector_double& B) {
-  blas::gemv(alpha,A,h,beta,B);
+// A += alpha*x*x**T, where A is a symmetric matrx (only lower half is filled)
+void specex::syr(const double& alpha, const harp::vector_double& x, harp::matrix_double& A) {  
+  specex_syr(x.size(), &alpha, &x[0], &A(0,0)); 
 }
 
-/*
-// ! C = alpha*A*B + beta*C if side='L' , C = alpha*B*A + beta*C if side='R' , where A is a symmetric matrix
-// see vn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_3_blas/symm.html
-void specex::symm(const char side, const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C) {
-  SPECEX_ERROR("specex::symm not implemented");
-  //blas::symm('L',alpha,boost::numeric::bindings::lower(A),B,beta,C);
-}
-*/
-
-// ! C = alpha*A*B + beta*C 
-// see vn.boost.org/svn/boost/sandbox/numeric_bindings/libs/numeric/bindings/doc/html/boost_numeric_bindings/reference/blas/level_3_blas/gemm.html
-void specex::gemm(const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C) {
-  blas::gemm(alpha,A,B,beta,C);
-}
-// ! C = alpha*A*At + beta*C
+// C = alpha*A*A**T + beta*C
 void specex::syrk(const double& alpha, const harp::matrix_double &A, const double& beta, harp::matrix_double &C) {
-  blas::syrk(alpha,A,beta,boost::numeric::bindings::lower(C));
+  specex_syrk(A.size1(), A.size2(), &alpha, &A(0,0), &beta, &C(0,0));
 }
-// must exist somewhere in boost
+
+// y = alpha*A*x + beta*y 
+void specex::gemv(const double &alpha,  const harp::matrix_double &A,  const harp::vector_double& x, const double &beta, harp::vector_double& y) {  
+  specex_gemv(A.size1(),A.size2(), &alpha, &A(0,0), &x(0), &beta, &y[0]);  
+}
+
+// C = alpha*A*B + beta*C
+void specex::gemm(const double& alpha, const harp::matrix_double &A, const harp::matrix_double &B, const double& beta, harp::matrix_double &C) {
+  specex_gemm(A.size1(), B.size2(), A.size2(), &alpha, &A(0,0), &B(0,0), &beta, &C(0,0));  
+}
+
+// returns the solution, x, to a real system of linear equations
+//   A * x = b,
+// solution is returned in b, i.e. b --> x, for return value 0
+int specex::cholesky_solve(harp::matrix_double& A, harp::vector_double& b) {
+  return specex_posv(b.size(),&A(0,0),&b[0]);
+}
+
+// invert matrix A in place; A := inv(A)
+int specex::cholesky_invert_after_decomposition(harp::matrix_double& A) {
+  return specex_potri(A.size1(),&A(0,0));
+}
+
+// min and max of vector
 void specex::minmax(const harp::vector_double& v, double& minv, double& maxv) {
   harp::vector_double::const_iterator it=v.begin();
   minv=maxv=(*it);
@@ -58,15 +57,8 @@ void specex::minmax(const harp::vector_double& v, double& minv, double& maxv) {
   }
 }
 
+// square of scalar
 double specex::square(const double& x) {
   return x*x;
 }
 
-int specex::cholesky_solve(harp::matrix_double& A, harp::vector_double& B) { 
-  return lapack::posv(boost::numeric::bindings::lower(A),B);
-}
-
-// ! assumes A has been through cholesky_solve before
-int specex::cholesky_invert_after_decomposition(harp::matrix_double& A) {
-  return lapack::potri(boost::numeric::bindings::lower(A));
-}
