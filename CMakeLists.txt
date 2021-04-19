@@ -86,7 +86,7 @@ message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
 target_include_directories(_libspecex
 	PUBLIC
 	src
-	src/deboosted
+	src/deboosted_headers
 	${MKL_INCLUDE}
 	)
 
