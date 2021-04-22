@@ -2,11 +2,16 @@
 #include <specex_message.h>
 #include <specex_blas.h>
 #include <specex_lapack.h>
+#include <vector>
 
 // contains all calls to C-wrappers (specex_*) calling C-interface BLAS and LAPACK functions 
 
 // returns the dot product of x and y
 double specex::dot(const harp::vector_double& x, const harp::vector_double& y) {  
+  return specex_dot(x.size(), &x[0], &y[0]);  
+}
+
+double specex::dot_db(const std::vector<double>& x, const std::vector<double>& y) {
   return specex_dot(x.size(), &x[0], &y[0]);  
 }
   

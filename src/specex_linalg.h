@@ -20,6 +20,7 @@ namespace specex {
   
   // ! scalar product
   double dot(const harp::vector_double& v1, const harp::vector_double& v2);
+  double dot_db(const std::vector<double>& v1, const std::vector<double>& v2);
   
   // !  A += w*h*h.transposed(), where A is a symmetric matrx (only lower half is filled!)
   void syr(const double& w, const harp::vector_double& h, harp::matrix_double& A);

@@ -8,7 +8,7 @@ from specex._libspecex import (PyOptions,PyIO,PyPrior,PyImage,PyPSF,PyFitting,Ve
 from specex.io import (read_preproc, write_psf)
 
 def run_specex(com):
-    
+
     # instantiate specex c++ objects exposed to python        
     opts = PyOptions() # input options
     pyio = PyIO()      # IO options and methods
