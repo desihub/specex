@@ -16,12 +16,14 @@
 #include "specex_psf_io.h"
 #include "specex_model_image.h"
 #include "specex_psf.h"
-
+#include "specex_unbst.h"
 //#include <boost/archive/xml_oarchive.hpp>
 
 #define SIDE_BAND_WEIGHT_SCALE 10.
 
 using namespace std;
+using namespace specex;
+//namespace unbst = specex::unbst;
 
 void specex::PSF_Fitter::SelectFiberBundle(int bundle) {
   std::map<int,PSF_Params>::iterator it = psf->ParamsOfBundles.find(bundle);
@@ -527,6 +529,21 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
       std::vector<double> continuum_params_db(continuum_params.size());
       std::copy(continuum_params.begin(),continuum_params.end(),continuum_params_db.begin());
+      //std::vector<int> r(2);
+      boost::numeric::ublas::vector<double> 
+	continuum_params_dbb = specex::unbst::project(continuum_params,
+						      specex::unbst::range(0,continuum_params.size()));
+      //boost::numeric::ublas::vector<double>
+      //continuum_params_dbb = ublas::subrange(continuum_params,0,continuum_params.size());
+      
+      if(continuum_params.size()<0 && continuum_params[0]>0){
+	cout << "-----" << endl;
+	cout << endl; for (int i=0; i<continuum_params.size(); i++)
+			cout << continuum_params[i] << " " << endl;
+	cout << endl; for (int i=0; i<continuum_params_dbb.size(); i++)
+			cout << continuum_params_dbb[i] << " " << endl;
+      }
+      
 #ifdef CONTINUUM
       if(has_continuum) {
 	double continuum_value=0;
@@ -543,6 +560,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 			     continuum_params_db,continuum_monomials_db    )*continuum_prof;
 	  if((dotval != dotval_db) ) std::cout << "dots: " << dotval << " " << dotval_db << std::endl;
 	  continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
+	  
 	  if(compute_ab && fit_continuum) {
 	    ublas::noalias(ublas::project(H,ublas::range(continuum_index,continuum_index+np_continuum))) += continuum_prof*continuum_monomials[fiber];
 	  }
@@ -747,7 +765,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      double whi = w*hi;
 	      (*Ap)(*i,*i) += whi*hi;
 	      for(vector<int>::const_iterator j=other_indices.begin();j!=i;j++) (*Ap)(*i,*j) += whi*H(*j);
-	      specex::axpy(whi,ublas::project(H,ublas::range(0,index_of_spots_parameters)),Arect[*i-index_of_spots_parameters]);
+	      //whi *= 2; 
+	      specex::axpy(whi,unbst::subrange(H,0,index_of_spots_parameters),Arect[*i-index_of_spots_parameters]);
+	      //specex::axpy(whi,unbst::project(H,unbst::range(0,index_of_spots_parameters)),Arect[*i-index_of_spots_parameters]);
 	    }
 	  }
 	}else{
@@ -1277,7 +1297,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
 	const harp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
 	size_t c_size = coeff.size();
-	ublas::noalias(ublas::project(Params,ublas::range(index,index+c_size))) = coeff;
+	//ublas::noalias(ublas::project(Params,ublas::range(index,index+c_size))) = coeff;
+	std::copy(coeff.begin(),coeff.end(),Params.begin()+index);
 	index += c_size;
       }
     }
