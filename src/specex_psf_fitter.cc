@@ -608,16 +608,21 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      size_t m_size = psf_params->FitParPolXW[p]->coeff.size();
 	      //blas::axpy(flux*gradPar[p],ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size)),ublas::project(H,ublas::range(index,index+m_size))); // doesnt compile
-	      ublas::noalias(ublas::project(H,ublas::range(index,index+m_size))) += (flux*gradAllPar(indices_of_fitpar_in_allpar[p]))*ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size));
+	      //ublas::noalias(ublas::project(H,ublas::range(index,index+m_size))) += (flux*gradAllPar(indices_of_fitpar_in_allpar[p]))*ublas::project(tmp.psf_monomials,ublas::range(index,index+m_size));
+	      double alpha = flux*gradAllPar(indices_of_fitpar_in_allpar[p]);
+	      unbst::subadd(unbst::subrange(tmp.psf_monomials,index,index+m_size),H,index,alpha);
 	      index += m_size;
 	    }
 	  }
 	  //}
 	  if(fit_trace) {
-	    ublas::noalias(ublas::project(H,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size()))) 
-	      += (gradPos(0) * flux)*tmp.trace_x_monomials;
-	    ublas::noalias(ublas::project(H,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size()))) 
-	      += (gradPos(1) * flux)*tmp.trace_y_monomials;
+	    //ublas::noalias(ublas::project(H,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size()))) 
+	    //+= (gradPos(0) * flux)*tmp.trace_x_monomials;
+	    unbst::subadd(tmp.trace_x_monomials,H,tmp.trace_x_parameter_index,gradPos(0)*flux);
+
+	    //ublas::noalias(ublas::project(H,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size()))) 
+	    //+= (gradPos(1) * flux)*tmp.trace_y_monomials;
+	    unbst::subadd(tmp.trace_y_monomials,H,tmp.trace_y_parameter_index,gradPos(1)*flux);
 	  }
 	  
 	  if(fit_flux && in_core) {
