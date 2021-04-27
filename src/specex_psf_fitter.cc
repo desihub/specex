@@ -314,8 +314,10 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
       }
     }
     if(fit_trace) {
-      tmp.x = specex::dot(ublas::project(Params,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size())),tmp.trace_x_monomials);
-      tmp.y = specex::dot(ublas::project(Params,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size())),tmp.trace_y_monomials);
+      //tmp.x = specex::dot(ublas::project(Params,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size())),tmp.trace_x_monomials);
+      //tmp.y = specex::dot(ublas::project(Params,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size())),tmp.trace_y_monomials);
+      tmp.x = specex::dot(unbst::subrange(Params,tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size()),tmp.trace_x_monomials);
+      tmp.y = specex::dot(unbst::subrange(Params,tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size()),tmp.trace_y_monomials);
     }
     if(fit_position) {
       tmp.x = Params(tmp.x_parameter_index);
@@ -471,7 +473,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
   if(has_continuum) {
     if(fit_continuum)
-      continuum_params = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
+      //continuum_params = ublas::project(Params,ublas::range(continuum_index,continuum_index+np_continuum));
+      continuum_params = unbst::subrange(Params,continuum_index,continuum_index+np_continuum);
     else
       continuum_params = psf_params->ContinuumPol.coeff;
     
@@ -761,8 +764,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      }
 	    }
 	  } else {
-	    blas::syr(w,ublas::project(H,ublas::range(0,index_of_spots_parameters)),boost::numeric::bindings::lower(Ablock));
-	    
+	    //blas::syr(w,ublas::project(H,ublas::range(0,index_of_spots_parameters)),boost::numeric::bindings::lower(Ablock));
+	    specex::syr(w,unbst::subrange(H,0,index_of_spots_parameters),Ablock);
 	    for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
 	      const double& hi = H(*i);
 	      double whi = w*hi;
@@ -1645,8 +1648,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	for(size_t s=0;s<spot_tmp_data.size();s++) { // loop on tmp spots data
 	  const specex::SpotTmpData &tmp = spot_tmp_data[s];
 	  
-	  double dx = specex::dot(ublas::project(scale*B,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size())),tmp.trace_x_monomials);
-	  double dy = specex::dot(ublas::project(scale*B,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size())),tmp.trace_y_monomials);
+	  //double dx = specex::dot(ublas::project(scale*B,ublas::range(tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size())),tmp.trace_x_monomials);
+	  //double dy = specex::dot(ublas::project(scale*B,ublas::range(tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size())),tmp.trace_y_monomials);
+	  double dx = specex::dot(unbst::subrange(B,tmp.trace_x_parameter_index,tmp.trace_x_parameter_index+tmp.trace_x_monomials.size(),scale),tmp.trace_x_monomials);
+	  double dy = specex::dot(unbst::subrange(B,tmp.trace_y_parameter_index,tmp.trace_y_parameter_index+tmp.trace_y_monomials.size(),scale),tmp.trace_y_monomials);
 	  double dist=sqrt(dx*dx+dy*dy);
 	  //SPECEX_INFO("trace fit: dx=" << dx << " " << dy << " for x,y,fiber,wavelength " << tmp.x << "," << tmp.y << "," << tmp.fiber << "," << tmp.wavelength);
 	  if(dist>max_step)
