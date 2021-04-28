@@ -10,6 +10,7 @@
 #include <specex_message.h>
 #include <specex_spot_array.h>
 #include <specex_vector_utils.h>
+#include <specex_unbst.h>
 
 specex::Trace::Trace(int i_fiber) :
   fiber(i_fiber)
@@ -23,22 +24,22 @@ void specex::Trace::resize(int ncoeff) {
   coeff=X_vs_W.coeff;
   X_vs_W.deg = ncoeff-1;
   X_vs_W.coeff.resize(ncoeff);
-  X_vs_W.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  X_vs_W.coeff = specex::unbst::subrange(coeff,0,min(ncoeff,int(coeff.size())));
   
   coeff=Y_vs_W.coeff;
   Y_vs_W.deg = ncoeff-1;
   Y_vs_W.coeff.resize(ncoeff);
-  Y_vs_W.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  Y_vs_W.coeff = specex::unbst::subrange(coeff,0,min(ncoeff,int(coeff.size())));
   
   coeff=W_vs_Y.coeff;
   W_vs_Y.deg = ncoeff-1;
   W_vs_Y.coeff.resize(ncoeff);
-  W_vs_Y.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  W_vs_Y.coeff = specex::unbst::subrange(coeff,0,min(ncoeff,int(coeff.size())));
   
   coeff=X_vs_Y.coeff;
   X_vs_Y.deg = ncoeff-1;
   X_vs_Y.coeff.resize(ncoeff);
-  X_vs_Y.coeff = ublas::project(coeff,ublas::range(0,min(ncoeff,int(coeff.size()))));
+  X_vs_Y.coeff = specex::unbst::subrange(coeff,0,min(ncoeff,int(coeff.size())));
   
   
   
