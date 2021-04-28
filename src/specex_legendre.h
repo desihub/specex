@@ -4,6 +4,7 @@
 #include <string>
 
 #include <harp.hpp>
+#include <specex_unhrp.h>
 
 using namespace std;
  
@@ -15,16 +16,16 @@ class Legendre1DPol
  
  public :
  string name;
-  harp::vector_double coeff;
+  unhrp::vector_double coeff;
   int deg;
   double xmin,xmax;
   
   Legendre1DPol(int i_deg=0, const double& i_xmin=0, const double& i_xmax=0);
   
-  harp::vector_double Monomials(const double &x) const;
+  unhrp::vector_double Monomials(const double &x) const;
   double Value(const double &x) const;
   
-  bool Fit(const harp::vector_double& x, const harp::vector_double& y, const harp::vector_double* ey=0, bool set_range = true);
+  bool Fit(const unhrp::vector_double& x, const unhrp::vector_double& y, const unhrp::vector_double* ey=0, bool set_range = true);
   Legendre1DPol Invert(int add_degree=0) const;
   /*  
   private :
@@ -54,14 +55,14 @@ class Legendre2DPol
 
  public :
   string name;
-  harp::vector_double coeff;
+  unhrp::vector_double coeff;
   int xdeg,ydeg;
   double xmin,xmax,ymin,ymax;
   
  Legendre2DPol(int i_xdeg=0, const double& i_xmin=0, const double& i_xmax=0, 
 	       int i_ydeg=0, const double& i_ymin=0, const double& i_ymax=0);
  
-  harp::vector_double Monomials(const double &x,const double &y) const;
+  unhrp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   void Fill();
   /*
@@ -95,7 +96,7 @@ class SparseLegendre2DPol
   
  public :
   string name;
-  harp::vector_double coeff;
+  unhrp::vector_double coeff;
   int xdeg,ydeg;
   double xmin,xmax,ymin,ymax;
   int Npar() const { return non_zero_indices.size();}
@@ -106,7 +107,7 @@ class SparseLegendre2DPol
   SparseLegendre2DPol(int i_xdeg=0, const double& i_xmin=0, const double& i_xmax=0, 
 		      int i_ydeg=0, const double& i_ymin=0, const double& i_ymax=0);
   
-  harp::vector_double Monomials(const double &x,const double &y) const;
+  unhrp::vector_double Monomials(const double &x,const double &y) const;
   double Value(const double &x,const double &y) const;
   /*
   private :
