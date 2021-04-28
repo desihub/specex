@@ -5,6 +5,7 @@
 #include <specex_trace.h>
 #include <specex_gauss_hermite_psf.h>
 #include <specex_string.h>
+#include <specex_unbst.h>
 
 using namespace std ;
 
@@ -539,7 +540,8 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
       string pname=params[s];
       //SPECEX_DEBUG("Truncated parameter " << pname);
       int ncoef_per_fiber = param_coeff[pname].size()/original_nfibers;
-      param_coeff[pname] = ublas::project(param_coeff[pname],ublas::range(new_fiber_begin*ncoef_per_fiber,new_fiber_end*ncoef_per_fiber));
+      //param_coeff[pname] = ublas::project(param_coeff[pname],ublas::range(new_fiber_begin*ncoef_per_fiber,new_fiber_end*ncoef_per_fiber));
+      param_coeff[pname] = specex::unbst::subrange(param_coeff[pname],new_fiber_begin*ncoef_per_fiber,new_fiber_end*ncoef_per_fiber);
     }
     fibermin=new_fiber_begin;
     fibermax=new_fiber_end-1;
