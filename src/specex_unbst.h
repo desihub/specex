@@ -31,6 +31,13 @@ namespace specex::unbst {
     std::copy(vin.begin(),vin.end(),vout.begin()+i0);
   }
 
+    // assigns vout[i0:] = alpha*vin
+  template<class vtype1, class vtype2, class vtype3>
+  static void subcopy(vtype1 vin, vtype2 &vout, int i0, vtype3 alpha){
+    for(int i=0; i<vin.size(); i++) vin[i] *= alpha;
+    std::copy(vin.begin(),vin.end(),vout.begin()+i0);
+  }
+
   // assigns vout[i0:] += vin
   template<class vtype1, class vtype2>
   static void subadd(vtype1 vin, vtype2 &vout, int i0){

@@ -7,6 +7,7 @@
 #include "specex_psf.h"
 //#include "specex_base_analytic_psf.h"
 #include "specex_message.h"
+#include "specex_unbst.h"
 
 using namespace std;
 
@@ -475,7 +476,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_AllBundleParams(const dou
   int index=0;
   for (size_t k =0; k < P.size(); ++k) {
     size_t c_size = P[k]->coeff.size();
-    params(k)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),P[k]->Monomials(X,wave));
+    params(k)=specex::dot(unbst::subrange(ForThesePSFParams,index,index+c_size),P[k]->Monomials(X,wave));
     index += c_size;
   }
   return params;
@@ -508,7 +509,7 @@ harp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const dou
 
       size_t c_size = APk->coeff.size();
 
-      params(ak)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),APk->Monomials(X,wave));
+      params(ak)=specex::dot(unbst::subrange(ForThesePSFParams,index,index+c_size),APk->Monomials(X,wave));
       
       //SPECEX_INFO("DEBUG all param " << ak << " and fit = " << fk << " are the same, param val =  " << params(ak));
 
@@ -540,7 +541,7 @@ harp::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const dou
   int index=0;
   for (size_t k =0; k < P.size(); ++k) {
     size_t c_size = P[k]->coeff.size();
-    params(k)=specex::dot(ublas::project(ForThesePSFParams,ublas::range(index,index+c_size)),P[k]->Monomials(X,wave));
+    params(k)=specex::dot(unbst::subrange(ForThesePSFParams,index,index+c_size),P[k]->Monomials(X,wave));
     index += c_size;
   }
   return params;

@@ -12,6 +12,7 @@
 #include "specex_message.h"
 #include "specex_fits.h"
 #include "specex_psf.h"
+#include "specex_unbst.h"
 
 using namespace std;
 
