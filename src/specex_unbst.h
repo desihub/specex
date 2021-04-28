@@ -2,8 +2,11 @@
 #define SPECEX_UNBST__H
 #include <vector>
 
+// unbst: functions to replace basic boost/numeric/ublas vector operations
+
 namespace specex::unbst {
 
+  // returns vin[i0:i1]
   template<class vtype>
   static vtype subrange(vtype vin, int i0, int i1){
     int n = i1-i0;
@@ -12,6 +15,7 @@ namespace specex::unbst {
     return vout;
   }
     
+  // returns alpha*vin[i0:i1]
   template<class vtype1, class vtype2>
     static vtype1 subrange(vtype1 vin, int i0, int i1, vtype2 alpha){
     int n = i1-i0;
@@ -21,16 +25,19 @@ namespace specex::unbst {
     return vout;
   }
     
+  // assigns vout[i0:] = vin
   template<class vtype1, class vtype2>
   static void subcopy(vtype1 vin, vtype2 &vout, int i0){
     std::copy(vin.begin(),vin.end(),vout.begin()+i0);
   }
 
+  // assigns vout[i0:] += vin
   template<class vtype1, class vtype2>
   static void subadd(vtype1 vin, vtype2 &vout, int i0){
     for(int i=0; i<vin.size(); i++) vout[i+i0] += vin[i];
   }
 
+  // assigns vout[i0:] *= alpha*vin
   template<class vtype1, class vtype2, class vtype3>
   static void subadd(vtype1 vin, vtype2 &vout, int i0, vtype3 alpha){
     for(int i=0; i<vin.size(); i++) vout[i+i0] += alpha*vin[i];
