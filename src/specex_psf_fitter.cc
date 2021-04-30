@@ -510,17 +510,6 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	other_indices.clear();
 #endif
       }
-
-      std::vector<double> continuum_params_db(continuum_params.size());
-      std::copy(continuum_params.begin(),continuum_params.end(),continuum_params_db.begin());
-      
-      if(continuum_params.size()<0 && continuum_params[0]>0){
-	cout << "-----" << endl;
-	cout << endl; for (int i=0; i<continuum_params.size(); i++)
-			cout << continuum_params[i] << " " << endl;
-	cout << endl; for (int i=0; i<continuum_params_db.size(); i++)
-			cout << continuum_params_db[i] << " " << endl;
-      }
       
 #ifdef CONTINUUM
       if(has_continuum) {
@@ -528,17 +517,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	for(int fiber=psf_params->fiber_min;fiber<=psf_params->fiber_max;fiber++) {
 	  if(psf->GetTrace(fiber).Off()) continue;
 	  double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf_params->continuum_sigma_x));
-	  std::vector<double> continuum_monomials_db(continuum_monomials[fiber].size());
-	  std::copy(continuum_monomials[fiber].begin(),
-		    continuum_monomials[fiber].end(),
-		    continuum_monomials_db.begin());
-	  double dotval    = specex::dot(
-			     continuum_params,   continuum_monomials[fiber])*continuum_prof;
-	  double dotval_db = specex::dot_db(
-			     continuum_params_db,continuum_monomials_db    )*continuum_prof;
-	  if((dotval != dotval_db) ) std::cout << "dots: " << dotval << " " << dotval_db << std::endl;
 	  continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
-	  
 	  if(compute_ab && fit_continuum) {
 	    unbst::subadd(continuum_monomials[fiber],H,continuum_index,continuum_prof);
 	  }
