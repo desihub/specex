@@ -40,8 +40,6 @@ void specex::Trace::resize(int ncoeff) {
   X_vs_Y.coeff.resize(ncoeff);
   X_vs_Y.coeff = specex::unbst::subrange(coeff,0,min(ncoeff,int(coeff.size())));
   
-  
-  
 }
 
 bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {

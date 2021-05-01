@@ -290,7 +290,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
   
 #ifdef CONTINUUM
   if(fit_continuum)
-    unbst::subcopyr(Params,continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size(),psf_params->ContinuumPol.coeff,0);
+    unbst::subcopy(Params,continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size(),psf_params->ContinuumPol.coeff,0);
 #endif
   
   // update spot_tmp_data (spots are called several times because we loop on pixels)
@@ -328,7 +328,7 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
       for(int p=0;p<npar_fixed_coord;p++) {
 	harp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);
 	size_t m_size = legendre_monomials_for_this_psf_parameter.size();
-	unbst::subcopyr(legendre_monomials_for_this_psf_parameter,tmp.psf_monomials,index);	  
+	unbst::subcopy(legendre_monomials_for_this_psf_parameter,tmp.psf_monomials,index);	  
 	index += m_size;
       }
     }
@@ -451,7 +451,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
   if(has_continuum) {
     if(fit_continuum)
-      continuum_params = unbst::subrangerr(Params,continuum_index,continuum_index+np_continuum);
+      continuum_params = unbst::subrange(Params,continuum_index,continuum_index+np_continuum);
     else
       continuum_params = psf_params->ContinuumPol.coeff;
     
@@ -565,14 +565,14 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    size_t index = 0;
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      size_t m_size = psf_params->FitParPolXW[p]->coeff.size();
-	      unbst::subaddr(tmp.psf_monomials,index,index+m_size,H,index,flux*gradAllPar(indices_of_fitpar_in_allpar[p]));
+	      unbst::subadd(tmp.psf_monomials,index,index+m_size,H,index,flux*gradAllPar(indices_of_fitpar_in_allpar[p]));
 	      index += m_size;
 	    }
 	  }
 	  //}
 	  if(fit_trace) {
-	    unbst::subaddr(tmp.trace_x_monomials,H,tmp.trace_x_parameter_index,gradPos(0)*flux);
-	    unbst::subaddr(tmp.trace_y_monomials,H,tmp.trace_y_parameter_index,gradPos(1)*flux);
+	    unbst::subadd(tmp.trace_x_monomials,H,tmp.trace_x_parameter_index,gradPos(0)*flux);
+	    unbst::subadd(tmp.trace_y_monomials,H,tmp.trace_y_parameter_index,gradPos(1)*flux);
 	  }
 	  
 	  if(fit_flux && in_core) {
@@ -1248,7 +1248,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
 	const harp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
 	size_t c_size = coeff.size();
-	unbst::subcopyr(coeff,Params,index);
+	unbst::subcopy(coeff,Params,index);
 	index += c_size;
       }
     }
@@ -1265,7 +1265,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	{
 	  const harp::vector_double& coeff = it->second.X_vs_W.coeff;
 	  size_t c_size = coeff.size();
-	  unbst::subcopyr(coeff,Params,index);
+	  unbst::subcopy(coeff,Params,index);
 	  index += c_size;
 	  npar_trace += c_size;
 	}
@@ -1275,7 +1275,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	{
 	  const harp::vector_double& coeff = it->second.Y_vs_W.coeff;
 	  size_t c_size = coeff.size();
-	  unbst::subcopyr(coeff,Params,index);
+	  unbst::subcopy(coeff,Params,index);
 	  index += c_size;
 	  npar_trace += c_size;
 	}
@@ -1284,7 +1284,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #ifdef CONTINUUM
     if(fit_continuum) {
       continuum_index = index;
-      unbst::subcopyr(psf_params->ContinuumPol.coeff,Params,continuum_index);
+      unbst::subcopy(psf_params->ContinuumPol.coeff,Params,continuum_index);
       index += psf_params->ContinuumPol.coeff.size();
     }
     
@@ -1402,7 +1402,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       for(int p=0;p<npar_fixed_coord;p++) {
 	harp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);
 	size_t m_size = legendre_monomials_for_this_psf_parameter.size();
-	unbst::subcopyr(legendre_monomials_for_this_psf_parameter,tmp.psf_monomials,index);
+	unbst::subcopy(legendre_monomials_for_this_psf_parameter,tmp.psf_monomials,index);
 	index += m_size;
 	}
     }    
@@ -1765,7 +1765,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 
 #ifdef CONTINUUM
     if(fit_continuum) {
-      unbst::subcopyr(Params,continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size(),psf_params->ContinuumPol.coeff,0);
+      unbst::subcopy(Params,continuum_index,continuum_index+psf_params->ContinuumPol.coeff.size(),psf_params->ContinuumPol.coeff,0);
     }
 #endif
 

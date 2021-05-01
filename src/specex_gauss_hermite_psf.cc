@@ -1,4 +1,3 @@
-
 #include <cmath>
 #include <assert.h>
 #include <ctime>
@@ -87,7 +86,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 	Monomials_dy[index]=dHyj*Hxi;
       }
     }
-    prefactor += specex::dot(Monomials,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+    prefactor += specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,Monomials);
+    
   } else if(PosDer && ParamDer==0) {
     Monomials_dx.resize(nc);
     Monomials_dy.resize(nc);
@@ -122,9 +122,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
                    -= x/sigmax * sum_i P_i Monomials_dx_i * expfact
      */
      
-    (*ParamDer)[0] -= (x*sigma_x_inv*expfact)*specex::dot(Monomials_dx,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
-    (*ParamDer)[1] -= (y*sigma_y_inv*expfact)*specex::dot(Monomials_dy,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
-    
+    (*ParamDer)[0] -= (x*sigma_x_inv*expfact)*specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,Monomials_dx);
+    (*ParamDer)[1] -= (y*sigma_y_inv*expfact)*specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,Monomials_dy);    
     unbst::subcopy(Monomials,*ParamDer,first_hermite_param_index,expfact);
   }
   
@@ -136,8 +135,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
     dvdx=x*sigma_x_inv*psf_val;
     dvdy=y*sigma_y_inv*psf_val;
     
-    double d_poly_dx = specex::dot(Monomials_dx,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
-    double d_poly_dy = specex::dot(Monomials_dy,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+    double d_poly_dx = specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,Monomials_dx);
+    double d_poly_dy = specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,Monomials_dy);
     dvdx -= d_poly_dx*expfact*sigma_x_inv; // minus sign cause derivative wrt -x
     dvdy -= d_poly_dy*expfact*sigma_y_inv;
 }
@@ -338,25 +337,24 @@ double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
       }
     }
     
-    psfval = ex*ey + specex::dot(PiPj,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+    psfval = ex*ey + specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,PiPj);
     
     if(ParamDer) {
       // derivative wrt gauss-hermite coefficients , VALIDATED
       unbst::subcopy(PiPj,*ParamDer,first_hermite_param_index);
       
       // derivative wrt sigmax, VALIDATED
-      (*ParamDer)[0] = dexdsx*ey + specex::dot(dPiPjdsx,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+      (*ParamDer)[0]  = dexdsx*ey + specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,dPiPjdsx);
       // derivative wrt sigmay, VALIDATED
-      (*ParamDer)[1] += ex*deydsy + specex::dot(dPiPjdsy,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+      (*ParamDer)[1] += ex*deydsy + specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,dPiPjdsy);
     }
     if(PosDer) {
       // derivative wrt x
-      (*PosDer)[0] = dexdx*ey + specex::dot(dPiPjdx,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+      (*PosDer)[0]  = dexdx*ey + specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,dPiPjdx);
       // derivative wrt y
-      (*PosDer)[1] += ex*deydy + specex::dot(dPiPjdy,unbst::subranger(Params,first_hermite_param_index,first_hermite_param_index+nc));
+      (*PosDer)[1] += ex*deydy + specex::dot(Params,first_hermite_param_index,first_hermite_param_index+nc,dPiPjdy);
     }
-    
-    
+        
     return psfval;
 
 }
