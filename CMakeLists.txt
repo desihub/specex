@@ -42,7 +42,8 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/deboosted/specex_tokens.cc
 	    src/deboosted/specex_vector_utils.cc
 	    src/specex_blas.c
-	    src/specex_lapack.c)
+	    src/specex_lapack.c
+	    src/specex_unbst.cc)
 # look for BLAS/LAPACK with MKL first
 
 set(BLA_VENDOR Intel10_64lp)
