@@ -6,8 +6,6 @@
 
 // unbst: functions to replace basic boost/numeric/ublas vector operations
 
-namespace ublas  = boost::numeric::ublas;
-
 namespace specex::unbst {
 
   void subcopy(const harp::vector_double&, int, int, harp::vector_double&, int);
