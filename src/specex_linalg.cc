@@ -2,22 +2,36 @@
 #include <specex_message.h>
 #include <specex_blas.h>
 #include <specex_lapack.h>
+#include <vector>
 
 // contains all calls to C-wrappers (specex_*) calling C-interface BLAS and LAPACK functions 
 
 // returns the dot product of x and y
 double specex::dot(const harp::vector_double& x, const harp::vector_double& y) {  
-  return specex_dot(x.size(), &x[0], &y[0]);  
+  return specex_dot(x.size(), &x[0],  &y[0]);  
+}
+double specex::dot(const harp::vector_double& x, int i0, int i1, const harp::vector_double& y) {  
+  return specex_dot(i1-i0,    &x[i0], &y[0]);  
 }
   
 // y += alpha*x
-void specex::axpy(const double &alpha, const harp::vector_double& x,  harp::vector_double& y) {  
-  specex_axpy(x.size(), &alpha, &x[0], &y[0]);
+void specex::axpy(const double &alpha, const harp::vector_double& x,
+		  harp::vector_double& y) {  
+  specex_axpy(x.size(), &alpha, &x[0],  &y[0]);
+}
+void specex::axpy(const double &alpha, const harp::vector_double& x, int i0, int i1,
+		  harp::vector_double& y) {  
+  specex_axpy(i1-i0,    &alpha, &x[i0], &y[0]);
 }
 
 // A += alpha*x*x**T, where A is a symmetric matrx (only lower half is filled)
-void specex::syr(const double& alpha, const harp::vector_double& x, harp::matrix_double& A) {  
-  specex_syr(x.size(), &alpha, &x[0], &A(0,0)); 
+void specex::syr(const double& alpha, const harp::vector_double& x,
+		 harp::matrix_double& A) {  
+  specex_syr(x.size(), &alpha, &x[0],  &A(0,0)); 
+}
+void specex::syr(const double& alpha, const harp::vector_double& x, int i0, int i1,
+		 harp::matrix_double& A) {  
+  specex_syr(i1-i0,    &alpha, &x[i0], &A(0,0)); 
 }
 
 // C = alpha*A*A**T + beta*C

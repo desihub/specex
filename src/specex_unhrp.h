@@ -1,5 +1,5 @@
-#ifndef HARP_TDEFS
-#define HARP_TDEFS
+#ifndef SPECEX_UNHRP__H
+#define SPECEX_UNHRP__H
 
 #include <boost/numeric/ublas/operation.hpp>
 #include <boost/numeric/ublas/vector.hpp>
@@ -14,7 +14,15 @@
 #include <boost/numeric/bindings/lapack.hpp>
 #include <boost/numeric/bindings/views.hpp>
 
-namespace harp {
+// specex::unhrp
+// definitions, methods and classes necessary for SPECEX calculations that were originally
+// part of HARP but have been modified to
+//   - remove dependencies on boost
+//   - be a part of specex source
+// see https://github.com/tskisner/HARP for the original HARP package developed by
+// Ted Kisner
+
+namespace specex::unhrp {
 
   typedef enum {
     EIG_NONE,

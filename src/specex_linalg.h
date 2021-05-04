@@ -19,14 +19,17 @@ namespace specex {
   //typedef boost::numeric::ublas::symmetric_matrix<double, boost::numeric::ublas::upper, boost::numeric::ublas::column_major> symmetric_matrix_double;
   
   // ! scalar product
-  double dot(const harp::vector_double& v1, const harp::vector_double& v2);
+  double dot(const harp::vector_double&, const harp::vector_double&);
+  double dot(const harp::vector_double&, int, int, const harp::vector_double&);
+  
+  // ! B += a*h
+  void axpy(const double&, const harp::vector_double&, harp::vector_double&);
+  void axpy(const double&, const harp::vector_double&, int, int, harp::vector_double&);
   
   // !  A += w*h*h.transposed(), where A is a symmetric matrx (only lower half is filled!)
-  void syr(const double& w, const harp::vector_double& h, harp::matrix_double& A);
+  void syr(const double&, const harp::vector_double&, harp::matrix_double&);
+  void syr(const double&, const harp::vector_double&, int, int, harp::matrix_double&);
 
-  // ! B += a*h
-  void axpy(const double &a, const harp::vector_double& h,  harp::vector_double& B);
-  
   // ! B := alpha*A*h + beta*B (B += alpha*A*h for beta=1)
   void gemv(const double &alpha,  const harp::matrix_double &A,  const harp::vector_double& h, const double &beta, harp::vector_double& B);
 
