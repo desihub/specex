@@ -518,7 +518,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	  double continuum_prof = expfact_for_continuum * exp(-0.5*square((i-x_of_trace_for_continuum(fiber-psf_params->fiber_min))/psf_params->continuum_sigma_x));
 	  continuum_value += specex::dot(continuum_params,continuum_monomials[fiber])*continuum_prof;
 	  if(compute_ab && fit_continuum) {
-	    unbst::subadd(continuum_monomials[fiber],H,continuum_prof);
+	    unbst::subadd(continuum_monomials[fiber],H,continuum_index,continuum_prof);
 	  }
 	}
 	signal += continuum_value;
