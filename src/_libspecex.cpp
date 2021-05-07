@@ -281,9 +281,9 @@ PYBIND11_MODULE(_libspecex, m) {
 	    return self.read_psf(opts,pypsf);
 	}
 	)
-        .def("prepare_psf",[](spx::PyIO &self, spx::PyOptions opts,
+        .def("load_psf",[](spx::PyIO &self, spx::PyOptions opts,
 				 spx::PyPSF& pypsf){
-	    return self.prepare_psf(opts,pypsf);
+	    return self.load_psf(opts,pypsf);
 	}
 	)
         .def("write_spots",   [](spx::PyIO &self, spx::PyOptions opts,

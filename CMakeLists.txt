@@ -25,6 +25,7 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/specex_legendre.cc
 	    src/specex_linalg.cc
 	    src/specex_psf_io.cc
+	    src/specex_psf_proc.cc
 	    src/specex_model_image.cc
 	    src/specex_image_data.cc
 	    src/specex_hermite.cc
@@ -88,6 +89,7 @@ target_include_directories(_libspecex
 	PUBLIC
 	src
 	src/deboosted_headers
+	src/unhrp
 	${MKL_INCLUDE}
 	)
 

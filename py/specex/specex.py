@@ -30,7 +30,7 @@ def run_specex(com):
     
     pyft.fit_psf(opts,pyio,pypr,pymg,pyps) # fit psf 
     
-    pyio.prepare_psf(opts,pyps) # prepare psf 
+    pyio.load_psf(opts,pyps)    # load psf
     write_psf(pyps,opts)        # write psf 
     pyio.write_spots(opts,pyps) # write spots
 
