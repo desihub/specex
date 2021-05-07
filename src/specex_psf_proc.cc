@@ -6,9 +6,11 @@
 #include <specex_fits.h>
 #include <specex_trace.h>
 
-#include <harp.hpp>
+#include <specex_unhrp.h>
 
-static void _AddRow2(specex::FitsTable& table,const string& PARAM, harp::vector_double& coeff, int legdegx, int legdegw) {
+namespace unhrp = specex::unhrp;
+
+static void _AddRow2(specex::FitsTable& table,const string& PARAM, unhrp::vector_double& coeff, int legdegx, int legdegw) {
   std::vector<specex::FitsTableEntry> row;
   {specex::FitsTableEntry entry; entry.string_val = PARAM; row.push_back(entry);}
   {specex::FitsTableEntry entry; entry.double_vals = coeff; row.push_back(entry);}
@@ -61,8 +63,8 @@ void _load_trace(specex::PSF_p psf, bool is_x) {
       if(pol->coeff.size()>0) {
 	SPECEX_DEBUG("need to refit trace coeff.size=" << pol->coeff.size());
 	try {
-	  harp::vector_double wave(pol->coeff.size());
-	  harp::vector_double x(pol->coeff.size());
+	  unhrp::vector_double wave(pol->coeff.size());
+	  unhrp::vector_double x(pol->coeff.size());
 	  for(int i=0;i<pol->coeff.size();i++) {
 	    wave[i]=WAVEMIN+i*((WAVEMAX-WAVEMIN)/(pol->coeff.size()-1));
 	    x[i]=pol->Value(wave[i]);
@@ -171,7 +173,7 @@ void _load_psf(specex::PSF_p psf) {
     table.AddColumnDescription("LEGDEGW","J",sdim,"");
   }
 
-  harp::vector_double wave(ncoeff);
+  unhrp::vector_double wave(ncoeff);
   {
     double wavestep = (WAVEMAX-WAVEMIN)/(ncoeff-1);
     for(int w=0;w<ncoeff;w++) {
@@ -181,8 +183,8 @@ void _load_psf(specex::PSF_p psf) {
   
   vector<string> keys;
   
-  harp::vector_double coeff(ncoeff*NFIBERS);
-  harp::vector_double values(ncoeff);
+  unhrp::vector_double coeff(ncoeff*NFIBERS);
+  unhrp::vector_double values(ncoeff);
   
   bool need_to_add_first_gh = true;
   for(int p=0;p<nparams;p++) {  // loop on all PSF parameters      
