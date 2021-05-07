@@ -2695,10 +2695,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   ok = FitIndividualSpotFluxes(input_spots);
   
   std::vector<specex::Spot_p> selected_spots = select_spots(input_spots,min_snr_non_linear_terms,min_wave_dist_non_linear_terms);
-  if(write_tmp_results) {
-    write_spots_xml(selected_spots,"spots-before-gaussian-fit.xml");
-    write_psf_xml(psf,"psf-before-gaussian-fit.xml");
-  }
+  //  if(write_tmp_results) {
+  //  write_spots_xml(selected_spots,"spots-before-gaussian-fit.xml");
+  //  write_psf_xml(psf,"psf-before-gaussian-fit.xml");
+  //}
 
   
   if(scheduled_fit_of_traces) {
@@ -2837,8 +2837,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	}
       }
       
-      if(write_tmp_results)
-	write_spots_xml(input_spots,"spots-after-trace-fit.xml");
+      //if(write_tmp_results)
+      //write_spots_xml(input_spots,"spots-after-trace-fit.xml");
     } // end of test direct_simultaneous_fit
   
     
@@ -2948,10 +2948,10 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
     
-    if(write_tmp_results) {
-      write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
-      write_psf_xml(psf,"psf-after-gaussian-fit.xml");
-    }
+    //if(write_tmp_results) {
+    //  write_spots_xml(selected_spots,"spots-after-gaussian-fit.xml");
+    //  write_psf_xml(psf,"psf-after-gaussian-fit.xml");
+    //}
   }
     
   if(psf->HasParam("GHNSIG")) {
@@ -3063,11 +3063,11 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     SPECEX_INFO("Starting FitSeveralSpots PSF+FLUX #" << count);
     ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
     if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-    if(write_tmp_results) {
-      char filename[1000];
-      sprintf(filename,"spots-after-psf+flux-%d.xml",count);
-      write_spots_xml(selected_spots,filename);
-    }
+    //if(write_tmp_results) {
+    //  char filename[1000];
+    //  sprintf(filename,"spots-after-psf+flux-%d.xml",count);
+    //  write_spots_xml(selected_spots,filename);
+    //}
     
     
     // if we have continuum and tail, additional loop
@@ -3136,11 +3136,11 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
       
       if(!ok) SPECEX_ERROR("FitSeveralSpots failed for PSF+FLUX");
-      if(write_tmp_results) {
-	char filename[1000];
-	sprintf(filename,"spots-after-psf+flux-%d.xml",count);
-	write_spots_xml(selected_spots,filename);
-      }
+      //if(write_tmp_results) {
+      //  char filename[1000];
+      //  sprintf(filename,"spots-after-psf+flux-%d.xml",count);
+      //  write_spots_xml(selected_spots,filename);
+      //}
       
 
     } // end of test of fit of tail or continuum
@@ -3159,21 +3159,21 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
 	selected_spots = select_spots(selected_spots,min_snr_linear_terms,min_wave_dist_linear_terms);
 	
-	if(write_tmp_results) {
-	  char filename[1000];
-	  sprintf(filename,"spots-after-flux-%d.xml",count);
-	  write_spots_xml(selected_spots,filename);
-	}
+	//if(write_tmp_results) {
+	//  char filename[1000];
+	//  sprintf(filename,"spots-after-flux-%d.xml",count);
+	//  write_spots_xml(selected_spots,filename);
+	//}
 	
 	fit_flux = false; fit_psf = true;
 	SPECEX_INFO("Starting FitSeveralSpots PSF(w) #" << count);
 	ok = FitSeveralSpots(selected_spots,&chi2,&npix,&niter);
 	
-	if(write_tmp_results) {
-	  char filename[1000];
-	  sprintf(filename,"spots-after-psf-%d.xml",count);
-	  write_spots_xml(selected_spots,filename);
-	}
+	//if(write_tmp_results) {
+	//  char filename[1000];
+	//  sprintf(filename,"spots-after-psf-%d.xml",count);
+	//  write_spots_xml(selected_spots,filename);
+        //}
       }
   } // end of test on scheduled_fit_of_psf
   

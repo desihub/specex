@@ -32,6 +32,5 @@ def run_specex(com):
     
     pyio.load_psf(opts,pyps)    # load psf
     write_psf(pyps,opts)        # write psf 
-    pyio.write_spots(opts,pyps) # write spots
 
     return 0

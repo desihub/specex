@@ -45,8 +45,9 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   vector <Spot_p> fitted_spots = pypsf.fitted_spots;
 
-  if(opts.output_spots_filename != "")
-    write_spots_xml(fitted_spots,opts.output_spots_filename);    
+  // xml serialization is removed nothing done here
+  //if(opts.output_spots_filename != "")
+  //  write_spots_xml(fitted_spots,opts.output_spots_filename);    
   
   return EXIT_SUCCESS;
 
@@ -66,7 +67,7 @@ int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 		       opts.trace_deg_wave);     
     
   }else{ // use_input_specex_psf
-    read_psf_gen(pypsf.psf,opts.input_psf_filename);
+    read_psf_fits(pypsf.psf,opts.input_psf_filename);
   }
     
   return EXIT_SUCCESS;

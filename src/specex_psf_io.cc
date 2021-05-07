@@ -1,6 +1,4 @@
 #include <fstream>
-#include <boost/archive/xml_oarchive.hpp>
-#include <boost/archive/xml_iarchive.hpp>
 #include <boost/algorithm/string.hpp>
 
 #include <harp.hpp>
@@ -23,37 +21,6 @@
 #include "specex_psf_io_gauss_hermite_psf_fits_1.h"
 #include "specex_psf_io_gauss_hermite_psf_fits_2.h"
 #include "specex_psf_io_gauss_hermite_psf_fits_3.h"
-
-
-
-void specex::read_psf_gen(specex::PSF_p& psf, const std::string& filename) {
-  
-  if (filename.find(".xml") != std::string::npos) {
-    SPECEX_INFO("read xml file " << filename);
-    specex::read_psf_xml(psf,filename);
-  } else if (filename.find(".fits") != std::string::npos) {
-    SPECEX_INFO("read fits file " << filename);
-    specex::read_psf_fits(psf,filename);
-  } else {
-    SPECEX_ERROR("not sure how to read this file (expect xxx.fits or xxx.xml) " << filename);
-  }
-}
-
-void specex::write_psf_xml(const specex::PSF_p psf, const std::string& filename) {
-  // this function is no longer functional as xml serialization is removed
-  std::ofstream os(filename.c_str());
-  os.close();
-  SPECEX_INFO("wrote psf in " << filename);
-}
-
-void specex::read_psf_xml(specex::PSF_p& psf, const std::string& filename) {
-  
-  // this function is no longer functional as xml serialization is removed
-  std::ifstream is(filename.c_str());
-  is.close();
-  SPECEX_INFO("read psf in " << filename);
-  
-}
 
 void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx, int requested_deg) {
   // read image of coefficients
@@ -125,81 +92,6 @@ void specex::synchronize_traces(specex::PSF_p psf) {
   }
 }
   
-void specex::write_spots_xml(const std::vector<specex::Spot_p>& spots, const std::string& filename) {
-
-  // this function is no longer functional as xml serialization is removed
-  std::ofstream os(filename.c_str());
-  os.close();
-  SPECEX_INFO("wrote spots in " << filename);
-}
-
-void specex::write_psf_fits_image(const specex::PSF_p psf, const string& filename, const int fiber, const double& wavelength, int oversampling) {
-  
-  double x=psf->Xccd(fiber,wavelength);
-  double y=psf->Yccd(fiber,wavelength);
-  SPECEX_INFO("PSF center X Y = " << x << " " << y);
-  bool force_center=false;
-  if (force_center) {
-    x = int(x);
-    y = int(y);
-  }
-  harp::vector_double P=psf->AllLocalParamsFW(fiber,wavelength);
-  
-  SPECEX_INFO("PSF Params " << P);
-  SPECEX_INFO("PSF value at center = " << psf->PSFValueWithParamsXY(int(x),int(y),int(x),int(y),P,0,0));
-  
-  int nx = 2*psf->hSizeX*oversampling+1;
-  int ny = 2*psf->hSizeY*oversampling+1;
-  
-
-  double sum=0;
-  specex::image_data img(nx,ny);
-  for(int j=0;j<ny;j++) {
-    for(int i=0;i<nx;i++) {
-      
-      int ib = (i-nx/2)/oversampling;
-      int jb = (j-ny/2)/oversampling;
-      double dx = (i-nx/2)/double(oversampling)-ib;
-      double dy = (j-ny/2)/double(oversampling)-jb;
-      //if(j==0) SPECEX_INFO("x[" << i << "]=" << ib+dx << " y[" << j << "]=" << jb+dy);
-      
-      img(i,j)=psf->PSFValueWithParamsXY(x-dx,y-dy,ib+int(x+0.5),jb+int(y+0.5),P,0,0);
-      sum += img(i,j);
-    }
-  }
-  SPECEX_INFO("PSF integral in image = " << sum/(oversampling*oversampling));
- 
-  
-  // get maximum of psf profile numerically
-  {
-    double maxval=0;
-    int imax=0;
-    int jmax=0;
-   
-    for(int j=int(y)-3;j<=int(y+3);j++)
-      for(int i=int(x)-3;i<=int(x+3);i++)
-	{
-	  double val=psf->PSFValueWithParamsXY(x,y,i,j,P,0,0);
-	  if(val>maxval) {maxval=val; imax=i; jmax=j;}
-	}
-    SPECEX_INFO("for x,y=" << x << "," << y << " max at i,j=" << imax << "," << jmax);
-  }
-  
-  specex::write_new_fits_image(filename,img);
-}
-
-void specex::write_psf_fits_dummy(const std::string& path){
-  fitsfile * fp;
-  int status = 0;
-  long naxes[2];
-  double dummy;
-  naxes[0] = 10;
-  naxes[1] = 15;
-  harp::fits::create(fp,path);  
-  fits_create_img(fp,-64, 2, naxes, &status);
-  harp::fits::close(fp);
-}
-
 void specex::read_traceset_fits(specex::PSF_p psf, fitsfile * fp, int degx, int degy) {
   read_xtrace_fits_hdu(psf,fp,find_hdu(fp,"XTRACE","XCOEFF"),degx);
   read_ytrace_fits_hdu(psf,fp,find_hdu(fp,"YTRACE","YCOEFF"),degy);
