@@ -24,14 +24,6 @@
 // see https://github.com/tskisner/HARP for the original HARP package developed by
 // Ted Kisner
 
-
-typedef enum {
-  EIG_NONE,
-  EIG_SQRT,
-  EIG_INVSQRT,
-  EIG_INV
-} eigen_op;
-
 namespace unhrp {
 
   typedef boost::numeric::ublas::vector < int > vector_int;
