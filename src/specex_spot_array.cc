@@ -117,7 +117,7 @@ void specex::write_spots_list(vector<Spot_p> spots, const PSF_p psf, const strin
     
     spot->write_list_entry(osl);
 
-    harp::vector_double params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
+    unhrp::vector_double params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
     for(size_t p=0;p<params.size();p++)
       osl << " " << params[p];
     

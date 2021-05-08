@@ -1,7 +1,7 @@
 #include <fstream>
 #include <boost/algorithm/string.hpp>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include <specex_psf.h>
 #include <specex_spot.h>
@@ -70,8 +70,8 @@ void specex::synchronize_traces(specex::PSF_p psf) {
     double wmax = trace.Y_vs_W.xmax;
     
     int ddeg = 1; // add one degree for inversion
-    harp::vector_double ty(deg+ddeg+1);
-    harp::vector_double tx(deg+ddeg+1);
+    unhrp::vector_double ty(deg+ddeg+1);
+    unhrp::vector_double tx(deg+ddeg+1);
     for(int i=0;i<deg+ddeg+1;i++) {
       double wave=wmin+i*((wmax-wmin)/deg);
       ty[i]=trace.Y_vs_W.Value(wave);

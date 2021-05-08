@@ -3,8 +3,7 @@
 #include <string>
 #include <sstream>
 
-//#include <harp.hpp>
-
+//#include <unhrp.h>
 #include <specex_image_data.h>
 #include <specex_fits.h>
 #include <specex_message.h>
@@ -128,7 +127,7 @@ string specex::FitsTable::encode_dimension(const std::vector<int>& dimension) co
 
 
 
-void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const harp::vector_double& data) {
+void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const unhrp::vector_double& data) {
   
   if(data.size() != (n_rows*n_cols))
     SPECEX_ERROR("Incompatible number of columns x rows and vector size");
@@ -148,7 +147,7 @@ void specex::write_new_fits_image(std::string const & path, const image_data& im
   SPECEX_INFO("wrote image in file " << path);
 }
 
-void specex::write_new_fits_image(std::string const & path, const harp::matrix_double& mat) {
+void specex::write_new_fits_image(std::string const & path, const unhrp::matrix_double& mat) {
   specex::write_new_fits_image(path, mat.size1(), mat.size2() , mat.data()); 
   SPECEX_INFO("wrote matrix in file " << path);
 }

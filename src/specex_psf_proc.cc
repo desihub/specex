@@ -6,9 +6,6 @@
 #include <specex_fits.h>
 #include <specex_trace.h>
 
-#include <specex_unhrp.h>
-
-namespace unhrp = specex::unhrp;
 
 static void _AddRow2(specex::FitsTable& table,const string& PARAM, unhrp::vector_double& coeff, int legdegx, int legdegw) {
   std::vector<specex::FitsTableEntry> row;

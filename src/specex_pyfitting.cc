@@ -6,7 +6,7 @@
 
 #include <boost/program_options.hpp>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include <specex_message.h>
 

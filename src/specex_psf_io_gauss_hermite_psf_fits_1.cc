@@ -1,6 +1,6 @@
 #include <fstream>
 #include <boost/algorithm/string.hpp>
-#include <harp.hpp>
+#include <unhrp.h>
 #include <specex_fits.h>
 #include <specex_trace.h>
 #include <specex_gauss_hermite_psf.h>
@@ -75,8 +75,8 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
     
     // now loop on real psf parameters
 
-    harp::vector_double wave(ncoeff);
-    harp::vector_double values(ncoeff);
+    unhrp::vector_double wave(ncoeff);
+    unhrp::vector_double values(ncoeff);
     
     // get the max range of wavelength and convert to int 
     

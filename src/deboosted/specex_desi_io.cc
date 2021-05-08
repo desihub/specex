@@ -1,6 +1,6 @@
 #include <iostream>
 
-//#include <harp.hpp>
+#include <unhrp.h>
 
 #include "specex_psf.h"
 #include "specex_trace.h"
@@ -113,9 +113,9 @@ void specex::read_DESI_traceset_in_fits(
     trace.X_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
     trace.W_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
     int npts=100;
-    harp::vector_double w(npts);
-    harp::vector_double x(npts);
-    harp::vector_double y(npts);
+    unhrp::vector_double w(npts);
+    unhrp::vector_double x(npts);
+    unhrp::vector_double y(npts);
     for(int i=0;i<npts;i++) {
       w[i]=y_vs_wave_wavemin+((y_vs_wave_wavemax-y_vs_wave_wavemin)/(npts-1))*i;
       x[i]=trace.X_vs_W.Value(w[i]);

@@ -1,6 +1,6 @@
 #include <fstream>
 #include <boost/algorithm/string.hpp>
-#include <harp.hpp>
+#include <unhrp.h>
 #include <specex_fits.h>
 #include <specex_trace.h>
 #include <specex_gauss_hermite_psf.h>
@@ -9,7 +9,7 @@
 
 using namespace std ;
 
-static void AddRow1(specex::FitsTable& table,const string& PARAM, double wavemin, double wavemax, harp::vector_double& coeff) {
+static void AddRow1(specex::FitsTable& table,const string& PARAM, double wavemin, double wavemax, unhrp::vector_double& coeff) {
   std::vector<specex::FitsTableEntry> row;
   {specex::FitsTableEntry entry; entry.string_val = PARAM; row.push_back(entry);}
   {specex::FitsTableEntry entry; entry.double_vals.resize(1); entry.double_vals[0] = wavemin; row.push_back(entry);}
@@ -149,8 +149,8 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     
     // now loop on real psf parameters
 
-    harp::vector_double wave(ncoeff);
-    harp::vector_double values(ncoeff);
+    unhrp::vector_double wave(ncoeff);
+    unhrp::vector_double values(ncoeff);
     
     // get the max range of wavelength and convert to int 
     
@@ -175,12 +175,12 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
     
     bool need_to_add_first_gh = true;
 
-    harp::vector_double coeff(ncoeff*NFIBERS);
+    unhrp::vector_double coeff(ncoeff*NFIBERS);
 
     // first deal with X and Y
     {
-      harp::vector_double coeff_y(ncoeff*NFIBERS);
-      harp::vector_double values_y(ncoeff);
+      unhrp::vector_double coeff_y(ncoeff*NFIBERS);
+      unhrp::vector_double values_y(ncoeff);
       coeff.clear();
       coeff_y.clear();
       int fiber_index=0;
@@ -515,7 +515,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
   std::map<std::string,int> param_row;
   std::map<std::string,double> param_wavemin;
   std::map<std::string,double> param_wavemax;
-  std::map<std::string,harp::vector_double > param_coeff;
+  std::map<std::string,unhrp::vector_double > param_coeff;
   for(int i=0;i<table.data.size();i++) { 
     std::string pname=table.data[i][param_col].string_val;
     trim(pname);
@@ -578,9 +578,9 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
     trace.X_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
     trace.W_vs_Y.deg  = trace.Y_vs_W.deg + 1; // add one for inversion
     int npts=100;
-    harp::vector_double w(npts);
-    harp::vector_double x(npts);
-    harp::vector_double y(npts);
+    unhrp::vector_double w(npts);
+    unhrp::vector_double x(npts);
+    unhrp::vector_double y(npts);
     for(int i=0;i<npts;i++) {
       w[i]=param_wavemin["Y"]+((param_wavemax["Y"]-param_wavemin["Y"])/(npts-1))*i;
       x[i]=trace.X_vs_W.Value(w[i]);
@@ -655,8 +655,8 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
       pol->Fill(true); // sparse or not sparse
 
       int npar = pol->Npar();
-      harp::matrix_double A(npar,npar);
-      harp::vector_double B(npar);
+      unhrp::matrix_double A(npar,npar);
+      unhrp::vector_double B(npar);
       A *= 0;
       B *= 0;
       for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
@@ -667,7 +667,7 @@ void read_gauss_hermite_psf_fits_version_2(specex::PSF_p& psf, fitsfile* fp, int
 	for(double wave=wavemin;wave<=wavemax;wave+=(wavemax-wavemin)/(legdeg_param_fit+2)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
-	  harp::vector_double der = pol->Monomials(x,wave);
+	  unhrp::vector_double der = pol->Monomials(x,wave);
 	  specex::syr(1.,der,A); // A += der*der.transposed;
 	  specex::axpy(pval,der,B); // B += pval*der;
 	}

@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include <specex_psf.h>
 #include <specex_spot.h>

@@ -3,7 +3,7 @@
 #include <ctime>
 
 //#include "harp_tdefs.h"
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include "specex_hermite.h"
 #include "specex_gauss_hermite_psf.h"
@@ -31,9 +31,9 @@ void specex::GaussHermitePSF::SetDegree(const int ideg) {
 
 
 double specex::GaussHermitePSF::Profile(const double &input_X, const double &input_Y,
-			  const harp::vector_double &Params,
-			  harp::vector_double *PosDer,
-			  harp::vector_double *ParamDer) const
+			  const unhrp::vector_double &Params,
+			  unhrp::vector_double *PosDer,
+			  unhrp::vector_double *ParamDer) const
 {
 
   double sx = Params(0);
@@ -51,9 +51,9 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   int nc=nx*ny-1; // skip (0,0)
   
   // precompute to go faster
-  harp::vector_double Monomials;
-  harp::vector_double Monomials_dx;
-  harp::vector_double Monomials_dy;
+  unhrp::vector_double Monomials;
+  unhrp::vector_double Monomials_dx;
+  unhrp::vector_double Monomials_dy;
   double prefactor=1;
   int first_hermite_param_index = 2; // first 2 params are sigmas
   double expfact=1./(2*M_PI)*sigma_x_inv*sigma_y_inv*exp(-0.5*(x*x+y*y));
@@ -146,9 +146,9 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 
 double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
 					 const double &XPix, const double &YPix,
-					 const harp::vector_double &Params,
-					 harp::vector_double *PosDer,
-					 harp::vector_double *ParamDer) const {
+					 const unhrp::vector_double &Params,
+					 unhrp::vector_double *PosDer,
+					 unhrp::vector_double *ParamDer) const {
 
   
   // shut down analytic calculation
@@ -262,11 +262,11 @@ double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
 
   // full derivative computation
   // PiPj = int_{x1,y1}^{x2,y2} dx dy exp(-(x**2+y**2)/2) * Hi(x) * Hj(y)
-  harp::vector_double PiPj(nc);    
-  harp::vector_double dPiPjdsx(nc);// derivative wrt sigma
-  harp::vector_double dPiPjdsy(nc);
-  harp::vector_double dPiPjdx(nc);// derivative wrt x
-  harp::vector_double dPiPjdy(nc);
+  unhrp::vector_double PiPj(nc);    
+  unhrp::vector_double dPiPjdsx(nc);// derivative wrt sigma
+  unhrp::vector_double dPiPjdsy(nc);
+  unhrp::vector_double dPiPjdx(nc);// derivative wrt x
+  unhrp::vector_double dPiPjdy(nc);
 
   /*
   PiPj.resize(nc);
@@ -371,10 +371,10 @@ int specex::GaussHermitePSF::LocalNAllPar() const {
   return npar;
 }
 
-harp::vector_double specex::GaussHermitePSF::DefaultParams() const 
+unhrp::vector_double specex::GaussHermitePSF::DefaultParams() const 
 {
   
-  harp::vector_double Params(LocalNAllPar());
+  unhrp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning = a pure gaussian
   int index=0;
   Params(index++) = 1.0; // this is sigma_x ; value of 1. tuned on CCDS1R (EM-spectro)

@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <string>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include <specex_image_data.h>
 #include <specex_linalg.h>
@@ -22,7 +22,7 @@ specex::image_data::image_data(size_t ncols, size_t nrows) :
   resize(ncols,nrows);
 }
 
-specex::image_data::image_data(size_t ncols, size_t nrows, const harp::vector_double& i_data) : 
+specex::image_data::image_data(size_t ncols, size_t nrows, const unhrp::vector_double& i_data) : 
   harp::image()
 {
   resize(ncols,nrows);

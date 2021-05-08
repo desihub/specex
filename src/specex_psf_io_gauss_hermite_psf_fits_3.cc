@@ -1,6 +1,6 @@
 #include <fstream>
 #include <boost/algorithm/string.hpp>
-#include <harp.hpp>
+#include <unhrp.h>
 #include <specex_fits.h>
 #include <specex_trace.h>
 #include <specex_gauss_hermite_psf.h>
@@ -51,7 +51,7 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
   
   std::vector<std::string> params;
   std::map<std::string,int> param_row;
-  std::map<std::string,harp::vector_double > param_coeff;
+  std::map<std::string,unhrp::vector_double > param_coeff;
   std::map<std::string,int > param_degx;
   std::map<std::string,int > param_degw;
   
@@ -144,8 +144,8 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
       pol->Fill(true); // sparse or not sparse ????
       
       int npar = pol->Npar();
-      harp::matrix_double A(npar,npar); A.clear();
-      harp::vector_double B(npar); B.clear();
+      unhrp::matrix_double A(npar,npar); A.clear();
+      unhrp::vector_double B(npar); B.clear();
       
       int npoints=0;
       for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
@@ -157,7 +157,7 @@ void read_gauss_hermite_psf_fits_version_3(specex::PSF_p& psf, fitsfile* fp, int
 	for(double wave=WAVEMIN;wave<WAVEMAX+0.01;wave+=(WAVEMAX-WAVEMIN)/(degw+1)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
-	  harp::vector_double der = pol->Monomials(x,wave);
+	  unhrp::vector_double der = pol->Monomials(x,wave);
 	  specex::syr(1.,der,A); // A += der*der.transposed;
 	  specex::axpy(pval,der,B); // B += pval*der;
 	  npoints += 1;

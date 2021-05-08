@@ -106,7 +106,7 @@ namespace specex {
 #ifdef EXTERNAL_TAIL
     
   public :
-    double TailProfile(const double& dx, const double &dy, const harp::vector_double &Params, bool full_calculation=false) const;
+    double TailProfile(const double& dx, const double &dy, const unhrp::vector_double &Params, bool full_calculation=false) const;
     
   protected :
 
@@ -117,7 +117,7 @@ namespace specex {
     double r_tail_power_law_index;
     
     bool r_tail_profile_must_be_computed;
-    void ComputeTailProfile(const harp::vector_double &Params);
+    void ComputeTailProfile(const unhrp::vector_double &Params);
     double TailProfileValue(const double& dx, const double &dy) const;
     int psf_tail_amplitude_index;    
     
@@ -127,12 +127,12 @@ namespace specex {
     
     double TailValueWithParamsXY(const double &Xc, const double &Yc, 
 				 const int IPix, const int JPix,
-				 const harp::vector_double &Params,
-				 harp::vector_double* derivative_r_tail_amplitude) const;
+				 const unhrp::vector_double &Params,
+				 unhrp::vector_double* derivative_r_tail_amplitude) const;
    
     double TailValueFW(const int fiber, const double& wavelength, 
 		       const int IPix, const int JPix, int bundle_id, 
-		       harp::vector_double* derivative_r_tail_amplitude) const;    
+		       unhrp::vector_double* derivative_r_tail_amplitude) const;    
     */
        
 #endif
@@ -149,7 +149,7 @@ public :
     
   protected :
     
-    //harp::vector_double TmpParamDer;
+    //unhrp::vector_double TmpParamDer;
     std::string name;
 
     std::map<int,Legendre1DPol*> XPol; // Legendre1DPol X_vs_W of fibers, data are in FiberTraces
@@ -184,23 +184,23 @@ public :
     
     virtual double PixValue(const double &Xc, const double &Yc,
 		    const double &XPix, const double &YPix,
-		    const harp::vector_double &Params,
-		    harp::vector_double *PosDer = 0,
-		    harp::vector_double *ParamDer = 0) const;
+		    const unhrp::vector_double &Params,
+		    unhrp::vector_double *PosDer = 0,
+		    unhrp::vector_double *ParamDer = 0) const;
 
   public :
 
     virtual double Profile(const double &X, const double &Y,
-			   const harp::vector_double &Params,
-			   harp::vector_double *PosDer = 0,
-			   harp::vector_double *ParamGradient = 0) const {return 0;};
+			   const unhrp::vector_double &Params,
+			   unhrp::vector_double *PosDer = 0,
+			   unhrp::vector_double *ParamGradient = 0) const {return 0;};
     
-    virtual harp::vector_double DefaultParams() const = 0;
+    virtual unhrp::vector_double DefaultParams() const = 0;
     virtual std::vector<std::string> DefaultParamNames() const = 0;
     virtual void AllocateDefaultParams();
     
     // check if parameter values are within bounds
-    virtual bool CheckParams(const harp::vector_double &Params) const {return false;};
+    virtual bool CheckParams(const unhrp::vector_double &Params) const {return false;};
     
     
     // ==================================================
@@ -269,14 +269,14 @@ public :
     // this is the fastest (no conversion fiber,wave -> x,y)
     virtual double PSFValueWithParamsXY(const double& X, const double &Y, 
 				const int IPix, const int JPix,
-				const harp::vector_double &Params,
-				harp::vector_double *PosDer, harp::vector_double *ParamDer,
+				const unhrp::vector_double &Params,
+				unhrp::vector_double *PosDer, unhrp::vector_double *ParamDer,
 				bool with_core=true, bool with_tail=true) const;
     
     double PSFValueWithParamsFW(const int fiber, const double &wave, 
 				const int IPix, const int JPix,
-				const harp::vector_double &Params,
-				harp::vector_double *PosDer, harp::vector_double *ParamDer,
+				const unhrp::vector_double &Params,
+				unhrp::vector_double *PosDer, unhrp::vector_double *ParamDer,
 				bool with_core=true, bool with_tail=true) const;
     
     
@@ -284,7 +284,7 @@ public :
     //! Access to the current PSF pixels.
     double PSFValueFW(const int fiber, const double &wave, 
 		    const int IPix, const int JPix, int bundle_id,
-		      harp::vector_double *PosDer = 0, harp::vector_double *ParamDer = 0,
+		      unhrp::vector_double *PosDer = 0, unhrp::vector_double *ParamDer = 0,
 		      bool with_core=true, bool with_tail=true) const;
     
     
@@ -292,17 +292,17 @@ public :
     
     //! Access to current analytical PSF params (which may depend on position in the frame).
     int GetBundleOfFiber(int fiber) const;
-    harp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
-    harp::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    harp::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
-    harp::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
-    harp::vector_double AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
-    harp::vector_double AllLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    unhrp::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
+    unhrp::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
+    unhrp::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const unhrp::vector_double& ForThesePSFParams) const;
+    unhrp::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const unhrp::vector_double& ForThesePSFParams) const;
+    unhrp::vector_double AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unhrp::vector_double& ForThesePSFParams) const;
+    unhrp::vector_double AllLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unhrp::vector_double& ForThesePSFParams) const;
 
-    harp::vector_double FitLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
-    harp::vector_double FitLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    harp::vector_double FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
-    harp::vector_double FitLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const harp::vector_double& ForThesePSFParams) const;
+    unhrp::vector_double FitLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
+    unhrp::vector_double FitLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
+    unhrp::vector_double FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unhrp::vector_double& ForThesePSFParams) const;
+    unhrp::vector_double FitLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unhrp::vector_double& ForThesePSFParams) const;
     
     
     //! I/O for interface with specter

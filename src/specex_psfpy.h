@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 
-#include <harp.hpp>
+#include <unhrp.h>
 #include "specex_fits.h"
 #include "specex_image_data.h"
 

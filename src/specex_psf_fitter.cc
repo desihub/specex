@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <time.h>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 //#include "specex_base_analytic_psf.h"
 #include "specex_psf_fitter.h"
@@ -55,9 +55,9 @@ void specex::PSF_Fitter::SetStampLimitsFromPSF(specex::Stamp& stamp, const spece
 
 struct BrentBox { // handler to data and params needed to compute chi2 in brent routine
   specex::PSF_Fitter& fitter;
-  harp::vector_double& delta_P;
+  unhrp::vector_double& delta_P;
   vector<specex::Spot_p>& spots;
-  BrentBox(specex::PSF_Fitter& i_fitter,  harp::vector_double& i_delta_P, vector<specex::Spot_p>& i_spots) :
+  BrentBox(specex::PSF_Fitter& i_fitter,  unhrp::vector_double& i_delta_P, vector<specex::Spot_p>& i_spots) :
     fitter(i_fitter),
     delta_P(i_delta_P),
     spots(i_spots)
@@ -122,12 +122,12 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 #endif
   
   
-  harp::vector_double chi2_of_band(number_of_image_bands);
+  unhrp::vector_double chi2_of_band(number_of_image_bands);
   chi2_of_band.clear();
   
   // choosing bins
-  harp::vector_double begin_j(number_of_image_bands);
-  harp::vector_double end_j(number_of_image_bands);
+  unhrp::vector_double begin_j(number_of_image_bands);
+  unhrp::vector_double end_j(number_of_image_bands);
   
   int band = 0;
   for(band=0; band<number_of_image_bands; band++) {
@@ -320,13 +320,13 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
       tmp.y = Params(tmp.y_parameter_index);
     }
     if(fit_psf || fit_psf_tail) {
-      //harp::vector_double toto = tmp.psf_all_params;
+      //unhrp::vector_double toto = tmp.psf_all_params;
       tmp.psf_all_params = psf->AllLocalParamsXW_with_FitBundleParams(tmp.x,tmp.wavelength,psf_params->bundle_id,Params);     
     }
     if(fit_psf && ( fit_trace || fit_position ) && compute_ab) { // need to update at each step monomials
       int index=0;
       for(int p=0;p<npar_fixed_coord;p++) {
-	harp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);
+	unhrp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);
 	size_t m_size = legendre_monomials_for_this_psf_parameter.size();
 	unbst::subcopy(legendre_monomials_for_this_psf_parameter,tmp.psf_monomials,index);	  
 	index += m_size;
@@ -338,15 +338,15 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 
 
-double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, harp::matrix_double* input_Ap, harp::vector_double* input_Bp, bool update_tmp_data) const  {
+double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, unhrp::matrix_double* input_Ap, unhrp::vector_double* input_Bp, bool update_tmp_data) const  {
 
   
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
   
   
-  harp::matrix_double* Ap = input_Ap;
-  harp::vector_double* Bp = input_Bp;
+  unhrp::matrix_double* Ap = input_Ap;
+  unhrp::vector_double* Bp = input_Bp;
   
   if(begin_j==0) begin_j=stamp.begin_j;
   if(end_j==0) end_j=stamp.end_j;
@@ -361,19 +361,19 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 #ifdef FASTER_THAN_SYR  
 
   vector<int> other_indices;
-  harp::matrix_double Ablock;
-  vector<harp::vector_double> Arect;
+  unhrp::matrix_double Ablock;
+  vector<unhrp::vector_double> Arect;
   bool do_faster_than_syr = compute_ab && fit_flux && spot_tmp_data.size()>1;
   if(do_faster_than_syr) {
     Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
     Ablock.clear();
     for(size_t s=0; s<spot_tmp_data.size(); s++) {
-      //Arect.push_back(harp::vector_double(index_of_spots_parameters));
+      //Arect.push_back(unhrp::vector_double(index_of_spots_parameters));
       //Arect.back().clear();    
       
       const SpotTmpData& tmp = spot_tmp_data[s];
       if(tmp.can_measure_flux && !tmp.ignore) {
-	Arect.push_back(harp::vector_double(index_of_spots_parameters));
+	Arect.push_back(unhrp::vector_double(index_of_spots_parameters));
 	Arect.back().clear();    
       }
     }
@@ -385,7 +385,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   if(update_tmp_data) const_cast<specex::PSF_Fitter*>(this)->UpdateTmpData(compute_ab);
   
 
-  harp::vector_double H;  
+  unhrp::vector_double H;  
   if(compute_ab) {
     H.resize(nparTot);
 
@@ -396,9 +396,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   int npix_in_chi2 = 0;
   double sum_flux = 0;
   
-  harp::vector_double gradAllPar,gradPos;
-  harp::vector_double *gradAllPar_pointer = 0;
-  harp::vector_double *gradPos_pointer = 0;
+  unhrp::vector_double gradAllPar,gradPos;
+  unhrp::vector_double *gradAllPar_pointer = 0;
+  unhrp::vector_double *gradPos_pointer = 0;
   std::vector<int> indices_of_fitpar_in_allpar;
   
   if(compute_ab) {
@@ -440,11 +440,11 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 #ifdef CONTINUUM
   if(psf_params->fiber_min<psf_params->fiber_min) SPECEX_ERROR("fibers not defined");
   
-  harp::vector_double continuum_params;
-  harp::vector_double x_of_trace_for_continuum;
-  //harp::vector_double w_of_trace_for_continuum;
+  unhrp::vector_double continuum_params;
+  unhrp::vector_double x_of_trace_for_continuum;
+  //unhrp::vector_double w_of_trace_for_continuum;
   double expfact_for_continuum = 0;
-  map<int,harp::vector_double> continuum_monomials;
+  map<int,unhrp::vector_double> continuum_monomials;
   size_t np_continuum = psf_params->ContinuumPol.coeff.size();
   bool has_continuum  = fit_continuum;
   if(!has_continuum) for(size_t k=0; k<np_continuum; k++) if(psf_params->ContinuumPol.coeff[k]!=0) {has_continuum = true; break;}
@@ -1013,7 +1013,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       if(only_positive) SPECEX_DEBUG("WEIGHTS: only positive");
       
       bool modified_tail_amplitude = false;
-      harp::vector_double saved_tail_amplitude_coeff;
+      unhrp::vector_double saved_tail_amplitude_coeff;
       if(fit_psf_tail || fit_continuum) {
 	int index=psf->ParamIndex("TAILAMP");
 	if(psf_params->AllParPolXW[index]->coeff(0)==0) {
@@ -1246,7 +1246,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     int index=0;
     if(fit_psf || fit_psf_tail) {
       for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
-	const harp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
+	const unhrp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
 	size_t c_size = coeff.size();
 	unbst::subcopy(coeff,Params,index);
 	index += c_size;
@@ -1263,7 +1263,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	tmp_trace_x_parameter[it->first] = index;
 
 	{
-	  const harp::vector_double& coeff = it->second.X_vs_W.coeff;
+	  const unhrp::vector_double& coeff = it->second.X_vs_W.coeff;
 	  size_t c_size = coeff.size();
 	  unbst::subcopy(coeff,Params,index);
 	  index += c_size;
@@ -1273,7 +1273,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	tmp_trace_y_parameter[it->first] = index;
 	
 	{
-	  const harp::vector_double& coeff = it->second.Y_vs_W.coeff;
+	  const unhrp::vector_double& coeff = it->second.Y_vs_W.coeff;
 	  size_t c_size = coeff.size();
 	  unbst::subcopy(coeff,Params,index);
 	  index += c_size;
@@ -1400,7 +1400,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       // specex::zero(tmp.psf_monomials);
       int index=0;
       for(int p=0;p<npar_fixed_coord;p++) {
-	harp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);
+	unhrp::vector_double legendre_monomials_for_this_psf_parameter = psf_params->FitParPolXW[p]->Monomials(tmp.x,tmp.wavelength);
 	size_t m_size = legendre_monomials_for_this_psf_parameter.size();
 	unbst::subcopy(legendre_monomials_for_this_psf_parameter,tmp.psf_monomials,index);
 	index += m_size;
@@ -1444,8 +1444,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   A_of_band.clear();
   B_of_band.clear();
   for(int i=0;i<number_of_image_bands;i++) {
-    A_of_band.push_back(harp::matrix_double(nparTot, nparTot));
-    B_of_band.push_back(harp::vector_double(nparTot));
+    A_of_band.push_back(unhrp::matrix_double(nparTot, nparTot));
+    B_of_band.push_back(unhrp::vector_double(nparTot));
   }
 
 
@@ -1470,10 +1470,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots chi2 = " << *psfChi2);
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving ...");
     
-    harp::matrix_double& A = A_of_band[0];
-    harp::vector_double& B = B_of_band[0];
+    unhrp::matrix_double& A = A_of_band[0];
+    unhrp::vector_double& B = B_of_band[0];
     
-    harp::matrix_double As=A;
+    unhrp::matrix_double As=A;
     
     //if(false) {SPECEX_DEBUG("Writing A.fits"); specex::write_new_fits_image("A.fits",A);  }
     
@@ -1722,7 +1722,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   // fitWeight is now a covariance matrix
   // just to avoid confusion :
-  harp::matrix_double& fitCovmat = fitWeight;
+  unhrp::matrix_double& fitCovmat = fitWeight;
   
   SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots saving fitted params");
   
@@ -1740,7 +1740,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 		
 
     for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
-      harp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
+      unhrp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
       for(size_t c=0;c<coeff.size();c++,index++)
 	coeff(c)=Params(index);
     }
@@ -1754,10 +1754,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       if(it->first < psf_params->fiber_min || it->first > psf_params->fiber_max) continue;
       if(it->second.Off()) continue;
       
-      harp::vector_double& PX = it->second.X_vs_W.coeff;
+      unhrp::vector_double& PX = it->second.X_vs_W.coeff;
       for(size_t k=0;k<PX.size();k++,index++)
 	PX(k)=Params(index);
-      harp::vector_double& PY = it->second.Y_vs_W.coeff;
+      unhrp::vector_double& PY = it->second.Y_vs_W.coeff;
       for(size_t k=0;k<PY.size();k++,index++)
 	PY(k)=Params(index);
     }
@@ -1838,7 +1838,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #ifdef EXTERNAL_TAIL
 	if(fit_psf_tail) {
 	  
-	  harp::vector_double spot_params = psf->AllLocalParamsXW_with_FitBundleParams(spot_tmp_data[spot_tmp_data.size()/2].x
+	  unhrp::vector_double spot_params = psf->AllLocalParamsXW_with_FitBundleParams(spot_tmp_data[spot_tmp_data.size()/2].x
 										       ,spot_tmp_data[spot_tmp_data.size()/2].wavelength,psf_params->bundle_id,Params);
 	  SPECEX_INFO("psf tail amplitudes, " << spot_params(psf->ParamIndex("TAILAMP")));
 	}
@@ -1905,7 +1905,7 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
 };
 
 /*
-void specex::PSF_Fitter::SetAllPSFParams(const harp::vector_double &ParamsToSet) {
+void specex::PSF_Fitter::SetAllPSFParams(const unhrp::vector_double &ParamsToSet) {
   // also, define psf polynomes (should be in fitter)
   psf_params->AllParPolXW.clear();
   psf_params->FitParPolXW.clear();
@@ -2581,7 +2581,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       
       int npar = psf->LocalNAllPar();
       
-      harp::vector_double default_params = psf->DefaultParams();
+      unhrp::vector_double default_params = psf->DefaultParams();
       std::vector<string> param_names = psf->DefaultParamNames();
       SPECEX_INFO("Default PSF params = " <<  default_params);
       
