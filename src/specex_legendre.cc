@@ -123,8 +123,8 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   unhrp::vector_double X(ndata);
   unhrp::vector_double Y(ndata);
   for(int i=0;i<ndata;i++) {
-    X(i) = xmin+i*dx;
-    Y(i) = Value(X(i));
+    X[i] = xmin+i*dx;
+    Y[i] = Value(X[i]);
   }
   bool ok = inverse.Fit(Y,X,0,true);
   if(!ok) abort();
@@ -142,8 +142,8 @@ specex::Legendre1DPol specex::composed_pol(const specex::Legendre1DPol& pol1, co
   unhrp::vector_double X2(ndata);
   unhrp::vector_double Y1(ndata);
   for(int i=0;i<ndata;i++) {
-    X2(i) = pol2.xmin+i*dx;
-    Y1(i) = pol1.Value(pol2.Value(X2(i)));
+    X2[i] = pol2.xmin+i*dx;
+    Y1[i] = pol1.Value(pol2.Value(X2[i]));
   }
   bool ok = composed.Fit(X2,Y1,0,true);
   if(!ok) abort();

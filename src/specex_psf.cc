@@ -7,6 +7,7 @@
 #include "specex_psf.h"
 //#include "specex_base_analytic_psf.h"
 #include "specex_message.h"
+#include "specex_unbst.h"
 
 using namespace std;
 
@@ -73,10 +74,12 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
 	  val += weight*prof;
 	  
 	  if (PosDer) 
-	    tmpPosDer += weight*(*PosDer);
+	    //tmpPosDer += weight*(*PosDer);
+	    unbst::subadd(*PosDer,tmpPosDer,0,weight);
 	  
 	  if (ParamDer)
-	    tmpParamDer += weight*(*ParamDer);
+	    //tmpParamDer += weight*(*ParamDer);
+	    unbst::subadd(*ParamDer,tmpParamDer,0,weight);	  
 	  
 	}
     }
@@ -137,10 +140,10 @@ void specex::PSF::ComputeTailProfile(const unhrp::vector_double &Params) {
     SPECEX_ERROR("in PSF::ComputeTailProfile, missing param TAILCORE, need to allocate them, for instance with PSF::AllocateDefaultParams()");
   
 
-  r2_tail_core_size = square(Params(ParamIndex("TAILCORE")));
-  r_tail_x_scale   = Params(ParamIndex("TAILXSCA"));
-  r_tail_y_scale   = Params(ParamIndex("TAILYSCA"));
-  r_tail_power_law_index = Params(ParamIndex("TAILINDE"));
+  r2_tail_core_size = square(Params[ParamIndex("TAILCORE")]);
+  r_tail_x_scale   = Params[ParamIndex("TAILXSCA")];
+  r_tail_y_scale   = Params[ParamIndex("TAILYSCA")];
+  r_tail_power_law_index = Params[ParamIndex("TAILINDE")];
   
   
   for(int j=0;j<NY_TAIL_PROFILE;j++) {
@@ -371,8 +374,8 @@ double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc,
 #else
   if(with_tail) {
     double prof = TailProfile(IPix-Xc,JPix-Yc, Params, with_core);
-    if(ParamDer) (*ParamDer)(psf_tail_amplitude_index) = prof;
-    val += Params(psf_tail_amplitude_index)*prof;
+    if(ParamDer) (*ParamDer)[psf_tail_amplitude_index] = prof;
+    val += Params[psf_tail_amplitude_index]*prof;
   }
 #endif
 #endif
@@ -429,7 +432,7 @@ unhrp::vector_double specex::PSF::AllLocalParamsXW(const double &X, const double
   
   unhrp::vector_double params(P.size());
   for (size_t k =0; k < P.size(); ++k)
-    params(k) = P[k]->Value(X,wave);
+    params[k] = P[k]->Value(X,wave);
   
   return params;
 }
@@ -451,7 +454,7 @@ unhrp::vector_double specex::PSF::FitLocalParamsXW(const double &X, const double
   
   unhrp::vector_double params(P.size());
   for (size_t k =0; k < P.size(); ++k)
-    params(k) = P[k]->Value(X,wave);
+    params[k] = P[k]->Value(X,wave);
   return params;
 }
 
@@ -474,7 +477,7 @@ unhrp::vector_double specex::PSF::AllLocalParamsXW_with_AllBundleParams(const do
   int index=0;
   for (size_t k =0; k < P.size(); ++k) {
     size_t c_size = P[k]->coeff.size();
-    params(k)=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
+    params[k]=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
     index += c_size;
   }
   return params;
@@ -507,7 +510,7 @@ unhrp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const do
 
       size_t c_size = APk->coeff.size();
 
-      params(ak)=specex::dot(ForThesePSFParams,index,index+c_size,APk->Monomials(X,wave));
+      params[ak]=specex::dot(ForThesePSFParams,index,index+c_size,APk->Monomials(X,wave));
       
       //SPECEX_INFO("DEBUG all param " << ak << " and fit = " << fk << " are the same, param val =  " << params(ak));
 
@@ -515,7 +518,7 @@ unhrp::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const do
       // change free param index for next iteration
       fk++;
     }else{ // this not a free param
-      params(ak)=APk->Value(X,wave);
+      params[ak]=APk->Value(X,wave);
       //SPECEX_INFO("DEBUG all param " << ak << " is not it fit, param val = " << params(ak));
     }
   }
@@ -539,7 +542,7 @@ unhrp::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const do
   int index=0;
   for (size_t k =0; k < P.size(); ++k) {
     size_t c_size = P[k]->coeff.size();
-    params(k)=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
+    params[k]=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
     index += c_size;
   }
   return params;

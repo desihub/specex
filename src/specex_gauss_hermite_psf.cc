@@ -36,8 +36,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
 			  unhrp::vector_double *ParamDer) const
 {
 
-  double sx = Params(0);
-  double sy = Params(1);
+  double sx = Params[0];
+  double sy = Params[1];
   if(sx<0.1) {sx=0.1;} // to avoid failures in exploration of model params
   if(sy<0.1) {sy=0.1;} // to avoid failures in exploration of model params
   double sigma_x_inv = 1./sx;
@@ -65,7 +65,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       double Hyj=HermitePol(j,y);
       int imin=0; if(j==0) imin=1; // skip (0,0)
       for(int i=imin;i<nx;i++,param_index++) {
-	prefactor+=Params(param_index)*Hyj*HermitePol(i,x);
+	prefactor+=Params[param_index]*Hyj*HermitePol(i,x);
       }
     }
     return expfact*prefactor;
@@ -100,7 +100,7 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
       for(int i=imin;i<nx;i++,index++,param_index++) {
 	
 	double Hxi=HermitePol(i,x);
-	prefactor+=Params(param_index)*Hxi*Hyj;
+	prefactor+=Params[param_index]*Hxi*Hyj;
 	Monomials_dx[index]=Hyj*HermitePolDerivative(i,x);
 	Monomials_dy[index]=dHyj*Hxi;
       }
@@ -128,8 +128,8 @@ double specex::GaussHermitePSF::Profile(const double &input_X, const double &inp
   }
   
   if(PosDer) { // wrong sign on purpose (derivatives w.r.t -X)
-    double& dvdx=(*PosDer)(0);
-    double& dvdy=(*PosDer)(1);  
+    double& dvdx=(*PosDer)[0];
+    double& dvdy=(*PosDer)[1];  
    
 
     dvdx=x*sigma_x_inv*psf_val;
@@ -179,8 +179,8 @@ double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
 
   
   // sigmas of Gaussian
-  double sx = Params(0);
-  double sy = Params(1);
+  double sx = Params[0];
+  double sy = Params[1];
   if(sx<0.1) {sx=0.1;} // to avoid failures in exploration of model params
   if(sy<0.1) {sy=0.1;} // to avoid failures in exploration of model params
   
@@ -242,7 +242,7 @@ double specex::GaussHermitePSF::PixValue(const double &Xc, const double &Yc,
 	else 
 	  Pi=sx*( gx1*HermitePol(i-1,x1)-gx2*HermitePol(i-1,x2) );
 	
-	psfval+=Params(param_index)*Pj*Pi;
+	psfval+=Params[param_index]*Pj*Pi;
       }
     }
     
@@ -377,17 +377,17 @@ unhrp::vector_double specex::GaussHermitePSF::DefaultParams() const
   unhrp::vector_double Params(LocalNAllPar());
   Params.clear(); // all = zero at beginning = a pure gaussian
   int index=0;
-  Params(index++) = 1.0; // this is sigma_x ; value of 1. tuned on CCDS1R (EM-spectro)
-  Params(index++) = 1.0; // this is sigma_y ; value of 1. tuned on CCDS1R (EM-spectro)
+  Params[index++] = 1.0; // this is sigma_x ; value of 1. tuned on CCDS1R (EM-spectro)
+  Params[index++] = 1.0; // this is sigma_y ; value of 1. tuned on CCDS1R (EM-spectro)
   index += ((degree+1)*(degree+1)-1);
   
 #ifdef EXTERNAL_TAIL
   
-  Params(index++) = 0.; // tail amplitude
-  Params(index++) = 1.; // tail core size
-  Params(index++) = 1.; // tail x scale
-  Params(index++) = 1.; // tail y scale
-  Params(index++) = 2.; // tail power law index
+  Params[index++] = 0.; // tail amplitude
+  Params[index++] = 1.; // tail core size
+  Params[index++] = 1.; // tail x scale
+  Params[index++] = 1.; // tail y scale
+  Params[index++] = 2.; // tail power law index
 #endif
 
   return Params;

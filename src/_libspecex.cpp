@@ -176,8 +176,7 @@ PYBIND11_MODULE(_libspecex, m) {
 	  // row2, COEFF	  
 	  const spx::FitsColumnDescription& column = c1->second;
 	  int nd = column.SizeOfVectorOfDouble();
-	  double* double_vals = new double[nd];
-	  for(int d=0;d<nd;d++) table_col1.push_back(table.data[r][1].double_vals(d));
+	  for(int d=0;d<nd;d++) table_col1.push_back(table.data[r][1].double_vals[d]);
 
 	  // row3, LEGDEGX
 	  table_col2.push_back(table.data[r][2].int_vals(0));

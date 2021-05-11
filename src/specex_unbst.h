@@ -21,7 +21,6 @@ namespace specex::unbst {
   }
   
   unhrp::vector_double scalevec(const unhrp::vector_double&, double);
-  
   unhrp::vector_double subrange(const unhrp::vector_double&, int, int);
 
 }

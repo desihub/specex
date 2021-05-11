@@ -41,7 +41,7 @@ void specex::syrk(const double& alpha, const unhrp::matrix_double &A, const doub
 
 // y = alpha*A*x + beta*y 
 void specex::gemv(const double &alpha,  const unhrp::matrix_double &A,  const unhrp::vector_double& x, const double &beta, unhrp::vector_double& y) {  
-  specex_gemv(A.size1(),A.size2(), &alpha, &A(0,0), &x(0), &beta, &y[0]);  
+  specex_gemv(A.size1(),A.size2(), &alpha, &A(0,0), &x[0], &beta, &y[0]);  
 }
 
 // C = alpha*A*B + beta*C

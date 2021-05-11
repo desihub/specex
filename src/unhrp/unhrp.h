@@ -25,11 +25,11 @@
 // Ted Kisner
 
 namespace unhrp {
-
+  
   typedef boost::numeric::ublas::vector < int > vector_int;
   typedef boost::numeric::ublas::vector < double > vector_double;
+  //typedef std::vector<double> vector_double;
   typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
-  
 }
 
 #endif
