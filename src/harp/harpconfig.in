@@ -1,0 +1,217 @@
+#!/bin/sh
+
+# This script provides include and linking flags for
+# the serial and MPI HARP libraries, as well as
+# information about the compile flags used and location
+# of the python bindings.
+
+# Install locations
+
+CXX="@CXX@"
+CXXFLAGS="@CXXFLAGS@"
+CPPFLAGS="@CPPFLAGS@"
+LDFLAGS="@LDFLAGS@"
+LIBS="@LIBS@"
+
+MPICXX="@MPICXX@"
+MPICXXFLAGS="@MPICXXFLAGS@"
+MPICPPFLAGS="@MPICPPFLAGS@"
+MPILDFLAGS="@MPILDFLAGS@"
+MPILIBS="@MPILIBS@"
+
+PYPATH="@PYPATH@"
+PLUGCOMP="@PLUGCOMP@"
+PLUGLINK="@PLUGLINK@"
+PLUGEXT="@PLUGEXT@"
+
+LIBEXT="@LIBEXT@"
+
+# Print out usage information
+
+help() {
+  echo " "
+  echo "Usage:  harpconfig"
+  echo "        [ --help (print this help info) ]"
+  echo "        [ --cxx (print compiler used) ]"
+  echo "        [ --cxxflags (print compiler optimizations used) ]"
+  echo "        [ --cppflags (print include flags) ]"
+  echo "        [ --ldflags (print library include paths and flags) ]"
+  echo "        [ --libs (print serial libraries) ]"
+  echo "        [ --link (print full serial link command) ]"
+  echo "        [ --libext (print shared library file extension) ]"
+  echo "        [ --mpi-cxx (print MPI compiler used) ]"
+  echo "        [ --mpi-cxxflags (print MPI compiler optimizations used) ]"
+  echo "        [ --mpi-cppflags (print MPI include flags) ]"
+  echo "        [ --mpi-ldflags (print MPI library include paths and flags) ]"
+  echo "        [ --mpi-libs (print MPI libraries) ]"
+  echo "        [ --mpi-link (print full MPI link command) ]"
+  echo "        [ --python (print python module location for PYTHONPATH) ]"
+  echo "        [ --plugflags (print external plugin compiling flags) ]"
+  echo "        [ --pluglink (print external plugin linking commands) ]"
+  echo "        [ --plugext (print external plugin file extension) ]"
+  echo " "
+  exit $1
+}
+
+# Check that we have at least one option
+
+if [ $# -eq 0 ]
+then
+  help 1
+fi
+
+# Parse simple command line options.
+
+DOCXX=no
+DOCXXFLAGS=no
+DOCPPFLAGS=no
+DOLDFLAGS=no
+DOLIBS=no
+DOLINK=no
+
+DOMPICXX=no
+DOMPICXXFLAGS=no
+DOMPICPPFLAGS=no
+DOMPILDFLAGS=no
+DOMPILIBS=no
+DOMPILINK=no
+
+DOPYTHON=no
+DOPLUGCOMP=no
+DOPLUGLINK=no
+DOPLUGEXT=no
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --help) 
+      help 0
+      ;;
+    --cxx)
+      DOCXX=yes
+      ;;
+    --cxxflags)
+      DOCXXFLAGS=yes
+      ;;
+    --cppflags)
+      DOCPPFLAGS=yes
+      ;;
+    --ldflags)
+      DOLDFLAGS=yes
+      ;;
+    --libs)
+      DOLIBS=yes
+      ;;
+    --link)
+      DOLINK=yes
+      ;;
+    --mpi-cxx)
+      DOMPICXX=yes
+      ;;
+    --mpi-cxxflags)
+      DOMPICXXFLAGS=yes
+      ;;
+    --mpi-cppflags)
+      DOMPICPPFLAGS=yes
+      ;;
+    --mpi-ldflags)
+      DOMPILDFLAGS=yes
+      ;;
+    --mpi-libs)
+      DOMPILIBS=yes
+      ;;
+    --mpi-link)
+      DOMPILINK=yes
+      ;;
+    --python)
+      DOPYTHON=yes
+      ;;
+    --plugflags)
+      DOPLUGCOMP=yes
+      ;;
+    --pluglink)
+      DOPLUGLINK=yes
+      ;;
+    --plugext)
+      DOPLUGEXT=yes
+      ;;
+    *) 
+      help 1
+      ;;
+  esac
+  shift
+done
+
+if [ $DOMPILINK = yes ]; then
+  DOMPILIBS=yes
+  DOLINK=yes
+fi
+
+if [ $DOLINK = yes ]; then
+  DOLDFLAGS=yes
+  DOLIBS=yes
+fi
+
+# Print out requested info
+
+if [ $DOPLUGEXT = yes ]; then
+  echo "${PLUGEXT}"
+  exit 0
+fi
+
+OUT=""
+
+if [ $DOPYTHON = yes ]; then
+  OUT="${PYPATH}"
+fi
+
+if [ $DOCXX = yes ]; then
+  OUT="${CXX}"
+fi
+
+if [ $DOMPICXX = yes ]; then
+  OUT="${MPICXX}"
+fi
+
+if [ $DOCXXFLAGS = yes ]; then
+  OUT="${OUT} ${CXXFLAGS}"
+fi
+
+if [ $DOMPICXXFLAGS = yes ]; then
+  OUT="${OUT} ${MPICXXFLAGS}"
+fi
+
+if [ $DOCPPFLAGS = yes ]; then
+  OUT="${OUT} ${CPPFLAGS}"
+fi
+
+if [ $DOMPICPPFLAGS = yes ]; then
+  OUT="${OUT} ${MPICPPFLAGS}"
+fi
+
+if [ $DOPLUGCOMP = yes ]; then
+  OUT="${OUT} ${PLUGCOMP}"
+fi
+
+if [ $DOPLUGLINK = yes ]; then
+  OUT="${OUT} ${PLUGLINK}"
+fi
+
+if [ $DOLDFLAGS = yes ]; then
+  OUT="${OUT} ${LDFLAGS}"
+fi
+
+if [ $DOMPILDFLAGS = yes ]; then
+  OUT="${OUT} ${MPILDFLAGS}"
+fi
+
+if [ $DOLIBS = yes ]; then
+  OUT="${OUT} ${LIBS}"
+fi
+
+if [ $DOMPILIBS = yes ]; then
+  OUT="${OUT} ${MPILIBS}"
+fi
+
+echo "${OUT}"
+
+exit 0
