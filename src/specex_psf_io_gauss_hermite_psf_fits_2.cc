@@ -200,8 +200,8 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
 	  pol1d_x.Fit(wave,values,0,false);
 	  pol1d_y.Fit(wave,values_y,0,false);
 	  for(int w = 0; w < ncoeff ; w++) {
-	    coeff(fiber*ncoeff+w)   =  pol1d_x.coeff(w);
-	    coeff_y(fiber*ncoeff+w) =  pol1d_y.coeff(w);
+	    coeff[fiber*ncoeff+w]   =  pol1d_x.coeff[w];
+	    coeff_y[fiber*ncoeff+w] =  pol1d_y.coeff[w];
 	  }
 	  
 	  
@@ -222,7 +222,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
       if(need_to_add_first_gh && pname.find("GH-")<pname.npos) { // insert now GH param 0
 	
 	for(int fiber=0;fiber<NFIBERS;fiber++) 
-	  coeff(fiber*ncoeff)=1; 
+	  coeff[fiber*ncoeff]=1; 
 	AddRow1(table,"GH-0-0",LEGWMIN,LEGWMAX,coeff);
 	need_to_add_first_gh = false;
       }
@@ -251,7 +251,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
 	  // now copy parameters;
 	  
 	  for(int w = 0; w < ncoeff ; w++) {
-	    coeff(fiber*ncoeff+w) = pol1d.coeff(w); // this is the definition of the ordering, (wave,fiber)
+	    coeff[fiber*ncoeff+w] = pol1d.coeff[w]; // this is the definition of the ordering, (wave,fiber)
 	  }
 	  
 	} // end of loop on fibers of bundle
@@ -276,7 +276,7 @@ void write_gauss_hermite_psf_fits_version_2(const specex::GaussHermitePSF& psf, 
 	pol1d.Fit(wave,values,0,false);
 	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
 	  for(int w = 0; w < ncoeff ; w++) {
-	    coeff(fiber*ncoeff+w)   =  pol1d.coeff(w);
+	    coeff[fiber*ncoeff+w]  =  pol1d.coeff[w];
 	  }    
 	}
       }

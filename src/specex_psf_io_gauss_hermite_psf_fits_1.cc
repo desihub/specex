@@ -130,7 +130,7 @@ void write_gauss_hermite_psf_fits_version_1(const specex::GaussHermitePSF& psf, 
 	  // now copy parameters;
 	  
 	  for(int w = 0; w < ncoeff ; w++) {
-	    image((p+1)*ncoeff+w,fiber_index) = pol1d.coeff(w); // this is the definition of the ordering, (wave,fiber)
+	    image((p+1)*ncoeff+w,fiber_index) = pol1d.coeff[w]; // this is the definition of the ordering, (wave,fiber)
 	  }
 	  
 	} // end of loop on fibers of bundle

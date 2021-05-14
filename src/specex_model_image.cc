@@ -158,7 +158,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       
 #ifdef CONTINUUM
       
-      if(params_of_bundle.ContinuumPol.coeff(0)!=0) {
+      if(params_of_bundle.ContinuumPol.coeff[0]!=0) {
 	for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
 	  
 	  if(psf->GetTrace(fiber).Off()) continue;
@@ -206,7 +206,7 @@ void specex::compute_model_image(specex::image_data& model_image, const specex::
       const Stamp& spot_stamp=spot_stamps[s];
 
       unhrp::vector_double spot_params = psf->AllLocalParamsXW(spot->xc,spot->wavelength,spot->fiber_bundle);
-      bool has_tail  = spot_params(psf_tail_index)!=0;
+      bool has_tail  = spot_params[psf_tail_index]!=0;
       bool only_core = ( only_psf_core || (!has_tail) );
       
       for (int j=begin_j; j <end_j; ++j) { 

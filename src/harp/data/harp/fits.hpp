@@ -29,8 +29,7 @@ namespace harp { namespace fits {
   void close ( fitsfile * fp );
   
   int nhdus ( fitsfile * fp );
-
-  
+    
   // FITS data type map
 
   template < typename T >
@@ -159,9 +158,6 @@ namespace harp { namespace fits {
 
   void key_write ( fitsfile * fp, std::string const & keyname, float const & keyval, std::string const & keycom );
 
-  
-
-
   // image operations
 
   void img_dims ( fitsfile * fp, size_t & rows, size_t & cols );
@@ -208,6 +204,7 @@ namespace harp { namespace fits {
   }
 
 
+  void img_write ( fitsfile *, std::vector<double> const &, bool);
   template < class V >
   void img_write ( fitsfile * fp, boost::numeric::ublas::vector_expression < V > const & data, bool swap ) {
 
@@ -286,8 +283,8 @@ namespace harp { namespace fits {
 
     return;
   }
-  
 
+  void img_read ( fitsfile *, std::vector<double> &, bool);
   template < class V >
   void img_read ( fitsfile * fp, boost::numeric::ublas::vector_expression < V > & data, bool swap ) {
 

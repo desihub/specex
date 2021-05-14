@@ -333,7 +333,7 @@ bool specex::FitsTable::Write(fitsfile *fp) const {
 	  
 	  for(int d=0;d<nd;d++) {
 	    
-	    double_vals[r*nd+d] = data[r][column.col].double_vals(d); // ordering checked with pyfits
+	    double_vals[r*nd+d] = data[r][column.col].double_vals[d]; // ordering checked with pyfits
 	    //double_vals[r+d*nrows] = data[r][column.col].double_vals(d);
 	  
 	  }
@@ -487,7 +487,7 @@ void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
 	
 	entry.double_vals.resize(nvals);
 	for(int i=0;i<nvals;i++)
-	  entry.double_vals(i)=values[i];
+	  entry.double_vals[i]=values[i];
 	delete [] values;
 
 	if(r==0) {

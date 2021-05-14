@@ -55,7 +55,7 @@ void _load_trace(specex::PSF_p psf, bool is_x) {
 
     if( (pol->xmin==WAVEMIN) && (pol->xmax==WAVEMAX) ) {
       for(int c=0;c<pol->coeff.size();c++)
-	coeff2d(c,fiber-FIBERMIN)=pol->coeff(c);
+	coeff2d(c,fiber-FIBERMIN)=pol->coeff[c];
     }else{ // need to refit
       if(pol->coeff.size()>0) {
 	SPECEX_DEBUG("need to refit trace coeff.size=" << pol->coeff.size());
@@ -69,7 +69,7 @@ void _load_trace(specex::PSF_p psf, bool is_x) {
 	  specex::Legendre1DPol npol(pol->coeff.size()-1,WAVEMIN,WAVEMAX);
 	  npol.Fit(wave,x,0,false);
 	  for(int c=0;c<npol.coeff.size();c++)
-	    coeff2d(c,fiber-FIBERMIN)=npol.coeff(c);
+	    coeff2d(c,fiber-FIBERMIN)=npol.coeff[c];
 	}catch(std::exception& e) {
 	  SPECEX_ERROR("Fit failed " << e.what());
 	}
@@ -191,7 +191,7 @@ void _load_psf(specex::PSF_p psf) {
       // insert now GH param 0 which is not a PSF parameter in C++ but needed but specter
       
       for(int fiber=0;fiber<NFIBERS;fiber++) 
-	coeff(fiber*ncoeff)=1; 
+	coeff[fiber*ncoeff]=1; 
       _AddRow2(table,"GH-0-0",coeff,0,0);
       need_to_add_first_gh = false;
     }
@@ -219,7 +219,7 @@ void _load_psf(specex::PSF_p psf) {
 	
 	// now copy parameters;	
 	for(int w = 0; w < ncoeff ; w++) {
-	  coeff((fiber-FIBERMIN)*ncoeff+w) = pol1d.coeff(w); // this is the definition of the ordering, (wave,fiber)
+	  coeff[(fiber-FIBERMIN)*ncoeff+w] = pol1d.coeff[w]; // this is the definition of the ordering, (wave,fiber)
 	}	
       } // end of loop on fibers of bundle      
     } // end of loop on bundles
@@ -230,12 +230,12 @@ void _load_psf(specex::PSF_p psf) {
   { // add a parameter to link fibers and bundles in fit
     coeff.clear();
     for(int fiber=FIBERMIN;fiber<=FIBERMAX;fiber++)
-      coeff((fiber-FIBERMIN)*ncoeff) = -1; // no bundle
+      coeff[(fiber-FIBERMIN)*ncoeff] = -1; // no bundle
     for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf->ParamsOfBundles.begin();
 	bundle_it != psf->ParamsOfBundles.end(); ++bundle_it) {
       const specex::PSF_Params & params_of_bundle = bundle_it->second;
       for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
-	coeff((fiber-FIBERMIN)*ncoeff) = bundle_it->first;
+	coeff[(fiber-FIBERMIN)*ncoeff] = bundle_it->first;
       }
     }
     _AddRow2(table,"BUNDLE",coeff,0,0); 
@@ -243,12 +243,12 @@ void _load_psf(specex::PSF_p psf) {
   { // add a parameter with the fit status
     coeff.clear();
     for(int fiber=FIBERMIN;fiber<=FIBERMAX;fiber++)
-      coeff((fiber-FIBERMIN)*ncoeff) = -1; // no bundle
+      coeff[(fiber-FIBERMIN)*ncoeff] = -1; // no bundle
     for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf->ParamsOfBundles.begin();
 	bundle_it != psf->ParamsOfBundles.end(); ++bundle_it) {
       const specex::PSF_Params & params_of_bundle = bundle_it->second;
       for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
-	coeff((fiber-FIBERMIN)*ncoeff) = params_of_bundle.fit_status;
+	coeff[(fiber-FIBERMIN)*ncoeff] = params_of_bundle.fit_status;
       }
     }
     _AddRow2(table,"STATUS",coeff,0,0); 
@@ -271,7 +271,7 @@ void _load_psf(specex::PSF_p psf) {
       pol1d.Fit(wave,values,0,false);
       for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++,fiber_index++) {
 	for(int w = 0; w < ncoeff ; w++) {
-	  coeff((fiber-FIBERMIN)*ncoeff+w)   =  pol1d.coeff(w);
+	  coeff[(fiber-FIBERMIN)*ncoeff+w]   =  pol1d.coeff[w];
 	}    
       }
     }
