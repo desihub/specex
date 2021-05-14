@@ -32,4 +32,16 @@ namespace unhrp {
   typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
 }
 
+template < class T >
+inline std::ostream& operator << (std::ostream& os, const std::vector<T>& v) 
+{
+    os << "[";
+    for (int i = 0; i<v.size(); i++)
+    {
+        os << " " << v[i];
+    }
+    os << " ]";
+    return os;
+}
+
 #endif
