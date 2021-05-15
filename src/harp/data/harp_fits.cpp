@@ -21,50 +21,6 @@ extern "C" {
 using namespace std;
 using namespace harp;
   
-void img_write ( fitsfile * fp, std::vector<double> const & data, bool swap ) {
-
-  int ret;
-  int status = 0;
-  
-  long fpixel[2];
-  
-  fpixel[0] = 1;
-  fpixel[1] = 1;
-  
-  long npix = (long) data.size();
-  
-  size_t rows;
-  size_t cols;
-  fits::img_dims ( fp, rows, cols );
-  
-  if ( rows * cols != data.size() ) {
-    HARP_THROW( "data vector size not consistent with image dimensions" );
-  }
-  
-  int fitstype = fits::ftype < double > :: datatype();
-  
-  // copy data to a buffer to work around stupid CFITSIO non-const API
-  
-  std::vector<double> buffer(npix); // * buffer = (double*) malloc ( npix * sizeof( double ) );
-  
-  if ( swap ) {
-    for ( size_t i = 0; i < rows; ++i ) {
-      for ( size_t j = 0; j < cols; ++j ) {
-	buffer[ i * cols + j ] = data[ j * rows + i ];
-      }
-    }
-  } else {
-    for ( long i = 0; i < npix; ++i ) {
-      buffer[i] = data[i];
-    }
-  }
-  
-  ret = fits_write_pix ( fp, fitstype, fpixel, npix, &buffer[0], &status );
-  fits::check ( status );
-  
-  return;
-}
-
 void harp::fits::img_read ( fitsfile * fp, std::vector<double> & data, bool swap ) {
 
   int ret;
@@ -96,7 +52,7 @@ void harp::fits::img_read ( fitsfile * fp, std::vector<double> & data, bool swap
 	buffer[ i * rows + j ] = data[ j * cols + i ];
       }
     }
-    data = buffer;
+    for( size_t i = 0; i < nelem; i++) data[i] = buffer[i];
   }
   
   return;

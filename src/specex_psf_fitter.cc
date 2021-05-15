@@ -1029,22 +1029,12 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       // generate error for a reason not understood
       parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0,psf_params->bundle_id);
       
-      //SPECEX_INFO("FOR DEBUG write model-image.fits");
-      //write_new_fits_image("model-image.fits",footprint_weight);
-      
-
       //compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,0,0,psf_params->bundle_id);
       
       if(modified_tail_amplitude) {
 	psf_params->AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff = saved_tail_amplitude_coeff;
       }
       
-
-      
-      
-      //if(fit_psf_tail || fit_continuum) SPECEX_INFO("debug, writing toto.fits and exit"); write_new_fits_image("toto.fits",footprint_weight); exit(12);
-      
-
       // compute variance and weight
       
       SPECEX_DEBUG("WEIGHTS: Compute weights");
@@ -1067,10 +1057,6 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  (*npix)++;
 	}
       }
-      
-      //SPECEX_INFO("FOR DEBUG write model-weight.fits and exit");
-      //write_new_fits_image("model-weight.fits",footprint_weight);
-      //exit(12);
       
     }else{
       SPECEX_DEBUG("WEIGHTS: inverse variance");
@@ -1477,11 +1463,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
     unhrp::matrix_double As=A;
     
-    //if(false) {SPECEX_DEBUG("Writing A.fits"); specex::write_new_fits_image("A.fits",A);  }
-    
     int status = cholesky_solve(A,B);
-
-    //{SPECEX_DEBUG("Writing fitweight-0.fits"); specex::write_new_fits_image("fitweight-0.fits",A);}
     
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving done");
 
@@ -1500,12 +1482,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  }
 	}
       }
-      /*
-	if(As.size1()>1) {
-	specex::write_new_fits_image("A.fits",As);
-	SPECEX_WARNING("wrote A.fits");
-      }
-      */
+
       if(fatal) {
 	SPECEX_ERROR("cholesky_solve failed with status " << status);
       } else {
@@ -1715,7 +1692,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   fitWeight = A_of_band[0];
   SPECEX_DEBUG("Compute covariance");
-  //{SPECEX_DEBUG("Writing fitweight.fits"); specex::write_new_fits_image("fitweight.fits",fitWeight);  }
 
   if (specex::cholesky_invert_after_decomposition(fitWeight) != 0) {
     SPECEX_ERROR("cholesky_invert_after_decomposition failed");

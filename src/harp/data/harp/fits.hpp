@@ -13,7 +13,6 @@ extern "C" {
   #include <fitsio.h>
 }
 
-
 namespace harp { namespace fits {
 
   // general manipulation of files and keywords

@@ -3,7 +3,8 @@
 #include <string>
 #include <sstream>
 
-//#include <unhrp.h>
+#include <unhrp.h>
+
 #include <specex_image_data.h>
 #include <specex_fits.h>
 #include <specex_message.h>
@@ -122,36 +123,6 @@ string specex::FitsTable::encode_dimension(const std::vector<int>& dimension) co
   return string(tdim.str());
 }
 
-
-////////////////////////////////////////
-
-
-
-void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const unhrp::vector_double& data) {
-  
-  if(data.size() != (n_rows*n_cols))
-    SPECEX_ERROR("Incompatible number of columns x rows and vector size");
-
-  fitsfile * fp;  
-  harp::fits::create ( fp, path );
-  harp::fits::img_append < double > ( fp, n_rows, n_cols );
-  harp::fits::img_write ( fp, data, false );
-  harp::fits::close ( fp );
-  
-  
-  
-}
-
-void specex::write_new_fits_image(std::string const & path, const image_data& img) {
-  specex::write_new_fits_image(path, img.n_rows(), img.n_cols() , img.data);
-  SPECEX_INFO("wrote image in file " << path);
-}
-
-void specex::write_new_fits_image(std::string const & path, const unhrp::matrix_double& mat) {
-  specex::write_new_fits_image(path, mat.size1(), mat.size2() , mat.data()); 
-  SPECEX_INFO("wrote matrix in file " << path);
-}
-  
 void specex::read_fits_image(std::string const & path, int hdu, image_data& img) {
   
   fitsfile * fp; 
@@ -491,7 +462,7 @@ void specex::FitsTable::Read(fitsfile *fp, bool verbose)  {
 	delete [] values;
 
 	if(r==0) {
-	  SPECEX_INFO("first FitsTableEntry col=" << it->first << " : " << entry.double_vals(0));
+	  SPECEX_INFO("first FitsTableEntry col=" << it->first << " : " << entry.double_vals[0]);
 	}
       } else if(col.IsInt()) {
 	int nvals = col.SizeOfVectorOfInt();
