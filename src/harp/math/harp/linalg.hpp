@@ -22,7 +22,6 @@
 #include <boost/numeric/bindings/lapack.hpp>
 #include <boost/numeric/bindings/views.hpp>
 
-
 namespace harp {
 
   typedef enum {
@@ -32,6 +31,8 @@ namespace harp {
     EIG_INV
   } eigen_op;
 
+  typedef boost::numeric::ublas::vector < int > vector_int;
+  
   typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
 
   typedef boost::numeric::ublas::compressed_matrix < double, boost::numeric::ublas::row_major > matrix_double_sparse;

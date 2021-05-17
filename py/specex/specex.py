@@ -16,7 +16,7 @@ def run_specex(com):
     pyps = PyPSF()     # psf data
     pyft = PyFitting() # psf fitting
     
-    # copy com to opaque pybind VectorString object args
+    # copy com to opaque pybind VectorString object spxargs
     spxargs = VectorString()
     for strs in com:
         spxargs.append(strs)

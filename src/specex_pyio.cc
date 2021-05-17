@@ -56,6 +56,7 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   if( ! use_input_specex_psf ) {
+    std::cout << "read_psf 1" << std::endl;
     SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
     pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
     
@@ -67,6 +68,7 @@ int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 		       opts.trace_deg_wave);     
     
   }else{ // use_input_specex_psf
+    std::cout << "read_psf 2" << std::endl;
     read_psf_fits(pypsf.psf,opts.input_psf_filename);
   }
     

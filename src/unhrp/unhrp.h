@@ -26,10 +26,13 @@
 
 namespace unhrp {
   
-  typedef boost::numeric::ublas::vector < int > vector_int;
-  typedef boost::numeric::ublas::vector < double > vector_double;
-  //typedef std::vector<double> vector_double;
-  typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
+  //typedef boost::numeric::ublas::vector < int > vector_int;
+  //typedef boost::numeric::ublas::vector < double > vector_double;
+  //typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
+
+  typedef harp::vector_int    vector_int;
+  typedef harp::vector_double vector_double;
+  typedef harp::matrix_double matrix_double;
 }
 
 template < class T >
