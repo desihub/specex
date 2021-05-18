@@ -5,7 +5,7 @@ from datetime import datetime
 
 import numpy as np
 from specex._libspecex import (PyOptions,PyIO,PyPrior,PyImage,PyPSF,PyFitting,VectorString)
-from specex.io import (read_preproc, write_psf)
+from specex.io import (read_preproc, write_psf, read_psf)
 
 def run_specex(com):
 
@@ -21,16 +21,20 @@ def run_specex(com):
     for strs in com:
         spxargs.append(strs)
         
-    opts.parse(spxargs)     # parse args
-    pyio.set_inputpsf(opts) # set input psf bools
-    pypr.set_priors(opts)   # set Gaussian priors
+    opts.parse(spxargs)       # parse args
+    pyio.set_inputpsf(opts)   # set input psf bools
+    pypr.set_priors(opts)     # set Gaussian priors
 
-    pymg = read_preproc(opts) # read preproc image 
-    pyio.read_psf(opts,pyps)  # read psf 
+    pyio.init_traces(opts,pyps) # initialize traces
+    pytr = read_psf(opts,pyps)  # read traces (python)
+    pyps.synchronize_traces()   # synchronize traces
+    #'''
+    pymg = read_preproc(opts)   # read preproc image 
+    #pyio.read_traces(opts,pyps) # read traces (C++)
     
     pyft.fit_psf(opts,pyio,pypr,pymg,pyps) # fit psf 
     
     pyio.load_psf(opts,pyps)    # load psf
     write_psf(pyps,opts)        # write psf 
-
+    #'''
     return 0

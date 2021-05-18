@@ -55,6 +55,7 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
 int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
+  /*
   if( ! use_input_specex_psf ) {
     std::cout << "read_psf 1" << std::endl;
     SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
@@ -71,6 +72,36 @@ int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
     std::cout << "read_psf 2" << std::endl;
     read_psf_fits(pypsf.psf,opts.input_psf_filename);
   }
+  */
+  return EXIT_SUCCESS;
+  
+}
+
+int specex::PyIO::read_traces(specex::PyOptions opts, specex::PyPSF& pypsf){
+
+  SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
+  pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
+    
+  pypsf.psf->hSizeX = opts.half_size_x;
+  pypsf.psf->hSizeY = opts.half_size_y;
+  SPECEX_INFO("trace_deg_x=" << opts.trace_deg_x << " trace_deg_wave=" <<
+	      opts.trace_deg_wave);
+  read_traceset_fits(pypsf.psf,opts.input_psf_filename,opts.trace_deg_x,
+		     opts.trace_deg_wave);     
+    
+  return EXIT_SUCCESS;
+  
+}
+
+int specex::PyIO::init_traces(specex::PyOptions opts, specex::PyPSF& pypsf){
+
+  SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
+  pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
+    
+  pypsf.psf->hSizeX = opts.half_size_x;
+  pypsf.psf->hSizeY = opts.half_size_y;
+  SPECEX_INFO("trace_deg_x=" << opts.trace_deg_x << " trace_deg_wave=" <<
+	      opts.trace_deg_wave);
     
   return EXIT_SUCCESS;
   
@@ -78,24 +109,7 @@ int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
 int specex::PyIO::set_inputpsf(specex::PyOptions opts){
   
-  // check input PSF type, can be from boot calib with only the traces
-  if (opts.input_psf_filename.find(".xml") != std::string::npos) { // xml file
-    SPECEX_INFO("Input PSF file is xml");
-    use_input_specex_psf = true;
-  }else{ // fits file, look at header  
-    try {
-      fitsfile * fp;
-      harp::fits::open_read(fp,opts.input_psf_filename);
-      int status = 0;
-      int first_hdu = 1;
-      fits_movabs_hdu ( fp, first_hdu, NULL, &status ); harp::fits::check ( status );
-      string psftype; harp::fits::key_read(fp,"PSFTYPE",psftype);
-      SPECEX_INFO("Input PSF type = " << psftype);
-      use_input_specex_psf = (psftype=="GAUSS-HERMITE"); 
-    } catch (harp::exception) {
-      SPECEX_WARNING("Could not read PSF type in " << opts.input_psf_filename);
-    }
-  }
+  use_input_specex_psf = true;
 
   psf_change_req |= (! opts.vm["half-size-x"].defaulted());
   psf_change_req |= (! opts.vm["half-size-y"].defaulted());

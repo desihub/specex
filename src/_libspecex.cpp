@@ -102,6 +102,7 @@ PYBIND11_MODULE(_libspecex, m) {
     py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
     py::bind_vector<std::vector<std::vector<int               >>>(m, "VectorVectorInt");
     py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
+    
     // data interface functions
 
     m.def("tablewrite_init", [](spx::PyPSF&          pyps) {
@@ -203,9 +204,12 @@ PYBIND11_MODULE(_libspecex, m) {
         Class for storing and processing input options to specex.
         )")
         .def(py::init ())
-        .def_readwrite("arc_image_filename", &spx::PyOptions::arc_image_filename)
-        .def_readwrite("input_psf_filename", &spx::PyOptions::input_psf_filename)
+        .def_readwrite("arc_image_filename",   &spx::PyOptions::arc_image_filename)
+        .def_readwrite("input_psf_filename",   &spx::PyOptions::input_psf_filename)
         .def_readwrite("output_fits_filename", &spx::PyOptions::output_fits_filename)
+        .def_readwrite("trace_deg_x",          &spx::PyOptions::trace_deg_x)
+        .def_readwrite("trace_deg_wave",       &spx::PyOptions::trace_deg_wave)
+
         .def("parse", [](spx::PyOptions &self, std::vector<std::string>& args){
 	    std::vector<char *> cstrs;
 	    cstrs.reserve(args.size());
@@ -231,6 +235,9 @@ PYBIND11_MODULE(_libspecex, m) {
         Class for specex PSF interchangeable with python implementations
         )")
         .def(py::init ())
+
+        .def("set_trace",          &spx::PyPSF::set_trace)
+        .def("synchronize_traces", &spx::PyPSF::synchronize_traces)
 
         .def_readwrite("psf", &spx::PyPSF::psf)
 
@@ -278,6 +285,16 @@ PYBIND11_MODULE(_libspecex, m) {
         .def("read_psf", [](spx::PyIO &self, spx::PyOptions opts,
 				 spx::PyPSF& pypsf){
 	    return self.read_psf(opts,pypsf);
+	}
+	)
+        .def("read_traces", [](spx::PyIO &self, spx::PyOptions opts,
+				 spx::PyPSF& pypsf){
+	    return self.read_traces(opts,pypsf);
+	}
+	)
+        .def("init_traces", [](spx::PyIO &self, spx::PyOptions opts,
+				 spx::PyPSF& pypsf){
+	    return self.init_traces(opts,pypsf);
 	}
 	)
         .def("load_psf",[](spx::PyIO &self, spx::PyOptions opts,

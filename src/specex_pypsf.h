@@ -13,6 +13,10 @@
 #include <specex_gauss_hermite_psf.h>
 
 #include <specex_pyoptions.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
+
+namespace py = pybind11;
 
 namespace specex {
   
@@ -27,8 +31,9 @@ namespace specex {
 
     PyPSF(){}
 
-    specex::image_data get_trace(std::string);
-    
+    image_data get_trace(std::string);    
+    void       set_trace(py::array, int, int);
+    void   synchronize_traces();
     int trace_ncoeff, table_nrows, nfibers;
     int FIBERMIN, FIBERMAX;
     double trace_WAVEMIN, trace_WAVEMAX;

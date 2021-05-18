@@ -221,6 +221,27 @@ def meta2header(meta):
 
     return header
 
+def read_psf(opts,pyps):
+    
+    # open fitsfile
+    fitsfilename = opts.input_psf_filename
+    fitsfile     = FITS(fitsfilename,'r')
+
+    # read psf from fits file
+    xtrace_header = fitsfile['XTRACE'].read_header()
+    ytrace_header = fitsfile['YTRACE'].read_header()
+    
+    pyps.trace_ncoeff  = xtrace_header['NAXIS1']
+    pyps.nfibers       = xtrace_header['NAXIS2']
+    pyps.trace_WAVEMIN = xtrace_header['WAVEMIN']
+    pyps.trace_WAVEMAX = xtrace_header['WAVEMAX']
+    
+    xtrace = fitsfile['XTRACE'].read()
+    ytrace = fitsfile['YTRACE'].read()
+
+    pyps.set_trace(xtrace,opts.trace_deg_x   ,1)
+    pyps.set_trace(ytrace,opts.trace_deg_wave,0)
+    
 def read_preproc(opts):
     import desispec.io.image
 
