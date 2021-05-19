@@ -7,8 +7,6 @@
 
 #include <unhrp.h>
 
-#include <specex_desi_io.h>
-
 #include <specex_pyoptions.h>
 #include <specex_pyimage.h>
 #include <specex_pypsf.h>

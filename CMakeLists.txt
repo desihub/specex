@@ -34,16 +34,15 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/specex_mask.cc
 	    src/specex_lamp_lines_utils.cc
 	    src/specex_brent.cc
-	    src/specex_desi_io.cc
 	    src/specex_tokens.cc
-	    src/_vector_utils.cc
+	    src/specex_vector_utils.cc
 	    src/specex_blas.c
 	    src/specex_lapack.c
 	    src/specex_unbst.cc
-	    src/harp/harp.cpp
-	    src/harp/data/harp_data.cpp
 	    src/harp/data/harp_fits.cpp
 	    src/harp/data/harp_image.cpp
+	    src/harp/harp.cpp
+	    src/harp/data/harp_data.cpp
 	    src/harp/data/harp_metadata.cpp
 	    src/harp/data/harp_plugin_registry.cpp
 	    src/harp/data/harp_psf.cpp

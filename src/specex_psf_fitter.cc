@@ -3,7 +3,6 @@
 
 #include <unhrp.h>
 
-//#include "specex_base_analytic_psf.h"
 #include "specex_psf_fitter.h"
 #include "specex_brent.h"
 #include "specex_legendre.h"
@@ -13,12 +12,9 @@
 #include "specex_image_data.h"
 #include "specex_fits.h"
 #include "specex_message.h"
-#include "specex_psf_io.h"
 #include "specex_model_image.h"
 #include "specex_psf.h"
 #include "specex_unbst.h"
-
-//#include <boost/archive/xml_oarchive.hpp>
 
 #define SIDE_BAND_WEIGHT_SCALE 10.
 

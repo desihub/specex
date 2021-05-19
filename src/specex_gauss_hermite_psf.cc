@@ -2,7 +2,6 @@
 #include <assert.h>
 #include <ctime>
 
-//#include "harp_tdefs.h"
 #include <unhrp.h>
 
 #include "specex_hermite.h"

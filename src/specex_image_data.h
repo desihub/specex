@@ -8,7 +8,6 @@
 
 namespace specex {
   class image_data : public harp::image {
-    friend class boost::serialization::access;
 
   protected :
     size_t rows_;

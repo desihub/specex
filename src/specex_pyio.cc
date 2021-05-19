@@ -5,7 +5,6 @@
 
 #include <specex_pyio.h>
 #include <specex_pyimage.h>
-#include <specex_psf_io.h>
 #include <specex_psf_proc.h>
 
 using namespace std;

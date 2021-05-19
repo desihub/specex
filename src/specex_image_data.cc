@@ -26,8 +26,6 @@ specex::image_data::image_data(size_t ncols, size_t nrows, const unhrp::vector_d
   harp::image()
 {
   resize(ncols,nrows);
-  if(i_data.size() != ncols*nrows) 
-    HARP_THROW("Invalid input vector size");
   data = i_data; // copy
 }
 

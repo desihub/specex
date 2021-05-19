@@ -27,7 +27,7 @@ specex::PyImage::PyImage(
   size_t ny = pix_prop.shape[1];
 
   // this is to match the existing ordering as used in specex with
-  // harp::image i.e. specex::image_data objects
+  // specex::image_data objects
   image.resize(ny,nx);
   weight.resize(ny,nx);
   mask.resize(ny,nx);

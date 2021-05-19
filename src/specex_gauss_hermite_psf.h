@@ -11,8 +11,6 @@ namespace specex {
 
   class GaussHermitePSF : public PSF {
 
-    friend class boost::serialization::access;
-    
   protected :
     int degree;
     
@@ -50,19 +48,9 @@ namespace specex {
     { return true;}
     
     void Append(const specex::PSF_p other);
-    
-    template<class Archive>
-    void serialize(Archive & ar, const unsigned int version)
-    {
-      ar & BOOST_SERIALIZATION_BASE_OBJECT_NVP(PSF);
-      ar & BOOST_SERIALIZATION_NVP(degree);
-    }
+ 
   };
   
-  BOOST_SERIALIZATION_SHARED_PTR(GaussHermitePSF)
-    
 }
-
-
 
 #endif
