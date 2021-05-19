@@ -2,8 +2,6 @@
 #include <cmath>
 #include <string>
 
-#include <unbls.h>
-
 #include "specex_psf.h"
 //#include "specex_base_analytic_psf.h"
 #include "specex_message.h"

@@ -2,8 +2,6 @@
 #include <assert.h>
 #include <ctime>
 
-#include <unbls.h>
-
 #include "specex_hermite.h"
 #include "specex_gauss_hermite_psf.h"
 #include "specex_linalg.h"
@@ -11,6 +9,7 @@
 #include "specex_fits.h"
 #include "specex_psf.h"
 #include "specex_unbst.h"
+#include <unbls.h>
 
 using namespace std;
 

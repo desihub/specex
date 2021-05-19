@@ -23,6 +23,6 @@ namespace specex::unbst {
   unbls::vector_double scalevec(const unbls::vector_double&, double);
   unbls::vector_double subrange(const unbls::vector_double&, int, int);
 
+  //}
 }
-
 #endif

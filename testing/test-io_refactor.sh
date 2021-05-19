@@ -1,53 +1,59 @@
 #!/bin/bash
 
-build_dev=0
+build_dev=1
 compare=1
+dirac=1
 
-do_master=0
+do_dev=1
+do_master=1
+
 pull_master=1
 build_master=0
 
-do_dev=1
 loc_dev=1
-inplace_dev=0
 
 mstcode='mst'
 devcode='dev'
 
 mstbranch='master'
-devbranch='harp_refactor'
+devbranch='rm_harpio'
+
+if [ $dirac -gt 0 ] ; then
+    devtestdir=/global/home/users/malvarez/dev/dev-test
+    inputroot=$devtestdir
+else
+    devtestdir=/global/common/software/desi/users/malvarez/dev-test
+    inputroot=/global/cfs/cdirs/desi/spectro/redux/blanc/preproc/20201216/00068217/
+fi
+cd $devtestdir
 
 # activate desi environment
-source /global/common/software/desi/desi_environment.sh
-source ${DESICONDA}/etc/profile.d/conda.sh
-conda activate
-
-export SPECEXDATA=/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/code/specex/0.6.7/data
-
-# clear default system specex and desispec
-module unload specex
-module unload desispec
+if [ $dirac -gt 0 ] ; then
+    source dirac_setup.sh
+    export CXX=`which c++` # on dirac force C++ compiler to version after dirac_setup.sh
+else
+    source /global/common/software/desi/desi_environment.sh
+    source ${DESICONDA}/etc/profile.d/conda.sh
+    conda activate
+    export SPECEXDATA=/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/code/specex/0.6.7/data
+    # clear default system specex and desispec
+    module unload specex
+    module unload desispec
+fi
 
 specex_system=/global/common/software/desi/cori/desiconda/20200801-1.4.0-spec/code/specex/master/lib/python3.8/site-packages/specex-0.6.7.dev617-py3.8-linux-x86_64.egg
 
 desi_compute_psf_args="--input-image /global/cfs/cdirs/desi/spectro/redux/blanc/preproc/20201216/00068217/preproc-b1-00068217.fits --input-psf /global/cfs/cdirs/desi/spectro/redux/blanc/exposures/20201216/00068217/shifted-input-psf-b1-00068217.fits --debug" 
-
-# set CC and CXX to gcc as in harpconfig
-#export CC=gcc
-#export CXX=gcc
-#export CC=icc
-#export CXX=icpc
-
-#module unload PrgEnv-gnu
-#module load   PrgEnv-intel
 
 if [ $do_master -gt 0 ]; then
     # clean
     rm -f *mst*.fits mst_version.log
     
     # change current desispec to master
-    module load desispec
-
+    if [ $dirac -eq 0 ] ; then
+	module load desispec
+    fi
+    
     # change specex to master
     if [ $pull_master -eq 0 ]; then
 	specex_loc=$specex_system
@@ -70,7 +76,7 @@ if [ $do_master -gt 0 ]; then
     echo $specex_loc >> mst_version.log    
     echo `ls -rlt $specex_loc` >> mst_version.log
     echo `which desi_compute_psf` >> mst_version.log
-    (time python test_specex.py psf-$code.fits) |& tee psf-b1-$code.log
+    (time python test_specex.py psf-$code.fits $inputroot) |& tee psf-b1-$code.log
     
 fi
 
@@ -99,23 +105,21 @@ if [ $do_dev -gt 0 ]; then
     fi
     
     # change current desispec to master
-    module load desispec
-
-    # change specex to dev branch
-    if [ $inplace_dev -eq 0 ] ; then
-	specex_loc=$PWD/specex-$devcode/code/lib/python3.8/site-packages/specex-0.7.0.dev637-py3.8-linux-x86_64.egg
-    else
-	specex_loc=/global/common/software/desi/users/malvarez/specex-dev/py/specex:$PYTHONPATH
+    if [ $dirac -eq 0 ] ; then
+	module load desispec
     fi
+    
+    # change specex to dev branch
+    specex_loc=$PWD/specex-$devcode/code/lib/python3.8/site-packages/specex-0.7.0.dev637-py3.8-linux-x86_64.egg
     export PYTHONPATH=$specex_loc:$PYTHONPATH
     
     # do specex-dev
-    ./linkpython.sh
+    #./linkpython.sh
     echo $specex_loc >> dev_version.log    
     echo `ls -rlt $specex_loc` >> dev_version.log
     echo `which desi_compute_psf` >> dev_version.log
     code=dev
-    (time python test_specex.py psf-$code.fits) |& tee psf-b1-$code.log
+    (time python test_specex.py psf-$code.fits $inputroot) |& tee psf-b1-$code.log
     
 fi
 

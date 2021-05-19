@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 2.8.12)
 
 project(specex)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(Python_ROOT_DIR $ENV{DESICONDA})
 
