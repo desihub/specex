@@ -245,7 +245,9 @@ def read_psf(opts,pyio,pyps):
     pyps.set_trace(xtrace,opts.trace_deg_x   ,1)
     pyps.set_trace(ytrace,opts.trace_deg_wave,0)
 
-    #pyio.use_input_specex_psf = True
+    # synchronize traces
+    pyps.synchronize_traces() 
+
     if(not pyio.use_input_specex_psf): return
 
     # read psf

@@ -25,13 +25,10 @@ def run_specex(com):
     pyio.set_inputpsf(opts)   # set input psf bools
     pypr.set_priors(opts)     # set Gaussian priors
 
-    read_psf(opts,pyio,pyps)  # read psf (python)
-    #'''
-    pyps.synchronize_traces() # synchronize traces
+    read_psf(opts,pyio,pyps)  # read psf 
 
     pymg = read_preproc(opts) # read preproc image
     
-    #pyio.read_psf(opts,pyps) # read psf (C++)
     pyft.fit_psf(opts,pyio,pypr,pymg,pyps) # fit psf 
     
     pyio.load_psf(opts,pyps)    # load psf
