@@ -11,7 +11,7 @@
 
 using namespace std;
 
-
+/*
 int specex::find_hdu( fitsfile *fp, const std::string& extname, const std::string& alternate_extname) {
   //SPECEX_DEBUG("Looking for extension '" << extname << "'");
   
@@ -51,7 +51,7 @@ int specex::find_hdu( fitsfile *fp, const std::string& extname, const std::strin
   }
   return -1;
 }
-
+*/
 
 static vector<string> DecomposeString(const string &Source,vector<string> &Tokens)
 {

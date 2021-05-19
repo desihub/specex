@@ -16,8 +16,7 @@ namespace specex {
   void read_fits_image(std::string const & path, image_data& img_in_hdu1);
   void read_fits_images(std::string const & path, image_data& img_in_hdu1, image_data& img_in_hdu2);
 
-
-  int find_hdu( fitsfile *fp, const std::string& extname, const std::string& alternate_extname="");
+  //int find_hdu( fitsfile *fp, const std::string& extname, const std::string& alternate_extname="");
   
   
   // the following shoudl be somewhere in harp : it's about reading fits tables

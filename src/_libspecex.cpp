@@ -283,16 +283,6 @@ PYBIND11_MODULE(_libspecex, m) {
 	    return self.set_inputpsf(opts);
 	}
 	)
-        .def("read_preproc", [](spx::PyIO &self, spx::PyOptions opts,
-				   spx::PyImage& pyimg){
-	    return self.read_preproc(opts,pyimg);
-	}
-	)
-        .def("read_psf", [](spx::PyIO &self, spx::PyOptions opts,
-				 spx::PyPSF& pypsf){
-	    return self.read_psf(opts,pypsf);
-	}
-	)
         .def("load_psf",[](spx::PyIO &self, spx::PyOptions opts,
 				 spx::PyPSF& pypsf){
 	    return self.load_psf(opts,pypsf);
