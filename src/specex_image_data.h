@@ -34,9 +34,7 @@ namespace specex {
       if (i<0 || i>=cols_ || j<0 || j>=rows_)
 	SPECEX_ERROR("Out of range");
 #endif
-      return data[i+j*cols_]; // "STANDARD" PACKING (FITSIO)
-      // return data[j+i*rows_]; // "REVERSE" PACKING (HARP)
-      
+      return data[i+j*cols_]; // "STANDARD" PACKING (FITSIO)      
       
     }
     
@@ -47,7 +45,6 @@ namespace specex {
 #endif
       
       return data[i+j*cols_];// "STANDARD" PACKING (FITSIO)
-      // return data[j+i*rows_]; // "REVERSE" PACKING (HARP)
       
     }
 

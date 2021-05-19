@@ -13,7 +13,6 @@
 #include <specex_pyimage.h>
 #include <specex_psf.h>
 #include <specex_gauss_hermite_psf.h>
-#include <specex_psf_io.h>
 #include <specex_image_data.h>
 #include <specex_pypsf.h>
 #include <specex_fits.h>

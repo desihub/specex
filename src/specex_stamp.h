@@ -66,39 +66,13 @@ class Stamp {
    return(i>=begin_i && i<end_i && j>=begin_j && j<end_j);
  }
  
- /*
- void SetLimitsFromPSF(const SpecExPSF& PSF, const double &X, const double &Y) {
-   PSF.StampLimits(X,Y,begin_i,end_i,begin_j,end_j);
-   // now check image bounds
-   begin_i = max(0,begin_i);
-   end_i   = min(Parent_n_cols(),end_i);
-   begin_j = max(0,begin_j);
-   end_j   = min(Parent_n_rows(),end_j);
- }
- 
- void SetLimitsFromPSF(const SpecExPSF& PSF, 
-		       const double &spot_x_min, const double &spot_x_max,
-		       const double &spot_y_min, const double &spot_y_max) {
-   
-   int k,p;
-   PSF.StampLimits(spot_x_min,spot_y_min,begin_i,k,begin_j,p);
-   PSF.StampLimits(spot_x_max,spot_y_max,k,end_i,p,end_j);
-   
-   // now check image bounds
-   begin_i = max(0,begin_i);
-   end_i   = min(Parent_n_cols(),end_i);
-   begin_j = max(0,begin_j);
-   end_j   = min(Parent_n_rows(),end_j);
- }
- */
- 
   int n_cols() const {return end_i-begin_i;}
   int n_rows() const {return end_j-begin_j;}
 
   
   Stamp Intersection(const Stamp& other_stamp) {
     if((parent_image !=  other_stamp.parent_image) || (parent_stamp !=  other_stamp.parent_stamp) ) {
-      HARP_THROW("Stamp::Intersection not same parents");
+      SPECEX_ERROR("Stamp::Intersection not same parents");
     }
     Stamp inter(*this);
     if(inter.begin_i<other_stamp.begin_i) inter.begin_i=other_stamp.begin_i;

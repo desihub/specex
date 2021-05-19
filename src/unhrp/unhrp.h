@@ -1,6 +1,7 @@
 #ifndef SPECEX_UNHRP__H
 #define SPECEX_UNHRP__H
 
+/*
 #include <boost/numeric/ublas/operation.hpp>
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/vector_proxy.hpp>
@@ -8,13 +9,13 @@
 #include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <boost/numeric/ublas/matrix_sparse.hpp>
 #include <boost/numeric/ublas/storage.hpp>
-
-#include <boost/numeric/bindings/ublas.hpp>
 #include <boost/numeric/bindings/blas.hpp>
 #include <boost/numeric/bindings/lapack.hpp>
 #include <boost/numeric/bindings/views.hpp>
+*/
 
 #include <harp.hpp>
+#include <boost/numeric/bindings/ublas.hpp>
 
 // unhrp:
 // definitions, methods and classes necessary for SPECEX calculations that were originally
@@ -26,13 +27,10 @@
 
 namespace unhrp {
   
-  //typedef boost::numeric::ublas::vector < int > vector_int;
-  //typedef boost::numeric::ublas::vector < double > vector_double;
-  //typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
+  typedef boost::numeric::ublas::vector < int > vector_int;
+  typedef boost::numeric::ublas::vector < double > vector_double;
+  typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
 
-  typedef harp::vector_int    vector_int;
-  typedef harp::vector_double vector_double;
-  typedef harp::matrix_double matrix_double;
 }
 
 template < class T >
