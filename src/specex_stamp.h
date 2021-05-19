@@ -1,7 +1,7 @@
 #ifndef SPECEX_STAMP__H
 #define SPECEX_STAMP__H
 
-//#include <unhrp.h>
+//#include <unbls.h>
 #include <harp/image.hpp>
 
 //#include "specex_psf.h"

@@ -6,7 +6,7 @@
 
 #include <boost/program_options.hpp>
 
-#include <unhrp.h>
+#include <unbls.h>
 
 #include <specex_message.h>
 

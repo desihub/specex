@@ -18,7 +18,7 @@ specex::Trace::Trace(int i_fiber) :
 }
 
 void specex::Trace::resize(int ncoeff) {
-  unhrp::vector_double coeff;
+  unbls::vector_double coeff;
 
   coeff=X_vs_W.coeff;
   X_vs_W.deg = ncoeff-1;
@@ -104,8 +104,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   {
     int npar = X_vs_W.coeff.size();
     
-    unhrp::matrix_double A(npar,npar); A.clear();
-    unhrp::vector_double B(npar); B.clear();
+    unbls::matrix_double A(npar,npar); A.clear();
+    unbls::vector_double B(npar); B.clear();
     
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
@@ -113,7 +113,7 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
 	continue;
       double w=1;
       double res=spot.xc;
-      unhrp::vector_double h=X_vs_W.Monomials(spot.wavelength);
+      unbls::vector_double h=X_vs_W.Monomials(spot.wavelength);
       
       
       specex::syr(w,h,A);  // A += w*Mat(h)*h.transposed();
@@ -129,15 +129,15 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   // fit y
   {
     int npar = Y_vs_W.coeff.size();
-    unhrp::matrix_double A(npar,npar); A.clear();
-    unhrp::vector_double B(npar); B.clear();
+    unbls::matrix_double A(npar,npar); A.clear();
+    unbls::vector_double B(npar); B.clear();
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
       if(spot.fiber != fiber) 
 	continue;
       double w=1;
       double res=spot.yc;
-      unhrp::vector_double h=Y_vs_W.Monomials(spot.wavelength);
+      unbls::vector_double h=Y_vs_W.Monomials(spot.wavelength);
       
       specex::syr(w,h,A);  // A += w*Mat(h)*h.transposed();
       specex::axpy(w*res,h,B); // B += (w*res)*h;

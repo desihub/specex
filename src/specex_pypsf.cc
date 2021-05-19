@@ -48,7 +48,7 @@ void specex::PyPSF::set_psf(
 
   std::vector<std::string> params;
   std::map<std::string,int> param_row;
-  std::map<std::string,unhrp::vector_double > param_coeff;
+  std::map<std::string,unbls::vector_double > param_coeff;
   std::map<std::string,int > param_degx;
   std::map<std::string,int > param_degw;
     
@@ -59,7 +59,7 @@ void specex::PyPSF::set_psf(
     params.push_back(pname);
     param_row[pname]=i;
     for(int j=0; j < ncoeff_per_row; j++){
-      param_coeff[pname] = unhrp::vector_double(ncoeff_per_row);
+      param_coeff[pname] = unbls::vector_double(ncoeff_per_row);
       param_coeff[pname][j] = table_col1[i*ncoeff_per_row+j];
     }
     param_degx[pname]=table_col2[i];
@@ -145,8 +145,8 @@ void specex::PyPSF::set_psf(
       pol->Fill(true); // sparse or not sparse ????
       
       int npar = pol->Npar();
-      unhrp::matrix_double A(npar,npar); A.clear();
-      unhrp::vector_double B(npar); B.clear();
+      unbls::matrix_double A(npar,npar); A.clear();
+      unbls::vector_double B(npar); B.clear();
       
       int npoints=0;
       for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {
@@ -158,7 +158,7 @@ void specex::PyPSF::set_psf(
 	for(double wave=WAVEMIN;wave<WAVEMAX+0.01;wave+=(WAVEMAX-WAVEMIN)/(degw+1)) {
 	  double x    = trace.X_vs_W.Value(wave);
 	  double pval = fiberpol.Value(wave);
-	  unhrp::vector_double der = pol->Monomials(x,wave);
+	  unbls::vector_double der = pol->Monomials(x,wave);
 	  specex::syr(1.,der,A); // A += der*der.transposed;
 	  specex::axpy(pval,der,B); // B += pval*der;
 	  npoints += 1;
@@ -201,8 +201,8 @@ void specex::PyPSF::synchronize_traces(){
     double wmax = trace.Y_vs_W.xmax;
     
     int ddeg = 1; // add one degree for inversion
-    unhrp::vector_double ty(deg+ddeg+1);
-    unhrp::vector_double tx(deg+ddeg+1);
+    unbls::vector_double ty(deg+ddeg+1);
+    unbls::vector_double tx(deg+ddeg+1);
     for(int i=0;i<deg+ddeg+1;i++) {
       double wave=wmin+i*((wmax-wmin)/deg);
       ty[i]=trace.Y_vs_W.Value(wave);

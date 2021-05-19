@@ -3,7 +3,6 @@
 
 #define CHECK_BOUNDS
 
-//#include <unhrp.h>
 #include <harp.hpp>
 #include <specex_message.h>
 
@@ -14,18 +13,17 @@ namespace specex {
     size_t rows_;
     size_t cols_;
     
-
   public :
 
-    unhrp::vector_double data;
+    unbls::vector_double data;
     
     image_data ();
     image_data ( size_t ncols, size_t nrows);
-    image_data ( size_t ncols, size_t nrows, const unhrp::vector_double& i_data);
+    image_data ( size_t ncols, size_t nrows, const unbls::vector_double& i_data);
     void resize( size_t ncols, size_t nrows); 
     size_t n_rows ( ) const { return rows_; }
     size_t n_cols ( ) const { return cols_; }
-    void values ( unhrp::vector_double & i_data ) const {i_data=data;}
+    void values ( unbls::vector_double & i_data ) const {i_data=data;}
     size_t Ny ( ) const { return rows_; }
     size_t Nx ( ) const { return cols_; }
     

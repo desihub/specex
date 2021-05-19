@@ -23,8 +23,8 @@ namespace specex {
   class FitsTableEntry {
   public :    
     std::string string_val;           // can be empty
-    unhrp::vector_double double_vals; // can be empty
-    unhrp::vector_int       int_vals; // can be empty
+    unbls::vector_double double_vals; // can be empty
+    unbls::vector_int       int_vals; // can be empty
   };
   
   class FitsTable {
