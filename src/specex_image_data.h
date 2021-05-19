@@ -3,7 +3,8 @@
 
 #define CHECK_BOUNDS
 
-#include <unhrp.h>
+//#include <unhrp.h>
+#include <harp.hpp>
 #include <specex_message.h>
 
 namespace specex {
@@ -50,6 +51,5 @@ namespace specex {
 
   };
 };
-BOOST_SERIALIZATION_SHARED_PTR(image_data)
 
 #endif

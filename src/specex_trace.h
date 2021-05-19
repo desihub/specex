@@ -48,32 +48,8 @@ namespace specex {
     
     bool Off() const;
 
-
-    /*
-      void write(std::ostream &os) const;
-      bool read(std::istream &is);
-      void write(const std::string &FileName) const;
-      bool read(const std::string &FileName) ;
-    */
-    
     private :
 
-    template < class Archive >
-      void serialize ( Archive & ar, const unsigned int version ) {
-      ar & BOOST_SERIALIZATION_NVP(fiber);
-      ar & BOOST_SERIALIZATION_NVP(mask);
-      ar & BOOST_SERIALIZATION_NVP(X_vs_W);
-      ar & BOOST_SERIALIZATION_NVP(Y_vs_W);
-      ar & BOOST_SERIALIZATION_NVP(W_vs_Y);
-      ar & BOOST_SERIALIZATION_NVP(X_vs_Y);
-      ar & BOOST_SERIALIZATION_NVP(yjumplo);
-      ar & BOOST_SERIALIZATION_NVP(yjumphi);
-      ar & BOOST_SERIALIZATION_NVP(yjumpval);
-      
-        return;
-    }
-
-    BOOST_SERIALIZATION_SHARED_PTR(Trace)  
   };
   
   // SDSS IO

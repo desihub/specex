@@ -85,8 +85,7 @@ int specex::FitsColumnDescription::SizeOfVectorOfDouble() const {
   return atoi(format.substr(0,format.size()-1).c_str());
 }
 
-specex::FitsTable::FitsTable() : fptr(0) {
-}
+specex::FitsTable::FitsTable(){}
 
 void specex::FitsTable::AddColumnDescription(const string& ttype, const string& tform,  const string& tdim, const string& tunit) {
   FitsColumnDescription column;

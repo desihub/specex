@@ -39,8 +39,8 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/specex_blas.c
 	    src/specex_lapack.c
 	    src/specex_unbst.cc
-	    src/harp/data/harp_fits.cpp
 	    src/harp/data/harp_image.cpp
+	    src/harp/data/harp_fits.cpp
 	    src/harp/harp.cpp
 	    src/harp/data/harp_data.cpp
 	    src/harp/data/harp_metadata.cpp
@@ -111,8 +111,6 @@ message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
 target_include_directories(_libspecex
 	PUBLIC
 	src
-	src/deboosted_headers
-	src/unhrp
 	src/harp
 	src/harp/data
 	src/harp/data/harp
