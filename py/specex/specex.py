@@ -21,17 +21,25 @@ def run_specex(com):
     for strs in com:
         spxargs.append(strs)
         
-    opts.parse(spxargs)       # parse args
-    pyio.set_inputpsf(opts)   # set input psf bools
-    pypr.set_priors(opts)     # set Gaussian priors
+    # parse args
+    opts.parse(spxargs)
 
-    read_psf(opts,pyio,pyps)  # read psf 
+    # set input psf bools
+    pyio.set_inputpsf(opts)
 
-    pymg = read_preproc(opts) # read preproc image
+     # set Gaussian priors
+    pypr.set_priors(opts)    
+
+    # read psf 
+    read_psf(opts,pyio,pyps)  
+
+    # read preproc
+    pymg = read_preproc(opts) 
     
-    pyft.fit_psf(opts,pyio,pypr,pymg,pyps) # fit psf 
+    # fit psf 
+    pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
     
-    pyio.load_psf(opts,pyps)    # load psf
-    write_psf(pyps,opts)        # write psf 
-    #'''
+    # write psf 
+    write_psf(pyps,opts,pyio)        
+
     return 0
