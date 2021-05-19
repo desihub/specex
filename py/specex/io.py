@@ -221,7 +221,10 @@ def meta2header(meta):
 
     return header
 
-def read_psf(opts,pyps):
+def read_psf(opts,pyio,pyps):
+
+    #initialize traces
+    pyps.init_traces(opts)
     
     # open fitsfile
     fitsfilename = opts.input_psf_filename
@@ -241,7 +244,55 @@ def read_psf(opts,pyps):
 
     pyps.set_trace(xtrace,opts.trace_deg_x   ,1)
     pyps.set_trace(ytrace,opts.trace_deg_wave,0)
+
+    #pyio.use_input_specex_psf = True
+    if(not pyio.use_input_specex_psf): return
+
+    # read psf
+    psf_header = fitsfile['PSF'].read_header()
     
+    pyps.GHDEGX          = psf_header['GHDEGX']
+    pyps.GHDEGY          = psf_header['GHDEGY']
+    pyps.mjd             = psf_header['MJD']
+    pyps.plate_id        = psf_header['PLATEID']
+    pyps.camera_id       = psf_header['CAMERA']
+    pyps.arc_exposure_id = psf_header['ARCEXP']
+    pyps.NPIX_X          = psf_header['NPIX_X']
+    pyps.NPIX_Y          = psf_header['NPIX_Y']
+    pyps.hSizeX          = psf_header['HSIZEX']
+    pyps.hSizeY          = psf_header['HSIZEY']
+    pyps.FIBERMIN        = psf_header['FIBERMIN']
+    pyps.FIBERMAX        = psf_header['FIBERMAX']
+    pyps.table_WAVEMIN   = psf_header['WAVEMIN']
+    pyps.table_WAVEMAX   = psf_header['WAVEMAX']
+    pyps.LEGDEG          = psf_header['LEGDEG']
+    
+    table_col0 = spx.VectorString()
+    table_col1 = spx.VectorDouble()
+    table_col2 = spx.VectorInt()
+    table_col3 = spx.VectorInt()
+    
+    col0 = fitsfile['PSF']['PARAM'][:]
+    col1 = fitsfile['PSF']['COEFF'][:]
+    col2 = fitsfile['PSF']['LEGDEGX'][:]
+    col3 = fitsfile['PSF']['LEGDEGW'][:]
+
+    for t in col0: table_col0.append(t)
+    for t in col2: table_col2.append(t)
+    for t in col3: table_col3.append(t)
+
+    pyps.table_nrows = np.shape(col1)[0]
+    pyps.nfibers     = np.shape(col1)[1]
+    pyps.ncoeff      = np.shape(col1)[2]
+    for r in np.arange(pyps.table_nrows):
+        for f in np.arange(pyps.nfibers):
+            for c in np.arange(pyps.ncoeff):
+                table_col1.append(col1[r,f,c])
+
+    pyps.set_psf(table_col0,table_col1,table_col2,table_col3)
+    
+    return
+
 def read_preproc(opts):
     import desispec.io.image
 

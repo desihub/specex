@@ -31,11 +31,8 @@ namespace specex {
 
     PyPSF(){}
 
-    image_data get_trace(std::string);    
-    void       set_trace(py::array, int, int);
-    void   synchronize_traces();
     int trace_ncoeff, table_nrows, nfibers;
-    int FIBERMIN, FIBERMAX;
+    int FIBERMIN, FIBERMAX, LEGDEG;
     double trace_WAVEMIN, trace_WAVEMAX;
     double table_WAVEMIN, table_WAVEMAX;
     long long mjd, plate_id, arc_exposure_id, NPIX_X, NPIX_Y,
@@ -45,6 +42,17 @@ namespace specex {
     std::vector<int>    bundle_id, bundle_ndata, bundle_nparams;
     std::vector<double> bundle_chi2pdf;
 
+    image_data get_trace(std::string);    
+    void set_trace(py::array, int, int);
+    void init_traces(specex::PyOptions);
+    void synchronize_traces();   
+    void set_psf(
+		 std::vector<std::string>&,
+		 std::vector<double>&,
+		 std::vector<int>&,
+		 std::vector<int>&
+		 );
+    
     void get_table(std::vector<std::string> &table_string,
 		   std::vector<std::vector<int>> &table_int,
 		   std::vector<std::vector<double>> &table_double);

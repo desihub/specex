@@ -55,7 +55,6 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
 int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
-  /*
   if( ! use_input_specex_psf ) {
     std::cout << "read_psf 1" << std::endl;
     SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
@@ -72,37 +71,7 @@ int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
     std::cout << "read_psf 2" << std::endl;
     read_psf_fits(pypsf.psf,opts.input_psf_filename);
   }
-  */
-  return EXIT_SUCCESS;
-  
-}
 
-int specex::PyIO::read_traces(specex::PyOptions opts, specex::PyPSF& pypsf){
-
-  SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
-  pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
-    
-  pypsf.psf->hSizeX = opts.half_size_x;
-  pypsf.psf->hSizeY = opts.half_size_y;
-  SPECEX_INFO("trace_deg_x=" << opts.trace_deg_x << " trace_deg_wave=" <<
-	      opts.trace_deg_wave);
-  read_traceset_fits(pypsf.psf,opts.input_psf_filename,opts.trace_deg_x,
-		     opts.trace_deg_wave);     
-    
-  return EXIT_SUCCESS;
-  
-}
-
-int specex::PyIO::init_traces(specex::PyOptions opts, specex::PyPSF& pypsf){
-
-  SPECEX_INFO("Initializing a " << opts.psf_model << " PSF");
-  pypsf.psf = PSF_p(new specex::GaussHermitePSF(opts.gauss_hermite_deg));
-    
-  pypsf.psf->hSizeX = opts.half_size_x;
-  pypsf.psf->hSizeY = opts.half_size_y;
-  SPECEX_INFO("trace_deg_x=" << opts.trace_deg_x << " trace_deg_wave=" <<
-	      opts.trace_deg_wave);
-    
   return EXIT_SUCCESS;
   
 }
