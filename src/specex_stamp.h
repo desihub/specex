@@ -1,7 +1,6 @@
 #ifndef SPECEX_STAMP__H
 #define SPECEX_STAMP__H
 
-#include <harp/image.hpp>
 #include <iostream>
 #include <specex_image_data_base.h>
 

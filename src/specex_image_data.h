@@ -3,7 +3,6 @@
 
 #define CHECK_BOUNDS
 
-#include <harp.hpp>
 #include <specex_message.h>
 #include <specex_image_data_base.h>
 
