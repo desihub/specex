@@ -9,12 +9,6 @@
 specex::Mask::Mask() {
 }
 
-void specex::Mask::SetBArcLampMask() {
-  cout << "INFO specex::Mask::SetBArcLampMask" << endl;
-  AddWavelengthInterval(3653,3673); // missing line at lambda ~= 3663 A
-  AddWavelengthInterval(5750,5770); // missing line at lambda ~= 3663 A
-}
-
 void specex::Mask::AddWavelengthInterval(const double& min_wave, const double& max_wave) {
   cout << "INFO specex::Mask masking wavelength range [" << min_wave << "," << max_wave << "]" << endl;
   WaveIntervals.push_back(Interval(min_wave,max_wave));

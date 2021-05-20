@@ -37,10 +37,6 @@ void image_data_base::mask ( unbls::vector_mask & msk ) const {
   return;
 }
 
-string image_data_base::type ( ) const {
-  return type_;
-}
-
 void image_data_base::values ( unbls::matrix_double & data ) const {
 
   size_t imgrows = n_rows();

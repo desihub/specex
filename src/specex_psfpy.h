@@ -23,8 +23,6 @@ namespace specex {
     double table_WAVEMIN,  table_WAVEMAX;
 
     specex::FitsTable table;
-
-    specex::image_data GetCoeff2d(bool);  
     
     void SetCoeff2d(specex::image_data, bool);    
     void SetParamsOfBundle();

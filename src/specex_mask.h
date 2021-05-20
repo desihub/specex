@@ -27,7 +27,6 @@ class Mask {
   
   Mask();
   void AddWavelengthInterval(const double& min_wave, const double& max_wave); 
-  void SetBArcLampMask();
   void ApplyMaskToImage(image_data& img, const PSF& psf, const double& value=0) const;
   void Clear() { WaveIntervals.clear();}
 };

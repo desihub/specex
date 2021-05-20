@@ -21,9 +21,7 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   vector <Spot_p> fitted_spots = pypsf.fitted_spots;
 
-  // xml serialization is removed nothing done here
-  //if(opts.output_spots_filename != "")
-  //  write_spots_xml(fitted_spots,opts.output_spots_filename);    
+  // future location of spot writing
   
   return EXIT_SUCCESS;
 

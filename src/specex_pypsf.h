@@ -53,10 +53,6 @@ namespace specex {
 		 std::vector<int>&
 		 );
     
-    void get_table(std::vector<std::string> &table_string,
-		   std::vector<std::vector<int>> &table_int,
-		   std::vector<std::vector<double>> &table_double);
-
     void SetParamsOfBundle();
     
   };
