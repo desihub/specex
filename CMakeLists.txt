@@ -42,6 +42,10 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/specex_blas.c
 	    src/specex_lapack.c
 	    src/specex_unbst.cc
+	    src/unhrp/unhrp_image.cpp
+    	    src/specex_fits.cc
+	    )
+	    #[[
 	    src/harp/data/harp_image.cpp
 	    src/harp/data/harp_fits.cpp
 	    src/harp/harp.cpp
@@ -68,8 +72,8 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/harp/plugins/harp_plugin_targets_desi.cpp
 	    src/harp/plugins/harp_plugin_targets_fits.cpp
 	    src/harp/plugins/harp_plugin_targets_sim.cpp
-	    src/specex_fits.cc
 	    )
+	    ]]
 
 # look for BLAS/LAPACK with MKL first
 
@@ -114,6 +118,10 @@ message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
 target_include_directories(_libspecex
 	PUBLIC
 	src
+	src/unhrp
+	${MKL_INCLUDE}
+	)
+	#[[
 	src/harp
 	src/harp/data
 	src/harp/data/harp
@@ -123,9 +131,9 @@ target_include_directories(_libspecex
 	src/harp/math/harp
 	src/harp/extract/
 	src/harp/extract/harp
-	${MKL_INCLUDE}
 	)
-
+	]]
+	
 target_link_directories(_libspecex
 	PUBLIC)
 	

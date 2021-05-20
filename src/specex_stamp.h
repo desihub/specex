@@ -1,18 +1,16 @@
 #ifndef SPECEX_STAMP__H
 #define SPECEX_STAMP__H
 
-//#include <unbls.h>
 #include <harp/image.hpp>
-
-//#include "specex_psf.h"
 #include <iostream>
+#include <unhrp_image.hpp>
 
 namespace specex {
 
 class Stamp {
  public :
   // current bounds of psf fit stamp in image
-  const harp::image* parent_image; // either one of the two
+  const unhrp::image* parent_image; // either one of the two
   const Stamp* parent_stamp; // either one of the two
   int begin_i;
   int begin_j;
@@ -21,7 +19,7 @@ class Stamp {
   
  
  
-  void SetParent(const harp::image& image) {
+  void SetParent(const unhrp::image& image) {
     parent_image = &image;
     parent_stamp = 0;
     begin_i=0;
@@ -49,7 +47,7 @@ class Stamp {
    end_j=0;
  }
  
- Stamp(const harp::image& image) {
+ Stamp(const unhrp::image& image) {
    SetParent(image);
  }
  

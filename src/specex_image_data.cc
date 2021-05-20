@@ -10,20 +10,20 @@
 using namespace std;
 
 specex::image_data::image_data() : 
-  harp::image()
+  unhrp::image()
 {
  rows_=0;
  cols_=0;
 }
 
 specex::image_data::image_data(size_t ncols, size_t nrows) : 
-  harp::image()
+  unhrp::image()
 {
   resize(ncols,nrows);
 }
 
 specex::image_data::image_data(size_t ncols, size_t nrows, const unbls::vector_double& i_data) : 
-  harp::image()
+  unhrp::image()
 {
   resize(ncols,nrows);
   data = i_data; // copy

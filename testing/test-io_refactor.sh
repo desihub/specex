@@ -5,7 +5,7 @@ compare=1
 dirac=1
 
 do_dev=1
-do_master=1
+do_master=0
 
 pull_master=1
 build_master=0

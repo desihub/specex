@@ -8,7 +8,9 @@ namespace unbls {
   typedef boost::numeric::ublas::vector < int > vector_int;
   typedef boost::numeric::ublas::vector < double > vector_double;
   typedef boost::numeric::ublas::matrix < double, boost::numeric::ublas::column_major > matrix_double;
-
+  typedef boost::numeric::ublas::vector < uint8_t > vector_mask;
+  typedef boost::numeric::ublas::matrix < uint8_t, boost::numeric::ublas::column_major > matrix_mask;
+  
 }
 
 template < class T >
