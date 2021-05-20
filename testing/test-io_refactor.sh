@@ -10,7 +10,7 @@ do_master=0
 pull_master=1
 build_master=0
 
-loc_dev=0
+loc_dev=1
 
 mstcode='mst'
 devcode='dev'
