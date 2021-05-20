@@ -3,14 +3,14 @@
 
 #include <harp/image.hpp>
 #include <iostream>
-#include <unhrp_image.hpp>
+#include <specex_image_data_base.h>
 
 namespace specex {
 
 class Stamp {
  public :
   // current bounds of psf fit stamp in image
-  const unhrp::image* parent_image; // either one of the two
+  const image_data_base* parent_image; // either one of the two
   const Stamp* parent_stamp; // either one of the two
   int begin_i;
   int begin_j;
@@ -19,7 +19,7 @@ class Stamp {
   
  
  
-  void SetParent(const unhrp::image& image) {
+  void SetParent(const image_data_base& image) {
     parent_image = &image;
     parent_stamp = 0;
     begin_i=0;
@@ -47,7 +47,7 @@ class Stamp {
    end_j=0;
  }
  
- Stamp(const unhrp::image& image) {
+ Stamp(const image_data_base& image) {
    SetParent(image);
  }
  

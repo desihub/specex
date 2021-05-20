@@ -5,10 +5,10 @@
 
 #include <harp.hpp>
 #include <specex_message.h>
-#include <unhrp_image.hpp>
+#include <specex_image_data_base.h>
 
 namespace specex {
-  class image_data : public unhrp::image {
+  class image_data : public image_data_base {
 
   protected :
     size_t rows_;
