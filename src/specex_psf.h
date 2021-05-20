@@ -17,8 +17,6 @@
 #define EXTERNAL_TAIL
 
 namespace specex {
-
-  
   
   class Prior { 
   public :
@@ -162,7 +160,7 @@ public :
 
     const Trace& GetTrace(int fiber) const;
     Trace& GetTrace(int fiber);
-    void AddTrace(int fiber);
+    //void AddTrace(int fiber);
     void LoadXYPol();
     double Xccd(int fiber, const double& wave) const;
     double Yccd(int fiber, const double& wave) const;
@@ -197,7 +195,7 @@ public :
     
     virtual unbls::vector_double DefaultParams() const = 0;
     virtual std::vector<std::string> DefaultParamNames() const = 0;
-    virtual void AllocateDefaultParams();
+    //virtual void AllocateDefaultParams();
     
     // check if parameter values are within bounds
     virtual bool CheckParams(const unbls::vector_double &Params) const {return false;};
@@ -294,9 +292,9 @@ public :
     int GetBundleOfFiber(int fiber) const;
     unbls::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
     unbls::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    unbls::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
+    //unbls::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
     unbls::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
-    unbls::vector_double AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
+    //unbls::vector_double AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
     unbls::vector_double AllLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
 
     unbls::vector_double FitLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;

@@ -266,7 +266,7 @@ int specex::PSF::ParamIndex(const std::string& name) const {
 bool specex::PSF::HasParam(const std::string& name) const { 
   return (ParamIndex(name)>=0);
 }
-
+/*
 void specex::PSF::AllocateDefaultParams() {
   unbls::vector_double params = DefaultParams();
   std::vector<std::string> param_names = DefaultParamNames();
@@ -280,6 +280,7 @@ void specex::PSF::AllocateDefaultParams() {
     ParamsOfBundles[0].AllParPolXW.push_back(pol);
   }
 }
+*/
 
 void specex::PSF::StampLimits(const double &X, const double &Y,
 			    int &BeginI, int &EndI,
@@ -304,7 +305,7 @@ specex::Trace& specex::PSF::GetTrace(int fiber)  {
   if(it == FiberTraces.end()) SPECEX_ERROR("No trace for fiber " << fiber);
   return it->second;
 }
-
+/*
 void specex::PSF::AddTrace(int fiber) {
   std::map<int,specex::Trace>::iterator it = FiberTraces.find(fiber);
   if(it != FiberTraces.end()) {
@@ -314,7 +315,7 @@ void specex::PSF::AddTrace(int fiber) {
     LoadXYPol();
   }
 }
-
+*/
 void specex::PSF::LoadXYPol() {
 #pragma omp critical
   {
@@ -481,12 +482,12 @@ unbls::vector_double specex::PSF::AllLocalParamsXW_with_AllBundleParams(const do
   return params;
 }
 
-  
+/*  
 unbls::vector_double specex::PSF::AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   double X=Xccd(fiber,wave); 
   return AllLocalParamsXW_with_AllBundleParams(X,wave,bundle_id,ForThesePSFParams);
 }
-
+*/
 
 unbls::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   
@@ -522,10 +523,13 @@ unbls::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const do
   }
   return params;
 }
+
+/* 
 unbls::vector_double specex::PSF::AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   double X=Xccd(fiber,wave); 
   return AllLocalParamsXW_with_FitBundleParams(X,wave,bundle_id,ForThesePSFParams);
 }
+*/
 
 unbls::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   
@@ -544,14 +548,12 @@ unbls::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const do
     index += c_size;
   }
   return params;
-}
+}  
 
-  
 unbls::vector_double specex::PSF::FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   double X=Xccd(fiber,wave); 
   return FitLocalParamsXW_with_FitBundleParams(X,wave,bundle_id,ForThesePSFParams);
 }
-
 
 bool specex::PSF::IsLinear() const {
   if(Name() == "GAUSSHERMITE") return true;
