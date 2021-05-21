@@ -373,7 +373,7 @@ unbls::vector_double specex::GaussHermitePSF::DefaultParams() const
 {
   
   unbls::vector_double Params(LocalNAllPar());
-  Params.clear(); // all = zero at beginning = a pure gaussian
+  unbls::zero(Params); // all = zero at beginning = a pure gaussian
   int index=0;
   Params[index++] = 1.0; // this is sigma_x ; value of 1. tuned on CCDS1R (EM-spectro)
   Params[index++] = 1.0; // this is sigma_y ; value of 1. tuned on CCDS1R (EM-spectro)

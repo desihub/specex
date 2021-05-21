@@ -39,15 +39,15 @@ double specex::PSF::PixValue(const double &Xc, const double &Yc,
   unbls::vector_double tmpPosDer;
   if(PosDer) {
     tmpPosDer.resize(2);
-    tmpPosDer.clear();
+    unbls::zero(tmpPosDer);
   }
   unbls::vector_double tmpParamDer;
   int npar=0;
   if(ParamDer) {
     npar = ParamDer->size();
     tmpParamDer.resize(npar);
-    tmpParamDer.clear();
-  }
+    unbls::zero(tmpParamDer);
+   }
   
   double val = 0;
   for (int ix=0; ix<NPT; ++ix)
@@ -293,9 +293,8 @@ double specex::PSF::PSFValueWithParamsXY(const double &Xc, const double &Yc,
 					 unbls::vector_double *PosDer, unbls::vector_double *ParamDer,
 					 bool with_core, bool with_tail) const {
   
-  if(PosDer) PosDer->clear();
-  if(ParamDer) ParamDer->clear();
-  
+  if(PosDer) unbls::zero(*PosDer);
+  if(ParamDer) unbls::zero(*ParamDer);
 
   double val = 0;
   if(with_core) val += PixValue(Xc,Yc,IPix, JPix, Params, PosDer, ParamDer); 

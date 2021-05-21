@@ -179,10 +179,10 @@ PYBIND11_MODULE(_libspecex, m) {
 	  for(int d=0;d<nd;d++) table_col1.push_back(table.data[r][1].double_vals[d]);
 
 	  // row2, LEGDEGX
-	  table_col2.push_back(table.data[r][2].int_vals(0));
+	  table_col2.push_back(table.data[r][2].int_vals[0]);
 
 	  // row3, LEGDEGW
-	  table_col3.push_back(table.data[r][3].int_vals(0));
+	  table_col3.push_back(table.data[r][3].int_vals[0]);
 	  
 	}
 	

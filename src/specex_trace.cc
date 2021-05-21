@@ -104,8 +104,9 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   {
     int npar = X_vs_W.coeff.size();
     
-    unbls::matrix_double A(npar,npar); A.clear();
-    unbls::vector_double B(npar); B.clear();
+    unbls::matrix_double A(npar,npar);
+    unbls::zero(A);
+    unbls::vector_double B(npar,0.);
     
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
@@ -129,8 +130,8 @@ bool specex::Trace::Fit(std::vector<specex::Spot_p> spots, bool set_xy_range) {
   // fit y
   {
     int npar = Y_vs_W.coeff.size();
-    unbls::matrix_double A(npar,npar); A.clear();
-    unbls::vector_double B(npar); B.clear();
+    unbls::matrix_double A(npar,npar); unbls::zero(A);
+    unbls::vector_double B(npar,0.);
     for(size_t s=0;s<spots.size();s++) {
       const specex::Spot &spot = *(spots[s]);
       if(spot.fiber != fiber) 

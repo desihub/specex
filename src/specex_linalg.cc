@@ -16,7 +16,7 @@ double specex::dot(const unbls::vector_double& x, int i0, int i1, const unbls::v
   
 // y += alpha*x
 void specex::axpy(const double &alpha, const unbls::vector_double& x,
-		  unbls::vector_double& y) {  
+		  unbls::vector_double& y) {
   specex_axpy(x.size(), &alpha, &x[0],  &y[0]);
 }
 void specex::axpy(const double &alpha, const unbls::vector_double& x, int i0, int i1,
