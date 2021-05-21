@@ -6,6 +6,7 @@
 #include <specex_pyio.h>
 #include <specex_pyimage.h>
 #include <specex_psf_io.h>
+#include <specex_psf_proc.h>
 
 using namespace std;
 
@@ -32,14 +33,9 @@ int specex::PyIO::read_img_datam(specex::PyOptions opts,
   return EXIT_SUCCESS;
 }
 
-int specex::PyIO::prepare_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
+int specex::PyIO::load_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
-  vector <Spot_p> fitted_spots = pypsf.fitted_spots;
-  
-  if(opts.output_xml_filename != "")
-    write_psf_xml(pypsf.psf,opts.output_xml_filename);
-  if(opts.output_fits_filename != "")
-    write_psf_fits(pypsf.psf,opts.output_fits_filename,&fitted_spots);
+  load_psf_work(pypsf.psf);  
   
   return EXIT_SUCCESS;
 
@@ -49,8 +45,9 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
   vector <Spot_p> fitted_spots = pypsf.fitted_spots;
 
-  if(opts.output_spots_filename != "")
-    write_spots_xml(fitted_spots,opts.output_spots_filename);    
+  // xml serialization is removed nothing done here
+  //if(opts.output_spots_filename != "")
+  //  write_spots_xml(fitted_spots,opts.output_spots_filename);    
   
   return EXIT_SUCCESS;
 
@@ -70,7 +67,7 @@ int specex::PyIO::read_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 		       opts.trace_deg_wave);     
     
   }else{ // use_input_specex_psf
-    read_psf_gen(pypsf.psf,opts.input_psf_filename);
+    read_psf_fits(pypsf.psf,opts.input_psf_filename);
   }
     
   return EXIT_SUCCESS;

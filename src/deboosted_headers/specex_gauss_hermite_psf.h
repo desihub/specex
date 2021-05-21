@@ -32,21 +32,21 @@ namespace specex {
     }
     
     double Profile(const double &X, const double &Y,
-		   const harp::vector_double &Params,
-		   harp::vector_double *PosDer = 0,
-		   harp::vector_double *ParamGradient = 0) const;
+		   const unhrp::vector_double &Params,
+		   unhrp::vector_double *PosDer = 0,
+		   unhrp::vector_double *ParamGradient = 0) const;
     
     // needed for analytic integration
     double PixValue(const double &Xc, const double &Yc,
 				     const double &XPix, const double &YPix,
-				     const harp::vector_double &Params,
-				     harp::vector_double *PosDer,
-				 harp::vector_double *ParamDer) const;
+				     const unhrp::vector_double &Params,
+				     unhrp::vector_double *PosDer,
+				 unhrp::vector_double *ParamDer) const;
     
-    harp::vector_double DefaultParams() const;
+    unhrp::vector_double DefaultParams() const;
     std::vector<std::string> DefaultParamNames() const;
     
-    bool CheckParams(const harp::vector_double &Params) const 
+    bool CheckParams(const unhrp::vector_double &Params) const 
     { return true;}
     
     void Append(const specex::PSF_p other);

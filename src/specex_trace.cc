@@ -9,7 +9,7 @@
 #include <specex_spot_array.h>
 #include <specex_vector_utils.h>
 #include <specex_unbst.h>
-#include <specex_unhrp.h>
+
 
 specex::Trace::Trace(int i_fiber) :
   fiber(i_fiber)

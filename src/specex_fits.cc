@@ -3,8 +3,7 @@
 #include <string>
 #include <sstream>
 
-//#include <harp.hpp>
-
+//#include <unhrp.h>
 #include <specex_image_data.h>
 #include <specex_fits.h>
 #include <specex_message.h>
@@ -128,7 +127,7 @@ string specex::FitsTable::encode_dimension(const std::vector<int>& dimension) co
 
 
 
-void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const harp::vector_double& data) {
+void specex::write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const unhrp::vector_double& data) {
   
   if(data.size() != (n_rows*n_cols))
     SPECEX_ERROR("Incompatible number of columns x rows and vector size");
@@ -148,7 +147,7 @@ void specex::write_new_fits_image(std::string const & path, const image_data& im
   SPECEX_INFO("wrote image in file " << path);
 }
 
-void specex::write_new_fits_image(std::string const & path, const harp::matrix_double& mat) {
+void specex::write_new_fits_image(std::string const & path, const unhrp::matrix_double& mat) {
   specex::write_new_fits_image(path, mat.size1(), mat.size2() , mat.data()); 
   SPECEX_INFO("wrote matrix in file " << path);
 }
@@ -293,24 +292,6 @@ bool specex::FitsTable::Write(fitsfile *fp) const {
   }
  
   // now we need to write the data .........
-#ifdef EXAMPLE
-  int fits_write_col / ffpcl
-      (fitsfile *fptr, int datatype, int colnum, LONGLONG firstrow,
-       LONGLONG firstelem, LONGLONG nelements, DTYPE *array, > int *status)
-       firstrow  = 1;  /* first row in table to write   */
-    firstelem = 1;  /* first element in row  (ignored in ASCII tables) */
-
-    /* write names to the first column (character strings) */
-    /* write diameters to the second column (longs) */
-    /* write density to the third column (floats) */
-
-    fits_write_col(fptr, TSTRING, 1, firstrow, firstelem, nrows, planet,
-                   &status);
-    fits_write_col(fptr, TLONG, 2, firstrow, firstelem, nrows, diameter,
-                   &status);
-    fits_write_col(fptr, TFLOAT, 3, firstrow, firstelem, nrows, density,
-                   &status);
-#endif
 
     // Automatic data type conversion is performed for numerical data types (only) if the data type of the column (defined by the TFORMn keyword) differs from the data type of the array in the calling routine. ASCII and binary tables support the following data type values: TSTRING, TBYTE, TSBYTE, TSHORT, TUSHORT, TINT, TUINT, TLONG, TLONGLONG, TULONG, TFLOAT, or TDOUBLE. Binary tables also support TLOGICAL (internally mapped to the `char' data type), TCOMPLEX, and TDBLCOMPLEX. 
 

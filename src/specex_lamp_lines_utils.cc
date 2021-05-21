@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include "specex_spot.h"
 #include "specex_trace.h"

@@ -26,14 +26,14 @@ namespace specex {
     int LocalNAllPar() const;
     
     double Profile(const double &X, const double &Y,
-		   const harp::vector_double &Params,
-		   harp::vector_double *PosDer = 0,
-		   harp::vector_double *ParamGradient = 0) const;
+		   const unhrp::vector_double &Params,
+		   unhrp::vector_double *PosDer = 0,
+		   unhrp::vector_double *ParamGradient = 0) const;
     
-    harp::vector_double DefaultParams() const;
+    unhrp::vector_double DefaultParams() const;
     std::vector<std::string> DefaultParamNames() const;
     
-    bool CheckParams(const harp::vector_double &Params) const 
+    bool CheckParams(const unhrp::vector_double &Params) const 
     { return true;}
     
     void Append(const specex::PSF_p other);
@@ -42,8 +42,8 @@ namespace specex {
     // will be optimized. for now a hack for the tail at the boundary of core radius
     virtual double PSFValueWithParamsXY(const double& X, const double &Y, 
 					const int IPix, const int JPix,
-					const harp::vector_double &Params,
-					harp::vector_double *PosDer, harp::vector_double *ParamDer,
+					const unhrp::vector_double &Params,
+					unhrp::vector_double *PosDer, unhrp::vector_double *ParamDer,
 					bool with_core=true, bool with_tail=true) const;
     
 

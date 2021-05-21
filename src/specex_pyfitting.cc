@@ -6,7 +6,7 @@
 
 #include <boost/program_options.hpp>
 
-#include <harp.hpp>
+#include <unhrp.h>
 
 #include <specex_message.h>
 
@@ -246,8 +246,8 @@ int specex::PyFitting::fit_psf(
 			       min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
-      if(write_tmp_results)
-	write_spots_xml(spots,"spots-init.xml");
+      //if(write_tmp_results)
+      //  write_spots_xml(spots,"spots-init.xml");
       
       // starting fit
       // --------------------------------------------

@@ -43,11 +43,11 @@ specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const doub
 
 
 
-harp::vector_double specex::Legendre1DPol::Monomials(const double &x) const {
+unhrp::vector_double specex::Legendre1DPol::Monomials(const double &x) const {
 
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
-  harp::vector_double m(deg+1);
+  unhrp::vector_double m(deg+1);
   for(int i=0;i<=deg;i++) {
     m[i]=LegendrePol(i,rx);
   }
@@ -59,7 +59,7 @@ double specex::Legendre1DPol::Value(const double &x) const {
   return specex::dot(coeff,Monomials(x));
 }
 
-bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector_double& Y, const harp::vector_double* Yerr, bool set_range) {
+bool specex::Legendre1DPol::Fit(const unhrp::vector_double& X, const unhrp::vector_double& Y, const unhrp::vector_double* Yerr, bool set_range) {
    // fit x
   
   if(X.size() != Y.size()) SPECEX_ERROR("Legendre1DPol::Fit, not same size X:" << X.size() << " Y:" << Y.size());
@@ -72,8 +72,8 @@ bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector
     specex::minmax(X,xmin,xmax);
   }
   
-  harp::matrix_double A(npar,npar); A.clear();
-  harp::vector_double B(npar); B.clear();
+  unhrp::matrix_double A(npar,npar); A.clear();
+  unhrp::vector_double B(npar); B.clear();
   
   
   
@@ -83,12 +83,12 @@ bool specex::Legendre1DPol::Fit(const harp::vector_double& X, const harp::vector
       w=1./square((*Yerr)[i]);
     }
     
-    harp::vector_double h=Monomials(X[i]);
+    unhrp::vector_double h=Monomials(X[i]);
     specex::syr(w,h,A); // A += w*Mat(h)*h.transposed();
     specex::axpy(double(w*Y[i]),h,B); //B += (w*Y[i])*h;
   }
 
-  //harp::matrix_double As=A;
+  //unhrp::matrix_double As=A;
   int status = cholesky_solve(A,B);
   if(status != 0) {
     //write_new_fits_image("A.fits",As);
@@ -120,11 +120,11 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   int npar = inverse.deg + 1;
   int ndata = npar*4;  // 
   double dx = (xmax-xmin)/ndata;
-  harp::vector_double X(ndata);
-  harp::vector_double Y(ndata);
+  unhrp::vector_double X(ndata);
+  unhrp::vector_double Y(ndata);
   for(int i=0;i<ndata;i++) {
-    X(i) = xmin+i*dx;
-    Y(i) = Value(X(i));
+    X[i] = xmin+i*dx;
+    Y[i] = Value(X[i]);
   }
   bool ok = inverse.Fit(Y,X,0,true);
   if(!ok) abort();
@@ -139,11 +139,11 @@ specex::Legendre1DPol specex::composed_pol(const specex::Legendre1DPol& pol1, co
   int npar = composed.deg + 1;
   int ndata = npar*4;  // 
   double dx = (pol2.xmax-pol2.xmin)/ndata;
-  harp::vector_double X2(ndata);
-  harp::vector_double Y1(ndata);
+  unhrp::vector_double X2(ndata);
+  unhrp::vector_double Y1(ndata);
   for(int i=0;i<ndata;i++) {
-    X2(i) = pol2.xmin+i*dx;
-    Y1(i) = pol1.Value(pol2.Value(X2(i)));
+    X2[i] = pol2.xmin+i*dx;
+    Y1[i] = pol1.Value(pol2.Value(X2[i]));
   }
   bool ok = composed.Fit(X2,Y1,0,true);
   if(!ok) abort();
@@ -171,17 +171,17 @@ void specex::Legendre2DPol::Fill() {
   coeff.clear();
 }
  
-harp::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {
+unhrp::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {
   
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
-  harp::vector_double mx(xdeg+1); mx.clear();
+  unhrp::vector_double mx(xdeg+1); mx.clear();
   for(int i=0;i<=xdeg;i++)
     mx[i]=LegendrePol(i,rx);
   
-  harp::vector_double m((xdeg+1)*(ydeg+1));
+  unhrp::vector_double m((xdeg+1)*(ydeg+1));
   int index=0;
   for(int j=0;j<=ydeg;j++) {
     double myj = LegendrePol(j,ry);
@@ -256,14 +256,14 @@ void specex::SparseLegendre2DPol::Clear() {
 }
 
 
-harp::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, const double &y) const {
+unhrp::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, const double &y) const {
   
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
   
-  harp::vector_double m(non_zero_indices.size()); m.clear();
+  unhrp::vector_double m(non_zero_indices.size()); m.clear();
   int index=0;
   for(std::vector<int>::const_iterator k = non_zero_indices.begin(); k!=  non_zero_indices.end(); k++, index++) {
     int i = (*k)%(xdeg+1);

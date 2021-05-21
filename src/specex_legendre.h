@@ -3,8 +3,7 @@
 
 #include <string>
 
-#include <harp.hpp>
-#include <specex_unhrp.h>
+#include <unhrp.h>
 
 using namespace std;
  

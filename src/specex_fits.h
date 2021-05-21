@@ -7,9 +7,9 @@ namespace specex {
 
   class image_data;
 
-  void write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const harp::vector_double& data);
+  void write_new_fits_image(std::string const & path, size_t n_rows, size_t n_cols, const unhrp::vector_double& data);
   void write_new_fits_image(std::string const & path, const image_data& img);
-  void write_new_fits_image(std::string const & path, const harp::matrix_double& mat);
+  void write_new_fits_image(std::string const & path, const unhrp::matrix_double& mat);
   
   void read_fits_image(std::string const & path, int hdu, image_data& img);
   void read_fits_image(std::string const & path, image_data& img_in_hdu1);
@@ -38,10 +38,10 @@ namespace specex {
   };
   
   class FitsTableEntry {
-  public :
-    std::string string_val; // can be empty
-    boost::numeric::ublas::vector<double> double_vals; // can be empty
-    boost::numeric::ublas::vector<int>    int_vals; // can be empty
+  public :    
+    std::string string_val;           // can be empty
+    unhrp::vector_double double_vals; // can be empty
+    unhrp::vector_int       int_vals; // can be empty
   };
   
   class FitsTable {

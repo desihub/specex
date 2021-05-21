@@ -5,10 +5,6 @@
 #include <string>
 #include <memory>
 
-//#include <harp.hpp>
-
-//#include "spec2dpsf.h"
-
 namespace specex {
   
   class Spot {
