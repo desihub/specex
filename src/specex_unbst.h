@@ -1,6 +1,6 @@
 #ifndef SPECEX_UNBST__H
 #define SPECEX_UNBST__H
-#include <unbls.h>
+#include <specex_unbls.h>
 #include <vector>
 #include <type_traits>
 

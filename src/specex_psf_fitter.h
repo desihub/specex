@@ -5,7 +5,7 @@
 #include <string>
 #include <map>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include "specex_psf.h"
 #include "specex_spot.h"

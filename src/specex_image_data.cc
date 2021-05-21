@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <string>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include <specex_image_data.h>
 #include <specex_linalg.h>

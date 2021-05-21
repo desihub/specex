@@ -9,7 +9,7 @@
 #include "specex_fits.h"
 #include "specex_psf.h"
 #include "specex_unbst.h"
-#include <unbls.h>
+#include <specex_unbls.h>
 
 using namespace std;
 

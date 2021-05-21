@@ -1,7 +1,7 @@
 #ifndef SPECEX_LINALG__H
 #define SPECEX_LINALG__H
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 namespace specex {
     

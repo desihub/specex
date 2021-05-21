@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <time.h>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include "specex_psf_fitter.h"
 #include "specex_brent.h"
