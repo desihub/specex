@@ -29,8 +29,6 @@ class Legendre1DPol
 
 typedef std::shared_ptr < specex::Legendre1DPol > Legendre1DPol_p;
   
-Legendre1DPol composed_pol(const Legendre1DPol& pol1, const Legendre1DPol& pol2); 
-
 class Legendre2DPol
 {
 

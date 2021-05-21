@@ -29,38 +29,6 @@ float FArrayMedian(float *array, const int size)
 }
 
 
-void Dmean_median_sigma(double *values, const int nval, double &mean,  double &median, double &sigma)
-{
-  mean =0;
-  sigma =0;
-  median = DArrayMedian(values, nval);
-  for (int i=nval-1; i >= 0 ; --i)
-    {
-      mean += values[i];
-      sigma += values[i]*values[i];
-    }
-  mean /= double(nval);
-  sigma = sigma/double(nval) - mean*mean;
-  if (sigma>0)  sigma = sqrt(sigma); else sigma = 0;
-}
-
-float Fmedian_sigma(float *values, const int nval, float &sigma)
-{
-  double dmean =0;
-  double dsigma =0;
-  double median = FArrayMedian(values, nval);
-  for (int i=nval-1; i>=0 ; --i)
-    {
-      dmean += values[i];
-      dsigma += values[i]*values[i];
-    }
-  dmean /= double(nval);
-  dsigma = dsigma/double(nval) - dmean * dmean;
-  if (dsigma>0)  sigma = sqrt(dsigma); else sigma = 0;
-  return median;
-}
-
-
 
 
 

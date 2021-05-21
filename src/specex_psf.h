@@ -247,8 +247,7 @@ public :
     virtual int LocalNAllPar() const = 0; // number of all the parameters parameters needed to describe psf at fixed ccd position
     virtual double Degree() const = 0; 
     int BundleNFitPar(int bundle_id) const; // number of parameters to be fitted  needed to describe psf varying with xy ccd coordinates
-    int BundleNAllPar(int bundle_id) const; // number of all the parameters needed to describe psf varying with xy ccd coordinates
-    
+   
     bool IsLinear() const; // true if PSF linear wrt PSF params
 
 
@@ -280,9 +279,6 @@ public :
     unbls::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
     unbls::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
     unbls::vector_double AllLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
-
-    unbls::vector_double FitLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    unbls::vector_double FitLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
     
     virtual void Append(const std::shared_ptr < specex::PSF > other) = 0;
     

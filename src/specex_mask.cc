@@ -9,14 +9,8 @@
 specex::Mask::Mask() {
 }
 
-void specex::Mask::AddWavelengthInterval(const double& min_wave, const double& max_wave) {
-  cout << "INFO specex::Mask masking wavelength range [" << min_wave << "," << max_wave << "]" << endl;
-  WaveIntervals.push_back(Interval(min_wave,max_wave));
-}
-  
 void specex::Mask::ApplyMaskToImage(specex::image_data& img, const specex::PSF& psf, const double& value) const{
 
-  //cout << "DEBUG specex::PSF_Fitter::FitSeveralSpots nx ny " << img.Nx() << " " << img.Ny() << endl;
   int hsize = 5;
   for(size_t m=0;m<WaveIntervals.size();m++) {
     const Interval& inter=WaveIntervals[m];

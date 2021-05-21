@@ -26,7 +26,6 @@ class Mask {
   std::vector<Interval> WaveIntervals; // do not fit psf in those wavelength intervals, primarily because of missing lines
   
   Mask();
-  void AddWavelengthInterval(const double& min_wave, const double& max_wave); 
   void ApplyMaskToImage(image_data& img, const PSF& psf, const double& value=0) const;
   void Clear() { WaveIntervals.clear();}
 };

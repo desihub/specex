@@ -194,15 +194,6 @@ int specex::PSF::BundleNFitPar(int bundle_id) const {
     n += P[p]->coeff.size();
   return n;
 }
-int specex::PSF::BundleNAllPar(int bundle_id) const {
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.AllParPolXW;
-  int n=0;
-  for(size_t p=0;p<P.size();p++)
-    n += P[p]->coeff.size();
-  return n;
-}
 
 specex::PSF::~PSF() {
 }
@@ -380,18 +371,6 @@ unbls::vector_double specex::PSF::AllLocalParamsFW(const int fiber, const double
   return AllLocalParamsXW(X,wave,bundle_id);
 }
 
-unbls::vector_double specex::PSF::FitLocalParamsXW(const double &X, const double &wave, int bundle_id) const {
-  
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.FitParPolXW;
-  
-  unbls::vector_double params(P.size());
-  for (size_t k =0; k < P.size(); ++k)
-    params[k] = P[k]->Value(X,wave);
-  return params;
-}
-
 unbls::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   
   
@@ -426,25 +405,6 @@ unbls::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const do
   }
   return params;
 }
-
-unbls::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
-  
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.FitParPolXW;
-  
-  unbls::vector_double params(P.size());
-  
-  if(BundleNFitPar(bundle_id)>ForThesePSFParams.size()) SPECEX_ERROR("VaryingCoordNPar(bundle_id)<=ForThesePSFParams.size()");
-  
-  int index=0;
-  for (size_t k =0; k < P.size(); ++k) {
-    size_t c_size = P[k]->coeff.size();
-    params[k]=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
-    index += c_size;
-  }
-  return params;
-}  
 
 bool specex::PSF::IsLinear() const {
   if(Name() == "GAUSSHERMITE") return true;

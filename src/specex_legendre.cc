@@ -129,25 +129,6 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   return inverse;
 }
 
-specex::Legendre1DPol specex::composed_pol(const specex::Legendre1DPol& pol1, const specex::Legendre1DPol& pol2) {
-  specex::Legendre1DPol composed;
-  composed.deg = max(pol1.deg,pol2.deg);
-  composed.coeff.resize(composed.deg+1);
-  composed.coeff.clear();
-  int npar = composed.deg + 1;
-  int ndata = npar*4;  // 
-  double dx = (pol2.xmax-pol2.xmin)/ndata;
-  unbls::vector_double X2(ndata);
-  unbls::vector_double Y1(ndata);
-  for(int i=0;i<ndata;i++) {
-    X2[i] = pol2.xmin+i*dx;
-    Y1[i] = pol1.Value(pol2.Value(X2[i]));
-  }
-  bool ok = composed.Fit(X2,Y1,0,true);
-  if(!ok) abort();
-  return composed;
-}
-
 //============================
 
 specex::Legendre2DPol::Legendre2DPol(int i_xdeg, const double& i_xmin, const double& i_xmax,

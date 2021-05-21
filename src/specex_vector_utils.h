@@ -15,12 +15,6 @@ double DConstArrayMedian(const double *array, const int size);
 //!
 float FArrayMedian(float *array, const int size);
 
-//! returns mean, median and rms of an array.
-void Dmean_median_sigma(double *values, const int nval, double &mean,  double &median, double &sigma);
-
-//! returns median and rms of an array
-float Fmedian_sigma(float *values, const int nval, float &sigma);
-
 /*! fit a gaussian on a region about mean of half width k-sigma, return mean
  * if first_evalutation, mean and sigma are guessed with  DConst_mean_median_sigma (using median)
  */
