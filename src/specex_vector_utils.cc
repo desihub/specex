@@ -20,13 +20,6 @@ double DConstArrayMedian(const double *array, const int size)
   delete [] to_delete;
   return median;
 }
- 
-
-float FArrayMedian(float *array, const int size)
-{
-  sort(array, array+size);
-  return size&1? array[size/2] : (array[size/2-1] + array[size/2])*0.5;
-}
 
 
 
