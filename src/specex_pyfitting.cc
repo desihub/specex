@@ -65,10 +65,7 @@ int specex::PyFitting::fit_psf(
 
   // set logging info
 
-  specex_set_debug(opts.vm.count("debug")>0);
-  specex_set_verbose(opts.vm.count("quiet")==0);
-  specex_set_dump_core(opts.vm.count("core")>0);
-
+  /*
   bool fit_traces = (opts.vm.count("no-trace-fit")==0);
   bool fit_sigmas = (opts.vm.count("no-sigma-fit")==0);
   bool fit_thepsf = (opts.vm.count("no-psf-fit")==0);
@@ -85,9 +82,11 @@ int specex::PyFitting::fit_psf(
   bool single_bundle = (opts.vm.count("single-bundle")>0);
   
   bool write_tmp_results = (opts.vm.count("tmp-results")>0);
+  */
   
   if(opts.trace_prior_deg>0) SPECEX_INFO("Will apply a prior on the traces high order terms in a bundle");
-    
+
+  /*
 #ifdef EXTERNAL_TAIL
   bool fit_psf_tails = (opts.vm.count("fit-psf-tails")>0);
 #endif
@@ -96,7 +95,7 @@ int specex::PyFitting::fit_psf(
 #endif
   bool use_variance_model = (opts.vm.count("variance-model")>0);
   bool fit_individual_spots_position = opts.vm.count("positions");
-  
+  */
   SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename); 
   
   // set broken fibers
@@ -121,7 +120,7 @@ int specex::PyFitting::fit_psf(
   
   // bundle sizes
   int number_of_fibers_per_bundle=0;
-  if(single_bundle) {
+  if(opts.single_bundle) {
     number_of_fibers_per_bundle = psf->FiberTraces.size();
   }else {
     number_of_fibers_per_bundle = eval_bundle_size(psf->FiberTraces);
@@ -145,22 +144,22 @@ int specex::PyFitting::fit_psf(
     fitter.polynomial_degree_along_wave = opts.legendre_deg_wave;
     fitter.psf->psf_error               = opts.psf_error;
     fitter.corefootprint_weight_bst     = opts.psf_core_wscale;
-    fitter.write_tmp_results            = write_tmp_results;
+    fitter.write_tmp_results            = opts.write_tmp_results;
     fitter.trace_prior_deg              = opts.trace_prior_deg;
     
 #ifdef EXTERNAL_TAIL
-    fitter.scheduled_fit_of_psf_tail    = fit_psf_tails;
+    fitter.scheduled_fit_of_psf_tail    = opts.fit_psf_tails;
 #endif
 
 #ifdef CONTINUUM
-    fitter.scheduled_fit_of_continuum   = fit_continuum;
+    fitter.scheduled_fit_of_continuum   = opts.fit_continuum;
 #endif
 
-    fitter.scheduled_fit_with_weight_model  = use_variance_model;
+    fitter.scheduled_fit_with_weight_model  = opts.use_variance_model;
     
-    fitter.scheduled_fit_of_traces      = fit_traces;
-    fitter.scheduled_fit_of_sigmas      = fit_sigmas;
-    fitter.scheduled_fit_of_psf         = fit_thepsf;
+    fitter.scheduled_fit_of_traces      = opts.fit_traces;
+    fitter.scheduled_fit_of_sigmas      = opts.fit_sigmas;
+    fitter.scheduled_fit_of_psf         = opts.fit_thepsf;
     fitter.direct_simultaneous_fit      = true; // use_input_specex_psf;
     fitter.max_number_of_lines          = opts.max_number_of_lines;
     
@@ -272,7 +271,7 @@ int specex::PyFitting::fit_psf(
 	pyps.fitted_spots.push_back(spots[s]);
       }
 
-      if(fit_individual_spots_position) // for debugging
+      if(opts.fit_individual_spots_position) // for debugging
 	fitter.FitIndividualSpotPositions(spots);
 
     } // end of loop on bundles
