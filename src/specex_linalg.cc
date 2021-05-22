@@ -36,29 +36,40 @@ void specex::syr(const double& alpha, const unbls::vector_double& x, int i0, int
 
 // C = alpha*A*A**T + beta*C
 void specex::syrk(const double& alpha, const unbls::matrix_double &A, const double& beta, unbls::matrix_double &C) {
-  specex_syrk(A.size1(), A.size2(), &alpha, &A(0,0), &beta, &C(0,0));
+  int Asize1 = A.size1();
+  int Asize2 = A.size2();
+  specex_syrk(Asize1, Asize2, &alpha, &A(0,0), &beta, &C(0,0));
 }
 
 // y = alpha*A*x + beta*y 
 void specex::gemv(const double &alpha,  const unbls::matrix_double &A,  const unbls::vector_double& x, const double &beta, unbls::vector_double& y) {  
-  specex_gemv(A.size1(),A.size2(), &alpha, &A(0,0), &x[0], &beta, &y[0]);  
+  int Asize1 = A.size1();
+  int Asize2 = A.size2();
+  specex_gemv(Asize1,Asize2, &alpha, &A(0,0), &x[0], &beta, &y[0]);  
 }
 
 // C = alpha*A*B + beta*C
 void specex::gemm(const double& alpha, const unbls::matrix_double &A, const unbls::matrix_double &B, const double& beta, unbls::matrix_double &C) {
-  specex_gemm(A.size1(), B.size2(), A.size2(), &alpha, &A(0,0), &B(0,0), &beta, &C(0,0));  
+  int Asize1 = A.size1();
+  int Asize2 = A.size2();
+  int Bsize2 = B.size2();
+  specex_gemm(A.size1(), Bsize2, Asize2, &alpha, &A(0,0), &B(0,0), &beta, &C(0,0));  
 }
 
 // returns the solution, x, to a real system of linear equations
 //   A * x = b,
 // solution is returned in b, i.e. b --> x, for return value 0
 int specex::cholesky_solve(unbls::matrix_double& A, unbls::vector_double& b) {
-  return specex_posv(b.size(),&A(0,0),&b[0]);
+  
+  int retval = specex_posv(b.size(),&A(0,0),&b[0]);
+  
+  return retval;
 }
 
 // invert matrix A in place; A := inv(A)
 int specex::cholesky_invert_after_decomposition(unbls::matrix_double& A) {
-  return specex_potri(A.size1(),&A(0,0));
+  int Asize1 = A.size1();
+  return specex_potri(Asize1,&A(0,0));
 }
 
 // min and max of vector

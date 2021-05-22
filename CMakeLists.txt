@@ -41,9 +41,10 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/specex_vector_utils.cc
 	    src/specex_blas.c
 	    src/specex_lapack.c
-	    src/specex_unbst.cc
 	    src/specex_image_data_base.cc
     	    src/specex_fits.cc
+	    src/specex_unbst.cc
+	    src/specex_unbls.cc
 	    )
 
 # look for BLAS/LAPACK with MKL first
@@ -95,8 +96,7 @@ target_include_directories(_libspecex
 target_link_directories(_libspecex
 	PUBLIC)
 	
-#target_link_libraries(_libspecex PUBLIC "-lharp -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt" ${BLAS_LIBRARIES})
-target_link_libraries(_libspecex PUBLIC "-lcfitsio -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt" ${BLAS_LIBRARIES})
+target_link_libraries(_libspecex PUBLIC "-lcfitsio -lboost_program_options-mt" ${BLAS_LIBRARIES})
 
 set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
 

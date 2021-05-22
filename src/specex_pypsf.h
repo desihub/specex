@@ -1,7 +1,6 @@
 #ifndef SPECEX_PYPSF__H
 #define SPECEX_PYPSF__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
 

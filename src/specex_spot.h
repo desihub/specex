@@ -9,8 +9,6 @@ namespace specex {
   
   class Spot {
 
-//    friend class boost::serialization::access;
-    
   public :
     
     double wavelength; 

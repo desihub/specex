@@ -13,9 +13,6 @@
 #include "specex_mask.h"
 #include "specex_image_data.h"
 
-
-
-
 namespace specex {
 
   class SpotTmpData  {
@@ -95,7 +92,7 @@ class PSF_Fitter {
   image_data corefootprint;  
   Stamp stamp; // rectangle in image where the fit occurs
   
-  double corefootprint_weight_boost;
+  double corefootprint_weight_bst;
   bool fit_psf;
   bool fit_trace;
   bool fit_flux;
@@ -143,7 +140,7 @@ class PSF_Fitter {
     weight(i_weight),
     readnoise(i_readnoise),
     stamp(i_image),
-    corefootprint_weight_boost(0), 
+    corefootprint_weight_bst(0), 
     fit_psf(false),
     fit_trace(false),
     fit_flux(false),
@@ -170,12 +167,10 @@ class PSF_Fitter {
     write_tmp_results(false),
     trace_prior_deg(0),
     fatal(true),
-    parallelized(true),
-        
+    parallelized(true),        
     polynomial_degree_along_x(1),
     polynomial_degree_along_wave(4),
     max_number_of_lines(0)
-
 
       {
       };

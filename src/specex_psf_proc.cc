@@ -1,3 +1,4 @@
+#include <cmath>
 #include <specex_psf.h>
 #include <specex_psf_proc.h>
 #include <specex_spot.h>

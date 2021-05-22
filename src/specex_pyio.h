@@ -1,7 +1,6 @@
 #ifndef SPECEX_PYIO__H
 #define SPECEX_PYIO__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
 

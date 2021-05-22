@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstdio>
 #include <string>
+#include <cmath>
 
 #include <specex_unbls.h>
 

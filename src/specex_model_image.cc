@@ -1,3 +1,4 @@
+#include <cmath>
 #include <specex_model_image.h>
 #include <specex_message.h>
 #include <specex_psf.h>

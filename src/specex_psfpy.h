@@ -1,7 +1,6 @@
 #ifndef SPECEX_PSFPY__H
 #define SPECEX_PSFPY__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
 

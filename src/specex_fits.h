@@ -1,8 +1,6 @@
 #ifndef SPECEX_FITS__H
 #define SPECEX_FITS__H
 
-#include <boost/numeric/ublas/io.hpp>
-
 namespace specex {
 
   class image_data;

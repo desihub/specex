@@ -1,7 +1,6 @@
 #include <string>
 #include <iostream>
 #include <specex_pyoptions.h>
-#include <boost/program_options.hpp>
 
 using namespace std;
 

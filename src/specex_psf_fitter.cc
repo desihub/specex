@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <assert.h>
 #include <time.h>
 
@@ -188,7 +190,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   }
   if(compute_ab) {
     for(int band=1; band<number_of_image_bands; band++) {
-      A_of_band[0] += A_of_band[band];      
+      unbst::subadd(A_of_band[band].vals,A_of_band[0].vals,0,1.0);
       unbst::subadd(B_of_band[band],B_of_band[0],0,1.0);
     }
   }
@@ -405,9 +407,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     
     }// will remain zero if (!fit_psf)
     if(fit_position || fit_trace) {gradPos.resize(2); gradPos_pointer = &gradPos;}
-  
-    
-    
+
   }
  
   bool use_footprint = (spot_tmp_data.size()>1 && footprint_weight.Nx()>0);
@@ -599,9 +599,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       }
       
       
-      if(corefootprint_weight_boost>0 && corefootprint.n_rows()>0 && corefootprint(i,j)>0) {
-	wscale *= corefootprint_weight_boost;
-	w *= corefootprint_weight_boost;
+      if(corefootprint_weight_bst>0 && corefootprint.n_rows()>0 && corefootprint(i,j)>0) {
+	wscale *= corefootprint_weight_bst;
+	w *= corefootprint_weight_bst;
       }
       
       res -= signal;
@@ -1250,7 +1250,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
   // ----------------------------------------------------
   
-  if(corefootprint_weight_boost>0) {
+  if(corefootprint_weight_bst>0) {
     corefootprint = image;
     unbls::zero(corefootprint.data);
     int core_hsize=2;
@@ -1370,9 +1370,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       
   SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots inc. signal in w=" << include_signal_in_weight << ", npix footprint = " << *npix);
 
-
-
-
   ////////////////////////////////////////////////////////////////////////// 
   number_of_image_bands = 1;
   if(parallelized) {
@@ -1470,7 +1467,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots linear because only fit tail and continuum");
       linear = true;
     } 
-
     
     bool use_brent = true;
     
@@ -1809,7 +1805,7 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
   bool ok = FitSeveralSpots(spots,&(spot->chi2),n_iterations);
   parallelized=true;
   
-  if(true) {
+  if(false) {
     
     if(ok) {
       cout << "INFO specex::PSF_Fitter::FitOneSpot successful fit of flux";
@@ -1838,8 +1834,8 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   // TURN OFF ALL MESSAGES HERE
   bool saved_debug = specex_is_debug();
   bool saved_info  = specex_is_verbose();
-  //specex_set_debug(false);
-  //specex_set_verbose(false);
+  specex_set_debug(false);
+  specex_set_verbose(false);
     
   fit_flux                 = true;
   fit_position             = false;
@@ -1860,7 +1856,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   int nok=0;
   int nfailed=0;
   for(size_t s=0;s<spots.size();s++) {
-    std::cout << "fitting " << s << "/" << spots.size() << std::endl;
+    //std::cout << "fitting " << s << "/" << spots.size() << std::endl;
     specex::Spot_p& spot = spots[s];    
     spot->eflux = 0;
     spot->flux = 0;	

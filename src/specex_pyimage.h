@@ -1,7 +1,6 @@
 #ifndef SPECEX_PYIMAGE__H
 #define SPECEX_PYIMAGE__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
 

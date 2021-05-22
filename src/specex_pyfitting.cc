@@ -4,8 +4,6 @@
 #include <string>
 #include <map>
 
-#include <boost/program_options.hpp>
-
 #include <specex_unbls.h>
 
 #include <specex_message.h>
@@ -146,7 +144,7 @@ int specex::PyFitting::fit_psf(
     fitter.polynomial_degree_along_x    = opts.legendre_deg_x;
     fitter.polynomial_degree_along_wave = opts.legendre_deg_wave;
     fitter.psf->psf_error               = opts.psf_error;
-    fitter.corefootprint_weight_boost   = opts.psf_core_wscale;
+    fitter.corefootprint_weight_bst     = opts.psf_core_wscale;
     fitter.write_tmp_results            = write_tmp_results;
     fitter.trace_prior_deg              = opts.trace_prior_deg;
     

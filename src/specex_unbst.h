@@ -4,7 +4,7 @@
 #include <vector>
 #include <type_traits>
 
-// unbst: functions to replace basic boost vector operations
+// unbst: functions for basic vector operations
 
 namespace specex::unbst {
 

@@ -8,20 +8,14 @@
 
 #include "specex_legendre.h"
 #include "specex_spot.h"
-#include <boost/serialization/map.hpp>
 
-namespace specex {
-  
-  
+namespace specex {  
 
 #define SPECEX_TRACE_DEFAULT_LEGENDRE_POL_DEGREE 6
   
   class Trace {
     
-    friend class boost::serialization::access;
-    
-  protected :
-    
+  protected :    
     
   public :
     

@@ -43,8 +43,6 @@ namespace specex {
   
   class PSF_Params  {
 
-//    friend class boost::serialization::access;
-
   public :
     
     // those are polynomials of x_cdd and lambda to allow continuous variation in CCD and at the same time
