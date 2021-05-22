@@ -4,8 +4,10 @@
 
 using namespace std;
 
-namespace popts = boost::program_options;
-
+#ifdef GETOPT
+int specex::PyOptions::parse(int argc, char *argv[] ){
+}
+#else
 int specex::PyOptions::parse(int argc, char *argv[] ){
 
   // reading arguments
@@ -106,4 +108,4 @@ int specex::PyOptions::parse(int argc, char *argv[] ){
   return EXIT_SUCCESS;
   
 }
-
+#endif

@@ -1,15 +1,18 @@
 #ifndef SPECEX_PYOPTIONS__H
 #define SPECEX_PYOPTIONS__H
 
-#include <boost/program_options.hpp>
+//#define GETOPT
+
 #include <vector>
 #include <string>
-
 #include <specex_unbls.h>
-
 #include <specex_psf_fitter.h>
 
+
+#ifndef GETOPT
+#include <boost/program_options.hpp>
 namespace popts = boost::program_options;
+#endif
 
 namespace specex {
   
@@ -62,7 +65,9 @@ namespace specex {
     int parse(int argc, char *argv[] ); 
 
     PyOptions()
-      : desc(popts::options_description("Options")) 
+#ifndef GETOPT
+      : desc(popts::options_description("Options"))
+#endif
       {
         
       arc_image_filename="";
