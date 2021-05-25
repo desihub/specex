@@ -31,16 +31,6 @@ int specex::PyIO::set_inputpsf(specex::PyOptions opts){
   
   use_input_specex_psf = true;
 
-#ifndef GETOPT
-  psf_change_req |= (! opts.vm["half-size-x"].defaulted());
-  psf_change_req |= (! opts.vm["half-size-y"].defaulted());
-  psf_change_req |= (! opts.vm["gauss-hermite-deg"].defaulted());
-  psf_change_req |= (! opts.vm["gauss-hermite-deg2"].defaulted());
-  psf_change_req |= (! opts.vm["legendre-deg-wave"].defaulted());
-  psf_change_req |= (! opts.vm["legendre-deg-x"].defaulted());
-  psf_change_req |= (! opts.vm["trace-deg-wave"].defaulted());
-  psf_change_req |= (! opts.vm["trace-deg-x"].defaulted());  
-#else
   psf_change_req |= (! opts.half_size_x_def);
   psf_change_req |= (! opts.half_size_y_def);
   psf_change_req |= (! opts.gauss_hermite_deg_def);
@@ -49,7 +39,6 @@ int specex::PyIO::set_inputpsf(specex::PyOptions opts){
   psf_change_req |= (! opts.legendre_deg_x_def);
   psf_change_req |= (! opts.trace_deg_wave_def);
   psf_change_req |= (! opts.trace_deg_x_def);
-#endif
   
   if(psf_change_req && use_input_specex_psf) {
     SPECEX_WARNING("option(s) were given to specify the psf properties, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");

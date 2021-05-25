@@ -1,19 +1,12 @@
 #ifndef SPECEX_PYOPTIONS__H
 #define SPECEX_PYOPTIONS__H
 
-#define GETOPT
-
 #include <vector>
 #include <string>
 #include <specex_unbls.h>
 #include <specex_psf_fitter.h>
 #include <getopt.h>
 #include <map>
-
-#ifndef GETOPT
-#include <boost/program_options.hpp>
-namespace popts = boost::program_options;
-#endif
 
 namespace specex {
   
@@ -59,11 +52,6 @@ namespace specex {
     std::string lamp_lines_filename;
     std::vector<std::string> argurment_priors;
         
-#ifndef GETOPT
-    popts::variables_map vm;    
-    popts::options_description desc;
-#endif
-    
     bool fit_traces;
     bool fit_sigmas;
     bool fit_thepsf;
@@ -88,9 +76,6 @@ namespace specex {
     int argint(std::map<std::string,std::vector<int>>&, const string);
     
     PyOptions()
-#ifndef GETOPT
-      : desc(popts::options_description("Options"))
-#endif
       {	
       arc_image_filename="";
       input_psf_filename="";
