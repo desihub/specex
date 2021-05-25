@@ -63,9 +63,14 @@ int specex::PyFitting::fit_psf(
   // copy to local psf pointer 
   specex::PSF_p psf = pyps.psf;
 
-  // set logging info
+#ifndef GETOPT
 
-  /*
+  // set logging info
+  
+  specex_set_debug(opts.vm.count("debug")>0);
+  specex_set_verbose(opts.vm.count("quiet")==0);
+  specex_set_dump_core(opts.vm.count("core")>0);
+  
   bool fit_traces = (opts.vm.count("no-trace-fit")==0);
   bool fit_sigmas = (opts.vm.count("no-sigma-fit")==0);
   bool fit_thepsf = (opts.vm.count("no-psf-fit")==0);
@@ -74,30 +79,29 @@ int specex::PyFitting::fit_psf(
       SPECEX_ERROR("cannot have both options --only-trace-fit and --no-trace-fit");
       return EXIT_FAILURE;
     }
-    fit_traces = true;
-    fit_sigmas = false;
-    fit_thepsf = false;      
+    opts.fit_traces = true;
+    opts.fit_sigmas = false;
+    opts.fit_thepsf = false;      
   }
   
-  bool single_bundle = (opts.vm.count("single-bundle")>0);
+  opts.single_bundle = (opts.vm.count("single-bundle")>0);
   
-  bool write_tmp_results = (opts.vm.count("tmp-results")>0);
-  */
+  opts.write_tmp_results = (opts.vm.count("tmp-results")>0);
+
+#ifdef EXTERNAL_TAIL
+  opts.fit_psf_tails = (opts.vm.count("fit-psf-tails")>0);
+#endif
+#ifdef CONTINUUM
+  opts.fit_continuum = (opts.vm.count("fit-continuum")>0);
+#endif
+  opts.use_variance_model = (opts.vm.count("variance-model")>0);
+  opts.fit_individual_spots_position = opts.vm.count("positions");
+#endif
+  
+  SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename); 
   
   if(opts.trace_prior_deg>0) SPECEX_INFO("Will apply a prior on the traces high order terms in a bundle");
 
-  /*
-#ifdef EXTERNAL_TAIL
-  bool fit_psf_tails = (opts.vm.count("fit-psf-tails")>0);
-#endif
-#ifdef CONTINUUM
-  bool fit_continuum = (opts.vm.count("fit-continuum")>0);
-#endif
-  bool use_variance_model = (opts.vm.count("variance-model")>0);
-  bool fit_individual_spots_position = opts.vm.count("positions");
-  */
-  SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename); 
-  
   // set broken fibers
   
   vector<string> tokens = split(opts.broken_fibers_string,',');

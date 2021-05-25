@@ -7,7 +7,8 @@
 #include <string>
 #include <specex_unbls.h>
 #include <specex_psf_fitter.h>
-
+#include <getopt.h>
+#include <map>
 
 #ifndef GETOPT
 #include <boost/program_options.hpp>
@@ -21,6 +22,8 @@ namespace specex {
   public :
 
     typedef std::shared_ptr <PyOptions> pshr;
+
+    int noptions;
 
     std::string arc_image_filename;
     std::string input_psf_filename; 
@@ -71,8 +74,19 @@ namespace specex {
     bool use_variance_model;
     bool fit_individual_spots_position;
     
-    int parse(int argc, char *argv[] ); 
+    bool half_size_x_def; 
+    bool half_size_y_def; 
+    bool gauss_hermite_deg_def; 
+    bool gauss_hermite_deg2_def; 
+    bool legendre_deg_wave_def; 
+    bool legendre_deg_x_def;
+    bool trace_deg_wave_def;
+    bool trace_deg_x_def; 
 
+    int parse(int argc, char *argv[] ); 
+    void loadmap(std::map<std::string,std::vector<int>>&, const string, int);
+    int argint(std::map<std::string,std::vector<int>>&, const string);
+    
     PyOptions()
 #ifndef GETOPT
       : desc(popts::options_description("Options"))
@@ -122,6 +136,15 @@ namespace specex {
       use_variance_model = false;
       fit_individual_spots_position = false;
       
+      half_size_x_def = false ;
+      half_size_y_def = false;
+      gauss_hermite_deg_def = false; 
+      gauss_hermite_deg2_def = false; 
+      legendre_deg_wave_def = false; 
+      legendre_deg_x_def = false;
+      trace_deg_wave_def = false;
+      trace_deg_x_def = false; 
+
       return;
       
     }

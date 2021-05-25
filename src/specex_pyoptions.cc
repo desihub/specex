@@ -1,5 +1,8 @@
 #include <string>
 #include <iostream>
+#include <sstream>
+#include <algorithm>
+#include <iterator>
 #include <specex_pyoptions.h>
 
 using namespace std;
@@ -8,6 +11,7 @@ using namespace std;
 
 void PrintHelp()
 {
+  return;
   std::cout <<
     "--help,-h             display usage information\n" 
     "--arc,-a              preprocessed fits image file name (mandatory)\n" 
@@ -61,17 +65,89 @@ void PrintHelp()
     "--fit-continuum       unable fit of continuum\n"
 #endif
     "--nlines              max # emission lines used (uses an algorithm to select best ones \n"
-    "                      based on S/N and line coverage\n"
-    
-    exit(1);
+    "                      based on S/N and line coverage\n";
+
+  return;
+  
+}
+
+void specex::PyOptions::loadmap(map<string,vector<int>>& optmap, const string argstring, int req){
+  optmap.insert(pair<string,vector<int>>({argstring,vector<int>({req, noptions++})}));
+  return;
+}
+
+int specex::PyOptions::argint(map<string,vector<int>>& optmap, const string argstring){
+  return optmap.find(argstring)->second[1];
 }
 
 int specex::PyOptions::parse(int argc, char *argv[] )
 {
-  const char* const short_opts = "n:bs:w:h";
+
+  using namespace std;
+  map<string, vector<int>> optmap;
+  map<string, vector<int>>::iterator it;
+  
+  int noptsmax=500;
+  option long_opts[noptsmax];
+
+  noptions=0;
+  loadmap(optmap, "help",               required_argument);
+  loadmap(optmap, "arc",                required_argument);
+  loadmap(optmap, "help",               required_argument);
+  loadmap(optmap, "verbose",            optional_argument);
+  loadmap(optmap, "in-psf",             required_argument);
+  loadmap(optmap, "out-psf",            required_argument);
+  loadmap(optmap, "lamp-lines",         required_argument);
+  loadmap(optmap, "only-trace-fit",     optional_argument);
+  loadmap(optmap, "no-trace-fit",       optional_argument);
+  loadmap(optmap, "no-sigma-fit",       optional_argument);
+  loadmap(optmap, "no-psf-fit",         optional_argument);
+  loadmap(optmap, "flux-hdu",           required_argument);
+  loadmap(optmap, "ivar-hdu",           required_argument);
+  loadmap(optmap, "mask-hdu",           required_argument);
+  loadmap(optmap, "header-hdu",         required_argument);
+  loadmap(optmap, "xcoord-hdu",         required_argument);
+  loadmap(optmap, "ycoord-hdu",         required_argument);
+  loadmap(optmap, "first-bundle",       required_argument);
+  loadmap(optmap, "last-bundle",        required_argument);
+  loadmap(optmap, "single-bundle",      optional_argument);
+  loadmap(optmap, "first-fiber",        required_argument);
+  loadmap(optmap, "last-fiber",         required_argument);
+  loadmap(optmap, "half-size-x",        required_argument);
+  loadmap(optmap, "half-size-y",        required_argument);
+  loadmap(optmap, "psfmodel",           required_argument);
+  loadmap(optmap, "positions",          optional_argument);
+  loadmap(optmap, "quiet",              optional_argument);
+  loadmap(optmap, "debug",              optional_argument);
+  loadmap(optmap, "trace-prior-deg",    required_argument);
+  loadmap(optmap, "lamplines",          required_argument);
+  loadmap(optmap, "core",               optional_argument);
+  loadmap(optmap, "gauss-hermite-deg",  required_argument);
+  loadmap(optmap, "gauss-hermite-deg2", required_argument);
+  loadmap(optmap, "legendre-deg-wave",  required_argument);
+  loadmap(optmap, "legendre-deg-x",     required_argument);
+  loadmap(optmap, "trace-deg-wave",     required_argument);
+  loadmap(optmap, "trace-deg-x",        required_argument);
+  loadmap(optmap, "psf-error",          required_argument);
+  loadmap(optmap, "psf-core-wscale",    required_argument);
+  loadmap(optmap, "broken-fibers",      required_argument);
+  loadmap(optmap, "variance-model",     optional_argument);
+  loadmap(optmap, "out-psf-xml",        required_argument);
+  loadmap(optmap, "out-spots",          required_argument);
+  loadmap(optmap, "prior",              required_argument);
+  loadmap(optmap, "tmp_results",        optional_argument);
+#ifdef EXTERNAL_TAIL
+  loadmap(optmap, "fit-psf-tails",      optional_argument);
+#endif
+#ifdef CONTINUUM
+  loadmap(optmap, "fit-continuum",      optional_argument);
+#endif
+  loadmap(optmap, "nlines",             required_argument);
+ 
+  /*
   const option long_opts[] = {
     {"help",               required_argument, nullptr, 'h'},
-    {"arc"                 required_argument, nullptr, 'arc'},
+    {"arc",                required_argument, nullptr, 'arc'},
     {"verbose",            optional_argument, nullptr, 'ver'},
     {"in-psf",             required_argument, nullptr, 'ip'},
     {"out-psf",            required_argument, nullptr, 'op'},
@@ -98,10 +174,10 @@ int specex::PyOptions::parse(int argc, char *argv[] )
     {"quiet",              optional_argument, nullptr, 'q'},
     {"debug",              optional_argument, nullptr, 'd'},
     {"trace-prior-deg",    optional_argument, nullptr, 'tpd'},
-    {"lamplines",          optional_argument, nullptr, 'll'},
+    {"lamplines",          optional_argument, nullptr, 'lls'},
     {"core",               optional_argument, nullptr, 'c'},
-    {"gauss-hermite-deg",  optional_argument, nullptr, 'qhd'},
-    {"gauss-hermite-deg2", optional_argument, nullptr, 'qhd2'},
+    {"gauss-hermite-deg",  optional_argument, nullptr, 'ghd'},
+    {"gauss-hermite-deg2", optional_argument, nullptr, 'ghd2'},
     {"legendre-deg-wave",  optional_argument, nullptr, 'ldw'},
     {"legendre-deg-x",     optional_argument, nullptr, 'ldx'},
     {"trace-deg-wave",     optional_argument, nullptr, 'tdw'},
@@ -122,120 +198,139 @@ int specex::PyOptions::parse(int argc, char *argv[] )
 #endif
     {"nlines",             optional_argument, nullptr, 'nl'}
   };
+  */
   
+  int i = 0;
+  for (it = optmap.begin(); it !=optmap.end(); it++){
+    long_opts[i] = {it->first.c_str(), it->second[0], nullptr, it->second[1]}; i++;
+  }
+  for (int i=noptions; i<noptsmax; i++) long_opts[i] = {"NULL", 0, nullptr, -1};
+
+  option long_optse[] = {{"",optional_argument,nullptr,'Z'}};
   const char* const short_opts = "ha:v";
   
+  specex_set_verbose(true);
+
   while (true)
     {
       const auto opt = getopt_long(argc, argv, short_opts, long_opts, nullptr);
-      
-      if (-1 == opt)
+
+      if (opt == -1){
 	break;
-      
-      switch (opt)
-	{
-	case 'h':
-	  PrintHelp(); break;	  
-	case 'arc':
-	  arc_image_filename = std::string(optarg); break;	  
-	case 'ver':
-	case 'ip':
-	  input_psf_filename = std::string(optarg); break;	  
-	case 'op':
-	  output_fits_filename = std::string(optarg); break;	  
-	case 'll':
-	  lamp_lines_fileanem = std::string(optarg); break;	  
-	case 'otf':
-	  fit_traces = true;
-	  fit_sigmas = true;
-	  fit_thepsf = true;
-	  break;
-	case 'ntf':
-	  fit_traces = false; break;	  
-	case 'nsf':
-	  fit_sigmas = false; break;
-	case 'npf':
-	  fit_thepsf = false; break;
-	case 'fh':
-	  flux_hdu = std::stoi(optarg); break;
-	case 'ih':
-	  ivar_hdu = std::stoi(optarg); break;
-	case 'mh':
-	  mask_hdu = std::stoi(optarg); break;
-	case 'hh':
-	  header_hdu = std::stoi(optarg); break;
-	case 'xh':
-	  xtrace_hdu = std::stoi(optarg); break;
-	case 'yh':
-	  ytrace_hdu = std::stoi(optarg); break;
-	case 'fb':
-	  first_fiber_bundle = std::stoi(optarg); break;
-	case 'lb':
-	  last_fiber_bundle = std::stoi(optarg); break;
-	case 'sb':
-	  single_bundle = true; break;
-	case 'ff':	  
-	  first_fiber = std::stoi(optarg); break;
-	case 'lf':
-	  last_fiber = std::stoi(optarg); break;
-	case 'hsx':
-	  half_size_x = std::stoi(optarg); break;  
-	case 'hsy':
-	  half_size_y = std::stoi(optarg); break;
-	case 'pm':
-	  psf_model = std::stoi(optarg); break;
-	case 'pos':
-	  break;
-	case 'q':
-	  specex_set_verbose(true); break;
-	case 'd':
-	  specex_set_debug(true); break;
-	case 'tpd':
-	  trace_prior_deg = std::stoi(optarg); break;
-	case 'll':
-	  lamp_lines_filename = std::string(optarg); break;
-	case 'c':
-	  specex_set_dump_core(true); break;
-	case 'qhd':
-	  gauss_hermite_deg = std::stoi(optarg); break;
-	case 'qhd2':
-	  gauss_hermite_deg2 = std::stoi(optarg); break;
-	case 'ldw':
-	  legendre_deg_wave = std::stoi(optarg); break;
-	case 'ldx':
-	  legendre_deg_x = std::stoi(optarg); break;
-	case 'tdx':
-	  trace_deg_x = std::stoi(optarg); break;
-	case 'pe':
-	  psf_error = std:stod(optarg); break;
-	case 'pcw':
-	  psf_core_wscale = std::stod(optarg); break;
-	case 'bf':
-	  broken_fibers_string = std::string(optarg); break;
+      } else if ( opt == argint(optmap, "help")){
+      } else if (opt == argint(optmap, "arc") || opt == 'a'){
+	arc_image_filename = string(optarg); 
+      } else if (opt == argint(optmap, "in-psf")){
+	input_psf_filename = string(optarg);
+      } else if (opt == argint(optmap, "out-psf")){
+	output_fits_filename = string(optarg);	  
+      } else if (opt == argint(optmap, "lamp-lines")){
+	lamp_lines_filename = string(optarg);	  
+      } else if (opt == argint(optmap, "only-trace-fit")){
+	fit_traces = true;
+	fit_sigmas = true;
+	fit_thepsf = true;	
+      } else if (opt == argint(optmap, "no-trace-fit")){
+	fit_traces = false;	  
+      } else if (opt == argint(optmap, "no-sigma-fit")){
+	fit_sigmas = false;
+      } else if (opt == argint(optmap, "no-psf-fit")){
+	fit_thepsf = false;
+      } else if (opt == argint(optmap, "flux-hdu")){
+	flux_hdu = stoi(optarg);
+      } else if (opt == argint(optmap, "ivar-hdu")){
+	ivar_hdu = stoi(optarg);
+      } else if (opt == argint(optmap, "mask-hdu")){
+	mask_hdu = stoi(optarg);
+      } else if (opt == argint(optmap, "header-hdu")){
+	header_hdu = stoi(optarg);
+      } else if (opt == argint(optmap, "xcoord-hdu")){
+	xtrace_hdu = stoi(optarg);
+      } else if (opt == argint(optmap, "ycoord-hdu")){
+	ytrace_hdu = stoi(optarg);
+      } else if (opt == argint(optmap, "first-bundle")){
+	first_fiber_bundle = stoi(optarg);
+      } else if (opt == argint(optmap, "last-bundle")){
+	last_fiber_bundle = stoi(optarg);
+      } else if (opt == argint(optmap, "single-bundle")){
+	single_bundle = true;
+      } else if (opt == argint(optmap, "first-fiber")){
+	first_fiber = stoi(optarg);
+      } else if (opt == argint(optmap, "last-fiber")){
+	last_fiber = stoi(optarg);
+      } else if (opt == argint(optmap, "half-size-x")){
+	half_size_x = stoi(optarg);
+	half_size_x_def = false;		  
+      } else if (opt == argint(optmap, "half-size-y")){
+	half_size_y = stoi(optarg); 
+	half_size_y_def = false;
+      } else if (opt == argint(optmap, "psfmodel")){
+	psf_model = stoi(optarg);
+      } else if (opt == argint(optmap, "positions")){
+	fit_individual_spots_position = true;
+      } else if (opt == argint(optmap, "quiet")){
+	specex_set_verbose(false);
+      } else if (opt == argint(optmap, "debug")){
+	specex_set_debug(true);
+      } else if (opt == argint(optmap, "trace-prior-deg")){
+	trace_prior_deg = stoi(optarg);
+      } else if (opt == argint(optmap, "lamplines")){
+	lamp_lines_filename = string(optarg);
+      } else if (opt == argint(optmap, "core")){
+	specex_set_dump_core(true);
+      } else if (opt == argint(optmap, "gauss-hermite-deg")){
+	gauss_hermite_deg = stoi(optarg);
+	gauss_hermite_deg_def = false;
+      } else if (opt == argint(optmap, "gauss-hermite-deg2")){
+	gauss_hermite_deg2 = stoi(optarg);
+	gauss_hermite_deg2_def = false;
+      } else if (opt == argint(optmap, "legendre-deg-x")){
+	legendre_deg_x = stoi(optarg);
+	legendre_deg_x_def = false;
+      } else if (opt == argint(optmap, "legendre-deg-wave")){
+	legendre_deg_wave = stoi(optarg);
+	legendre_deg_wave_def = false;
+      } else if (opt == argint(optmap, "trace-deg-x")){
+	trace_deg_x = stoi(optarg);
+	trace_deg_x_def = false;
+      } else if (opt == argint(optmap, "trace-deg-wave")){
+	trace_deg_wave = stoi(optarg);
+	trace_deg_wave_def = false;
+      } else if (opt == argint(optmap, "psf-error")){
+	psf_error = stod(optarg);
+      } else if (opt == argint(optmap, "psf-core-wscale")){
+	psf_core_wscale = stod(optarg);
+      } else if (opt == argint(optmap, "broken-fibers")){
+	broken_fibers_string = string(optarg);
 #ifdef EXTERNAL_TAIL
-	case 'fpt':
-	  fit_psf_tails = true; break;
+      } else if (opt == argint(optmap, "fit-psf-tails")){
+	fit_psf_tails = true;
 #endif
 #ifdef CONTINUUM
-	case 'fc':
-	   break;
+      } else if (opt == argint(optmap, "fit-continuum")){
+	fit_continuum = true;
 #endif
-	case 'vm':
-	  break;
-	case 'opx':
-	  output_xml_filename = std::string(optarg); break;
-	case 'os':
-	  output_spots_filename = std::string(optarg); break;
-	case 'p':
-	  argurment_priors.push_back(std::string(optarg)); break;
-	case 'tr':
-	  break;
-	case 'nl':
-	  max_number_of_lines = std:stoi(optarg); break;
-        default:
-	  PrintHelp(); break;
-        }
+      } else if (opt == argint(optmap, "variance-model")){
+	use_variance_model = true;
+      } else if (opt == argint(optmap, "out-psf-xml")){
+	output_xml_filename = string(optarg);
+      } else if (opt == argint(optmap, "out-spots")){
+	output_spots_filename = string(optarg);
+      } else if (opt == argint(optmap, "prior")){
+	string sentence = string(optarg);
+	istringstream iss(sentence);
+	copy(istream_iterator<string>(iss),
+	     istream_iterator<string>(),
+	     back_inserter(argurment_priors));	  
+      } else if (opt == argint(optmap, "tmp_results")){
+	write_tmp_results = true;
+      } else if (opt == argint(optmap, "nlines")){
+	max_number_of_lines = stoi(optarg);
+      }
     }
+
+  return EXIT_SUCCESS;
+  
 }
 
 #else

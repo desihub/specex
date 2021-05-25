@@ -2,7 +2,7 @@
 build_dev=1
 compare=1
 dirac=0
-tag=
+tag=getopt
 
 do_dev=1
 do_master=0
