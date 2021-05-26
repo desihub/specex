@@ -44,7 +44,34 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/deboosted/specex_vector_utils.cc
 	    src/specex_blas.c
 	    src/specex_lapack.c
-	    src/specex_unbst.cc)
+	    src/specex_unbst.cc
+	    src/harp/harp.cpp
+	    src/harp/data/harp_data.cpp
+	    src/harp/data/harp_fits.cpp
+	    src/harp/data/harp_image.cpp
+	    src/harp/data/harp_metadata.cpp
+	    src/harp/data/harp_plugin_registry.cpp
+	    src/harp/data/harp_psf.cpp
+	    src/harp/data/harp_spec.cpp
+	    src/harp/data/harp_targets.cpp
+	    src/harp/extract/harp_extraction.cpp
+	    src/harp/extract/harp_spec_slice.cpp
+	    src/harp/math/harp_linalg.cpp
+	    src/harp/math/harp_math.cpp
+	    src/harp/plugins/harp_plugin_image_desi.cpp
+	    src/harp/plugins/harp_plugin_image_fits.cpp
+	    src/harp/plugins/harp_plugin_image_sim.cpp
+	    src/harp/plugins/harp_plugin_psf_gauss.cpp
+	    src/harp/plugins/harp_plugin_psf_gauss_sim.cpp
+	    src/harp/plugins/harp_plugin_psf_gh.cpp
+	    src/harp/plugins/harp_plugin_spec_desi.cpp
+	    src/harp/plugins/harp_plugin_spec_desisim.cpp
+	    src/harp/plugins/harp_plugin_spec_fits.cpp
+	    src/harp/plugins/harp_plugin_spec_sim.cpp
+	    src/harp/plugins/harp_plugin_targets_desi.cpp
+	    src/harp/plugins/harp_plugin_targets_fits.cpp
+	    src/harp/plugins/harp_plugin_targets_sim.cpp
+	    )
 # look for BLAS/LAPACK with MKL first
 
 set(BLA_VENDOR Intel10_64lp)
@@ -90,13 +117,23 @@ target_include_directories(_libspecex
 	src
 	src/deboosted_headers
 	src/unhrp
+	src/harp
+	src/harp/data
+	src/harp/data/harp
+	src/harp/plugins/
+	src/harp/plugins/harp
+	src/harp/math/
+	src/harp/math/harp
+	src/harp/extract/
+	src/harp/extract/harp
 	${MKL_INCLUDE}
 	)
 
 target_link_directories(_libspecex
 	PUBLIC)
 	
-target_link_libraries(_libspecex PUBLIC "-lharp -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt" ${BLAS_LIBRARIES})
+#target_link_libraries(_libspecex PUBLIC "-lharp -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt" ${BLAS_LIBRARIES})
+target_link_libraries(_libspecex PUBLIC "-lcfitsio -lboost_regex-mt -lboost_program_options-mt -lboost_serialization-mt" ${BLAS_LIBRARIES})
 
 set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
 

@@ -210,8 +210,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   }
   if(compute_ab) {
     for(int band=1; band<number_of_image_bands; band++) {
-      A_of_band[0] += A_of_band[band];
-      //B_of_band[0] += B_of_band[band];
+      A_of_band[0] += A_of_band[band];      
       unbst::subadd(B_of_band[band],B_of_band[0],0,1.0);
     }
   }
@@ -568,7 +567,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    size_t index = 0;
 	    for(int p=0;p<npar_fixed_coord;p++) {
 	      size_t m_size = psf_params->FitParPolXW[p]->coeff.size();
-	      unbst::subadd(tmp.psf_monomials,index,index+m_size,H,index,flux*gradAllPar(indices_of_fitpar_in_allpar[p]));
+	      unbst::subadd(tmp.psf_monomials,index,index+m_size,H,index,flux*gradAllPar[indices_of_fitpar_in_allpar[p]]);
 	      index += m_size;
 	    }
 	  }
@@ -670,9 +669,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       
 	double eps = 1.e-6;
 	for(size_t p=0;p<Params.size();p++) {
-	  Params(p) += 0.5*eps;
+	  Params[p] += 0.5*eps;
 	  double chi2_plus = ComputeChi2AB(false);
-	  Params(p) -= eps;
+	  Params[p] -= eps;
 	  double chi2_minus = ComputeChi2AB(false);
 	  
 	  double chi2_der_numeric  = (chi2_plus-chi2_minus)/eps;
@@ -706,21 +705,21 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	if(do_faster_than_syr) {
 	  if(index_of_spots_parameters==0) {
 	    for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
-	      const double& hi = H(*i);
+	      const double& hi = H[*i];
 	      double whi = w*hi;
 	      (*Ap)(*i,*i) += whi*hi;
 	      for(vector<int>::const_iterator j=other_indices.begin();j!=i;j++) {
-		(*Ap)(*i,*j) += whi*H(*j);
+		(*Ap)(*i,*j) += whi*H[*j];
 	      }
 	    }
 	  } else {
 	    specex::syr(w,H,0,index_of_spots_parameters,Ablock);
 	    
 	    for(vector<int>::const_iterator i=other_indices.begin();i!=other_indices.end();i++) {
-	      const double& hi = H(*i);
+	      const double& hi = H[*i];
 	      double whi = w*hi;
 	      (*Ap)(*i,*i) += whi*hi;
-	      for(vector<int>::const_iterator j=other_indices.begin();j!=i;j++) (*Ap)(*i,*j) += whi*H(*j);
+	      for(vector<int>::const_iterator j=other_indices.begin();j!=i;j++) (*Ap)(*i,*j) += whi*H[*j];
 	      specex::axpy(whi,H,0,index_of_spots_parameters,Arect[*i-index_of_spots_parameters]);
 	    }
 	  }
@@ -753,7 +752,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     for(size_t s=0; s<Arect.size(); s++) {
       int i = index_of_spots_parameters + s;
       for(size_t j=0;j<n;j++)
-	(*Ap)(i,j) += Arect[s](j);
+	(*Ap)(i,j) += Arect[s][j];
     }
   }
 #endif
@@ -819,14 +818,14 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	  // compute dcoef
 	  int i=tmp_trace_y_parameter.find(fiber)->second+deg;
-	  double dcoef = Params(i);
+	  double dcoef = Params[i];
 	  for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
 	    int other_fiber = jt->first;
 	    if (other_fiber==fiber) continue;
 	    if(other_fiber < psf_params->fiber_min || other_fiber > psf_params->fiber_max) continue;	
 	    if(jt->second.Off()) continue; // not fitted	  
 	    int j=tmp_trace_y_parameter.find(other_fiber)->second+deg;
-	    dcoef -= Params(j)/(nfibers-1);
+	    dcoef -= Params[j]/(nfibers-1);
 	  }
 	  //if(fiber==0 && deg==it->second.Y_vs_W.deg) SPECEX_DEBUG("dcoef="<<dcoef);
 	  
@@ -837,7 +836,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    
 	    
 	    (*Ap)(i,i) += weight;
-	    (*Bp)(i)   -= weight*dcoef; // or opposite
+	    (*Bp)[i]   -= weight*dcoef; // or opposite
 	    
 	    for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
 	      int other_fiber = jt->first;
@@ -849,7 +848,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      // first term > second term
 	      (*Ap)(i,j) -= weight/(nfibers-1);
 	      (*Ap)(j,i) -= weight/(nfibers-1);	      
-	      (*Bp)(j)   += weight*dcoef/(nfibers-1); // or opposite
+	      (*Bp)[j]   += weight*dcoef/(nfibers-1); // or opposite
 	      
 	      for(std::map<int,specex::Trace>::const_iterator kt=psf->FiberTraces.begin(); kt!=psf->FiberTraces.end(); ++kt) {	    
 		int yet_another_fiber = kt->first;
@@ -869,14 +868,14 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	
 	  // compute dcoef
 	  int i=tmp_trace_x_parameter.find(fiber)->second+deg;
-	  double dcoef = Params(i);
+	  double dcoef = Params[i];
 	  for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
 	    int other_fiber = jt->first;
 	    if (other_fiber==fiber) continue;
 	    if(other_fiber < psf_params->fiber_min || other_fiber > psf_params->fiber_max) continue;	
 	    if(jt->second.Off()) continue; // not fitted	  
 	    int j=tmp_trace_x_parameter.find(other_fiber)->second+deg;
-	    dcoef -= Params(j)/(nfibers-1);
+	    dcoef -= Params[j]/(nfibers-1);
 	  }
 	  //if(fiber==0 && deg==it->second.X_vs_W.deg) SPECEX_DEBUG("dcoef="<<dcoef);
 	  
@@ -887,7 +886,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	    
 	    
 	    (*Ap)(i,i) += weight;
-	    (*Bp)(i)   -= weight*dcoef; // or opposite
+	    (*Bp)[i]   -= weight*dcoef; // or opposite
 	    
 	    for(std::map<int,specex::Trace>::const_iterator jt=psf->FiberTraces.begin(); jt!=psf->FiberTraces.end(); ++jt) {	    
 	      int other_fiber = jt->first;
@@ -899,7 +898,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	      // first term > second term
 	      (*Ap)(i,j) -= weight/(nfibers-1);
 	      (*Ap)(j,i) -= weight/(nfibers-1);	      
-	      (*Bp)(j)   += weight*dcoef/(nfibers-1); // or opposite
+	      (*Bp)[j]   += weight*dcoef/(nfibers-1); // or opposite
 	      
 	      for(std::map<int,specex::Trace>::const_iterator kt=psf->FiberTraces.begin(); kt!=psf->FiberTraces.end(); ++kt) {	    
 		int yet_another_fiber = kt->first;
@@ -948,15 +947,15 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 	  SPECEX_INFO("accounting for Prior at fit index " << fp << " and all index " << ap);
 	  
 	  const Prior* prior = it->second;
-	  const double& par = tmp.psf_all_params(ap);
+	  const double& par = tmp.psf_all_params[ap];
 	
 	  if (compute_ab) {
 	    
 	    
 	    for (size_t c=0; c<c_size; c++, index++) {
 	    
-	      const double& monomial_val = tmp.psf_monomials(index);
-	      (*Bp)(index)       += monomial_val * prior->hdChi2dx(par);
+	      const double& monomial_val = tmp.psf_monomials[index];
+	      (*Bp)[index]       += monomial_val * prior->hdChi2dx(par);
 	      (*Ap)(index,index) += square(monomial_val) * prior->hd2Chi2dx2(par);
 	    
 	    }
@@ -1019,33 +1018,23 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
       unhrp::vector_double saved_tail_amplitude_coeff;
       if(fit_psf_tail || fit_continuum) {
 	int index=psf->ParamIndex("TAILAMP");
-	if(psf_params->AllParPolXW[index]->coeff(0)==0) {
+	if(psf_params->AllParPolXW[index]->coeff[0]==0) {
 	  saved_tail_amplitude_coeff=psf_params->AllParPolXW[index]->coeff;
-	  psf_params->AllParPolXW[index]->coeff(0)=0.005;
+	  psf_params->AllParPolXW[index]->coeff[0]=0.005;
 	  modified_tail_amplitude = true;
-	  SPECEX_DEBUG("WEIGHTS: setting tail amplitude = " << psf_params->AllParPolXW[index]->coeff(0) << " for weights");
+	  SPECEX_DEBUG("WEIGHTS: setting tail amplitude = " << psf_params->AllParPolXW[index]->coeff[0] << " for weights");
 	}
       }
       
       // generate error for a reason not understood
       parallelized_compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,0,0,psf_params->bundle_id);
       
-      //SPECEX_INFO("FOR DEBUG write model-image.fits");
-      //write_new_fits_image("model-image.fits",footprint_weight);
-      
-
       //compute_model_image(footprint_weight,weight,psf,spots,only_on_spots,only_psf_core,only_positive,-1,-1,0,0,psf_params->bundle_id);
       
       if(modified_tail_amplitude) {
 	psf_params->AllParPolXW[psf->ParamIndex("TAILAMP")]->coeff = saved_tail_amplitude_coeff;
       }
       
-
-      
-      
-      //if(fit_psf_tail || fit_continuum) SPECEX_INFO("debug, writing toto.fits and exit"); write_new_fits_image("toto.fits",footprint_weight); exit(12);
-      
-
       // compute variance and weight
       
       SPECEX_DEBUG("WEIGHTS: Compute weights");
@@ -1068,10 +1057,6 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 	  (*npix)++;
 	}
       }
-      
-      //SPECEX_INFO("FOR DEBUG write model-weight.fits and exit");
-      //write_new_fits_image("model-weight.fits",footprint_weight);
-      //exit(12);
       
     }else{
       SPECEX_DEBUG("WEIGHTS: inverse variance");
@@ -1384,18 +1369,18 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       
       if(force_positive_flux) {
 	if(tmp.flux<=1) tmp.flux=1;
-	Params(tmp.flux_parameter_index) = log(tmp.flux);
+	Params[tmp.flux_parameter_index] = log(tmp.flux);
       }else{
-	Params(tmp.flux_parameter_index) = tmp.flux;
+	Params[tmp.flux_parameter_index] = tmp.flux;
       }
       }
     }
     if(fit_position) {
       tmp.x_parameter_index = index; 
-      Params(tmp.x_parameter_index) = tmp.x;
+      Params[tmp.x_parameter_index] = tmp.x;
       index++;
       tmp.y_parameter_index = index; 
-      Params(tmp.y_parameter_index) = tmp.y;
+      Params[tmp.y_parameter_index] = tmp.y;
       index++;
     }
     if(fit_psf || fit_psf_tail) {
@@ -1478,11 +1463,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
     unhrp::matrix_double As=A;
     
-    //if(false) {SPECEX_DEBUG("Writing A.fits"); specex::write_new_fits_image("A.fits",A);  }
-    
     int status = cholesky_solve(A,B);
-
-    //{SPECEX_DEBUG("Writing fitweight-0.fits"); specex::write_new_fits_image("fitweight-0.fits",A);}
     
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving done");
 
@@ -1501,12 +1482,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  }
 	}
       }
-      /*
-	if(As.size1()>1) {
-	specex::write_new_fits_image("A.fits",As);
-	SPECEX_WARNING("wrote A.fits");
-      }
-      */
+
       if(fatal) {
 	SPECEX_ERROR("cholesky_solve failed with status " << status);
       } else {
@@ -1548,10 +1524,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }else{
 	if(!fit_trace) { // we use brent anyway for the fit of traces
 	// check whether step indeed decreases chi2
-	Params += B;
+	unbst::subadd(B,Params,0);
 	SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots computing chi2 for step=1 ...");
 	double chi2_1 = ParallelizedComputeChi2AB(false);
-	Params -= B;
+	unbst::subadd(B,Params,0,-1.0);
 	if(chi2_1>oldChi2) {
 	  use_brent = true;
 	  SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots use brent because step 1 increases chi2");
@@ -1577,8 +1553,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	for(size_t s=0;s<spot_tmp_data.size();s++) {
 	  SpotTmpData& tmp = spot_tmp_data[s];
 	  if(tmp.ignore) continue;
-	  double step = fabs(B(tmp.flux_parameter_index));
-	  if(step>max_step) B *= (max_step/step);
+	  double step = fabs(B[tmp.flux_parameter_index]);
+	  if(step>max_step) unbst::scalevec(B,max_step/step);
 	}
       }
       if(fit_trace) {
@@ -1599,7 +1575,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	}
 	if(scale<1) {
 	  SPECEX_INFO("trace fit: scaling down parameter step by " << scale);
-	  B*=scale;
+	  unbst::scalevec(B,scale);
 	}
       }
       
@@ -1661,11 +1637,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	}
       }
       
-      Params += best_step*B;
+      unbst::subadd(B,Params,0,best_step);
       *psfChi2 = best_chi2;
 	
     } else { // didn't use brent
-      Params += B;
+      unbst::subadd(B,Params,0);
       // *psfChi2 = ComputeChi2AB(false); // already computed above
       SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots dchi2=" << oldChi2-*psfChi2 << " chi2pdf = " << *psfChi2/(*npix-Params.size()) << " npar = " << Params.size());
       
@@ -1673,7 +1649,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
     // some sanity checks flux == nan is really bad
     for (unsigned k=0; k < nparTot; ++k) {
-      if (std::isnan(Params(k))) {
+      if (std::isnan(Params[k])) {
 	if(fatal) {
 	  SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots one parameter read nan");
 	} else {
@@ -1716,7 +1692,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   fitWeight = A_of_band[0];
   SPECEX_DEBUG("Compute covariance");
-  //{SPECEX_DEBUG("Writing fitweight.fits"); specex::write_new_fits_image("fitweight.fits",fitWeight);  }
 
   if (specex::cholesky_invert_after_decomposition(fitWeight) != 0) {
     SPECEX_ERROR("cholesky_invert_after_decomposition failed");
@@ -1745,7 +1720,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
       unhrp::vector_double& coeff=psf_params->FitParPolXW[p]->coeff;
       for(size_t c=0;c<coeff.size();c++,index++)
-	coeff(c)=Params(index);
+	coeff[c]=Params[index];
     }
   
     //SPECEX_INFO("TESTING : output params of first spot = " << psf->AllLocalParamsFW(spots[0]->fiber,spots[0]->wavelength,spots[0]->fiber_bundle));
@@ -1759,10 +1734,10 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       
       unhrp::vector_double& PX = it->second.X_vs_W.coeff;
       for(size_t k=0;k<PX.size();k++,index++)
-	PX(k)=Params(index);
+	PX[k]=Params[index];
       unhrp::vector_double& PY = it->second.Y_vs_W.coeff;
       for(size_t k=0;k<PY.size();k++,index++)
-	PY(k)=Params(index);
+	PY[k]=Params[index];
     }
   }
 
@@ -1781,7 +1756,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     if(tmp.ignore) continue;
     if(fit_flux) {
       if(force_positive_flux) {
-	spot->flux = exp(min(max(Params(tmp.flux_parameter_index),-30.),+30.));
+	spot->flux = exp(min(max(Params[tmp.flux_parameter_index],-30.),+30.));
 	double cov = fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index);
 	if(cov>=0) {
 	  spot->eflux = spot->flux*sqrt(cov);
@@ -1789,7 +1764,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots negative cov = " << cov << " for spot " << s);
 	}
       }else{
-	spot->flux = Params(tmp.flux_parameter_index);
+	spot->flux = Params[tmp.flux_parameter_index];
 	double cov = fitCovmat(tmp.flux_parameter_index,tmp.flux_parameter_index);
 	if(cov>=0) {
 	  spot->eflux = sqrt(cov);
@@ -1799,8 +1774,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       }
     }
     if(fit_position) {
-      spot->xc = Params(tmp.x_parameter_index);
-      spot->yc = Params(tmp.y_parameter_index);
+      spot->xc = Params[tmp.x_parameter_index];
+      spot->yc = Params[tmp.y_parameter_index];
     }
     if(fit_trace) {
       spot->xc = psf->Xccd(spot->fiber,spot->wavelength);
@@ -1843,13 +1818,13 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	  
 	  unhrp::vector_double spot_params = psf->AllLocalParamsXW_with_FitBundleParams(spot_tmp_data[spot_tmp_data.size()/2].x
 										       ,spot_tmp_data[spot_tmp_data.size()/2].wavelength,psf_params->bundle_id,Params);
-	  SPECEX_INFO("psf tail amplitudes, " << spot_params(psf->ParamIndex("TAILAMP")));
+	  SPECEX_INFO("psf tail amplitudes, " << spot_params[psf->ParamIndex("TAILAMP")]);
 	}
 #endif
 	
 #ifdef CONTINUUM
 	if(fit_continuum)
-	  SPECEX_INFO("continuum amplitude, " << Params(continuum_index) );
+	  SPECEX_INFO("continuum amplitude, " << Params[continuum_index] );
 #endif
 
       }
@@ -2035,12 +2010,27 @@ bool specex::PSF_Fitter::FitTraces(vector<specex::Spot_p>& spots, int *n_fibers_
       if(fabs(dx)>2 || fabs(dy)>2) {
 	SPECEX_INFO("replacing trace of fiber " << it->first << " by interpolation");
 	SPECEX_WARNING("replacing trace of fiber " << it->first << " by interpolation");
-	trace.X_vs_W.deg  = min(trace1.X_vs_W.deg,trace2.X_vs_W.deg); trace.X_vs_W.coeff.resize(trace.X_vs_W.deg+1);
-	trace.X_vs_W.coeff = ((f2-f)/(f2-f1))*trace1.X_vs_W.coeff + ((f-f1)/(f2-f1))*trace2.X_vs_W.coeff;
-	trace.Y_vs_W.deg  = min(trace1.Y_vs_W.deg,trace2.Y_vs_W.deg); trace.Y_vs_W.coeff.resize(trace.Y_vs_W.deg+1);
-	trace.Y_vs_W.coeff = ((f2-f)/(f2-f1))*trace1.Y_vs_W.coeff + ((f-f1)/(f2-f1))*trace2.Y_vs_W.coeff;
+	
+	trace.X_vs_W.deg  = min(trace1.X_vs_W.deg,trace2.X_vs_W.deg);
+	trace.X_vs_W.coeff.resize(trace.X_vs_W.deg+1);
+	
+	trace.Y_vs_W.deg  = min(trace1.Y_vs_W.deg,trace2.Y_vs_W.deg);
+	trace.Y_vs_W.coeff.resize(trace.Y_vs_W.deg+1);
+
+	double ft1 = (f2-f)/(f2-f1);
+	double ft2 = (f-f1)/(f2-f1);
+	
+	//trace.X_vs_W.coeff = ft1*trace1.X_vs_W.coeff + ft2*trace2.X_vs_W.coeff;
+	unbst::subadd(trace1.X_vs_W.coeff,trace.X_vs_W.coeff,0,ft1);
+	unbst::subadd(trace2.X_vs_W.coeff,trace.X_vs_W.coeff,0,ft2);	  
+
+	//trace.Y_vs_W.coeff = ft1*trace1.Y_vs_W.coeff + ft2*trace2.Y_vs_W.coeff;
+	unbst::subadd(trace1.Y_vs_W.coeff,trace.Y_vs_W.coeff,0,ft1);
+	unbst::subadd(trace2.Y_vs_W.coeff,trace.Y_vs_W.coeff,0,ft2);	  
+
 	trace.W_vs_Y = trace.X_vs_W.Invert(2); 
 	trace.X_vs_Y = composed_pol(trace.X_vs_W,trace.W_vs_Y);
+
       }
 
 
@@ -2651,8 +2641,8 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	pol->Fill(sparse_pol); // is sparse
 	
 
-	pol->coeff(0) = default_params(p);
-	SPECEX_DEBUG("Init P" << p << " " << pol->name << " =" << pol->coeff(0) << ", degw=" << degw << " degx=" << degx << " ncoef=" << pol->coeff.size());
+	pol->coeff[0] = default_params[p];
+	SPECEX_DEBUG("Init P" << p << " " << pol->name << " =" << pol->coeff[0] << ", degw=" << degw << " degx=" << degx << " ncoef=" << pol->coeff.size());
 
 	npar_tot += pol->coeff.size();
 
@@ -2825,8 +2815,17 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 	  specex::Trace &bad_trace = psf->FiberTraces.find(bad_fiber)->second;
 	  const specex::Trace &trace1 = psf->FiberTraces.find(fiber1)->second;
 	  const specex::Trace &trace2 = psf->FiberTraces.find(fiber2)->second;
-	  bad_trace.X_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.X_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.X_vs_W.coeff;
-	  bad_trace.Y_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.Y_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.Y_vs_W.coeff;
+
+	  double ft1 = float(fiber2-bad_fiber)/(fiber2-fiber1);
+	  double ft2 = float(bad_fiber-fiber1)/(fiber2-fiber1);
+	  
+	  //bad_trace.X_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.X_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.X_vs_W.coeff;
+	  unbst::subadd(trace1.X_vs_W.coeff,bad_trace.X_vs_W.coeff,0,ft1);
+	  unbst::subadd(trace2.X_vs_W.coeff,bad_trace.X_vs_W.coeff,0,ft2);
+	  
+	  //bad_trace.Y_vs_W.coeff = (float(fiber2-bad_fiber)/(fiber2-fiber1))*trace1.Y_vs_W.coeff + (float(bad_fiber-fiber1)/(fiber2-fiber1))*trace2.Y_vs_W.coeff;
+	  unbst::subadd(trace1.Y_vs_W.coeff,bad_trace.Y_vs_W.coeff,0,ft1);
+	  unbst::subadd(trace2.Y_vs_W.coeff,bad_trace.Y_vs_W.coeff,0,ft2);
 	  
 	  }
 	  scheduled_fit_of_traces = false;
@@ -2959,7 +2958,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     
   if(psf->HasParam("GHNSIG")) {
     double inner_core_radius_n_sigma = 3.5;
-    psf_params->AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff(0)=inner_core_radius_n_sigma;
+    psf_params->AllParPolXW[psf->ParamIndex("GHNSIG")]->coeff[0]=inner_core_radius_n_sigma;
     SPECEX_INFO("Setting PSF inner core radius to " << inner_core_radius_n_sigma);
   }
 

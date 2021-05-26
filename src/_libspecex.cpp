@@ -102,6 +102,7 @@ PYBIND11_MODULE(_libspecex, m) {
     py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
     py::bind_vector<std::vector<std::vector<int               >>>(m, "VectorVectorInt");
     py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
+    
     // data interface functions
 
     m.def("tablewrite_init", [](spx::PyPSF&          pyps) {
@@ -173,15 +174,15 @@ PYBIND11_MODULE(_libspecex, m) {
 	  const char *input_val = table.data[r][0].string_val.c_str();	  
 	  table_col0.push_back(std::string(input_val));
 
-	  // row2, COEFF	  
+	  // row1, COEFF	  
 	  const spx::FitsColumnDescription& column = c1->second;
 	  int nd = column.SizeOfVectorOfDouble();
 	  for(int d=0;d<nd;d++) table_col1.push_back(table.data[r][1].double_vals[d]);
 
-	  // row3, LEGDEGX
+	  // row2, LEGDEGX
 	  table_col2.push_back(table.data[r][2].int_vals(0));
 
-	  // row4, LEGDEGW
+	  // row3, LEGDEGW
 	  table_col3.push_back(table.data[r][3].int_vals(0));
 	  
 	}
@@ -203,9 +204,12 @@ PYBIND11_MODULE(_libspecex, m) {
         Class for storing and processing input options to specex.
         )")
         .def(py::init ())
-        .def_readwrite("arc_image_filename", &spx::PyOptions::arc_image_filename)
-        .def_readwrite("input_psf_filename", &spx::PyOptions::input_psf_filename)
+        .def_readwrite("arc_image_filename",   &spx::PyOptions::arc_image_filename)
+        .def_readwrite("input_psf_filename",   &spx::PyOptions::input_psf_filename)
         .def_readwrite("output_fits_filename", &spx::PyOptions::output_fits_filename)
+        .def_readwrite("trace_deg_x",          &spx::PyOptions::trace_deg_x)
+        .def_readwrite("trace_deg_wave",       &spx::PyOptions::trace_deg_wave)
+
         .def("parse", [](spx::PyOptions &self, std::vector<std::string>& args){
 	    std::vector<char *> cstrs;
 	    cstrs.reserve(args.size());
@@ -232,6 +236,13 @@ PYBIND11_MODULE(_libspecex, m) {
         )")
         .def(py::init ())
 
+        .def("set_trace",          &spx::PyPSF::set_trace)
+        .def("set_psf",            &spx::PyPSF::set_psf)
+        .def("synchronize_traces", &spx::PyPSF::synchronize_traces)
+        .def("init_traces", [](spx::PyPSF &self, spx::PyOptions opts){
+	  return self.init_traces(opts);
+	}
+	)
         .def_readwrite("psf", &spx::PyPSF::psf)
 
         .def_readwrite("nfibers",          &spx::PyPSF::nfibers)    
@@ -245,6 +256,7 @@ PYBIND11_MODULE(_libspecex, m) {
         .def_readwrite("trace_WAVEMAX",    &spx::PyPSF::trace_WAVEMAX)
         .def_readwrite("table_WAVEMIN",    &spx::PyPSF::table_WAVEMIN)
         .def_readwrite("table_WAVEMAX",    &spx::PyPSF::table_WAVEMAX)
+        .def_readwrite("LEGDEG",           &spx::PyPSF::LEGDEG)
       
         .def_readwrite("mjd",              &spx::PyPSF::mjd)
         .def_readwrite("plate_id",         &spx::PyPSF::plate_id)
@@ -266,6 +278,7 @@ PYBIND11_MODULE(_libspecex, m) {
         Class for specex IO interchangeable with python implementations
         )")
         .def(py::init ())
+        .def_readwrite("use_input_specex_psf", &spx::PyIO::use_input_specex_psf)
         .def("set_inputpsf", [](spx::PyIO &self, spx::PyOptions opts){
 	    return self.set_inputpsf(opts);
 	}

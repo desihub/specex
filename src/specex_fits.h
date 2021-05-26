@@ -2,6 +2,7 @@
 #define SPECEX_FITS__H
 
 #include <boost/numeric/ublas/io.hpp>
+#include "fits.hpp"
 
 namespace specex {
 

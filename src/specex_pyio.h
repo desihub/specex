@@ -27,7 +27,7 @@ namespace specex {
     int set_inputpsf(  specex::PyOptions);
     int read_preproc(  specex::PyOptions, specex::PyImage&);
     int read_psf(      specex::PyOptions, specex::PyPSF&  );
-    int load_psf(   specex::PyOptions, specex::PyPSF&  );
+    int load_psf(      specex::PyOptions, specex::PyPSF&  );
     int write_spots(   specex::PyOptions, specex::PyPSF&  );
     int read_img_datam(specex::PyOptions,
 		       specex::image_data&,

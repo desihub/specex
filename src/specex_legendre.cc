@@ -6,7 +6,6 @@
 #include "specex_message.h"
 #include "specex_fits.h" // for debugging
 
-
 //! base of (not-normalized) Legendre polynomials
 static double LegendrePol(const int Degree, const double &X)
 {
@@ -91,7 +90,6 @@ bool specex::Legendre1DPol::Fit(const unhrp::vector_double& X, const unhrp::vect
   //unhrp::matrix_double As=A;
   int status = cholesky_solve(A,B);
   if(status != 0) {
-    //write_new_fits_image("A.fits",As);
     
     if(0) {
       for(int i=0;i<ndata;i++) {

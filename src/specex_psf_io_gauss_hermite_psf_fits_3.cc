@@ -1,5 +1,5 @@
 #include <fstream>
-#include <boost/algorithm/string.hpp>
+#include <string>
 #include <unhrp.h>
 #include <specex_fits.h>
 #include <specex_trace.h>

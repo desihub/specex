@@ -2,6 +2,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include <unhrp.h>
+//#include <harp.hpp>
 
 #include <specex_psf.h>
 #include <specex_spot.h>
@@ -29,6 +30,7 @@ void _read_trace(specex::PSF_p psf, fitsfile *fp, int hdu, bool isx, int request
   harp::fits::img_dims ( fp, nrows, ncols );  
   specex::image_data coeff(ncols,nrows);
   harp::fits::img_read ( fp, coeff.data , false);
+  std::cout << "got here" << std::endl;
   int nfibers = coeff.n_rows();
   int ncoefs  = coeff.n_cols();
   double WAVEMIN; harp::fits::key_read(fp,"WAVEMIN",WAVEMIN);
