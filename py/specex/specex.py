@@ -20,7 +20,7 @@ def run_specex(com):
     spxargs = VectorString()
     for strs in com:
         spxargs.append(strs)
-        
+
     # parse args
     opts.parse(spxargs)
 

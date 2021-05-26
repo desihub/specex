@@ -155,6 +155,7 @@ int specex::PyOptions::parse(int argc, char *argv[] )
 
   while (true)
     {
+
       const auto opt = getopt_long(argc, argv, short_opts, long_opts, nullptr);
 
       if (opt == -1){
@@ -271,6 +272,9 @@ int specex::PyOptions::parse(int argc, char *argv[] )
       }
     }
 
+  // reset the index of the option to be read from argv in case get_opt is invoked again
+  optind = 1;
+  
   return EXIT_SUCCESS;
   
 }

@@ -1,5 +1,5 @@
 #!/bin/bash
-build_dev=1
+build_dev=0
 compare=1
 dirac=0
 tag=
