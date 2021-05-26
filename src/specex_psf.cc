@@ -183,41 +183,6 @@ double specex::PSF::TailProfile(const double& dx, const double &dy, const unbls:
 	  );
 }
 
-
-/*
-double specex::PSF::TailAmplitudeXW(const double &x, const double& wavelength, int fiber_bundle) const {
-  const PSF_Params& params = ParamsOfBundles.find(fiber_bundle)->second;
-  params.AllParPolXW[ParamIndex("TAILAMP")]->Value(x,wavelength);
-}
-
-double specex::PSF::TailAmplitudeFW(const int fiber, const double& wavelength, int fiber_bundle) const {
-  return TailAmplitudeXW(Xccd(fiber,wavelength),wavelength,fiber_bundle);
-}
-
-double specex::PSF::TailValueWithParamsXY(const double &Xc, const double &Yc, 
-					  const int IPix, const int JPix,
-					  const unbls::vector_double &Params,
-					  unbls::vector_double* derivative_r_tail_amplitude) const {
-  
-  double r_prof = TailProfile(IPix-Xc,JPix-Yc, Params);
-  
-  if(derivative_r_tail_amplitude) {
-    SPECEX_ERROR("need a way to do this");
-    // return scalar ?
-  }
-  return Params(psf_tail_amplitude_index)*r_prof;
-}
-
-double specex::PSF::TailValueFW(const int fiber, const double& wave, 
-			      const int IPix, const int JPix, int bundle_id, 
-			      unbls::vector_double* derivative_r_tail_amplitude) const {
-  
-  double X=Xccd(fiber,wave);
-  double Y=Yccd(fiber,wave);
-  return TailValueWithParamsXY(X,Y,IPix,JPix,AllLocalParamsXW(X,wave,bundle_id), derivative_r_tail_amplitude);
-}
-*/
-
 #endif
 
 int specex::PSF::BundleNFitPar(int bundle_id) const {
@@ -227,24 +192,6 @@ int specex::PSF::BundleNFitPar(int bundle_id) const {
   int n=0;
   for(size_t p=0;p<P.size();p++)
     n += P[p]->coeff.size();
-  return n;
-}
-int specex::PSF::BundleNAllPar(int bundle_id) const {
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.AllParPolXW;
-  int n=0;
-  for(size_t p=0;p<P.size();p++)
-    n += P[p]->coeff.size();
-  return n;
-}
-
-int specex::PSF::TracesNPar() const {
-  int n=0;
-  for(std::map<int,Trace>::const_iterator it=FiberTraces.begin(); it!=FiberTraces.end(); ++it) {
-    n += it->second.X_vs_W.coeff.size();
-    n += it->second.Y_vs_W.coeff.size();
-  }
   return n;
 }
 
@@ -266,7 +213,7 @@ int specex::PSF::ParamIndex(const std::string& name) const {
 bool specex::PSF::HasParam(const std::string& name) const { 
   return (ParamIndex(name)>=0);
 }
-
+/*
 void specex::PSF::AllocateDefaultParams() {
   unbls::vector_double params = DefaultParams();
   std::vector<std::string> param_names = DefaultParamNames();
@@ -280,6 +227,7 @@ void specex::PSF::AllocateDefaultParams() {
     ParamsOfBundles[0].AllParPolXW.push_back(pol);
   }
 }
+*/
 
 void specex::PSF::StampLimits(const double &X, const double &Y,
 			    int &BeginI, int &EndI,
@@ -303,16 +251,6 @@ specex::Trace& specex::PSF::GetTrace(int fiber)  {
   std::map<int,specex::Trace>::iterator it = FiberTraces.find(fiber);
   if(it == FiberTraces.end()) SPECEX_ERROR("No trace for fiber " << fiber);
   return it->second;
-}
-
-void specex::PSF::AddTrace(int fiber) {
-  std::map<int,specex::Trace>::iterator it = FiberTraces.find(fiber);
-  if(it != FiberTraces.end()) {
-    SPECEX_WARNING("Trace for fiber " << fiber << " already exists");
-  }else{
-    FiberTraces[fiber]=specex::Trace();
-    LoadXYPol();
-  }
 }
 
 void specex::PSF::LoadXYPol() {
@@ -392,17 +330,6 @@ double specex::PSF::PSFValueWithParamsFW(const int fiber, const double &wave,
   return PSFValueWithParamsFW(X,Y,IPix,JPix,Params,PosDer,ParamDer,with_core,with_tail);
 }
 
-//! Access to the current PSF 
-double specex::PSF::PSFValueFW(const int fiber, const double &wave,
-			       const int IPix, const int JPix, int bundle_id,
-			       unbls::vector_double *PosDer, unbls::vector_double *ParamDer,
-			       bool with_core, bool with_tail) const {
-  double X=Xccd(fiber,wave);
-  double Y=Yccd(fiber,wave);
-  return PSFValueWithParamsXY(X,Y,IPix,JPix,AllLocalParamsXW(X,wave,bundle_id), PosDer, ParamDer);
-}
-
-
 int specex::PSF::GetBundleOfFiber(int fiber) const {
   // find bundle for this fiber
   int bundle=0;
@@ -444,50 +371,6 @@ unbls::vector_double specex::PSF::AllLocalParamsFW(const int fiber, const double
   return AllLocalParamsXW(X,wave,bundle_id);
 }
 
-unbls::vector_double specex::PSF::FitLocalParamsXW(const double &X, const double &wave, int bundle_id) const {
-  
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.FitParPolXW;
-  
-  unbls::vector_double params(P.size());
-  for (size_t k =0; k < P.size(); ++k)
-    params[k] = P[k]->Value(X,wave);
-  return params;
-}
-
-unbls::vector_double specex::PSF::FitLocalParamsFW(const int fiber, const double &wave, int bundle_id) const {
-  double X=Xccd(fiber,wave); 
-  return FitLocalParamsXW(X,wave,bundle_id);
-}
-
-
-unbls::vector_double specex::PSF::AllLocalParamsXW_with_AllBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
-  
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.AllParPolXW;
-  
-  unbls::vector_double params(LocalNAllPar());
-  
-  if(BundleNAllPar(bundle_id)>ForThesePSFParams.size()) SPECEX_ERROR("VaryingCoordNPar(bundle_id)<=ForThesePSFParams.size()");
-  
-  int index=0;
-  for (size_t k =0; k < P.size(); ++k) {
-    size_t c_size = P[k]->coeff.size();
-    params[k]=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
-    index += c_size;
-  }
-  return params;
-}
-
-  
-unbls::vector_double specex::PSF::AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
-  double X=Xccd(fiber,wave); 
-  return AllLocalParamsXW_with_AllBundleParams(X,wave,bundle_id,ForThesePSFParams);
-}
-
-
 unbls::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
   
   
@@ -522,36 +405,6 @@ unbls::vector_double specex::PSF::AllLocalParamsXW_with_FitBundleParams(const do
   }
   return params;
 }
-unbls::vector_double specex::PSF::AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
-  double X=Xccd(fiber,wave); 
-  return AllLocalParamsXW_with_FitBundleParams(X,wave,bundle_id,ForThesePSFParams);
-}
-
-unbls::vector_double specex::PSF::FitLocalParamsXW_with_FitBundleParams(const double &X, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
-  
-  std::map<int,PSF_Params>::const_iterator it = ParamsOfBundles.find(bundle_id);
-  if(it==ParamsOfBundles.end()) SPECEX_ERROR("no such bundle #" << bundle_id);
-  const std::vector<Pol_p>& P=it->second.FitParPolXW;
-  
-  unbls::vector_double params(P.size());
-  
-  if(BundleNFitPar(bundle_id)>ForThesePSFParams.size()) SPECEX_ERROR("VaryingCoordNPar(bundle_id)<=ForThesePSFParams.size()");
-  
-  int index=0;
-  for (size_t k =0; k < P.size(); ++k) {
-    size_t c_size = P[k]->coeff.size();
-    params[k]=specex::dot(ForThesePSFParams,index,index+c_size,P[k]->Monomials(X,wave));
-    index += c_size;
-  }
-  return params;
-}
-
-  
-unbls::vector_double specex::PSF::FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const {
-  double X=Xccd(fiber,wave); 
-  return FitLocalParamsXW_with_FitBundleParams(X,wave,bundle_id,ForThesePSFParams);
-}
-
 
 bool specex::PSF::IsLinear() const {
   if(Name() == "GAUSSHERMITE") return true;

@@ -192,16 +192,10 @@ class PSF_Fitter {
     double ParallelizedComputeChi2AB(bool compute_ab);
     double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, unbls::matrix_double* Ap=0, unbls::vector_double* Bp=0, bool update_tmp_data=true) const;
 
-   void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
-
-   // void SetAllPSFParams(const unbls::vector_double &Params); 
+  void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
 
   bool FitOneSpot(Spot_p& spot, double *chi2_val=0, int *n_iterations=0);
   bool FitSeveralSpots(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_pixels=0, int *n_iterations=0);
-  
-  //bool InterpolateSpotPSFs(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_iterations=0);
-  bool FitTraces(std::vector<Spot_p>& spots, int *nok=0);
-
   
   bool FitIndividualSpotFluxes(std::vector<Spot_p>& spots);
   bool FitIndividualSpotPositions(std::vector<Spot_p>& spots);

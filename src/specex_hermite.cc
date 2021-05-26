@@ -34,29 +34,6 @@ double specex::HermitePol(const int Degree, const double &x) {
   
 }
 
-void specex::HermitePols(unbls::vector_double& H, const int Degree, const double &x) {
-  
-  H.resize(Degree+1);
-  H[0]=1; if(Degree==0) return;
-  H[1]=x; if(Degree==1) return;
-  for(int d=2;d<=Degree;d++) {
-    H[d]=x*H[d-1]-(d-1)*H[d-2];
-  }
-}
-
-
-
-void specex::HermitePolsAndDerivatives(unbls::vector_double& H, unbls::vector_double& dHdx, const int Degree, const double &x) {
-  H.resize(Degree+1);
-  dHdx.resize(Degree+1);
-  H[0]=1; dHdx[0]=0; if(Degree==0) return;
-  H[1]=x; dHdx[1]=1; if(Degree==1) return;
-  for(int d=2;d<=Degree;d++) {
-    dHdx[d]=d*H[d-1];
-    H[d]=x*H[d-1]-dHdx[d-1];
-  }
-}
-
 double specex::HermitePolDerivative(const int Degree, const double &x) {
   if(Degree==0) return 0;
   return Degree*HermitePol(Degree-1,x);

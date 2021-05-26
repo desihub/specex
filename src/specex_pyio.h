@@ -10,6 +10,7 @@
 #include <specex_pyoptions.h>
 #include <specex_pyimage.h>
 #include <specex_pypsf.h>
+#include <specex_psf_fitter.h>
 
 namespace specex {
   

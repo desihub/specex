@@ -17,8 +17,6 @@
 #define EXTERNAL_TAIL
 
 namespace specex {
-
-  
   
   class Prior { 
   public :
@@ -162,7 +160,7 @@ public :
 
     const Trace& GetTrace(int fiber) const;
     Trace& GetTrace(int fiber);
-    void AddTrace(int fiber);
+    //void AddTrace(int fiber);
     void LoadXYPol();
     double Xccd(int fiber, const double& wave) const;
     double Yccd(int fiber, const double& wave) const;
@@ -197,7 +195,6 @@ public :
     
     virtual unbls::vector_double DefaultParams() const = 0;
     virtual std::vector<std::string> DefaultParamNames() const = 0;
-    virtual void AllocateDefaultParams();
     
     // check if parameter values are within bounds
     virtual bool CheckParams(const unbls::vector_double &Params) const {return false;};
@@ -250,9 +247,7 @@ public :
     virtual int LocalNAllPar() const = 0; // number of all the parameters parameters needed to describe psf at fixed ccd position
     virtual double Degree() const = 0; 
     int BundleNFitPar(int bundle_id) const; // number of parameters to be fitted  needed to describe psf varying with xy ccd coordinates
-    int BundleNAllPar(int bundle_id) const; // number of all the parameters needed to describe psf varying with xy ccd coordinates
-    int TracesNPar() const;
-    
+   
     bool IsLinear() const; // true if PSF linear wrt PSF params
 
 
@@ -279,44 +274,14 @@ public :
 				unbls::vector_double *PosDer, unbls::vector_double *ParamDer,
 				bool with_core=true, bool with_tail=true) const;
     
-    
-
-    //! Access to the current PSF pixels.
-    double PSFValueFW(const int fiber, const double &wave, 
-		    const int IPix, const int JPix, int bundle_id,
-		      unbls::vector_double *PosDer = 0, unbls::vector_double *ParamDer = 0,
-		      bool with_core=true, bool with_tail=true) const;
-    
-    
-
-    
     //! Access to current analytical PSF params (which may depend on position in the frame).
     int GetBundleOfFiber(int fiber) const;
     unbls::vector_double AllLocalParamsFW(const int fiber, const double &wave, int bundle_id=-1) const;
     unbls::vector_double AllLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    unbls::vector_double AllLocalParamsFW_with_AllBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
-    unbls::vector_double AllLocalParamsXW_with_AllBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
-    unbls::vector_double AllLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
     unbls::vector_double AllLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
-
-    unbls::vector_double FitLocalParamsFW(const int fiber, const double &wave, int bundle_id) const;
-    unbls::vector_double FitLocalParamsXW(const double& x, const double &wave, int bundle_id) const;
-    unbls::vector_double FitLocalParamsFW_with_FitBundleParams(const int fiber, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
-    unbls::vector_double FitLocalParamsXW_with_FitBundleParams(const double& x, const double &wave, int bundle_id, const unbls::vector_double& ForThesePSFParams) const;
     
-    
-    //! I/O for interface with specter
-    /*
-    virtual void WriteFits(fitsfile* fp, int first_hdu=1) const {};
-    virtual void ReadFits(fitsfile* fp, int first_hdu=1) {};  
-    virtual void WriteFits(const std::string& filename, int first_hdu=1) const;
-    virtual void ReadFits(const std::string& filename, int first_hdu=1);
-    */
-
-//    virtual void Append(const boost::shared_ptr < specex::PSF > other) = 0;
     virtual void Append(const std::shared_ptr < specex::PSF > other) = 0;
     
-
     ~PSF();
 
   };

@@ -30,8 +30,6 @@ class image_data_base {
   
   void mask ( unbls::matrix_mask & msk ) const;
   
-  std::string type ( ) const;
-  
  private :
   
   std::string type_;

@@ -256,16 +256,6 @@ void specex::PyPSF::set_trace(py::array trace, int requested_deg, int isx) {
   
 }
 
-void specex::PyPSF::get_table(std::vector<std::string>         &table_string,
-			      std::vector<std::vector<int>>    &table_int,
-			      std::vector<std::vector<double>> &table_double){
-
-  int status = 0;
-  int nrows  = this->psf->pydata.table.data.size();
-  int ncols  = this->psf->pydata.table.columns.size();
-
-}
-
 void specex::PyPSF::SetParamsOfBundle(){
 
   for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = this->psf->ParamsOfBundles.begin();

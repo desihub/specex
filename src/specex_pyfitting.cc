@@ -241,9 +241,6 @@ int specex::PyFitting::fit_psf(
 			       min_wavelength,max_wavelength);
       SPECEX_INFO("number of spots = " << spots.size());
       
-      //if(write_tmp_results)
-      //  write_spots_xml(spots,"spots-init.xml");
-      
       // starting fit
       // --------------------------------------------
       bool init_psf = (!pyio.use_input_specex_psf);

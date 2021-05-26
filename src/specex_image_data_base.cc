@@ -32,13 +32,8 @@ void image_data_base::inv_variance ( unbls::vector_double & invvar ) const {
   return;
 }
 
-
 void image_data_base::mask ( unbls::vector_mask & msk ) const {
   return;
-}
-
-string image_data_base::type ( ) const {
-  return type_;
 }
 
 void image_data_base::values ( unbls::matrix_double & data ) const {
