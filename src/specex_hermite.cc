@@ -1,5 +1,5 @@
 
-#include <unhrp.h>
+#include <unbls.h>
 
 #include <specex_hermite.h>
 
@@ -34,7 +34,7 @@ double specex::HermitePol(const int Degree, const double &x) {
   
 }
 
-void specex::HermitePols(unhrp::vector_double& H, const int Degree, const double &x) {
+void specex::HermitePols(unbls::vector_double& H, const int Degree, const double &x) {
   
   H.resize(Degree+1);
   H[0]=1; if(Degree==0) return;
@@ -46,7 +46,7 @@ void specex::HermitePols(unhrp::vector_double& H, const int Degree, const double
 
 
 
-void specex::HermitePolsAndDerivatives(unhrp::vector_double& H, unhrp::vector_double& dHdx, const int Degree, const double &x) {
+void specex::HermitePolsAndDerivatives(unbls::vector_double& H, unbls::vector_double& dHdx, const int Degree, const double &x) {
   H.resize(Degree+1);
   dHdx.resize(Degree+1);
   H[0]=1; dHdx[0]=0; if(Degree==0) return;

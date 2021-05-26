@@ -5,7 +5,7 @@
 #include <string>
 #include <map>
 
-#include <unhrp.h>
+#include <unbls.h>
 
 #include "specex_psf.h"
 #include "specex_spot.h"
@@ -26,10 +26,10 @@ namespace specex {
     double x,y,wavelength,fiber,fiber_bundle,flux;
     double frozen_x,frozen_y,frozen_flux; // for tails, keep fixed during minimization to avoid fitting flux with tails
     
-    unhrp::vector_double trace_x_monomials;
-    unhrp::vector_double trace_y_monomials;
-    unhrp::vector_double psf_monomials;
-    unhrp::vector_double psf_all_params;
+    unbls::vector_double trace_x_monomials;
+    unbls::vector_double trace_y_monomials;
+    unbls::vector_double psf_monomials;
+    unbls::vector_double psf_all_params;
     
     int flux_parameter_index;
     int x_parameter_index;
@@ -40,7 +40,7 @@ namespace specex {
     
 #ifdef EXTERNAL_TAIL
     double tail_amplitude;
-    unhrp::vector_double tail_monomials;
+    unbls::vector_double tail_monomials;
 #endif
 
 
@@ -69,10 +69,10 @@ class PSF_Fitter {
 
  public :
   // internal set of parameters and matrices
-  unhrp::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
-  std::vector<unhrp::matrix_double> A_of_band; // for Gauss-Newton solving
-  std::vector<unhrp::vector_double> B_of_band; // for Gauss-Newton solving
-  unhrp::matrix_double fitWeight; // saved weight matrix of fitter parameters
+  unbls::vector_double Params; // parameters that are fit (PSF, fluxes, XY CCD positions)
+  std::vector<unbls::matrix_double> A_of_band; // for Gauss-Newton solving
+  std::vector<unbls::vector_double> B_of_band; // for Gauss-Newton solving
+  unbls::matrix_double fitWeight; // saved weight matrix of fitter parameters
   
  public :
   
@@ -190,11 +190,11 @@ class PSF_Fitter {
     void InitTmpData(const std::vector<Spot_p>& spots);
     void UpdateTmpData(bool compute_ab);
     double ParallelizedComputeChi2AB(bool compute_ab);
-    double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, unhrp::matrix_double* Ap=0, unhrp::vector_double* Bp=0, bool update_tmp_data=true) const;
+    double ComputeChi2AB(bool compute_ab, int begin_j=0, int end_j=0, unbls::matrix_double* Ap=0, unbls::vector_double* Bp=0, bool update_tmp_data=true) const;
 
    void ComputeWeigthImage(std::vector<specex::Spot_p>& spots, int* npix);
 
-   // void SetAllPSFParams(const unhrp::vector_double &Params); 
+   // void SetAllPSFParams(const unbls::vector_double &Params); 
 
   bool FitOneSpot(Spot_p& spot, double *chi2_val=0, int *n_iterations=0);
   bool FitSeveralSpots(std::vector<Spot_p>& spots, double *chi2_val=0, int *n_pixels=0, int *n_iterations=0);

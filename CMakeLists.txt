@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 2.8.12)
 
 project(specex)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(Python_ROOT_DIR $ENV{DESICONDA})
 
@@ -24,54 +27,25 @@ pybind11_add_module(_libspecex NO_EXTRAS
 	    src/specex_message.cc
 	    src/specex_legendre.cc
 	    src/specex_linalg.cc
-	    src/specex_psf_io.cc
 	    src/specex_psf_proc.cc
 	    src/specex_model_image.cc
 	    src/specex_image_data.cc
 	    src/specex_hermite.cc
 	    src/specex_trace.cc
 	    src/specex_spot_array.cc
-	    src/specex_psf_io_gauss_hermite_psf_fits_1.cc
-	    src/specex_psf_io_gauss_hermite_psf_fits_2.cc
-	    src/specex_psf_io_gauss_hermite_psf_fits_3.cc
 	    src/specex_spot.cc
 	    src/specex_mask.cc
 	    src/specex_lamp_lines_utils.cc
-	    src/specex_fits.cc
-	    src/deboosted/specex_brent.cc
-	    src/deboosted/specex_desi_io.cc
-	    src/deboosted/specex_tokens.cc
-	    src/deboosted/specex_vector_utils.cc
+	    src/specex_brent.cc
+	    src/specex_tokens.cc
+	    src/specex_vector_utils.cc
 	    src/specex_blas.c
 	    src/specex_lapack.c
 	    src/specex_unbst.cc
-	    src/harp/harp.cpp
-	    src/harp/data/harp_data.cpp
-	    src/harp/data/harp_fits.cpp
-	    src/harp/data/harp_image.cpp
-	    src/harp/data/harp_metadata.cpp
-	    src/harp/data/harp_plugin_registry.cpp
-	    src/harp/data/harp_psf.cpp
-	    src/harp/data/harp_spec.cpp
-	    src/harp/data/harp_targets.cpp
-	    src/harp/extract/harp_extraction.cpp
-	    src/harp/extract/harp_spec_slice.cpp
-	    src/harp/math/harp_linalg.cpp
-	    src/harp/math/harp_math.cpp
-	    src/harp/plugins/harp_plugin_image_desi.cpp
-	    src/harp/plugins/harp_plugin_image_fits.cpp
-	    src/harp/plugins/harp_plugin_image_sim.cpp
-	    src/harp/plugins/harp_plugin_psf_gauss.cpp
-	    src/harp/plugins/harp_plugin_psf_gauss_sim.cpp
-	    src/harp/plugins/harp_plugin_psf_gh.cpp
-	    src/harp/plugins/harp_plugin_spec_desi.cpp
-	    src/harp/plugins/harp_plugin_spec_desisim.cpp
-	    src/harp/plugins/harp_plugin_spec_fits.cpp
-	    src/harp/plugins/harp_plugin_spec_sim.cpp
-	    src/harp/plugins/harp_plugin_targets_desi.cpp
-	    src/harp/plugins/harp_plugin_targets_fits.cpp
-	    src/harp/plugins/harp_plugin_targets_sim.cpp
+	    src/specex_image_data_base.cc
+    	    src/specex_fits.cc
 	    )
+
 # look for BLAS/LAPACK with MKL first
 
 set(BLA_VENDOR Intel10_64lp)
@@ -115,20 +89,9 @@ message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
 target_include_directories(_libspecex
 	PUBLIC
 	src
-	src/deboosted_headers
-	src/unhrp
-	src/harp
-	src/harp/data
-	src/harp/data/harp
-	src/harp/plugins/
-	src/harp/plugins/harp
-	src/harp/math/
-	src/harp/math/harp
-	src/harp/extract/
-	src/harp/extract/harp
 	${MKL_INCLUDE}
 	)
-
+	
 target_link_directories(_libspecex
 	PUBLIC)
 	

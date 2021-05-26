@@ -1,6 +1,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <fstream>
 
 #include "specex_spot_array.h"
 #include "specex_message.h"
@@ -117,7 +118,7 @@ void specex::write_spots_list(vector<Spot_p> spots, const PSF_p psf, const strin
     
     spot->write_list_entry(osl);
 
-    unhrp::vector_double params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
+    unbls::vector_double params = psf->AllLocalParamsFW(spot->fiber,spot->wavelength,spot->fiber_bundle);
     for(size_t p=0;p<params.size();p++)
       osl << " " << params[p];
     
@@ -129,4 +130,3 @@ void specex::write_spots_list(vector<Spot_p> spots, const PSF_p psf, const strin
   SPECEX_INFO("wrote spots in " << filename);
   
 }
-

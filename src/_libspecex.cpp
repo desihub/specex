@@ -13,7 +13,6 @@
 #include <specex_pyimage.h>
 #include <specex_psf.h>
 #include <specex_gauss_hermite_psf.h>
-#include <specex_psf_io.h>
 #include <specex_image_data.h>
 #include <specex_pypsf.h>
 #include <specex_fits.h>
@@ -281,16 +280,6 @@ PYBIND11_MODULE(_libspecex, m) {
         .def_readwrite("use_input_specex_psf", &spx::PyIO::use_input_specex_psf)
         .def("set_inputpsf", [](spx::PyIO &self, spx::PyOptions opts){
 	    return self.set_inputpsf(opts);
-	}
-	)
-        .def("read_preproc", [](spx::PyIO &self, spx::PyOptions opts,
-				   spx::PyImage& pyimg){
-	    return self.read_preproc(opts,pyimg);
-	}
-	)
-        .def("read_psf", [](spx::PyIO &self, spx::PyOptions opts,
-				 spx::PyPSF& pypsf){
-	    return self.read_psf(opts,pypsf);
 	}
 	)
         .def("load_psf",[](spx::PyIO &self, spx::PyOptions opts,

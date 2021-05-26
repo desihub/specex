@@ -1,18 +1,15 @@
 #ifndef SPECEX_STAMP__H
 #define SPECEX_STAMP__H
 
-//#include <unhrp.h>
-#include <harp/image.hpp>
-
-//#include "specex_psf.h"
 #include <iostream>
+#include <specex_image_data_base.h>
 
 namespace specex {
 
 class Stamp {
  public :
   // current bounds of psf fit stamp in image
-  const harp::image* parent_image; // either one of the two
+  const image_data_base* parent_image; // either one of the two
   const Stamp* parent_stamp; // either one of the two
   int begin_i;
   int begin_j;
@@ -21,7 +18,7 @@ class Stamp {
   
  
  
-  void SetParent(const harp::image& image) {
+  void SetParent(const image_data_base& image) {
     parent_image = &image;
     parent_stamp = 0;
     begin_i=0;
@@ -49,7 +46,7 @@ class Stamp {
    end_j=0;
  }
  
- Stamp(const harp::image& image) {
+ Stamp(const image_data_base& image) {
    SetParent(image);
  }
  
@@ -66,39 +63,13 @@ class Stamp {
    return(i>=begin_i && i<end_i && j>=begin_j && j<end_j);
  }
  
- /*
- void SetLimitsFromPSF(const SpecExPSF& PSF, const double &X, const double &Y) {
-   PSF.StampLimits(X,Y,begin_i,end_i,begin_j,end_j);
-   // now check image bounds
-   begin_i = max(0,begin_i);
-   end_i   = min(Parent_n_cols(),end_i);
-   begin_j = max(0,begin_j);
-   end_j   = min(Parent_n_rows(),end_j);
- }
- 
- void SetLimitsFromPSF(const SpecExPSF& PSF, 
-		       const double &spot_x_min, const double &spot_x_max,
-		       const double &spot_y_min, const double &spot_y_max) {
-   
-   int k,p;
-   PSF.StampLimits(spot_x_min,spot_y_min,begin_i,k,begin_j,p);
-   PSF.StampLimits(spot_x_max,spot_y_max,k,end_i,p,end_j);
-   
-   // now check image bounds
-   begin_i = max(0,begin_i);
-   end_i   = min(Parent_n_cols(),end_i);
-   begin_j = max(0,begin_j);
-   end_j   = min(Parent_n_rows(),end_j);
- }
- */
- 
   int n_cols() const {return end_i-begin_i;}
   int n_rows() const {return end_j-begin_j;}
 
   
   Stamp Intersection(const Stamp& other_stamp) {
     if((parent_image !=  other_stamp.parent_image) || (parent_stamp !=  other_stamp.parent_stamp) ) {
-      HARP_THROW("Stamp::Intersection not same parents");
+      SPECEX_ERROR("Stamp::Intersection not same parents");
     }
     Stamp inter(*this);
     if(inter.begin_i<other_stamp.begin_i) inter.begin_i=other_stamp.begin_i;

@@ -53,30 +53,8 @@ namespace specex {
     
 private :
 
-    /*
-    template < class Archive >
-      void serialize ( Archive & ar, const unsigned int version ) {
-      ar & BOOST_SERIALIZATION_NVP(wavelength);
-      ar & BOOST_SERIALIZATION_NVP(fiber);
-      ar & BOOST_SERIALIZATION_NVP(fiber_bundle);
-      ar & BOOST_SERIALIZATION_NVP(xc);
-      ar & BOOST_SERIALIZATION_NVP(yc);
-      ar & BOOST_SERIALIZATION_NVP(flux);
-      ar & BOOST_SERIALIZATION_NVP(initial_xc);
-      ar & BOOST_SERIALIZATION_NVP(initial_yc);
-      ar & BOOST_SERIALIZATION_NVP(initial_flux);      
-      ar & BOOST_SERIALIZATION_NVP(eflux);     
-      ar & BOOST_SERIALIZATION_NVP(chi2);
-      ar & BOOST_SERIALIZATION_NVP(status);
-      
-      return;
-    }
-    */
   };
 
-  // BOOST_SERIALIZATION_SHARED_PTR(Spot)  
-//    typedef boost::shared_ptr < specex::Spot > Spot_p;
-//  typedef boost::weak_ptr < specex::Spot > Spot_wp;
   typedef std::shared_ptr < specex::Spot > Spot_p;
   typedef std::weak_ptr   < specex::Spot > Spot_wp;
 }

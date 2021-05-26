@@ -42,11 +42,11 @@ specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const doub
 
 
 
-unhrp::vector_double specex::Legendre1DPol::Monomials(const double &x) const {
+unbls::vector_double specex::Legendre1DPol::Monomials(const double &x) const {
 
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
-  unhrp::vector_double m(deg+1);
+  unbls::vector_double m(deg+1);
   for(int i=0;i<=deg;i++) {
     m[i]=LegendrePol(i,rx);
   }
@@ -58,7 +58,7 @@ double specex::Legendre1DPol::Value(const double &x) const {
   return specex::dot(coeff,Monomials(x));
 }
 
-bool specex::Legendre1DPol::Fit(const unhrp::vector_double& X, const unhrp::vector_double& Y, const unhrp::vector_double* Yerr, bool set_range) {
+bool specex::Legendre1DPol::Fit(const unbls::vector_double& X, const unbls::vector_double& Y, const unbls::vector_double* Yerr, bool set_range) {
    // fit x
   
   if(X.size() != Y.size()) SPECEX_ERROR("Legendre1DPol::Fit, not same size X:" << X.size() << " Y:" << Y.size());
@@ -71,8 +71,8 @@ bool specex::Legendre1DPol::Fit(const unhrp::vector_double& X, const unhrp::vect
     specex::minmax(X,xmin,xmax);
   }
   
-  unhrp::matrix_double A(npar,npar); A.clear();
-  unhrp::vector_double B(npar); B.clear();
+  unbls::matrix_double A(npar,npar); A.clear();
+  unbls::vector_double B(npar); B.clear();
   
   
   
@@ -82,12 +82,12 @@ bool specex::Legendre1DPol::Fit(const unhrp::vector_double& X, const unhrp::vect
       w=1./square((*Yerr)[i]);
     }
     
-    unhrp::vector_double h=Monomials(X[i]);
+    unbls::vector_double h=Monomials(X[i]);
     specex::syr(w,h,A); // A += w*Mat(h)*h.transposed();
     specex::axpy(double(w*Y[i]),h,B); //B += (w*Y[i])*h;
   }
 
-  //unhrp::matrix_double As=A;
+  //unbls::matrix_double As=A;
   int status = cholesky_solve(A,B);
   if(status != 0) {
     
@@ -118,8 +118,8 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   int npar = inverse.deg + 1;
   int ndata = npar*4;  // 
   double dx = (xmax-xmin)/ndata;
-  unhrp::vector_double X(ndata);
-  unhrp::vector_double Y(ndata);
+  unbls::vector_double X(ndata);
+  unbls::vector_double Y(ndata);
   for(int i=0;i<ndata;i++) {
     X[i] = xmin+i*dx;
     Y[i] = Value(X[i]);
@@ -137,8 +137,8 @@ specex::Legendre1DPol specex::composed_pol(const specex::Legendre1DPol& pol1, co
   int npar = composed.deg + 1;
   int ndata = npar*4;  // 
   double dx = (pol2.xmax-pol2.xmin)/ndata;
-  unhrp::vector_double X2(ndata);
-  unhrp::vector_double Y1(ndata);
+  unbls::vector_double X2(ndata);
+  unbls::vector_double Y1(ndata);
   for(int i=0;i<ndata;i++) {
     X2[i] = pol2.xmin+i*dx;
     Y1[i] = pol1.Value(pol2.Value(X2[i]));
@@ -169,17 +169,17 @@ void specex::Legendre2DPol::Fill() {
   coeff.clear();
 }
  
-unhrp::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {
+unbls::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {
   
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
-  unhrp::vector_double mx(xdeg+1); mx.clear();
+  unbls::vector_double mx(xdeg+1); mx.clear();
   for(int i=0;i<=xdeg;i++)
     mx[i]=LegendrePol(i,rx);
   
-  unhrp::vector_double m((xdeg+1)*(ydeg+1));
+  unbls::vector_double m((xdeg+1)*(ydeg+1));
   int index=0;
   for(int j=0;j<=ydeg;j++) {
     double myj = LegendrePol(j,ry);
@@ -254,14 +254,14 @@ void specex::SparseLegendre2DPol::Clear() {
 }
 
 
-unhrp::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, const double &y) const {
+unbls::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, const double &y) const {
   
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
   
-  unhrp::vector_double m(non_zero_indices.size()); m.clear();
+  unbls::vector_double m(non_zero_indices.size()); m.clear();
   int index=0;
   for(std::vector<int>::const_iterator k = non_zero_indices.begin(); k!=  non_zero_indices.end(); k++, index++) {
     int i = (*k)%(xdeg+1);

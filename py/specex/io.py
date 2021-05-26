@@ -6,8 +6,11 @@ from datetime import datetime
 import numpy as np
 import specex._libspecex as spx
 
-def write_psf(pyps,opts):    
-    
+def write_psf(pyps,opts,pyio):    
+
+    # load psf
+    pyio.load_psf(opts,pyps)    
+
     # initialize table writing
     spx.tablewrite_init(pyps)
 

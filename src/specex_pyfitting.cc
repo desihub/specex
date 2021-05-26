@@ -6,21 +6,16 @@
 
 #include <boost/program_options.hpp>
 
-#include <unhrp.h>
+#include <unbls.h>
 
 #include <specex_message.h>
-
-#include <specex_serialization.h>
 
 #include <specex_trace.h>
 #include <specex_spot.h>
 #include <specex_spot_array.h>
 #include <specex_lamp_lines_utils.h>
 #include <specex_fits.h>
-#include <specex_desi_io.h>
 #include <specex_psf_fitter.h>
-
-#include <specex_psf_io.h>
 
 #include <specex_tokens.h>
 
@@ -291,19 +286,15 @@ int specex::PyFitting::fit_psf(
 
   // ending
   // --------------------------------------------   
-   
-  } catch(harp::exception e) {
-    cerr << "FATAL ERROR (harp) " << e.what() << endl;
-    return EXIT_FAILURE;
-  }
+  }   
   catch (std::exception& e) {
     cerr << "FATAL ERROR (other std) " << e.what() <<endl;
     return EXIT_FAILURE;
-
+    
   }catch (...) {
     cerr << "FATAL ERROR (unknown)" << endl;
     return EXIT_FAILURE;
- }
+  }
   
   // may prevent crashing on non-floating point exceptions outside this function
   fedisableexcept (FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW);
@@ -311,6 +302,5 @@ int specex::PyFitting::fit_psf(
 }
 
 
-#include <specex_serialization_implement.h>
 
 
