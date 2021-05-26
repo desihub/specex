@@ -1,14 +1,11 @@
-
 # specex
 
 This repository contains code for PSF measurement in fiber-fed spectrograph for DESI.
 
 ## Introduction
 
-Package for PSF measurement in fiber-fed spectrograph (BOSS data, DESI simulations).
-This package is intended to be used with [HARP](https://github.com/tskisner/HARP) and
-/or [specter](https://github.com/desihub/specter) extraction codes.
-The installation procedure is described in the [INSTALL file](INSTALL.md), as well as below. The code depends on HARP and uses pybind11 (2.2.0)
+This package is intended to be used with the [specter](https://github.com/desihub/specter) extraction code.
+The installation procedure is described in the [INSTALL file](INSTALL.md), as well as below. The code uses pybind11 (2.2.0)
 
 ## Installation
 
