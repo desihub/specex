@@ -1,15 +1,12 @@
 #ifndef SPECEX_PYOPTIONS__H
 #define SPECEX_PYOPTIONS__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
-
 #include <specex_unbls.h>
-
 #include <specex_psf_fitter.h>
-
-namespace popts = boost::program_options;
+#include <getopt.h>
+#include <map>
 
 namespace specex {
   
@@ -18,6 +15,8 @@ namespace specex {
   public :
 
     typedef std::shared_ptr <PyOptions> pshr;
+
+    int noptions;
 
     std::string arc_image_filename;
     std::string input_psf_filename; 
@@ -50,55 +49,87 @@ namespace specex {
     int max_number_of_lines; 
     
     std::string broken_fibers_string;
-
     std::string lamp_lines_filename;
-
     std::vector<std::string> argurment_priors;
-
-    popts::variables_map vm;
-
-    popts::options_description desc;
+        
+    bool fit_traces;
+    bool fit_sigmas;
+    bool fit_thepsf;
+    bool single_bundle;
+    bool write_tmp_results;
+    bool fit_psf_tails;
+    bool fit_continuum;
+    bool use_variance_model;
+    bool fit_individual_spots_position;
+    
+    bool half_size_x_def; 
+    bool half_size_y_def; 
+    bool gauss_hermite_deg_def; 
+    bool gauss_hermite_deg2_def; 
+    bool legendre_deg_wave_def; 
+    bool legendre_deg_x_def;
+    bool trace_deg_wave_def;
+    bool trace_deg_x_def; 
 
     int parse(int argc, char *argv[] ); 
-
+    void loadmap(std::map<std::string,std::vector<int>>&, const string, int);
+    int argint(std::map<std::string,std::vector<int>>&, const string);
+    
     PyOptions()
-      : desc(popts::options_description("Options")) 
-      {
-        
+      {	
       arc_image_filename="";
       input_psf_filename="";
       output_xml_filename="";
       output_fits_filename="";
       output_spots_filename="";
-      flux_hdu=0;
-      ivar_hdu=0;
-      mask_hdu=0;
-      header_hdu=0;
-      xtrace_hdu=0;
-      ytrace_hdu=0;
+      flux_hdu=1;
+      ivar_hdu=2;
+      mask_hdu=3;
+      header_hdu=1;
+      xtrace_hdu=-1;
+      ytrace_hdu=-1;
     
-      psf_model="";
+      psf_model="GAUSSHERMITE";
       first_fiber_bundle=0;
       last_fiber_bundle=0;
       first_fiber=0;
-      last_fiber=0;
-      half_size_x=0;
-      half_size_y=0;  
-      gauss_hermite_deg=0;
-      gauss_hermite_deg2=0; 
-      legendre_deg_wave=0;
-      legendre_deg_x=0;
-      trace_deg_wave=0;
-      trace_deg_x=0;  
+      last_fiber=100000;
+      half_size_x=8;
+      half_size_y=5;  
+      gauss_hermite_deg=6;
+      gauss_hermite_deg2=2; 
+      legendre_deg_wave=3;
+      legendre_deg_x=1;
+      trace_deg_wave=6;
+      trace_deg_x=6;  
       trace_prior_deg=0;
       psf_error=0;
       psf_core_wscale=0;
-      max_number_of_lines=0; 
+      max_number_of_lines=200; 
     
       broken_fibers_string="";
 
       lamp_lines_filename="";
+
+      fit_traces = true;
+      fit_sigmas = true;
+      fit_thepsf = true;
+      single_bundle = false;
+      write_tmp_results = false;
+      fit_psf_tails = false;
+      fit_continuum = false;
+      use_variance_model = false;
+      fit_individual_spots_position = false;
       
+      half_size_x_def = false ;
+      half_size_y_def = false;
+      gauss_hermite_deg_def = false; 
+      gauss_hermite_deg2_def = false; 
+      legendre_deg_wave_def = false; 
+      legendre_deg_x_def = false;
+      trace_deg_wave_def = false;
+      trace_deg_x_def = false; 
+
       return;
       
     }

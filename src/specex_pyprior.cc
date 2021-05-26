@@ -12,7 +12,6 @@ int specex::PyPrior::set_priors(specex::PyOptions opts){
     int np=int(opts.argurment_priors.size());
     if( ! (np%3==0) ) {
       cerr << "error in parsing, priors must be of the form 'name value error' (np=" << np << ")" << endl;
-      cerr << opts.desc << endl;
       return EXIT_FAILURE;
     }
     try {
@@ -26,7 +25,6 @@ int specex::PyPrior::set_priors(specex::PyOptions opts){
     }catch(std::exception) {
       cerr << "error in parsing arguments of priors" << endl;
       cerr << "priors must be of the form 'name value error'" << endl;
-      cerr << opts.desc << endl;
       return EXIT_FAILURE;
     } 
   }
