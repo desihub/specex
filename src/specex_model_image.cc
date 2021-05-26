@@ -1,9 +1,9 @@
+#include <cmath>
 #include <specex_model_image.h>
 #include <specex_message.h>
 #include <specex_psf.h>
 
 using namespace std;
-
 
 specex::Stamp specex::compute_stamp(const specex::image_data& model_image, const specex::PSF_p psf, const std::vector<specex::Spot_p>& spots, int x_margin, int y_margin, int only_this_bundle) {
   
@@ -61,8 +61,8 @@ void specex::parallelized_compute_model_image(specex::image_data& model_image, c
   //SPECEX_INFO("specex::parallelized_compute_model_image");
   Stamp stamp = compute_stamp(model_image,psf,spots,x_margin,y_margin);
   int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_chuncks;
-  
-  model_image.data.clear();
+
+  unbls::zero(model_image.data);
   
   int chunk=0;
   

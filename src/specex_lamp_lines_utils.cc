@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include "specex_spot.h"
 #include "specex_trace.h"

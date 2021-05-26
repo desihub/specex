@@ -1,8 +1,8 @@
 #!/bin/bash
-
 build_dev=1
 compare=1
-dirac=1
+dirac=0
+tag=
 
 do_dev=1
 do_master=0
@@ -119,7 +119,7 @@ if [ $do_dev -gt 0 ]; then
     echo `ls -rlt $specex_loc` >> dev_version.log
     echo `which desi_compute_psf` >> dev_version.log
     code=dev
-    (time python test_specex.py psf-$code.fits $inputroot) |& tee psf-b1-$code.log
+    (time python test_specex.py psf-$code.fits $inputroot) |& tee psf-b1-$code$tag.log
     
 fi
 

@@ -3,7 +3,7 @@
 #include <string>
 #include <sstream>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include <specex_image_data.h>
 #include <specex_fits.h>

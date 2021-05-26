@@ -1,7 +1,9 @@
+#include <algorithm>
+#include <cmath>
 #include <assert.h>
 #include <time.h>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include "specex_psf_fitter.h"
 #include "specex_brent.h"
@@ -105,8 +107,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   
   
   //int step_j  = (stamp.end_j-stamp.begin_j)/number_of_image_bands;
- 
-  
+   
   //SPECEX_INFO("Begin parallelized ComputeChi2AB j range " << stamp.begin_j << " " << stamp.end_j);
   
   UpdateTmpData(compute_ab);
@@ -117,8 +118,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
 #endif
   
   
-  unbls::vector_double chi2_of_band(number_of_image_bands);
-  chi2_of_band.clear();
+  unbls::vector_double chi2_of_band(number_of_image_bands,0.0);
   
   // choosing bins
   unbls::vector_double begin_j(number_of_image_bands);
@@ -130,7 +130,6 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     end_j[band]=0;
   }
   
-
   band = 0;
   {
     int ref_fiber=(psf_params->fiber_min + psf_params->fiber_max)/2;
@@ -140,8 +139,6 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     for(size_t s=0;s<spot_tmp_data.size();s++) {
       const specex::SpotTmpData &tmp = spot_tmp_data[s];
       if(tmp.fiber != ref_fiber) continue;
-      //if((tmp.y<0) || (tmp.y>=image.n_rows()))
-      //SPECEX_ERROR("Spot is outside of image ??? y=" << tmp.y);
       spots_j.push_back(int(tmp.y));
     }
     if(spots_j.empty()) {
@@ -149,13 +146,6 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     }
     std::sort(spots_j.begin(),spots_j.end());
     
-    //cout << "sorted spots yccd = ";
-    //for(vector<int>::const_iterator j=spots_j.begin();j!=spots_j.end();j++) {
-    //cout << " " << *j;
-    //}
-
-    //SPECEX_INFO("stamp begin " << stamp.begin_j << " end " << stamp.end_j);
-
     band = 0;
     int nspots_per_band = spots_j.size()/number_of_image_bands;
     vector<int>::const_iterator j=spots_j.begin();
@@ -182,18 +172,15 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
     //for(band=0; band<number_of_image_bands; band++) 
     //SPECEX_INFO("band " << band << " [" << begin_j(band) << ":" << end_j(band) << "]");
     
-    
-  }
-
-  
+  }  
   
 #pragma omp parallel for 
   for(band=0; band<number_of_image_bands; band++) {
     if(end_j[band]>begin_j[band]) {
        chi2_of_band[band] = ComputeChi2AB(compute_ab,begin_j[band],end_j[band],& A_of_band[band], & B_of_band[band],false);
     }else if(compute_ab) {
-      A_of_band[band].clear();
-      B_of_band[band].clear();
+      unbls::zero(A_of_band[band]);
+      unbls::zero(B_of_band[band]);
     }
   }
   
@@ -203,7 +190,7 @@ double specex::PSF_Fitter::ParallelizedComputeChi2AB(bool compute_ab) {
   }
   if(compute_ab) {
     for(int band=1; band<number_of_image_bands; band++) {
-      A_of_band[0] += A_of_band[band];      
+      unbst::subadd(A_of_band[band].vals,A_of_band[0].vals,0,1.0);
       unbst::subadd(B_of_band[band],B_of_band[0],0,1.0);
     }
   }
@@ -215,7 +202,7 @@ void specex::PSF_Fitter::InitTmpData(const vector<specex::Spot_p>& spots) {
 
   SPECEX_DEBUG("InitTmpData with " << spots.size() << " spots");
   
-  // load spot_tmp_data 
+  // load spot_tmp_data  
   spot_tmp_data.clear();
 
   for(size_t s=0;s<spots.size();s++) {
@@ -334,18 +321,16 @@ void specex::PSF_Fitter::UpdateTmpData(bool compute_ab) {
 
 
 double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int input_end_j, unbls::matrix_double* input_Ap, unbls::vector_double* input_Bp, bool update_tmp_data) const  {
-
   
   int begin_j = input_begin_j;
   int end_j   = input_end_j;
-  
-  
+    
   unbls::matrix_double* Ap = input_Ap;
   unbls::vector_double* Bp = input_Bp;
   
   if(begin_j==0) begin_j=stamp.begin_j;
   if(end_j==0) end_j=stamp.end_j;
-  
+
   if(compute_ab) {
     if(Ap==0) Ap = & const_cast<specex::PSF_Fitter*>(this)->A_of_band[0];
     if(Bp==0) Bp = & const_cast<specex::PSF_Fitter*>(this)->B_of_band[0];
@@ -361,15 +346,13 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   bool do_faster_than_syr = compute_ab && fit_flux && spot_tmp_data.size()>1;
   if(do_faster_than_syr) {
     Ablock.resize(index_of_spots_parameters,index_of_spots_parameters);
-    Ablock.clear();
+    unbls::zero(Ablock);
     for(size_t s=0; s<spot_tmp_data.size(); s++) {
-      //Arect.push_back(unbls::vector_double(index_of_spots_parameters));
-      //Arect.back().clear();    
       
       const SpotTmpData& tmp = spot_tmp_data[s];
       if(tmp.can_measure_flux && !tmp.ignore) {
 	Arect.push_back(unbls::vector_double(index_of_spots_parameters));
-	Arect.back().clear();    
+	unbls::zero(Arect.back());
       }
     }
      
@@ -397,8 +380,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
   std::vector<int> indices_of_fitpar_in_allpar;
   
   if(compute_ab) {
-    Ap->clear();
-    Bp->clear();
+    unbls::zero(*Ap);
+    unbls::zero(*Bp);
     
     if(fit_psf || fit_psf_tail) {
       gradAllPar.resize(psf->LocalNAllPar()); 
@@ -424,9 +407,7 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
     
     }// will remain zero if (!fit_psf)
     if(fit_position || fit_trace) {gradPos.resize(2); gradPos_pointer = &gradPos;}
-  
-    
-    
+
   }
  
   bool use_footprint = (spot_tmp_data.size()>1 && footprint_weight.Nx()>0);
@@ -499,8 +480,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       double signal = 0;
 
       if(compute_ab) {
-	H.clear();
-#ifdef FASTER_THAN_SYR
+	unbls::zero(H);
+#ifdef FASTER_THAN_SYR	
 	other_indices.clear();
 #endif
       }
@@ -618,9 +599,9 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
       }
       
       
-      if(corefootprint_weight_boost>0 && corefootprint.n_rows()>0 && corefootprint(i,j)>0) {
-	wscale *= corefootprint_weight_boost;
-	w *= corefootprint_weight_boost;
+      if(corefootprint_weight_bst>0 && corefootprint.n_rows()>0 && corefootprint(i,j)>0) {
+	wscale *= corefootprint_weight_bst;
+	w *= corefootprint_weight_bst;
       }
       
       res -= signal;
@@ -638,8 +619,8 @@ double specex::PSF_Fitter::ComputeChi2AB(bool compute_ab, int input_begin_j, int
 
       if(compute_ab && fit_psf && specex::dot(H,H)>0) {
 	cout << "DEBUGGING TESTING_H_VECTOR" << endl;
-	
-	footprint_weight.data.clear();
+
+	unbls::zero(footprint_weigh.data);
 	footprint_weight(i,j) = w; // only this pixel
 	
 	int nok = 0;
@@ -990,7 +971,7 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
   if(spots.size()>1) {
     // compute psf footprint
     footprint_weight.resize(weight.Nx(),weight.Ny());
-    footprint_weight.data.clear();
+    unbls::zero(footprint_weight.data);
     
     *npix = 0;
     if(include_signal_in_weight) {
@@ -1158,7 +1139,6 @@ void specex::PSF_Fitter::ComputeWeigthImage(vector<specex::Spot_p>& spots, int* 
 
 
 bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *chi2, int *n_pixels, int *n_iterations) {
-  
   if(fit_trace && fit_position) {
     SPECEX_ERROR("specex::PSF_Fitter::FitSeveralSpots cannot fit traces and spot positions at the same time");
   }
@@ -1186,14 +1166,11 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
   
   npar_fixed_coord = psf_params->FitParPolXW.size();
   npar_varying_coord = psf->BundleNFitPar(psf_params->bundle_id);
-
+  
   nparTot  = NPar(spots.size());
 
-  
- 
   ComputeWeigthImage(spots,npix);
 
-  
   InitTmpData(spots);
 
   int n_to_attach = 0;
@@ -1201,23 +1178,21 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     SpotTmpData& tmp = spot_tmp_data[s];
     if(!tmp.can_measure_flux) n_to_attach++;
   }
+
   if(fit_flux && n_to_attach>0) {
     SPECEX_DEBUG("n_to_attach = " << n_to_attach << " nparTot " << nparTot << " -> " << nparTot-n_to_attach);
     nparTot -= n_to_attach;
   }
   
-  
-
   SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots npar_fixed_coord   = " << npar_fixed_coord);
   SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots npar_varying_coord = " << npar_varying_coord);
-  
-  
   
   // allocation of parameters, setting Params 
   // and recording some indices
   // ----------------------------------------------------
+  
   Params.resize(nparTot);
-  Params.clear();
+  unbls::zero(Params);
 
   tmp_trace_x_parameter.clear();
   tmp_trace_y_parameter.clear();
@@ -1272,22 +1247,12 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 #endif
     index_of_spots_parameters = index;
   }
-  
-  
+    
   // ----------------------------------------------------
   
-  //ComputeWeigthImage(spots,npix);
-  
-  
-  
-  
-
-
-  //InitTmpData(spots);
-  
-  if(corefootprint_weight_boost>0) {
+  if(corefootprint_weight_bst>0) {
     corefootprint = image;
-    corefootprint.data.clear();
+    unbls::zero(corefootprint.data);
     int core_hsize=2;
     for(size_t s=0;s<spot_tmp_data.size();s++) {
       SpotTmpData& tmp = spot_tmp_data[s];
@@ -1346,8 +1311,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     }
     SPECEX_DEBUG("Number of attached spots = " << n_attached);
     SPECEX_DEBUG("Number of ignored spots  = " << n_ignored);
-    
-    
+        
   }
   // indexation and Params and monomials for tmp spots 
   {
@@ -1403,13 +1367,8 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     spot_tmp_data[it->first].flux = spot_tmp_data[it->second].flux;
     spot_tmp_data[it->first].flux_parameter_index = spot_tmp_data[it->second].flux_parameter_index;
   }
-  
-
-  
+      
   SPECEX_INFO("specex::PSF_Fitter::FitSeveralSpots inc. signal in w=" << include_signal_in_weight << ", npix footprint = " << *npix);
-
-
-
 
   ////////////////////////////////////////////////////////////////////////// 
   number_of_image_bands = 1;
@@ -1421,7 +1380,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     }
   }
  
-  
   A_of_band.clear();
   B_of_band.clear();
   for(int i=0;i<number_of_image_bands;i++) {
@@ -1440,10 +1398,15 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     
     clock_t tstart = clock();
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots filling matrix (n="<< nparTot << ")...");
-    if(parallelized) 
+
+    if(parallelized){
+      SPECEX_DEBUG("calling parallel chi2");
       *psfChi2 = ParallelizedComputeChi2AB(true);
-    else
+    }    else{
+      SPECEX_DEBUG("calling serial chi2");
       *psfChi2 = ComputeChi2AB(true);
+    }
+    
     clock_t tstop = clock();
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots time = " << float(tstop-tstart)/float(CLOCKS_PER_SEC) << "s");
     
@@ -1455,7 +1418,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     unbls::vector_double& B = B_of_band[0];
     
     unbls::matrix_double As=A;
-    
+
     int status = cholesky_solve(A,B);
     
     SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots solving done");
@@ -1489,9 +1452,7 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
 	return false;
       }
     }
-    
-    
-    
+
     bool linear = false;
     
     if( (fit_flux) && (!fit_position) && (!fit_trace) && (!fit_psf) ) {
@@ -1506,7 +1467,6 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
       SPECEX_DEBUG("specex::PSF_Fitter::FitSeveralSpots linear because only fit tail and continuum");
       linear = true;
     } 
-
     
     bool use_brent = true;
     
@@ -1840,15 +1800,7 @@ bool specex::PSF_Fitter::FitOneSpot(specex::Spot_p& spot, double *chi2, int *n_i
 
   vector<specex::Spot_p> spots; 
   spots.push_back(spot);
-  
-  
-  // int npar_psf = psf->LocalNPar();
-  // psf_global_params->clear();
-  // for(int p=0;p<npar_psf;p++) {
-  //   psf_global_params->push_back(specex::Legendre2DPol(0,0,image.Nx(),0,0,image.Ny()));
-  //   (*psf_global_params)[p].coeff(0) = spot->PSFParams(p);
-  // }
-  
+    
   parallelized=false;
   bool ok = FitSeveralSpots(spots,&(spot->chi2),n_iterations);
   parallelized=true;
@@ -1884,8 +1836,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   bool saved_info  = specex_is_verbose();
   specex_set_debug(false);
   specex_set_verbose(false);
-  
-  
+    
   fit_flux                 = true;
   fit_position             = false;
   fit_psf                  = false;
@@ -2319,13 +2270,14 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
     }
     
       SPECEX_INFO("Setting PSF polynomial degrees " << polynomial_degree_along_x << " " << polynomial_degree_along_wave);
-      
+
       psf_params->AllParPolXW.clear();
       
       int npar = psf->LocalNAllPar();
       
       unbls::vector_double default_params = psf->DefaultParams();
       std::vector<string> param_names = psf->DefaultParamNames();
+      std::cout << "size of default_params: " << default_params.size() << std::endl;
       SPECEX_INFO("Default PSF params = " <<  default_params);
       
       if(int(default_params.size()) != npar) SPECEX_ERROR("Fatal inconsistency in number of parameters of PSF");
@@ -2407,7 +2359,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
       //SPECEX_WARNING("I set deg=0 to cont and tail");
       psf_params->ContinuumPol.deg = 2;
       psf_params->ContinuumPol.coeff.resize(psf_params->ContinuumPol.deg+1);
-      psf_params->ContinuumPol.coeff.clear();
+      unbls::zero(psf_params->ContinuumPol.coeff);
       psf_params->ContinuumPol.xmin = min_wave;
       psf_params->ContinuumPol.xmax = max_wave;
 #endif
@@ -2647,6 +2599,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   if(scheduled_fit_of_sigmas) {
     {
       SPECEX_INFO("Choose the parameters that participate to the fit : only gaussian terms");
+      //unbls::zero(psf_params->FitParPolXW);
       psf_params->FitParPolXW.clear();
       int npar = psf->LocalNAllPar();
       for(int p=0;p<npar;p++) {
@@ -2722,6 +2675,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   if(scheduled_fit_of_psf_tail || scheduled_fit_of_continuum) {
 
     {
+      //unbls::zero(psf_params->FitParPolXW);
       psf_params->FitParPolXW.clear();
       for(int p=0;p<psf->LocalNAllPar();p++) {
 	const string& name = psf->ParamName(p);

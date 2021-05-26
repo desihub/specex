@@ -145,8 +145,9 @@ void specex::PyPSF::set_psf(
       pol->Fill(true); // sparse or not sparse ????
       
       int npar = pol->Npar();
-      unbls::matrix_double A(npar,npar); A.clear();
-      unbls::vector_double B(npar); B.clear();
+      unbls::matrix_double A(npar,npar);
+      unbls::zero(A);
+      unbls::vector_double B(npar,0.);
       
       int npoints=0;
       for(int fiber=bundle_fibermin;fiber<=bundle_fibermax;fiber++) {

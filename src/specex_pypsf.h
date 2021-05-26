@@ -1,11 +1,10 @@
 #ifndef SPECEX_PYPSF__H
 #define SPECEX_PYPSF__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include <specex_psf.h>
 #include <specex_spot.h>

@@ -1,7 +1,7 @@
 // Base image class for specex adapted from the HARP package developed
 // by Ted Kisner, see https://github.com/tskisner/HARP
 
-#include <unbls.h>
+#include <specex_unbls.h>
 #include <specex_image_data_base.h>
 
 using namespace std;

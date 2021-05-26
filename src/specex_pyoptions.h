@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include <specex_psf_fitter.h>
 

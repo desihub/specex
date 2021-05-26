@@ -1,11 +1,10 @@
 #ifndef SPECEX_PYIO__H
 #define SPECEX_PYIO__H
 
-#include <boost/program_options.hpp>
 #include <vector>
 #include <string>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include <specex_pyoptions.h>
 #include <specex_pyimage.h>

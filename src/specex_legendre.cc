@@ -37,7 +37,7 @@ specex::Legendre1DPol::Legendre1DPol(int i_deg, const double& i_xmin, const doub
   xmax(i_xmax)
 {
   coeff.resize(deg+1);
-  coeff.clear();
+  unbls::zero(coeff);
 }
 
 
@@ -71,10 +71,8 @@ bool specex::Legendre1DPol::Fit(const unbls::vector_double& X, const unbls::vect
     specex::minmax(X,xmin,xmax);
   }
   
-  unbls::matrix_double A(npar,npar); A.clear();
-  unbls::vector_double B(npar); B.clear();
-  
-  
+  unbls::matrix_double A(npar,npar); unbls::zero(A); 
+  unbls::vector_double B(npar,0.0);
   
   for(int i=0;i<ndata;i++) {
     double w=1;
@@ -87,7 +85,6 @@ bool specex::Legendre1DPol::Fit(const unbls::vector_double& X, const unbls::vect
     specex::axpy(double(w*Y[i]),h,B); //B += (w*Y[i])*h;
   }
 
-  //unbls::matrix_double As=A;
   int status = cholesky_solve(A,B);
   if(status != 0) {
     
@@ -114,7 +111,8 @@ specex::Legendre1DPol specex::Legendre1DPol::Invert(int add_degree) const {
   specex::Legendre1DPol inverse;
   inverse.deg = deg+add_degree;
   inverse.coeff.resize(inverse.deg+1);
-  inverse.coeff.clear();
+  unbls::zero(inverse.coeff);
+
   int npar = inverse.deg + 1;
   int ndata = npar*4;  // 
   double dx = (xmax-xmin)/ndata;
@@ -147,7 +145,7 @@ specex::Legendre2DPol::Legendre2DPol(int i_xdeg, const double& i_xmin, const dou
 
 void specex::Legendre2DPol::Fill() {
   coeff.resize((xdeg+1)*(ydeg+1));
-  coeff.clear();
+  unbls::zero(coeff);
 }
  
 unbls::vector_double specex::Legendre2DPol::Monomials(const double &x, const double &y) const {
@@ -156,7 +154,7 @@ unbls::vector_double specex::Legendre2DPol::Monomials(const double &x, const dou
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
   double ry= 2*(y-ymin)/(ymax-ymin)-1;
   
-  unbls::vector_double mx(xdeg+1); mx.clear();
+  unbls::vector_double mx(xdeg+1,0.0);
   for(int i=0;i<=xdeg;i++)
     mx[i]=LegendrePol(i,rx);
   
@@ -205,15 +203,15 @@ void specex::SparseLegendre2DPol::Add(int i,int j) {
   }
   non_zero_indices.push_back(index);
   coeff.resize(non_zero_indices.size());
-  coeff.clear();
+  unbls::zero(coeff);
 }
  
 void specex::SparseLegendre2DPol::Fill(bool sparse) {
-  non_zero_indices.clear();
+  unbls::zero(non_zero_indices);
   if ( ! sparse ) {
     for(int k=0;k<(xdeg+1)*(ydeg+1);k++) non_zero_indices.push_back(k);
     coeff.resize(non_zero_indices.size());
-    coeff.clear();
+    unbls::zero(coeff);
   }else{
     for(int i=0;i<=xdeg;i++) { // x coordinate
       for(int j=0;j<=ydeg;j++) { // wave coordinate	      
@@ -230,7 +228,7 @@ void specex::SparseLegendre2DPol::Fill(bool sparse) {
 }
 
 void specex::SparseLegendre2DPol::Clear() {
-  non_zero_indices.clear();
+  unbls::zero(non_zero_indices);
   coeff.resize(0);
 }
 
@@ -239,10 +237,9 @@ unbls::vector_double specex::SparseLegendre2DPol::Monomials(const double &x, con
   
   // range is -1,1 if  xmin<x<xmax
   double rx= 2*(x-xmin)/(xmax-xmin)-1;
-  double ry= 2*(y-ymin)/(ymax-ymin)-1;
+  double ry= 2*(y-ymin)/(ymax-ymin)-1;  
   
-  
-  unbls::vector_double m(non_zero_indices.size()); m.clear();
+  unbls::vector_double m(non_zero_indices.size(),0.0);
   int index=0;
   for(std::vector<int>::const_iterator k = non_zero_indices.begin(); k!=  non_zero_indices.end(); k++, index++) {
     int i = (*k)%(xdeg+1);

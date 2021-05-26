@@ -1,7 +1,7 @@
 #ifndef SPECEX_LINALG__H
 #define SPECEX_LINALG__H
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 namespace specex {
     
@@ -21,15 +21,12 @@ namespace specex {
   void gemv(const double &alpha,  const unbls::matrix_double &A,  const unbls::vector_double& h, const double &beta, unbls::vector_double& B);
 
   // ! C = alpha*A*B + beta*C if side='L' , C = alpha*B*A + beta*C if side='R', where A is a symmetric matrix
-  // void symm(const char side, const double& alpha, const unbls::matrix_double &A, const unbls::matrix_double &B, const double& beta, unbls::matrix_double &C);
-  
-  // ! C = alpha*A*B + beta*C if side='L' , C = alpha*B*A + beta*C if side='R', where A is a symmetric matrix
   void gemm(const double& alpha, const unbls::matrix_double &A, const unbls::matrix_double &B, const double& beta, unbls::matrix_double &C);
   
   // ! C = alpha*A*At + beta*C
   void syrk(const double& alpha, const unbls::matrix_double &A, const double& beta, unbls::matrix_double &C);
 
-  // must exist somewhere in boost
+  // return min and max of vector
   void minmax(const unbls::vector_double& v, double& minv, double& maxv);
   
   // !x*x

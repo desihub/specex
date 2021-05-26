@@ -5,7 +5,7 @@
 #include <string>
 #include <sstream>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 void specex_set_debug(bool yesorno);
 void specex_set_verbose(bool yesorno);

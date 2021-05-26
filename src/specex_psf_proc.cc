@@ -1,3 +1,4 @@
+#include <cmath>
 #include <specex_psf.h>
 #include <specex_psf_proc.h>
 #include <specex_spot.h>
@@ -228,7 +229,7 @@ void _load_psf(specex::PSF_p psf) {
   } // end of loop on params
 
   { // add a parameter to link fibers and bundles in fit
-    coeff.clear();
+    unbls::zero(coeff);
     for(int fiber=FIBERMIN;fiber<=FIBERMAX;fiber++)
       coeff[(fiber-FIBERMIN)*ncoeff] = -1; // no bundle
     for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf->ParamsOfBundles.begin();
@@ -241,7 +242,7 @@ void _load_psf(specex::PSF_p psf) {
     _AddRow2(table,"BUNDLE",coeff,0,0); 
   }
   { // add a parameter with the fit status
-    coeff.clear();
+    unbls::zero(coeff);
     for(int fiber=FIBERMIN;fiber<=FIBERMAX;fiber++)
       coeff[(fiber-FIBERMIN)*ncoeff] = -1; // no bundle
     for(std::map<int,specex::PSF_Params>::const_iterator bundle_it = psf->ParamsOfBundles.begin();
@@ -256,7 +257,7 @@ void _load_psf(specex::PSF_p psf) {
   
 #ifdef CONTINUUM  
   { // add a parameter for continuum
-    coeff.clear();
+    unbls::zero(coeff);
     int fiber_index=0;
     int legdegx=0;
     int legdegw=0;

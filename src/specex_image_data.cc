@@ -1,8 +1,9 @@
 #include <iostream>
 #include <cstdio>
 #include <string>
+#include <cmath>
 
-#include <unbls.h>
+#include <specex_unbls.h>
 
 #include <specex_image_data.h>
 #include <specex_linalg.h>
@@ -33,7 +34,7 @@ void specex::image_data::resize(size_t ncols, size_t nrows) {
   rows_ = nrows;
   cols_ = ncols;
   data.resize(rows_*cols_);
-  data.clear();
+  unbls::zero(data);
 }
 
 
