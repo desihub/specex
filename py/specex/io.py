@@ -1,10 +1,37 @@
-from astropy.io import fits
+import numpy as np
+import specex._libspecex as spx
 import fitsio
 from fitsio import FITS,FITSHDR
 from datetime import datetime
 
-import numpy as np
-import specex._libspecex as spx
+class Image:
+    def __init__(self, image, ivar, mask, readnoise, camera, meta):
+        self.pix       = image
+        self.ivar      = ivar
+        self.mask      = mask
+        self.readnoise = readnoise
+        self.camera    = camera
+        self.meta      = meta
+    
+def read_image(filename):
+
+    # open fitsfile
+    fitsfile     = FITS(filename,'r')
+
+    # read psf from fits file
+    meta   = fitsfile['IMAGE'].read_header()
+    image  = fitsfile['IMAGE'].read().astype(np.float64)
+    ivar   = fitsfile['IVAR'].read().astype(np.float64)
+    mask   = fitsfile['MASK'].read().astype(np.float64)
+
+    camera = meta['CAMERA']
+
+    if 'READNOISE' in fitsfile:
+        readnoise = fitsfile['READNOISE'].read().astype(np.float64)
+    else:
+        readnoise = meta['RDNOISE']
+        
+    return Image(image, ivar, mask, readnoise, camera, meta)
 
 def write_psf(pyps,opts,pyio):    
 
@@ -299,15 +326,14 @@ def read_psf(opts,pyio,pyps):
     return
 
 def read_preproc(opts):
-    import desispec.io.image
 
     # read images from fits file
-    dsmg = desispec.io.image.read_image(opts.arc_image_filename)
+    dsmg = read_image(opts.arc_image_filename)
 
     # set ivar=0 to pixels with mask!=0
     dsmg.ivar[dsmg.mask!=0] = 0.0
 
-    # convert from astropy.io.fits.header.Header dict-like object to
+    # convert from a fitsio dict-like header object to
     # std::map<std::string,std::string> object via meta2header
     # function above, changing formatting to match current use in
     # specex
@@ -319,5 +345,5 @@ def read_preproc(opts):
     pymg = spx.PyImage(dsmg.pix, dsmg.ivar,
                        dsmg.mask,dsmg.readnoise,
                        hdr)
-
+    
     return pymg

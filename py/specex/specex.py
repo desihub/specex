@@ -1,15 +1,10 @@
-from astropy.io import fits
-import fitsio
-from fitsio import FITS,FITSHDR
-from datetime import datetime
-
 import numpy as np
-from specex._libspecex import (PyOptions,PyIO,PyPrior,PyImage,PyPSF,PyFitting,VectorString)
+from specex._libspecex import (PyOptions,PyIO,PyPrior,PyPSF,PyFitting,VectorString)
 from specex.io import (read_preproc, write_psf, read_psf)
 
 def run_specex(com):
 
-    # instantiate specex c++ objects exposed to python        
+    # instantiate specex C++ objects exposed to python        
     opts = PyOptions() # input options
     pyio = PyIO()      # IO options and methods
     pypr = PyPrior()   # Gaussian priors
