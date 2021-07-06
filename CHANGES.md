@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.7.1 (unreleased)
+## 0.8.1 (unreleased)
 
 * No changes yet
+
+## 0.8.0 (2021-07-06)
+
+* Major refactor to remove boost and harp dependencies.
 
 ## 0.7.0 (2021-02-10)
 
