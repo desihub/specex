@@ -7,12 +7,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(Python_ROOT_DIR $ENV{DESICONDA})
 
-find_package (Python 3.8 EXACT REQUIRED)
-find_package (PythonInterp 3.8 EXACT REQUIRED)
-find_package (PythonLibs 3.8 EXACT REQUIRED)
+find_package (Python 3.8...3.9 REQUIRED)
+find_package (PythonInterp 3.8...3.9 REQUIRED)
+find_package (PythonLibs 3.8...3.9 REQUIRED)
 
 add_subdirectory(src/pybind11)
-pybind11_add_module(_libspecex NO_EXTRAS 
+pybind11_add_module(_libspecex NO_EXTRAS
 	    src/_libspecex.cpp
 	    src/specex_psfpy.cc
 	    src/specex_pyimage.cc
@@ -92,10 +92,10 @@ target_include_directories(_libspecex
 	src
 	${MKL_INCLUDE}
 	)
-	
+
 target_link_directories(_libspecex
 	PUBLIC)
-	
+
 target_link_libraries(_libspecex PUBLIC ${BLAS_LIBRARIES})
 
 set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
