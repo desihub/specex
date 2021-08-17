@@ -121,14 +121,14 @@ namespace specex {
       use_variance_model = false;
       fit_individual_spots_position = false;
       
-      half_size_x_def = false ;
-      half_size_y_def = false;
-      gauss_hermite_deg_def = false; 
-      gauss_hermite_deg2_def = false; 
-      legendre_deg_wave_def = false; 
-      legendre_deg_x_def = false;
-      trace_deg_wave_def = false;
-      trace_deg_x_def = false; 
+      half_size_x_def = true;
+      half_size_y_def = true;
+      gauss_hermite_deg_def = true; 
+      gauss_hermite_deg2_def = true; 
+      legendre_deg_wave_def = true; 
+      legendre_deg_x_def = true;
+      trace_deg_wave_def = true;
+      trace_deg_x_def = true;
 
       return;
       

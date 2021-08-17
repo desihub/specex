@@ -58,8 +58,8 @@ void specex::PyPSF::set_psf(
     std::string pname=table_col0[i];
     params.push_back(pname);
     param_row[pname]=i;
+    param_coeff[pname] = unbls::vector_double(ncoeff_per_row);	
     for(int j=0; j < ncoeff_per_row; j++){
-      param_coeff[pname] = unbls::vector_double(ncoeff_per_row);
       param_coeff[pname][j] = table_col1[i*ncoeff_per_row+j];
     }
     param_degx[pname]=table_col2[i];
