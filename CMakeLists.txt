@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.9)
 
 project(specex)
 set(CMAKE_CXX_STANDARD 17)
@@ -97,10 +97,14 @@ target_link_directories(_libspecex
 	PUBLIC)
 
 target_link_libraries(_libspecex PUBLIC ${BLAS_LIBRARIES})
+target_link_libraries(_libspecex PRIVATE OpenMP::OpenMP_CXX)
 
 set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
 
 set(INTERPROCEDURAL_OPTIMIZATION FALSE)
 set(INTERPROCEDURAL_OPTIMIZATION_<CONFIG> FALSE)
 set(CMAKE_C_COMPILE_OPTIONS_IPO "")
+
+find_package(OpenMP REQUIRED)
+
 target_compile_options(_libspecex PRIVATE -w)
