@@ -35,7 +35,7 @@ int specex::PyIO::set_inputpsf(specex::PyOptions opts){
   psf_change_req |= (! opts.half_size_y_def);
   psf_change_req |= (! opts.gauss_hermite_deg_def);
   psf_change_req |= (! opts.gauss_hermite_deg2_def);
-  psf_change_req |= (! opts.legendre_deg_wave_def);
+  //psf_change_req |= (! opts.legendre_deg_wave_def);
   psf_change_req |= (! opts.legendre_deg_x_def);
   psf_change_req |= (! opts.trace_deg_wave_def);
   psf_change_req |= (! opts.trace_deg_x_def);
