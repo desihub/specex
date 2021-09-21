@@ -33,7 +33,7 @@ int specex::PyIO::set_inputpsf(specex::PyOptions opts, specex::PyPSF& pypsf){
   use_input_specex_psf = true;
 
   // check if PSF parameters (whether specified on command line or default value)
-  // are different from those in the input PSF; if so, don'tuse PSF as starting point
+  // are different from those in the input PSF; if so, don't use PSF as starting point
   psf_change_req |= (pypsf.hSizeX != opts.half_size_x);
   psf_change_req |= (pypsf.hSizeY != opts.half_size_y);
   psf_change_req |= (pypsf.GHDEGX != opts.gauss_hermite_deg);
