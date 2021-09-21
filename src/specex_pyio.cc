@@ -11,8 +11,8 @@ using namespace std;
 
 int specex::PyIO::load_psf(specex::PyOptions opts, specex::PyPSF& pypsf){
 
-  load_psf_work(pypsf.psf);
-
+  load_psf_work(pypsf.psf);  
+  
   return EXIT_SUCCESS;
 
 }
@@ -22,7 +22,7 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
   vector <Spot_p> fitted_spots = pypsf.fitted_spots;
 
   // future location of spot writing
-
+  
   return EXIT_SUCCESS;
 
 }
@@ -58,11 +58,11 @@ int specex::PyIO::set_inputpsf(specex::PyOptions opts, specex::PyPSF& pypsf){
     SPECEX_WARNING("parameters not typically changed and/or deprecated have been specified, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");
     use_input_specex_psf = false;
   }
-
   if(use_input_specex_psf) {
     SPECEX_INFO("will start from input psf parameters")
   }
 
   return EXIT_SUCCESS;
-
+  
 }
+

@@ -24,21 +24,21 @@ py::array_t<double>  image_data2nparray(spx::image_data image_data){
   auto v = image_data.data;
   size_t size = v.size();
   double *foo = new double[size];
-  for (unsigned i = 0; i < v.size(); i++) foo[i]=v[i];
-
+  for (unsigned i = 0; i < v.size(); i++) foo[i]=v[i];	
+  
   // Create a Python object that will free the allocated
   // memory when destroyed:
   py::capsule free_when_done(foo, [](void *f) {
       double *foo = reinterpret_cast<double *>(f);
       delete[] foo;
     });
-
+  
   return py::array_t<double>(
 			     {size}, // shape
 			     {8}, // C-style//
 			     foo, // the data pointer
 			     free_when_done); // array refs parent
-
+  
 }
 
 template <class T>
@@ -90,7 +90,7 @@ PYBIND11_MODULE(_libspecex, m) {
     )";
 
     // stl bindings
-
+    
     py::bind_map<std::map<std::string,             std::string>> (m, "MapStringString");
     py::bind_map<std::map<std::string, std::vector<std::string>>>(m, "MapStringVString");
     py::bind_map<std::map<std::string, std::vector<int        >>>(m, "MapStringVInt");
@@ -101,23 +101,23 @@ PYBIND11_MODULE(_libspecex, m) {
     py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
     py::bind_vector<std::vector<std::vector<int               >>>(m, "VectorVectorInt");
     py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
-
+    
     // data interface functions
 
     m.def("tablewrite_init", [](spx::PyPSF&          pyps) {
 
 	pyps.FIBERMIN = pyps.psf->pydata.FIBERMIN;
 	pyps.FIBERMAX = pyps.psf->pydata.FIBERMAX;
-
+	
 	pyps.trace_WAVEMIN  = pyps.psf->pydata.trace_WAVEMIN;
 	pyps.trace_WAVEMAX  = pyps.psf->pydata.trace_WAVEMAX;
 	pyps.table_WAVEMIN  = pyps.psf->pydata.table_WAVEMIN;
 	pyps.table_WAVEMAX  = pyps.psf->pydata.table_WAVEMAX;
 
 	pyps.nfibers = pyps.FIBERMAX - pyps.FIBERMIN + 1;
-
-	pyps.mjd             = (long long)pyps.psf->mjd;
-	pyps.plate_id        = (long long)pyps.psf->plate_id;
+	
+	pyps.mjd = (long long)pyps.psf->mjd;
+	pyps.plate_id = (long long)pyps.psf->plate_id;
 	pyps.camera_id       = (std::string)pyps.psf->camera_id;
 	pyps.arc_exposure_id = (long long)pyps.psf->arc_exposure_id;
 	pyps.NPIX_X          = (long long)pyps.psf->ccd_image_n_cols;
@@ -130,18 +130,18 @@ PYBIND11_MODULE(_libspecex, m) {
 	pyps.GHDEGY          = (long long)pyps.psf->Degree();
 	pyps.psf_error       = (double   )pyps.psf->psf_error;
 	pyps.readout_noise   = (double   )pyps.psf->readout_noise;
-	pyps.gain            = (double   )pyps.psf->gain;
+	pyps.gain            = (double   )pyps.psf->gain;	
     });
 
     m.def("get_trace", [](spx::PyPSF& pyps,
 			  std::string axis) {
-
+	    
 	specex::image_data trace = pyps.get_trace(axis);
 	pyps.trace_ncoeff  = trace.n_cols();
 	return image_data2nparray(trace);
-
+	    
     });
-
+    
     m.def("get_table", [](spx::PyPSF&  pyps,
 			  std::vector<std::string> &table_col0,
 			  std::vector<double>      &table_col1,
@@ -159,21 +159,21 @@ PYBIND11_MODULE(_libspecex, m) {
 	bundle_ndata   = pyps.bundle_ndata;
 	bundle_nparams = pyps.bundle_nparams;
 	bundle_chi2pdf = pyps.bundle_chi2pdf;
-
+	    
 	spx::FitsTable table = pyps.psf->pydata.table;
 	pyps.table_nrows = table.data.size();
 	int nrows = pyps.table_nrows;
-
+	
 	std::map<std::string,spx::FitsColumnDescription>::const_iterator c1 =
 	  table.columns.begin();
 
 	for(int r=0;r<nrows;r++){
 
 	  // row0, PARAM
-	  const char *input_val = table.data[r][0].string_val.c_str();
+	  const char *input_val = table.data[r][0].string_val.c_str();	  
 	  table_col0.push_back(std::string(input_val));
 
-	  // row1, COEFF
+	  // row1, COEFF	  
 	  const spx::FitsColumnDescription& column = c1->second;
 	  int nd = column.SizeOfVectorOfDouble();
 	  for(int d=0;d<nd;d++) table_col1.push_back(table.data[r][1].double_vals[d]);
@@ -183,22 +183,22 @@ PYBIND11_MODULE(_libspecex, m) {
 
 	  // row3, LEGDEGW
 	  table_col3.push_back(table.data[r][3].int_vals[0]);
-
+	  
 	}
-
+	
     });
-
+    
     // classes
 
     py::class_ <spx::PSF, spx::PSF::pshr> (m, "PSF", R"(PSF base class)");
-
+    
     py::class_ <spx::GaussHermitePSF, spx::GaussHermitePSF::pshr> (m,
 					         "GaussHermitePSF", R"(
         Class for storing and processing PSF in specex.
         )")
         .def(py::init ())
         .def("Degree", &spx::GaussHermitePSF::Degree);
-
+    
     py::class_ <spx::PyOptions, spx::PyOptions::pshr > (m, "PyOptions", R"(
         Class for storing and processing input options to specex.
         )")
@@ -216,7 +216,7 @@ PYBIND11_MODULE(_libspecex, m) {
 	    return self.parse(cstrs.size(), cstrs.data());
 	}
 	);
-
+    
     py::class_ <spx::PyImage, spx::PyImage::pshr > (m, "PyImage", R"(
         Class for specex image interchangeable with python implementations
         )")
@@ -244,11 +244,11 @@ PYBIND11_MODULE(_libspecex, m) {
 	)
         .def_readwrite("psf", &spx::PyPSF::psf)
 
-        .def_readwrite("nfibers",          &spx::PyPSF::nfibers)
+        .def_readwrite("nfibers",          &spx::PyPSF::nfibers)    
 
-        .def_readwrite("table_nrows",      &spx::PyPSF::table_nrows)
+        .def_readwrite("table_nrows",      &spx::PyPSF::table_nrows)    
         .def_readwrite("trace_ncoeff",     &spx::PyPSF::trace_ncoeff)
-
+    
         .def_readwrite("FIBERMIN",         &spx::PyPSF::FIBERMIN)
         .def_readwrite("FIBERMAX",         &spx::PyPSF::FIBERMAX)
         .def_readwrite("trace_WAVEMIN",    &spx::PyPSF::trace_WAVEMIN)
@@ -256,6 +256,7 @@ PYBIND11_MODULE(_libspecex, m) {
         .def_readwrite("table_WAVEMIN",    &spx::PyPSF::table_WAVEMIN)
         .def_readwrite("table_WAVEMAX",    &spx::PyPSF::table_WAVEMAX)
         .def_readwrite("LEGDEG",           &spx::PyPSF::LEGDEG)
+      
         .def_readwrite("TRDEGW",           &spx::PyPSF::TRDEGW)
         .def_readwrite("mjd",              &spx::PyPSF::mjd)
         .def_readwrite("plate_id",         &spx::PyPSF::plate_id)
@@ -279,7 +280,7 @@ PYBIND11_MODULE(_libspecex, m) {
         .def(py::init ())
         .def_readwrite("use_input_specex_psf", &spx::PyIO::use_input_specex_psf)
         .def("set_inputpsf", [](spx::PyIO &self, spx::PyOptions opts,
-				 spx::PyPSF& pypsf){
+		 		 spx::PyPSF& pypsf){
 	    return self.set_inputpsf(opts,pypsf);
 	}
 	)
@@ -288,7 +289,7 @@ PYBIND11_MODULE(_libspecex, m) {
 	    return self.load_psf(opts,pypsf);
 	}
 	)
-        .def("write_spots",  [](spx::PyIO &self, spx::PyOptions opts,
+        .def("write_spots",   [](spx::PyIO &self, spx::PyOptions opts,
 				 spx::PyPSF& pypsf){
 	    return self.write_spots(opts,pypsf);
 	}
@@ -316,6 +317,6 @@ PYBIND11_MODULE(_libspecex, m) {
 	       return self.fit_psf(opts,pyio,pypr,pymg,pyps);
 	}
 	);
-
+    
 
 }
