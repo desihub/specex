@@ -12,7 +12,7 @@
 #include <specex_psf_fitter.h>
 
 namespace specex {
-  
+
   class PyIO : public std::enable_shared_from_this <PyIO> {
 
   public :
@@ -22,17 +22,17 @@ namespace specex {
     bool use_input_specex_psf;
     bool psf_change_req;
 
-    int load_psf(      specex::PyOptions, specex::PyPSF&  );
-    int write_spots(   specex::PyOptions, specex::PyPSF&  );
-    int set_inputpsf(  specex::PyOptions);
-    
+    int load_psf(      specex::PyOptions, specex::PyPSF& );
+    int write_spots(   specex::PyOptions, specex::PyPSF& );
+    int set_inputpsf(  specex::PyOptions, specex::PyPSF& );
+
     PyIO()
       : use_input_specex_psf(false)
       , psf_change_req(false)
       {}
-    
+
   };
-  
+
 }
 
 #endif

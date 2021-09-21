@@ -18,7 +18,7 @@
 namespace py = pybind11;
 
 namespace specex {
-  
+
   class PyPSF : public std::enable_shared_from_this <PyPSF> {
 
   public :
@@ -31,7 +31,7 @@ namespace specex {
     PyPSF(){}
 
     int trace_ncoeff, table_nrows, nfibers;
-    int FIBERMIN, FIBERMAX, LEGDEG;
+    int FIBERMIN, FIBERMAX, LEGDEG, TRDEGW;
     double trace_WAVEMIN, trace_WAVEMAX;
     double table_WAVEMIN, table_WAVEMAX;
     long long mjd, plate_id, arc_exposure_id, NPIX_X, NPIX_Y,
@@ -41,21 +41,21 @@ namespace specex {
     std::vector<int>    bundle_id, bundle_ndata, bundle_nparams;
     std::vector<double> bundle_chi2pdf;
 
-    image_data get_trace(std::string);    
+    image_data get_trace(std::string);
     void set_trace(py::array, int, int);
     void init_traces(specex::PyOptions);
-    void synchronize_traces();   
+    void synchronize_traces();
     void set_psf(
 		 std::vector<std::string>&,
 		 std::vector<double>&,
 		 std::vector<int>&,
 		 std::vector<int>&
 		 );
-    
+
     void SetParamsOfBundle();
-    
+
   };
-  
+
 }
 
 #endif
