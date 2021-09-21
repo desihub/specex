@@ -41,8 +41,6 @@ int specex::PyIO::set_inputpsf(specex::PyOptions opts, specex::PyPSF& pypsf){
   psf_change_req |= (pypsf.TRDEGW != opts.trace_deg_wave);
   psf_change_req |= (pypsf.LEGDEG != opts.legendre_deg_wave);
 
-  printf("IODEBUG: legdeg = %d and legendre_deg_wave = %d for %s\n",pypsf.LEGDEG,opts.legendre_deg_wave,opts.input_psf_filename);
-  fflush(stdout);
   if(psf_change_req) {
     SPECEX_WARNING("specified and/or default psf properties differ from those of the input PSF, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");
     use_input_specex_psf = false;
