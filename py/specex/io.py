@@ -251,7 +251,7 @@ def meta2header(meta):
 
     return header
 
-def read_psf(opts,pyio,pyps):
+def read_psf(opts,pyps):
 
     #initialize traces
     pyps.init_traces(opts)
@@ -268,6 +268,7 @@ def read_psf(opts,pyio,pyps):
     pyps.nfibers       = xtrace_header['NAXIS2']
     pyps.trace_WAVEMIN = xtrace_header['WAVEMIN']
     pyps.trace_WAVEMAX = xtrace_header['WAVEMAX']
+    pyps.TRDEGW        = pyps.trace_ncoeff - 1
     
     xtrace = fitsfile['XTRACE'].read()
     ytrace = fitsfile['YTRACE'].read()
@@ -277,8 +278,6 @@ def read_psf(opts,pyio,pyps):
 
     # synchronize traces
     pyps.synchronize_traces() 
-
-    if(not pyio.use_input_specex_psf): return
 
     # read psf
     psf_header = fitsfile['PSF'].read_header()

@@ -27,21 +27,33 @@ int specex::PyIO::write_spots(specex::PyOptions opts, specex::PyPSF& pypsf){
 
 }
 
-int specex::PyIO::set_inputpsf(specex::PyOptions opts){
-  
+int specex::PyIO::set_inputpsf(specex::PyOptions opts, specex::PyPSF& pypsf){
+
+  // use input PSF by default
   use_input_specex_psf = true;
 
-  psf_change_req |= (! opts.half_size_x_def);
-  psf_change_req |= (! opts.half_size_y_def);
-  psf_change_req |= (! opts.gauss_hermite_deg_def);
+  // check if PSF parameters (whether specified on command line or default value)
+  // are different from those in the input PSF; if so, don't use PSF as starting point
+  psf_change_req |= (pypsf.hSizeX != opts.half_size_x);
+  psf_change_req |= (pypsf.hSizeY != opts.half_size_y);
+  psf_change_req |= (pypsf.GHDEGX != opts.gauss_hermite_deg);
+  psf_change_req |= (pypsf.GHDEGY != opts.gauss_hermite_deg);
+  psf_change_req |= (pypsf.TRDEGW != opts.trace_deg_wave);
+  psf_change_req |= (pypsf.LEGDEG != opts.legendre_deg_wave);
+
+  if(psf_change_req) {
+    SPECEX_WARNING("specified and/or default psf properties differ from those of the input PSF, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");
+    use_input_specex_psf = false;
+  }
+
+  // these parameters are not typically specified and/or deprecated
+  // if they are specified (param_def = False) don't use PSF as starting point
   psf_change_req |= (! opts.gauss_hermite_deg2_def);
-  psf_change_req |= (! opts.legendre_deg_wave_def);
   psf_change_req |= (! opts.legendre_deg_x_def);
-  psf_change_req |= (! opts.trace_deg_wave_def);
   psf_change_req |= (! opts.trace_deg_x_def);
-  
-  if(psf_change_req && use_input_specex_psf) {
-    SPECEX_WARNING("option(s) were given to specify the psf properties, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");
+
+  if(psf_change_req) {
+    SPECEX_WARNING("parameters not typically changed and/or deprecated have been specified, so we cannot use the input PSF parameters as a starting point (except for the trace coordinates)");
     use_input_specex_psf = false;
   }
   if(use_input_specex_psf) {

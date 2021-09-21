@@ -257,6 +257,7 @@ PYBIND11_MODULE(_libspecex, m) {
         .def_readwrite("table_WAVEMAX",    &spx::PyPSF::table_WAVEMAX)
         .def_readwrite("LEGDEG",           &spx::PyPSF::LEGDEG)
       
+        .def_readwrite("TRDEGW",           &spx::PyPSF::TRDEGW)
         .def_readwrite("mjd",              &spx::PyPSF::mjd)
         .def_readwrite("plate_id",         &spx::PyPSF::plate_id)
         .def_readwrite("arc_exposure_id",  &spx::PyPSF::arc_exposure_id)
@@ -278,11 +279,12 @@ PYBIND11_MODULE(_libspecex, m) {
         )")
         .def(py::init ())
         .def_readwrite("use_input_specex_psf", &spx::PyIO::use_input_specex_psf)
-        .def("set_inputpsf", [](spx::PyIO &self, spx::PyOptions opts){
-	    return self.set_inputpsf(opts);
+        .def("set_inputpsf", [](spx::PyIO &self, spx::PyOptions opts,
+		 		 spx::PyPSF& pypsf){
+	    return self.set_inputpsf(opts,pypsf);
 	}
 	)
-        .def("load_psf",[](spx::PyIO &self, spx::PyOptions opts,
+        .def("load_psf",     [](spx::PyIO &self, spx::PyOptions opts,
 				 spx::PyPSF& pypsf){
 	    return self.load_psf(opts,pypsf);
 	}

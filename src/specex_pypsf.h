@@ -31,7 +31,7 @@ namespace specex {
     PyPSF(){}
 
     int trace_ncoeff, table_nrows, nfibers;
-    int FIBERMIN, FIBERMAX, LEGDEG;
+    int FIBERMIN, FIBERMAX, LEGDEG, TRDEGW;
     double trace_WAVEMIN, trace_WAVEMAX;
     double table_WAVEMIN, table_WAVEMAX;
     long long mjd, plate_id, arc_exposure_id, NPIX_X, NPIX_Y,

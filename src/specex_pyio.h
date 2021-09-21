@@ -24,7 +24,7 @@ namespace specex {
 
     int load_psf(      specex::PyOptions, specex::PyPSF&  );
     int write_spots(   specex::PyOptions, specex::PyPSF&  );
-    int set_inputpsf(  specex::PyOptions);
+    int set_inputpsf(  specex::PyOptions, specex::PyPSF&  );
     
     PyIO()
       : use_input_specex_psf(false)

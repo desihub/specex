@@ -19,14 +19,14 @@ def run_specex(com):
     # parse args
     opts.parse(spxargs)
 
+    # read psf
+    read_psf(opts,pyps)
+
     # set input psf bools
-    pyio.set_inputpsf(opts)
+    pyio.set_inputpsf(opts,pyps)
 
      # set Gaussian priors
-    pypr.set_priors(opts)    
-
-    # read psf 
-    read_psf(opts,pyio,pyps)  
+    pypr.set_priors(opts)
 
     # read preproc
     pymg = read_preproc(opts) 
