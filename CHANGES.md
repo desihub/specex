@@ -1,8 +1,14 @@
 # specex Change Log
 
-## 0.8.1 (unreleased)
+## 0.8.2 (unreleased)
 
 * No changes yet
+
+## 0.8.1 (2021-10-07)
+
+* Use input PSF if its properties match those expected (PR #52)
+* Fix OpenMP bug (PR #51)
+* Fix silent PSF fit error bug (PR #54)
 
 ## 0.8.0 (2021-07-06)
 
