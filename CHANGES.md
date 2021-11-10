@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.8.2 (unreleased)
+## 0.8.3 (unreleased)
 
 * No changes yet
+
+## 0.8.2 (2021-11-10)
+
+* Use OpenBLAS for BLAS by default, instead of MKL (PR #55)
 
 ## 0.8.1 (2021-10-07)
 
