@@ -32,9 +32,9 @@ def run_specex(com):
     pymg = read_preproc(opts) 
     
     # fit psf 
-    pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
+    retval = pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
     
     # write psf 
     write_psf(pyps,opts,pyio)        
 
-    return 0
+    return retval
