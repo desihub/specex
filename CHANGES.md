@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.8.3 (unreleased)
+## 0.8.4 (unreleased)
 
 * No changes yet
+
+## 0.8.3 (2021-11-19)
+
+* Don't write merged PSF if SPECEX_ERROR is called (PR #57)
 
 ## 0.8.2 (2021-11-10)
 
