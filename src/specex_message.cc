@@ -6,6 +6,7 @@ static bool static_specex_dump_core = false;
 static std::string static_message_prefix = "";
 
 void specex_set_message_prefix(const std::string &mess) { static_message_prefix = " "+mess;}
+std::string specex_get_message_prefix() { return static_message_prefix;}
 void specex_set_debug(bool yesorno) { static_specex_debug=yesorno;}
 void specex_set_verbose(bool yesorno) { static_specex_verbose=yesorno;}
 void specex_set_dump_core(bool yesorno) { static_specex_dump_core=yesorno;}
