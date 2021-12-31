@@ -74,7 +74,7 @@ int specex::PyFitting::fit_psf(
     if (mess.str() != "" ) mess << "-";
     mess << std::setw(8) << std::setfill('0') << pymg.header["EXPID"];
   }
-  if (opts.first_fiber_bundle == opts.last_fiber_bundle ) {
+  {
     if (mess.str() != "" ) mess << "-";
     mess << std::setw(2) << std::setfill('0') << opts.first_fiber_bundle;
   }
