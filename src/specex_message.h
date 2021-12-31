@@ -7,6 +7,8 @@
 
 #include <specex_unbls.h>
 
+
+void specex_set_message_prefix(const std::string &mess);
 void specex_set_debug(bool yesorno);
 void specex_set_verbose(bool yesorno);
 void specex_set_dump_core(bool yesorno);
