@@ -1841,7 +1841,9 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   fit_position             = false;
   fit_psf                  = false;
   fit_trace                = false;
-  fatal                    = false;
+
+  bool saved_fatal_error_state  = fatal;
+  fatal                    = false; // set it to false here because one spot can fail
 
   bool saved_force_positive_flux = force_positive_flux;
   force_positive_flux = false;
@@ -1884,6 +1886,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
   // TURN BACK ALL MESSAGES TO REQUIRED VALUDE
   specex_set_debug(saved_debug);
   specex_set_verbose(saved_info);
+  fatal = saved_fatal_error_state;
 
   return true;
 }
@@ -2168,7 +2171,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   double min_snr_linear_terms = 3;
   double min_wave_dist_linear_terms = 0;
 
-
+  fatal = true; // any fit error is a fatal error
 
   SPECEX_INFO("starting to fit PSF with " <<  input_spots.size() << " spots");
 
@@ -2372,7 +2375,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
   }
 
 
-  fatal = true;
+
   include_signal_in_weight = false;
   //include_signal_in_weight = true;
   chi2_precision = 50.;
