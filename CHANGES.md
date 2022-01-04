@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.8.4 (unreleased)
+## 0.8.5 (unreleased)
 
 * No changes yet
+
+## 0.8.4 (2022-01-04)
+
+* Fatal error scope and prefix for log messages (PR #61)
 
 ## 0.8.3 (2021-11-19)
 
