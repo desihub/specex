@@ -70,7 +70,7 @@ endif()
 
 if(NOT MKL_FOUND)
 
-	# if MKL BLAS and mkl.h not both found, look for OpenBLAS/LAPACK
+	# if MKL BLAS and mkl.h not both found, use available BLAS/LAPACK
 	set(BLAS_FOUND FALSE)
 	find_package (BLAS)
 	find_package (LAPACK)
