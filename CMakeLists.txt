@@ -52,7 +52,7 @@ pybind11_add_module(_libspecex NO_EXTRAS
 set(BLA_VENDOR Intel10_64lp)
 find_package (BLAS)
 find_package (LAPACK)
-if(BLAS_FOUND AND (DEFINED ENV{DESI_SPX_MKL}))
+if(BLAS_FOUND)
 
 	# this also means MKL with BLAS libraries were found
 	# now see if MKL include file can be found as well
@@ -72,7 +72,6 @@ if(NOT MKL_FOUND)
 
 	# if MKL BLAS and mkl.h not both found, look for OpenBLAS/LAPACK
 	set(BLAS_FOUND FALSE)
-	set(BLA_VENDOR OpenBLAS)
 	find_package (BLAS)
 	find_package (LAPACK)
 
