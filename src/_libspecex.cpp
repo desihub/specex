@@ -92,15 +92,9 @@ PYBIND11_MODULE(_libspecex, m) {
     // stl bindings
     
     py::bind_map<std::map<std::string,             std::string>> (m, "MapStringString");
-    py::bind_map<std::map<std::string, std::vector<std::string>>>(m, "MapStringVString");
-    py::bind_map<std::map<std::string, std::vector<int        >>>(m, "MapStringVInt");
-    py::bind_map<std::map<std::string, std::vector<double     >>>(m, "MapStringVDouble");
     py::bind_vector<std::vector<std::string                    >>(m, "VectorString");
     py::bind_vector<std::vector<int>>                            (m, "VectorInt");
-    py::bind_vector<std::vector<long long>>                      (m, "VectorLongLong");
     py::bind_vector<std::vector<double>>                         (m, "VectorDouble");
-    py::bind_vector<std::vector<std::vector<int               >>>(m, "VectorVectorInt");
-    py::bind_vector<std::vector<std::vector<double>>>            (m, "VectorVectorDouble");
     
     // data interface functions
 
