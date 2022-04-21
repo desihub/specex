@@ -64,7 +64,7 @@ def write_psf(pyps,opts,pyio):
                   table_bundle_chi2pdf)
     
     # copy columns to numpy arrays 
-    col0 = np.zeros( pyps.table_nros, dtype='U8')
+    col0 = np.zeros( pyps.table_nrows, dtype='U8')
     col1 = np.zeros((pyps.table_nrows,pyps.nfibers,pyps.ncoeff))
     col2 = np.zeros( pyps.table_nrows)
     col3 = np.zeros( pyps.table_nrows)
