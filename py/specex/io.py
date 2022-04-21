@@ -64,13 +64,14 @@ def write_psf(pyps,opts,pyio):
                   table_bundle_chi2pdf)
     
     # copy columns to numpy arrays 
-    col0 = table_col0
+    col0 = np.zeros( pyps.table_nrows, dtype='U8')
     col1 = np.zeros((pyps.table_nrows,pyps.nfibers,pyps.ncoeff))
     col2 = np.zeros( pyps.table_nrows)
     col3 = np.zeros( pyps.table_nrows)
 
     i = 0
     for r in np.arange(pyps.table_nrows):
+        col0[r] = table_col0[r]
         for t2 in np.arange(pyps.nfibers):
             for t1 in np.arange(pyps.ncoeff):
                 col1[r,t2,t1] = table_col1[i]
@@ -188,8 +189,8 @@ def write_psf(pyps,opts,pyio):
     fitsfile[2].write_key('READNOIS',pyps.readout_noise,'assumed read out noise in chi2');
     fitsfile[2].write_key('GAIN',pyps.gain,'assumed gain in chi2');
 
-    i=0
-    for bid in table_bundle_id:
+    for i in range(len(table_bundle_id)):
+        bid     = table_bundle_id[i]
         ndata   = table_bundle_ndata[i]
         nparams = table_bundle_nparams[i]
         chi2pdf = table_bundle_chi2pdf[i]
