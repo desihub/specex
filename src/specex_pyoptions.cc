@@ -9,64 +9,81 @@ using namespace std;
 
 void PrintHelp()
 {
-  return;
   std::cout <<
-    "--help,-h             display usage information\n" 
-    "--arc,-a              preprocessed fits image file name (mandatory)\n" 
-    "--in-psf              input psf file name (fits or xml, can contain only the traces, mandatory)\n"  
-    "--out-psf             output psf fits file name (mandatory)\n"
-    "--lamp-lines          input lamp lines file name (mandatory)\n" 
-    "--only-trace-fit      only fit the trace coordinates (default is trace,sigma,psf)\n"
-    "--no-trace-fit        do not fit the trace coordinates (default is trace,sigma,psf)\n"
-    "--no-sigma-fit        do not fit the gaussian sigma (default is trace,sigma,psf)\n"
-    "--no-psf-fit          do not fit the psf (default is trace,sigma,psf)\n"
-    "--flux-hdu            flux hdu in input arc fits, for unusual data format\n"
-    "--ivar-hdu            ivar hdu in input arc fits, for unusual data format\n"
-    "--mask-hdu            mask hdu in input arc fits, for unusual data format\n"
-    "--header-hdu          header hdu in input arc fits, for unusual data format\n"
-    "--xcoord-hdu          hdu of x trace legendre polynomial of wavelength (default is extension XTRACE)\n" 
-    "--ycoord-hdu          hdu of y trace legendre polynomial of wavelength (default is extension YTRACE)\n" 
-    "--first-bundle        first fiber bundle to fit\n"
-    "--last-bundle         last fiber bundle to fit\n"
-    "--single-bundle       fit a single bundle with all fibers\n"
-    "--first-fiber         first fiber (must be in bundle)\n"
-    "--last-fiber          last fiber (must be in bundle)\n"
-    "--half-size-x         half size of PSF stamp (full size is 2*half_size+1)\n"
-    "--half-size-y         half size of PSF stamp (full size is 2*half_size+1)\n"
-    "--psfmodel            PSF model, default is GAUSSHERMITE\n"
-    "--positions           fit positions of each spot individually after global fit for debugging\n"
-    "--verbose,v           turn on verbose mode (deprecated, true by default)\n" 
-    "--quiet               no info message, only warning\n" 
-    "--debug               turn on debug mode\n" 
-    "--trace-prior-deg     force equal trace coeff in bundle starting at this degree\n"
-    "--lamplines           lamp lines ASCII file name (def. is $SPECEXDATA/specex_linelist_desi.txt)\n" 
-    "--core                dump core files when an exception is thrown\n"
-    "--gauss-hermite-deg   degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE psf)\n"
-    "--gauss-hermite-deg2  degree of Hermite polynomials (same for x and y, only if GAUSSHERMITE2 psf)\n"
-    "--legendre-deg-wave   degree of Legendre polynomials along wavelength (can be reduced if missing data)\n"
-    "--legendre-deg-x      degree of Legendre polynomials along x_ccd (can be reduced if missing data)\n"
-    "--trace-deg-wave      degree of Legendre polynomials along wavelength for fit of traces\n"
-    "--trace-deg-x         degree of Legendre polynomials along x_ccd for fit of traces\n"
-    "--psf-error           psf fractional uncertainty (default is 0.01, for weights in the fit)\n"
-    "--psf-core-wscale     scale up the weight of pixels in 5x5 PSF core\n"
-    "--broken-fibers       broken fibers (comma separated list)\n"
+    std::endl <<
+    "usage: desi_psf_fit [options]\n"
+    "  --help,-h             display usage information\n" 
+    "  --arc,-a              preprocessed fits image file name (mandatory)\n" 
+    "  --in-psf              input psf file name (fits or xml, can contain \n"
+    "                        only the traces, mandatory)\n"
+    "  --out-psf             output psf fits file name (mandatory)\n"
+    "  --lamp-lines          input lamp lines file name (mandatory)\n"
+    "  --only-trace-fit      only fit the trace coordinates (default is \n"
+    "                        trace,sigma,psf)\n"
+    "  --no-trace-fit        do not fit the trace coordinates (default is \n"
+    "                        trace,sigma,psf)\n"
+    "  --no-sigma-fit        do not fit the gaussian sigma (default is \n"
+    "                        trace,sigma,psf)\n"
+    "  --no-psf-fit          do not fit the psf (default is trace,sigma,psf)\n"
+    "  --flux-hdu            flux hdu in input arc fits, for unusual data format\n"
+    "  --ivar-hdu            ivar hdu in input arc fits, for unusual data format\n"
+    "  --mask-hdu            mask hdu in input arc fits, for unusual data format\n"
+    "  --header-hdu          header hdu in input arc fits, for unusual data format\n"
+    "  --xcoord-hdu          hdu of x trace legendre polynomial of wavelength\n"
+    "                        (default is extension XTRACE)\n"
+    "  --ycoord-hdu          hdu of y trace legendre polynomial of wavelength\n" 
+    "                        (default is extension YTRACE)\n"
+    "  --first-bundle        first fiber bundle to fit\n"
+    "  --last-bundle         last fiber bundle to fit\n"
+    "  --single-bundle       fit a single bundle with all fibers\n"
+    "  --first-fiber         first fiber (must be in bundle)\n"
+    "  --last-fiber          last fiber (must be in bundle)\n"
+    "  --half-size-x         half size of PSF stamp (full size is 2*half_size+1)\n"
+    "  --half-size-y         half size of PSF stamp (full size is 2*half_size+1)\n"
+    "  --psfmodel            PSF model, default is GAUSSHERMITE\n"
+    "  --positions           fit positions of each spot individually after global\n"
+    "                        fit for debugging\n"
+    "  --verbose,v           turn on verbose mode (deprecated, true by default)\n" 
+    "  --quiet               no info message, only warning\n" 
+    "  --debug               turn on debug mode\n" 
+    "  --trace-prior-deg     force equal trace coeff in bundle starting at this\n"
+    "                        degree\n"
+    "  --lamplines           lamp lines ASCII file name (def. is \n"
+    "                        $SPECEXDATA/specex_linelist_desi.txt)\n"
+    "  --core                dump core files when an exception is thrown\n"
+    "  --gauss-hermite-deg   degree of Hermite polynomials (same for x and y,\n"
+    "                        only if GAUSSHERMITE psf)\n"
+    "  --gauss-hermite-deg2  degree of Hermite polynomials (same for x and y,\n"
+    "                        only if GAUSSHERMITE2 psf)\n"
+    "  --legendre-deg-wave   degree of Legendre polynomials along wavelength\n"
+    "                        (can be reduced if missing data)\n"
+    "  --legendre-deg-x      degree of Legendre polynomials along x_ccd (can be\n"
+    "                        reduced if missing data)\n"
+    "  --trace-deg-wave      degree of Legendre polynomials along wavelength for\n"
+    "                        fit of traces\n"
+    "  --trace-deg-x         degree of Legendre polynomials along x_ccd for fit of\n"
+    "                        traces\n"
+    "  --psf-error           psf fractional uncertainty (default is 0.01, for\n"
+    "                        weights in the fit)\n"
+    "  --psf-core-wscale     scale up the weight of pixels in 5x5 PSF core\n"
+    "  --broken-fibers       broken fibers (comma separated list)\n"
 
-    "--variance-model      refit at the end with a model of the variance to avoid Poisson noise bias\n"    
-    "--out-psf-xml         output psf xml file name\n"
-    "--out-spots           output spots file name\n"  
-    "--prior               gaussian prior on a param : 'name' value error\n"  
-    "--tmp_results         write tmp results\n"  
+    "  --variance-model      refit at the end with a model of the variance to\n"
+    "                        avoid Poisson noise bias\n"
+    "  --out-psf-xml         output psf xml file name\n"
+    "  --out-spots           output spots file name\n"  
+    "  --prior               gaussian prior on a param : 'name' value error\n"  
+    "  --tmp_results         write tmp results\n"  
 #ifdef EXTERNAL_TAIL
-    "--fit-psf-tails       unable fit of psf tails\n"
+    "  --fit-psf-tails       unable fit of psf tails\n"
 #endif
 #ifdef CONTINUUM
-    "--fit-continuum       unable fit of continuum\n"
+    "  --fit-continuum       unable fit of continuum\n"
 #endif
-    "--nlines              max # emission lines used (uses an algorithm to select best ones \n"
-    "                      based on S/N and line coverage\n";
-
-  return;
-  
+    "  --nlines              max # emission lines used (uses an algorithm to\n"
+    "                        select best ones \n"
+    "                        based on S/N and line coverage\n"
+    << endl;
 }
 
 void specex::PyOptions::loadmap(map<string,vector<int>>& optmap, const string argstring, int req){
@@ -89,7 +106,7 @@ int specex::PyOptions::parse(int argc, char *argv[] )
   option long_opts[noptsmax];
 
   noptions=0;
-  loadmap(optmap, "help",               required_argument);
+  loadmap(optmap, "help",               optional_argument);
   loadmap(optmap, "arc",                required_argument);
   loadmap(optmap, "help",               required_argument);
   loadmap(optmap, "verbose",            optional_argument);
@@ -160,7 +177,9 @@ int specex::PyOptions::parse(int argc, char *argv[] )
 
       if (opt == -1){
 	break;
-      } else if ( opt == argint(optmap, "help")){
+} else if ( opt == argint(optmap, "help") || opt == 'h'){
+  PrintHelp();
+  return 1;
       } else if (opt == argint(optmap, "arc") || opt == 'a'){
 	arc_image_filename = string(optarg); 
       } else if (opt == argint(optmap, "in-psf")){

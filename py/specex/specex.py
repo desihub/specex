@@ -17,7 +17,8 @@ def run_specex(com):
         spxargs.append(strs)
 
     # parse args
-    opts.parse(spxargs)
+    retval = opts.parse(spxargs)
+    if retval != 0: return retval
 
     # read psf
     read_psf(opts,pyps)
