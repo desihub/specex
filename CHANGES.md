@@ -1,8 +1,14 @@
 # specex Change Log
 
-## 0.8.5 (unreleased)
+## 0.8.6 (unreleased)
 
 * No changes yet
+
+## 0.8.5 (2023-01-12)
+
+* I/O updates (PR #65, #67)
+* pybind11 STL container fix (PR #64)
+* MKL BLAS update (PR #62)
 
 ## 0.8.4 (2022-01-04)
 
