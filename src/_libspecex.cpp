@@ -202,6 +202,7 @@ PYBIND11_MODULE(_libspecex, m) {
         .def_readwrite("output_fits_filename", &spx::PyOptions::output_fits_filename)
         .def_readwrite("trace_deg_x",          &spx::PyOptions::trace_deg_x)
         .def_readwrite("trace_deg_wave",       &spx::PyOptions::trace_deg_wave)
+        .def_readwrite("broken_fibers_string", &spx::PyOptions::broken_fibers_string)
 
         .def("parse", [](spx::PyOptions &self, std::vector<std::string>& args){
 	    std::vector<char *> cstrs;
