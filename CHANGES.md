@@ -2,7 +2,7 @@
 
 ## 0.8.6 (unreleased)
 
-* No changes yet
+* Report errors for overlapping trace fits of unflagged fibers (PR #70).
 
 ## 0.8.5 (2023-01-12)
 
