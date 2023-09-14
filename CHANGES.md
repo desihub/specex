@@ -1,6 +1,10 @@
 # specex Change Log
 
-## 0.8.6 (unreleased)
+## 0.8.7 (unreleased)
+
+* No changes yet
+
+## 0.8.6 (2023-09-14)
 
 * Report errors for overlapping trace fits of unflagged fibers (PR #70).
 
