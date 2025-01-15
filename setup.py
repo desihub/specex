@@ -1,4 +1,5 @@
 import os
+import sys
 import pathlib
 
 from setuptools import setup, Extension, find_packages
@@ -8,7 +9,7 @@ class CMakeExtension(Extension):
 
     def __init__(self, name):
         # don't invoke the original build_ext for this special extension
-        super().__init__(name, sources=[])        
+        super().__init__(name, sources=[])
 
 ename='specex._libspecex'
 class build_ext(build_ext_orig):
@@ -16,7 +17,7 @@ class build_ext(build_ext_orig):
     def run(self):
         for ext in self.extensions:
             self.build_cmake(ext)
-        
+
     def build_cmake(self, ext):
         cwd = pathlib.Path().absolute()
 
@@ -26,7 +27,7 @@ class build_ext(build_ext_orig):
         build_temp.mkdir(parents=True, exist_ok=True)
         extdir = pathlib.Path(self.get_ext_fullpath(ext.name))
         extdir.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # example of cmake args
         config = 'Debug' if self.debug else 'Release'
         cmake_args = [
@@ -48,13 +49,60 @@ class build_ext(build_ext_orig):
         for ext in self.extensions:
             dest_path = pathlib.Path(self.get_ext_fullpath(ext.name)).resolve()
             print('dest_path:',dest_path)
-            
-from desiutil.setup import DesiTest, DesiVersion, get_version
+
+from desiutil.setup import get_version
 #
 # Begin setup
 #
 pname = 'specex'
 pkg_version = get_version(pname)
+
+
+#
+# Warning about old features.
+#
+VERSION_HELP = """
+Note: Generating version strings is no longer done using 'python setup.py version'. Instead
+you will need to run:
+
+    desi_update_version [-t TAG] desiutil
+
+which is part of the desiutil package. If you don't already have desiutil installed, you can install it with:
+
+    pip install desiutil
+"""
+
+TEST_HELP = """
+Note: running tests is no longer done using 'python setup.py test'. Instead
+you will need to run:
+
+    pytest
+
+If you don't already have pytest installed, you can install it with:
+
+    pip install pytest
+"""
+
+DOCS_HELP = """
+Note: building the documentation is no longer done using
+'python setup.py {0}'. Instead you will need to run:
+
+    sphinx-build -W --keep-going -b html doc doc/_build/html
+
+If you don't already have Sphinx installed, you can install it with:
+
+    pip install Sphinx
+"""
+
+message = {'test': TEST_HELP,
+           'version': VERSION_HELP,
+           'build_docs': DOCS_HELP.format('build_docs'),
+           'build_sphinx': DOCS_HELP.format('build_sphinx'), }
+
+for m in message:
+    if m in sys.argv:
+        print(message[m])
+        sys.exit(1)
 
 packages=find_packages('py')
 setup(
