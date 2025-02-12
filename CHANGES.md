@@ -2,35 +2,35 @@
 
 ## 0.8.7 (unreleased)
 
-* No changes yet
+* Remove ``DesiTest`` from setup.py and warn about other deprecated features (PR [#72](https://github.com/desihub/specex/pull/72)).
 
 ## 0.8.6 (2023-09-14)
 
-* Report errors for overlapping trace fits of unflagged fibers (PR #70).
+* Report errors for overlapping trace fits of unflagged fibers (PR [#70](https://github.com/desihub/specex/pull/70)).
 
 ## 0.8.5 (2023-01-12)
 
-* I/O updates (PR #65, #67)
-* pybind11 STL container fix (PR #64)
-* MKL BLAS update (PR #62)
+* I/O updates (PR [#65](https://github.com/desihub/specex/pull/65), [#67](https://github.com/desihub/specex/pull/67))
+* pybind11 STL container fix (PR [#64](https://github.com/desihub/specex/pull/64))
+* MKL BLAS update (PR [#62](https://github.com/desihub/specex/pull/62))
 
 ## 0.8.4 (2022-01-04)
 
-* Fatal error scope and prefix for log messages (PR #61)
+* Fatal error scope and prefix for log messages (PR [#61](https://github.com/desihub/specex/pull/61)).
 
 ## 0.8.3 (2021-11-19)
 
-* Don't write merged PSF if SPECEX_ERROR is called (PR #57)
+* Don't write merged PSF if SPECEX_ERROR is called (PR [#57](https://github.com/desihub/specex/pull/57)).
 
 ## 0.8.2 (2021-11-10)
 
-* Use OpenBLAS for BLAS by default, instead of MKL (PR #55)
+* Use OpenBLAS for BLAS by default, instead of MKL (PR [#55](https://github.com/desihub/specex/pull/55)).
 
 ## 0.8.1 (2021-10-07)
 
-* Use input PSF if its properties match those expected (PR #52)
-* Fix OpenMP bug (PR #51)
-* Fix silent PSF fit error bug (PR #54)
+* Use input PSF if its properties match those expected (PR [#52](https://github.com/desihub/specex/pull/52)).
+* Fix OpenMP bug (PR [#51](https://github.com/desihub/specex/pull/51)).
+* Fix silent PSF fit error bug (PR [#54](https://github.com/desihub/specex/pull/54)).
 
 ## 0.8.0 (2021-07-06)
 
@@ -38,17 +38,17 @@
 
 ## 0.7.0 (2021-02-10)
 
-* Major refactor: move all I/O to python and change build method (PR #36)
+* Major refactor: move all I/O to python and change build method (PR [#36](https://github.com/desihub/specex/pull/36)).
 
 ## 0.6.9 (2021-02-10)
 
-* Comment out blended and faint lines; add missing lines (PR #37)
+* Comment out blended and faint lines; add missing lines (PR [#37](https://github.com/desihub/specex/pull/37)).
 
 ## 0.6.8 (2020-12-11)
 
-* Fixed floating point exception crash (PR #33)
-* Adjusted lines based upon inspection of arc lamp data (0e48b41 and 809c554)
-* Added timeout option (PR #34)
+* Fixed floating point exception crash (PR [#33](https://github.com/desihub/specex/pull/33)).
+* Adjusted lines based upon inspection of arc lamp data ([0e48b41](https://github.com/desihub/specex/commit/0e48b41bcc4b4a9cf17291161d631acbcf15105b) and [809c554](https://github.com/desihub/specex/commit/809c5540e76dc1681453488732d5845078427ad1)).
+* Added timeout option (PR [#34](https://github.com/desihub/specex/pull/34)).
 
 ## 0.6.7 (2020-04-15)
 
@@ -87,7 +87,7 @@
 ## 0.5.0 (2017-09-30)
 
 * Major refactor of fitting and formats to be faster and more robust by
-  accepting any previous PSF as a starting point for the optimization (PR #21).
+  accepting any previous PSF as a starting point for the optimization (PR [#21](https://github.com/desihub/specex/pull/21))).
 
 ## 0.4.5 (2017-07-19)
 
