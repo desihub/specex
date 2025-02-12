@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import specex._libspecex as spx
 import fitsio
@@ -347,3 +348,17 @@ def read_preproc(opts):
                        hdr)
     
     return pymg
+
+def get_desi_linelist_file():
+    """Return path to specex_linelist_desi.txt"""
+    if 'SPECEXDATA' in os.environ:
+        specexdata = os.environ['SPECEXDATA']
+    else:
+        from importlib import resources
+        specexdata = resources.files('specex').joinpath('data')
+
+    lamp_lines_file = os.path.join(specexdata,'specex_linelist_desi.txt')
+
+    return lamp_lines_file
+
+

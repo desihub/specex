@@ -1,5 +1,7 @@
 # Generic files
+__pycache__/
 *.pyc
+*.pyo
 *.o
 *.a
 *.so
