@@ -118,7 +118,6 @@ setup(
     ext_modules=[CMakeExtension(ename)],
     cmdclass={
         'build_ext': build_ext,
-        'version': DesiVersion
     },
     package_data={
         pname: ["data/*"]
