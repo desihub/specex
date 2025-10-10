@@ -22,5 +22,9 @@ src/tests/*
 !src/tests/Makefile
 !src/tests/wscript
 
+# Editor helper files
+.env
+.vscode
+
 # MacOS
 .DS_Store

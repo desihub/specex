@@ -3,6 +3,7 @@
 ## 0.8.7 (unreleased)
 
 * Remove ``DesiTest`` from setup.py and warn about other deprecated features (PR [#72](https://github.com/desihub/specex/pull/72)).
+* Support gcc/13 at NERSC (PR [#73](https://github.com/desihub/specex/pull/73)).
 
 ## 0.8.6 (2023-09-14)
 
