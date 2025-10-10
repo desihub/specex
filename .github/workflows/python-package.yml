@@ -40,7 +40,7 @@ jobs:
 
         steps:
             - name: Install libraries
-              run: sudo apt install libopenblas-dev
+              run: sudo apt install libopenblas-dev liblapack-dev
             - name: Checkout code
               uses: actions/checkout@v5
             - name: Set up Python ${{ matrix.python-version }}
