@@ -2,8 +2,9 @@
 
 ## 0.8.7 (unreleased)
 
-* Remove ``DesiTest`` from setup.py and warn about other deprecated features (PR [#72](https://github.com/desihub/specex/pull/72)).
+* Remove `DesiTest` from setup.py and warn about other deprecated features (PR [#72](https://github.com/desihub/specex/pull/72)).
 * Support gcc/13 at NERSC (PR [#73](https://github.com/desihub/specex/pull/73)).
+* Add `pyproject.toml` and other supporting package infrastructure files (PR [#78](https://github.com/desihub/specex/pull/78)).
 
 ## 0.8.6 (2023-09-14)
 
