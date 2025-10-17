@@ -5,7 +5,8 @@ This repository contains code for PSF measurement in fiber-fed spectrograph for 
 ## Introduction
 
 This package is intended to be used with the [specter](https://github.com/desihub/specter) extraction code.
-The installation procedure is described in the [INSTALL file](INSTALL.md), as well as below. The code uses pybind11 (2.2.0)
+The installation procedure is described in the [INSTALL file](INSTALL.md), as well as below.
+The code uses [pybind11](https://github.com/pybind/pybind11) (2.2.0).
 
 ## Installation
 

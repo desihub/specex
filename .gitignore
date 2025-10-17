@@ -12,6 +12,9 @@ __pycache__/
 .waf*
 build*
 
+# Python packaging
+py/specex.egg-info
+
 # compiled files
 src/apps/*
 !src/apps/*.cc
@@ -21,6 +24,10 @@ src/tests/*
 !src/tests/*.cc
 !src/tests/Makefile
 !src/tests/wscript
+
+# Editor helper files
+.env
+.vscode
 
 # MacOS
 .DS_Store
