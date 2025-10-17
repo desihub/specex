@@ -1,5 +1,7 @@
 # specex
 
+[![CI](https://github.com/desihub/specex/actions/workflows/python-package.yml/badge.svg)](https://github.com/desihub/specex/actions/workflows/python-package.yml)
+
 This repository contains code for PSF measurement in fiber-fed spectrograph for DESI.
 
 ## Introduction
@@ -10,18 +12,17 @@ The code uses [pybind11](https://github.com/pybind/pybind11) (2.2.0).
 
 ## Installation
 
-```
-
-git clone --single-branch --branch io_refactor https://github.com/desihub/specex
+```shell
+git clone https://github.com/desihub/specex
 cd specex
 python setup.py	install	--prefix .
-
 ```
 
 ## Using specex for DESI
 
 Access to specex in python is through a wrapper `specex.specex.run_specex`:
-```
+
+```python
 from specex.specex import run_specex
 
 com = ['desi_psf_fit']
@@ -37,5 +38,6 @@ com.extend(['--legendre-deg-wave', '1'])
 
 retval = run_specex(com)
 ```
+
 This should produce a file `fit-psf-b1-00068217-00.fits` in the same directory.
 
