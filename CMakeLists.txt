@@ -75,6 +75,13 @@ if(NOT MKL_FOUND)
 
 endif()
 
+# try finding openblas if the above failed
+if(NOT BLAS_FOUND)
+        set(BLA_VENDOR OpenBLAS)
+	find_package (BLAS)
+	find_package (LAPACK)
+endif()
+
 if(NOT BLAS_FOUND)
        message (FATAL_ERROR "BLAS not found, CMake will exit.")
 endif()
