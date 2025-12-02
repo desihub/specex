@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.15...4.0)
 
 project(specex)
 set(CMAKE_CXX_STANDARD 17)
@@ -7,9 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(Python_ROOT_DIR $ENV{DESICONDA})
 
-find_package (Python 3.8 REQUIRED)
-find_package (PythonInterp 3.8 REQUIRED)
-find_package (PythonLibs 3.8 REQUIRED)
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
 add_subdirectory(src/pybind11)
 pybind11_add_module(_libspecex NO_EXTRAS
