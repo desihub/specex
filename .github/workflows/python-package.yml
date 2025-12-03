@@ -55,6 +55,7 @@ jobs:
                 python -m pip install --upgrade pip setuptools wheel
                 python -m pip install --upgrade --upgrade-strategy only-if-needed "numpy${{ matrix.numpy-version }}"
                 python -m pip install desiutil fitsio pytest
+                python -m pip install desitarget
                 python -m pip install git+https://github.com/desihub/desispec
             - name: Install specex
               run: |
