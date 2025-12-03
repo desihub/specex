@@ -59,7 +59,7 @@ jobs:
                 python -m pip install git+https://github.com/desihub/desispec
             - name: Install specex
               run: |
-                python -m pip install . --no-cache-dir --verbose
+                python -m pip install --editable . --no-cache-dir --verbose
             - name: Run the test
               run: pytest
 
