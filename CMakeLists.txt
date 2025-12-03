@@ -100,7 +100,7 @@ target_include_directories(_libspecex
 target_link_directories(_libspecex
 	PUBLIC)
 
-target_link_libraries(_libspecex PUBLIC ${BLAS_LIBRARIES})
+target_link_libraries(_libspecex PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
 target_link_libraries(_libspecex PRIVATE OpenMP::OpenMP_CXX)
 
 set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
