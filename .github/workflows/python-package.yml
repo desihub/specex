@@ -42,6 +42,7 @@ jobs:
             - name: Install libraries
               run: |
                 sudo apt install libopenblas-dev liblapack-dev liblapacke-dev
+                sudo apt install intel-mkl libmkl-dev libmkl-intel
                 nm -D /usr/lib/x86_64-linux-gnu/liblapacke.so | grep LAPACKE_dpotri
             - name: Checkout code
               uses: actions/checkout@v5
