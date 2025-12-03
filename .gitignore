@@ -28,6 +28,7 @@ src/tests/*
 # Editor helper files
 .env
 .vscode
+.*.swp
 
 # MacOS
 .DS_Store
