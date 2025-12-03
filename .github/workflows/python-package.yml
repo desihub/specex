@@ -42,7 +42,7 @@ jobs:
             - name: Install libraries
               run: |
                 sudo apt install libopenblas-dev liblapack-dev liblapacke-dev
-                sudo apt install intel-mkl libmkl-dev libmkl-gf-lp64
+                sudo apt install intel-mkl libmkl-dev
             - name: Checkout code
               uses: actions/checkout@v5
             - name: Set up Python ${{ matrix.python-version }}
