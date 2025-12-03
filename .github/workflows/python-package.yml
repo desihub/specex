@@ -24,9 +24,9 @@ jobs:
             matrix:
                 include:
                     # Stable, yet close to bleeding-edge.
-                    # - os: ubuntu-latest
-                    #   python-version: '3.13'
-                    #   numpy-version: '<3.0'
+                    - os: ubuntu-latest
+                      python-version: '3.13'
+                      numpy-version: '<3.0'
                     # - os: ubuntu-latest
                     #   python-version: '3.12'
                     #   numpy-version: '<2.2'
