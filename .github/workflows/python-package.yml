@@ -52,7 +52,9 @@ jobs:
                 python -m pip install --upgrade pip setuptools wheel
                 python -m pip install --upgrade --upgrade-strategy only-if-needed "numpy${{ matrix.numpy-version }}"
                 python -m pip install desiutil fitsio pytest
-                python -m pip install --editable .
+            - name: Install specex
+              run: |
+                python -m pip install .
             - name: Run the test
               run: pytest
 
