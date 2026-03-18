@@ -1,6 +1,10 @@
 # specex Change Log
 
-## 0.9.0 (unreleased)
+## 0.10.1 (unreleased)
+
+* No changes yet.
+
+## 0.10.0 (2026-03-18))
 
 * Remove `DesiTest` from setup.py and warn about other deprecated features (PR [#72](https://github.com/desihub/specex/pull/72)).
 * Support gcc/13 at NERSC (PR [#73](https://github.com/desihub/specex/pull/73)).
