@@ -73,7 +73,8 @@ namespace specex {
 
   PSF_Params() : 
     bundle_id(0), fiber_min(0), fiber_max(0), 
-      chi2(0),ndata(0),fit_status(4), nspots_in_fit(0)
+      chi2(0), chi2_in_core(0), ndata(0), ndata_in_core(0), nparams(0),
+      fit_status(4), nspots_in_fit(0)
 #ifdef CONTINUUM
 , continuum_sigma_x(1)
 #endif
