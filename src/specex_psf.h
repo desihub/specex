@@ -61,7 +61,7 @@ namespace specex {
     int ndata;
     int ndata_in_core;
     int nparams;
-    int fit_status; // -1=no fit performed 0=ok 1=cholesky error 2=no convergence 3=nan in fit
+    int fit_status; // -1=no fit performed/missing 0=ok 1=cholesky error 2=no convergence 3=nan in fit 4=failed fit
     int nspots_in_fit;
 
 #define CONTINUUM
