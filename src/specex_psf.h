@@ -61,7 +61,7 @@ namespace specex {
     int ndata;
     int ndata_in_core;
     int nparams;
-    int fit_status; // -1=no fit performed 0=ok 1=cholesky error 2=no convergence 3=nan in fit
+    int fit_status; // -1=no fit performed/missing 0=ok 1=cholesky error 2=no convergence 3=nan in fit 4=failed fit
     int nspots_in_fit;
 
 #define CONTINUUM
@@ -73,7 +73,7 @@ namespace specex {
 
   PSF_Params() : 
     bundle_id(0), fiber_min(0), fiber_max(0), 
-      chi2(0),ndata(0),fit_status(-1), nspots_in_fit(0)
+      chi2(0),ndata(0),fit_status(4), nspots_in_fit(0)
 #ifdef CONTINUUM
 , continuum_sigma_x(1)
 #endif
