@@ -249,11 +249,7 @@ void _load_psf(specex::PSF_p psf) {
 	bundle_it != psf->ParamsOfBundles.end(); ++bundle_it) {
       const specex::PSF_Params & params_of_bundle = bundle_it->second;
       for(int fiber=params_of_bundle.fiber_min; fiber<=params_of_bundle.fiber_max; fiber++) {
-	auto trace_it = psf->FiberTraces.find(fiber);
-	if(trace_it != psf->FiberTraces.end() && trace_it->second.Off())
-	  coeff[(fiber-FIBERMIN)*ncoeff] = 4;
-	else
-	  coeff[(fiber-FIBERMIN)*ncoeff] = params_of_bundle.fit_status;
+	coeff[(fiber-FIBERMIN)*ncoeff] = params_of_bundle.fit_status;
       }
     }
     _AddRow2(table,"STATUS",coeff,0,0); 

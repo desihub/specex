@@ -1862,7 +1862,7 @@ bool specex::PSF_Fitter::FitIndividualSpotFluxes(std::vector<specex::Spot_p>& sp
     specex::Spot_p& spot = spots[s];
     spot->eflux = 0;
     spot->flux = 0;
-    spot->status=-1;
+    spot->status=4;
 
     bool ok = FitOneSpot(spot);
 
@@ -1908,7 +1908,7 @@ bool specex::PSF_Fitter::FitIndividualSpotPositions(std::vector<specex::Spot_p>&
     spot->initial_yc = spot->yc;
     spot->eflux = 0;
     spot->flux = 0;
-    spot->status=-1;
+    spot->status=4;
 
     bool ok = FitOneSpot(spot);
 
