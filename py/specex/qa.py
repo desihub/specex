@@ -54,17 +54,10 @@ def specex_psf_qa(opts):
     failcount, bad_fibers = trace_psf_qa(psf_filename, broken_fiber_list)
 
     if bad_fibers:
-        file = fits.open(psf_filename)
-        params = file['PSF']['PARAM'][:]
-        coeff_all = file['PSF']['COEFF'][:]
-        for i, param in enumerate(params):
-            if param.strip() == 'STATUS':
-                for fiber in bad_fibers:
-                    index = np.where(file['PSF'].data["PARAM"]=="STATUS")[0][0]
-                    file['PSF'].data["COEFF"][index][fiber]=4
-                    # coeff_all[i, fiber, 0] = 4
-                # file['PSF'].write_column('COEFF', coeff_all)
-                break
+        file = fits.open(psf_filename, mode='update')
+        index = np.where(file['PSF'].data["PARAM"]=="STATUS")[0][0]
+        for fiber in bad_fibers:
+            file['PSF'].data["COEFF"][index][fiber, 0] = 4
         file.close()
 
     return failcount
