@@ -53,7 +53,8 @@ def specex_psf_qa(opts):
 
     failcount, bad_fibers = trace_psf_qa(psf_filename, broken_fiber_list)
 
-    if bad_fibers:
+    if len(bad_fibers)>0:
+        print(f'Setting Status of Bad Fibers {bad_fibers} to 4 in PSF file {psf_filename}')
         file = fits.open(psf_filename, mode='update')
         index = np.where(file['PSF'].data["PARAM"]=="STATUS")[0][0]
         for fiber in bad_fibers:
