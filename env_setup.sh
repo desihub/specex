@@ -3,15 +3,14 @@
 # Setup environment for specex on Perlmutter
 # This script should be sourced: source env_setup.sh
 
-# Load necessary modules if on a compute node or if modules are available
+# Load necessary modules if on a compute node
 if command -v module &> /dev/null; then
     module load cudatoolkit
-    module load pytorch # Often contains useful GPU libs, or load specific ones
-    # Add any other specific DESI/Perlmutter modules here
 fi
 
-# Set PYTHONPATH to include current build and py directories
-export PYTHONPATH=$(pwd)/py:$(pwd)/build:$PYTHONPATH
+# Set PYTHONPATH using absolute paths
+BASE_DIR=/global/cfs/cdirs/desicollab/users/cdwarner/code/specex
+export PYTHONPATH=$BASE_DIR/py:$BASE_DIR/build:$PYTHONPATH
 
 echo "Environment setup complete."
 echo "PYTHONPATH set to: $PYTHONPATH"
