@@ -1,7 +1,7 @@
 import numpy as np
-from specex._libspecex import (PyOptions,PyIO,PyPrior,PyPSF,PyFitting,VectorString)
-from specex.io import (read_preproc, write_psf, read_psf)
-from specex.qa import (specex_psf_qa)
+from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
+from .io import (read_preproc, write_psf, read_psf)
+from .qa import (specex_psf_qa)
 
 def run_specex(com):
 
