@@ -81,8 +81,10 @@ class GaussHermitePSF:
         Vectorized evaluation using vmap.
         Returns shape (Np, Ns).
         """
+        # jax.debug.print("pix_value_jnp shapes: xc={} yc={} xpix={} ypix={} params={}", 
+        #                 xc.shape, yc.shape, xpix.shape, ypix.shape, params.shape)
+        
         # 1. vmap over spots (xc, yc, params)
-        # Resulting function takes (xc_s, yc_s, params_s) and returns shape (Np,)
         vmap_spots = vmap(GaussHermitePSF.single_pix_value_jnp, in_axes=(0, 0, None, None, 0, None))
         
         # 2. vmap over pixels (xpix, ypix)
@@ -111,6 +113,7 @@ class PSF_Params:
         self.bundle_id = bundle_id
         self.fiber_min = fiber_min
         self.fiber_max = fiber_max
+        self.param_names = [] # Maintain order of parameters
         self.all_par_pol_xw = [] 
         self.fit_par_pol_xw = [] 
         self.continuum_pol = None 
@@ -124,6 +127,7 @@ class PSF:
         self.gain = 1.0
         self.readout_noise = 1.0
         self.psf_error = 0.0
+        self.fiber_min = 0 # Default start of camera
         self.params_of_bundles = {} 
         self.fiber_traces = {} 
         self.gh_psf = GaussHermitePSF(degree=degree)
@@ -151,9 +155,40 @@ class PSF:
         if bundle_id not in self.params_of_bundles:
             raise ValueError(f"Bundle {bundle_id} not found")
         
-        x = self.x_ccd(fiber, wave)
         params = self.params_of_bundles[bundle_id]
         
+        # Fiber index within the bundle if needed, but here fiber is absolute
+        # The param_models are stored as a list of 500 fibers (matching pyps.nfibers)
+        # We need the relative index from FIBERMIN
+        fiber_idx = fiber - self.params_of_bundles[bundle_id].fiber_min # Wait, FIBERMIN is for the whole camera?
+        # Actually, in load_python_psf, I used range(pyps.nfibers)
+        # So it's relative to the start of the camera.
+        
+        # Let's check how I stored it in load_python_psf:
+        # fmin = pyps.FIBERMIN
+        # fiber_id = fmin + f
+        # ...
+        # coeffs[p_idx, f]
+        
+        # So fiber_idx is indeed fiber - fmin
+        # But wait, fmin is pyps.FIBERMIN.
+        # Let's find fmin from the PSF object.
+        # I'll add fmin to PSF.
+        
+        rel_fiber_idx = fiber - self.fiber_min
+        
+        if hasattr(params, 'param_models'):
+            # Use 1D projected models
+            n_params = len(params.param_models)
+            local_params = np.zeros(n_params)
+            # We need to maintain order. param_names from C++ table.
+            # For now, let's assume they are sorted or we use the names.
+            for i, name in enumerate(params.param_names):
+                local_params[i] = params.param_models[name][rel_fiber_idx].value(wave)
+            return local_params
+        
+        # Fallback to 2D models
+        x = self.x_ccd(fiber, wave)
         local_params = np.zeros(len(params.all_par_pol_xw))
         for i, pol in enumerate(params.all_par_pol_xw):
             local_params[i] = pol.value(x, wave)
