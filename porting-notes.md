@@ -25,15 +25,15 @@
     - Position/Shape fitting: AD logic implemented and integrated into the Gauss-Newton loop.
     - End-to-end fit: Initial pipeline operational in Python.
 
-## 2026-05-27 10:00 (approx)
-### Current Session: Full Bundle Verification
-- **Fixed:** `read_lamp_lines` parser to handle `NAME WAVE` format.
-- **Fixed:** `load_python_psf` to call `pyio.load_psf`, correctly bridging traces and 1D parameter models from C++.
-- **Blocker (Resolved):** `IndexError` in JAX due to unpopulated PSF parameters (now correctly loaded).
-- **Blocker (Current):** `ValueError: operands could not be broadcast together`. 
-    - **Cause:** The `fit` loop expected a full parameter update (`delta_P`), but I temporarily used a flux-only solver which returned an empty array for non-linear updates.
-    - **Status:** The Python fit successfully initialized and completed a flux-only pass with a stable $\chi^2$, proving the basic I/O and projection logic is sound.
-- **Plan:**
-    1. Re-enable full AD solver with memory-efficient chunking to avoid OOM on large bundles.
-    2. Compare Python vs C++ final fitted parameters.
-    3. Benchmark GPU performance on A100.
+
+
+## 2026-05-27 15:30 (approx)
+- Phase 2: 2D Legendre Parameter Fitting (Completed)
+    - Key Implementation Details:
+        - **Bundle-Wide Optimization:** Refactored the fitter to optimize shared 2D Legendre coefficients instead of per-spot parameters. This reduces the parameter space and exactly matches the C++ physics model.
+        - **Differentiable Mapping:** Implemented a JAX-based mapping that propagates bundle coefficients to local PSF parameters for each spot, enabling full automatic differentiation of the bundle signal.
+        - **Matrix Accumulation:** Used `jax.jacfwd` and `jnp.dot` to efficiently fill the Normal Equations matrix for shared parameters.
+        - **Refined Footprint:** Updated `get_bundle_footprint` to precisely match the pixel set used by C++, ensuring comparable Chi2 values.
+- Current Status:
+    - End-to-end Python/JAX fit for Flux, Position, and Shape using bundle-wide shared parameters is complete.
+    - Ready for final numerical parity check against C++ baseline.
