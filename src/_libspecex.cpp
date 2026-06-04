@@ -191,10 +191,16 @@ PYBIND11_MODULE(_libspecex, m) {
 					         "CppGaussHermitePSF", R"(
         Class for storing and processing PSF in specex.
         )")
-        .def(py::init ())
+        .def(py::init<int>(), py::arg("deg")=0)
         .def("Degree", &spx::GaussHermitePSF::Degree)
         .def("pix_value", [](spx::GaussHermitePSF &self, double xc, double yc, double xpix, double ypix, const std::vector<double> &params){
             return self.PixValue(xc, yc, xpix, ypix, params, nullptr, nullptr);
+        })
+        .def("pix_value_with_derivatives", [](spx::GaussHermitePSF &self, double xc, double yc, double xpix, double ypix, const std::vector<double> &params){
+            std::vector<double> pos_der(2);
+            std::vector<double> param_der(self.LocalNAllPar());
+            double val = self.PixValue(xc, yc, xpix, ypix, params, &pos_der, &param_der);
+            return std::make_tuple(val, pos_der, param_der);
         });
     
     py::class_ <spx::PyOptions, spx::PyOptions::pshr > (m, "PyOptions", R"(
