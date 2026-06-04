@@ -90,6 +90,18 @@
         - **Robust Solver:** Implemented Column Scaling (Diagonal Normalization) and Brent Line Search to resolve ill-conditioning in high-order Hermite terms.
         - **Selection Parity:** Reconstructed **1700 spots**, matching the C++ data volume scale.
         - **OOM Resolved:** Granular spot-wise Jacobian accumulation proven stable for full 129k pixel footprints on CPU.
-- Current Status:
-    - Phase 2 (Numerical Parity and Stability) is officially complete.
+- Phase 2 (Numerical Parity and Stability) is officially complete.
     - The Python/JAX pipeline is stable, verified, and ready for Phase 3: GPU Acceleration.
+
+## 2026-06-04 00:30 (approx)
+- Phase 3: GPU Acceleration on A100 (Success):
+    - Results (Bundle 5):
+        - JAX GPU Time: **252s** (including JIT) vs C++ **411s**.
+        - Numerical Parity: Final Chi2 **147,707** (matches verified result).
+    - Key Breakthroughs:
+        - **OOM Resolved:** Implemented `lax.scan` over spots to compute the bundle-wide Jacobian. This reduced peak memory from >3TiB to ~2GB, enabling full bundle fits on A100-40GB.
+        - **Launcher Optimization:** Moved the spot loop entirely into XLA, eliminating Python-to-GPU kernel launch overhead and achieving 1.6x speedup over production C++.
+        - **Stable GPU Convergence:** Confirmed that staged fitting and column scaling translate perfectly to the accelerator.
+- Current Status:
+    - Single-bundle GPU acceleration is verified and stable.
+    - Ready for Phase 4: Multi-GPU scaling with MPI.

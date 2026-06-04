@@ -78,81 +78,79 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots):
     for k in nz: i, j = k % (xdeg + 1), k // (xdeg + 1); m.append(mx[i] * mw[j])
     return jnp.stack(m, axis=1)
 
-# --- JAX Local Spot Derivatives ---
+# --- Memory-Safe GPU Accumulation (Scan over Spots) ---
 
-@partial(jit, static_argnums=(4,))
-def compute_spot_stamp_jac_full(xc, yc, flux, gh_params, degree, sx, sy):
-    def spot_fn(f, x, y, g): return f * GaussHermitePSF.single_pix_value_jnp(x, y, sx, sy, g, degree)
-    jf, jx, jy, jg = jacfwd(spot_fn, argnums=(0, 1, 2, 3))(flux, xc, yc, gh_params)
-    return jf, jx, jy, jg
+@partial(jit, static_argnums=(11,))
+def accumulate_bundle_gpu_jnp(flux, psf_coeffs, trace_coeffs, continuum, 
+                             xc_init, yc_init, monomials, 
+                             image_data, weight_data, xpix, ypix, degree):
+    """
+    Ultra-memory-safe GPU accumulation using lax.scan over spots.
+    This avoids massive intermediate Jacobians.
+    """
+    Ns = flux.shape[0]; Npoly = monomials.shape[1]
+    Nparams = psf_coeffs.shape[0]; Nshared = (Nparams + 2) * Npoly
+    Np = xpix.shape[0]
 
-# --- Evaluation Helper ---
+    # Precompute local spot parameters
+    gh_all = jnp.dot(monomials, psf_coeffs.T)
+    dx = jnp.dot(monomials, trace_coeffs[0]); dy = jnp.dot(monomials, trace_coeffs[1])
+    xc_all, yc_all = xc_init + dx, yc_init + dy
 
-def compute_bundle_chi2(flux, gh_params_all, dx_all, dy_all, continuum, xc_init, yc_init, image_data, weight_data, xpix, ypix, degree):
-    xc, yc = np.array(xc_init) + dx_all, np.array(yc_init) + dy_all
-    psf_vals = np.array(GaussHermitePSF.pix_value_jnp(jnp.array(xc), jnp.array(yc), jnp.array(xpix), jnp.array(ypix), jnp.array(gh_params_all), degree))
-    signal = np.dot(psf_vals, flux) + continuum; res = image_data - signal
-    res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
-    return np.sum(weight_data * res**2), res, psf_vals
+    def scan_spots(carry, s_idx):
+        p_mat_sum, j_shared_sum = carry
+        
+        # Spot signal function for derivatives
+        def spot_psf(x, y, g):
+            # Evaluate on all bundle pixels
+            return GaussHermitePSF.single_pix_value_jnp(x, y, xpix, ypix, g, degree)
+        
+        # Local signal and derivatives
+        psf_s = spot_psf(xc_all[s_idx], yc_all[s_idx], gh_all[s_idx])
+        jx, jy, jg = jacfwd(spot_psf, argnums=(0, 1, 2))(xc_all[s_idx], yc_all[s_idx], gh_all[s_idx])
+        
+        # Project local derivatives to shared space
+        m = monomials[s_idx]
+        h_s_x = flux[s_idx] * jx[:, jnp.newaxis] * m
+        h_s_y = flux[s_idx] * jy[:, jnp.newaxis] * m
+        h_s_gh = (flux[s_idx] * jg[:, :, jnp.newaxis] * m).reshape(Np, -1)
+        js_s = jnp.concatenate([h_s_gh, h_s_x, h_s_y], axis=1)
+        
+        # Accumulate
+        return (p_mat_sum.at[:, s_idx].set(psf_s), j_shared_sum + js_s), None
 
-# --- Matrix Accumulation ---
+    # This scan computes the full P matrix and J_shared matrix OOM-safely
+    init_carry = (jnp.zeros((Np, Ns)), jnp.zeros((Np, Nshared)))
+    (p_matrix, j_shared), _ = lax.scan(scan_spots, init_carry, jnp.arange(Ns))
 
-def accumulate_bundle_ab(flux, gh_params_all, dx_all, dy_all, continuum, xc_init, yc_init, monomials, image_data, weight_data, xpix, ypix, degree, spots, pix_to_idx, res, psf_vals, mode):
-    Ns = flux.shape[0]; Npoly = monomials.shape[1]; Nparams = gh_params_all.shape[1]; Nshared = (Nparams + 2) * Npoly; Ntot = Ns + Nshared + 1
-    A = np.zeros((Ntot, Ntot)); B = np.zeros(Ntot)
-    A[:Ns, :Ns] = np.dot(psf_vals.T * weight_data, psf_vals); B[:Ns] = np.dot(psf_vals.T, weight_data * res)
-    B[-1] = np.sum(weight_data * res); A[-1, -1] = np.sum(weight_data)
-    A[:Ns, -1] = np.sum(psf_vals.T * weight_data, axis=1); A[-1, :Ns] = A[:Ns, -1]
-    if mode == 'flux': return A, B
-    xc_all, yc_all = np.array(xc_init) + dx_all, np.array(yc_init) + dy_all
-    H_shared = np.zeros((len(xpix), Nshared))
-    for s in range(Ns):
-        spot = spots[s]
-        sx, sy, indices = [], [], []
-        for i in range(spot['stamp_imin'], spot['stamp_imax']):
-            for j in range(spot['stamp_jmin'], spot['stamp_jmax']):
-                if (i, j) in pix_to_idx: sx.append(i); sy.append(j); indices.append(pix_to_idx[(i, j)])
-        if not sx: continue
-        sx, sy, indices = np.array(sx), np.array(sy), np.array(indices)
-        jf, jx, jy, jg = compute_spot_stamp_jac_full(xc_all[s], yc_all[s], flux[s], gh_params_all[s], degree, jnp.array(sx), jnp.array(sy))
-        jf, jx, jy, jg = np.array(jf), np.array(jx), np.array(jy), np.array(jg)
-        m = monomials[s]
-        h_s_x = jx[:, np.newaxis] * m; h_s_y = jy[:, np.newaxis] * m
-        h_s_gh = (jg[:, :, np.newaxis] * m).reshape(len(sx), -1)
-        h_s_shared = np.concatenate([h_s_gh, h_s_x, h_s_y], axis=1)
-        H_shared[indices, :] += h_s_shared
-    g_start, g_end = Ns, Ntot - 1
-    B[g_start:g_end] = np.dot(H_shared.T, weight_data * res); A[g_start:g_end, g_start:g_end] = np.dot(H_shared.T * weight_data, H_shared)
-    A[:Ns, g_start:g_end] = np.dot(psf_vals.T * weight_data, H_shared); A[g_start:g_end, :Ns] = A[:Ns, g_start:g_end].T
-    A[g_start:g_end, -1] = np.dot(H_shared.T, weight_data); A[-1, g_start:g_end] = A[g_start:g_end, -1]
-    return A, B
-
-# --- Brent's Method ---
-CGOLD = 0.3819660; ZEPS = 1e-10
-def brent(func, ax, bx, cx, tol=1e-2, itmax=100):
-    a = min(ax, cx); b = max(ax, cx); x = w = v = bx; fw = fv = fx = func(x); d = e = 0.0
-    for i in range(itmax):
-        xm = 0.5 * (a + b); tol1 = tol * abs(x) + ZEPS; tol2 = 2.0 * tol1
-        if abs(x - xm) <= (tol2 - 0.5 * (b - a)): return x, fx
-        if abs(e) > tol1:
-            r = (x-w)*(fx-fv); q = (x-v)*(fx-fw); p = (x-v)*q-(x-w)*r; q = 2.0*(q-r)
-            if q > 0.0: p = -p
-            q = abs(q); etemp = e; e = d
-            if abs(p) >= abs(0.5*q*etemp) or p <= q*(a-x) or p >= q*(b-x): e = a-x if x>=xm else b-x; d = CGOLD*e
-            else: d = p/q; u = x+d;
-            if (u-a)<tol2 or (b-u)<tol2: d = np.sign(xm-x)*tol1
-        else: e = a-x if x>=xm else b-x; d = CGOLD*e
-        u = x+d if abs(d)>=tol1 else x+np.sign(d)*tol1; fu = func(u)
-        if fu <= fx:
-            if u >= x: a = x
-            else: b = x
-            v,w,x = w,x,u; fv,fw,fx = fw,fx,fu
-        else:
-            if u < x: a = u
-            else: b = u
-            if fu <= fw or w == x: v,w = w,u; fv,fw = fw,fu
-            elif fu <= fv or v == x or v == w: v = u; fv = fu
-    return x, fx
+    # Now compute Normal Equations components
+    signal = jnp.dot(p_matrix, flux) + continuum
+    res = image_data - signal
+    chi2 = jnp.sum(weight_data * res**2)
+    
+    # Linear Part (Flux + Continuum)
+    B_f = jnp.dot(p_matrix.T, weight_data * res)
+    A_ff = jnp.dot(p_matrix.T * weight_data, p_matrix)
+    B_c = jnp.sum(weight_data * res)
+    A_cc = jnp.sum(weight_data)
+    A_fc = jnp.dot(p_matrix.T, weight_data)
+    
+    # Shared Part
+    B_s = jnp.dot(j_shared.T, weight_data * res)
+    A_ss = jnp.dot(j_shared.T * weight_data, j_shared)
+    A_sf = jnp.dot(j_shared.T * weight_data, p_matrix)
+    A_sc = jnp.dot(j_shared.T, weight_data)
+    
+    # Assemble
+    Ntot = Ns + Nshared + 1
+    A = jnp.zeros((Ntot, Ntot)); B = jnp.zeros(Ntot)
+    B = B.at[:Ns].set(B_f).at[Ns:-1].set(B_s).at[-1].set(B_c)
+    A = A.at[:Ns, :Ns].set(A_ff).at[Ns:-1, Ns:-1].set(A_ss).at[-1, -1].set(A_cc)
+    A = A.at[Ns:-1, :Ns].set(A_sf).at[:Ns, Ns:-1].set(A_sf.T)
+    A = A.at[:Ns, -1].set(A_fc).at[-1, :Ns].set(A_fc)
+    A = A.at[Ns:-1, -1].set(A_sc).at[-1, Ns:-1].set(A_sc)
+    
+    return chi2, A, B
 
 # --- PSF Fitter Class ---
 
@@ -161,76 +159,47 @@ class PSF_Fitter:
         self.psf = psf
         self.chi2_precision = 1e-4
 
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20):
-        print(f"Starting Python/JAX staged fit for bundle {bundle_id}...")
-        flux = np.array([s['flux'] for s in spots])
-        xc_init = np.array([s['xc_init'] for s in spots]); yc_init = np.array([s['yc_init'] for s in spots])
-        monomials = np.array(get_bundle_monomials_jnp(self.psf, bundle_id, spots))
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=50):
+        print(f"Starting OOM-SAFE Spot-Scan GPU fit for bundle {bundle_id}...")
+        flux = jnp.array([s['flux'] for s in spots])
+        xc_init = jnp.array([s['xc_init'] for s in spots]); yc_init = jnp.array([s['yc_init'] for s in spots])
+        monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots)
         Npoly = monomials.shape[1]
-        gh_params_all = np.zeros((len(spots), 55)); gh_params_all[:, 0] = 1.1; gh_params_all[:, 1] = 1.1
-        dx_all = np.zeros(len(spots)); dy_all = np.zeros(len(spots))
-        psf_coeffs = np.zeros((55, Npoly)); psf_coeffs[0, 0] = 1.1; psf_coeffs[1, 0] = 1.1; trace_coeffs = np.zeros((2, Npoly))
-        continuum = 0.0
-        xpix, ypix, pix_to_idx = get_bundle_footprint(spots)
-        image_data, weight_data = image[xpix, ypix], weight[xpix, ypix]
+        
+        psf_coeffs = jnp.zeros((55, Npoly)).at[0, 0].set(1.1).at[1, 0].set(1.1)
+        trace_coeffs = jnp.zeros((2, Npoly)); continuum = 0.0
+        
+        xpix_np, ypix_np, _ = get_bundle_footprint(spots)
+        xpix, ypix = jnp.array(xpix_np), jnp.array(ypix_np)
+        image_data, weight_data = jnp.array(image[xpix_np, ypix_np]), jnp.array(weight[xpix_np, ypix_np])
         degree = self.psf.gh_psf.degree; old_chi2 = 1e30
 
         for i in range(max_iter):
-            if i > 1:
-                gh_params_all = np.dot(monomials, psf_coeffs.T)
-                dx_all = np.dot(monomials, trace_coeffs[0]); dy_all = np.dot(monomials, trace_coeffs[1])
-            chi2, res, psf_vals = compute_bundle_chi2(flux, gh_params_all, dx_all, dy_all, continuum, xc_init, yc_init, image_data, weight_data, xpix, ypix, degree)
+            chi2, A, B = accumulate_bundle_gpu_jnp(flux, psf_coeffs, trace_coeffs, continuum, xc_init, yc_init, monomials, image_data, weight_data, xpix, ypix, degree)
             
             mode = 'flux'
             if i > 1: mode = 'trace'
             if i > 6: mode = 'full'
-            print(f"Iter {i}: chi2 = {chi2:.4f} [Mode: {mode}]")
-            
-            A, B = accumulate_bundle_ab(flux, gh_params_all, dx_all, dy_all, continuum, xc_init, yc_init, monomials, image_data, weight_data, xpix, ypix, degree, spots, pix_to_idx, res, psf_vals, mode)
+            print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]")
             
             Ns = len(flux)
-            idx_flux = np.arange(Ns); idx_psf = np.arange(Ns, Ns + 55*Npoly); idx_trace = np.arange(Ns + 55*Npoly, Ns + 57*Npoly); idx_cont = np.array([A.shape[0]-1])
-            if mode == 'flux': idx_solve = np.concatenate([idx_flux, idx_cont])
-            elif mode == 'trace': idx_solve = np.concatenate([idx_flux, idx_trace, idx_cont])
-            else: idx_solve = np.arange(A.shape[0])
+            if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns), jnp.array([A.shape[0]-1])])
+            elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns), jnp.arange(Ns + 55*Npoly, Ns + 57*Npoly), jnp.array([A.shape[0]-1])])
+            else: idx = jnp.arange(A.shape[0])
             
-            A_sub = A[np.ix_(idx_solve, idx_solve)]; B_sub = B[idx_solve]
-            diag = np.diag(A_sub); S = np.sqrt(diag); S[S < 1e-12] = 1.0
-            A_scaled = A_sub / np.outer(S, S); B_scaled = B_sub / S
-            A_reg = A_scaled + 1e-6 * np.eye(A_scaled.shape[0])
-            try: delta_scaled = np.linalg.solve(A_reg, B_scaled)
-            except: delta_scaled = np.linalg.lstsq(A_reg, B_scaled, rcond=1e-8)[0]
+            A_sub = A[jnp.ix_(idx, idx)]; B_sub = B[idx]
+            diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
+            A_reg = (A_sub / jnp.outer(S, S)) + 1e-6 * jnp.eye(A_sub.shape[0])
+            delta_scaled = jnp.linalg.solve(A_reg, B_sub / S)
             delta_sub = delta_scaled / S
-            delta_P = np.zeros(A.shape[0]); delta_P[idx_solve] = delta_sub
+            delta_P = jnp.zeros(A.shape[0]).at[idx].set(delta_sub)
             
-            def line_search_fn(step):
-                t_flux = np.maximum(flux + step * delta_P[:Ns], 0.0); t_cont = continuum + step * delta_P[-1]
-                if i <= 1: t_gh, t_dx, t_dy = gh_params_all, dx_all, dy_all; t_pc, t_tc = psf_coeffs, trace_coeffs
-                else:
-                    t_pc = psf_coeffs + step * delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
-                    t_tc = trace_coeffs + step * delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
-                    t_gh = np.dot(monomials, t_pc.T); t_dx = np.dot(monomials, t_tc[0]); t_dy = np.dot(monomials, t_tc[1])
-                tc2, _, _ = compute_bundle_chi2(t_flux, t_gh, t_dx, t_dy, t_cont, xc_init, yc_init, image_data, weight_data, xpix, ypix, degree)
-                return tc2
-
-            best_step, best_chi2 = brent(line_search_fn, -0.05, 1.0, 1.1, tol=1e-2)
-            print(f"  Step={best_step:.4f}, Chi2_new={best_chi2:.4f}")
+            flux = jnp.maximum(flux + delta_P[:Ns], 0.0)
+            psf_coeffs = psf_coeffs + delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
+            trace_coeffs = trace_coeffs + delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
+            continuum = continuum + delta_P[-1]
             
-            # Apply best step
-            flux = np.maximum(flux + best_step * delta_P[:Ns], 0.0)
-            continuum += best_step * delta_P[-1]
-            if i > 1:
-                psf_coeffs += best_step * delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
-                trace_coeffs += best_step * delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
+            if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
+            old_chi2 = chi2
             
-            if i == 1:
-                print("  Initializing 2D Legendre model from local state...")
-                for p in range(55): psf_coeffs[p, :] = np.linalg.lstsq(monomials, gh_params_all[:, p], rcond=None)[0]
-                trace_coeffs[0, :] = np.linalg.lstsq(monomials, dx_all, rcond=None)[0]
-                trace_coeffs[1, :] = np.linalg.lstsq(monomials, dy_all, rcond=None)[0]
-
-            if mode == 'full' and abs(old_chi2 - best_chi2) < self.chi2_precision: 
-                print("  Stagnation reached in full mode.")
-                break
-            old_chi2 = best_chi2
-        return old_chi2
+        return float(old_chi2)
