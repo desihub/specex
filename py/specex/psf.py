@@ -48,12 +48,18 @@ class GaussHermitePSF:
                 param_index += 1
         if params.shape[0] > param_index:
             t_amp = params[param_index]
-            t_core = jnp.maximum(params[param_index+1], 0.1)
-            t_xsca = jnp.maximum(params[param_index+2], 0.1)
-            t_ysca = jnp.maximum(params[param_index+3], 0.1)
+            t_core = params[param_index+1]
+            t_xsca = params[param_index+2]
+            t_ysca = params[param_index+3]
             t_inde = params[param_index+4]
-            r2 = (x_rel/t_xsca)**2 + (y_rel/t_ysca)**2
-            tail = t_amp * r2 / (t_core**2 + r2)**(1.0 + t_inde/2.0)
+            
+            # C++ uses multiplication for scaling: r2 = square(dx*r_tail_x_scale)+square(dy*r_tail_y_scale)
+            # and formula: r2/(r2_tail_core_size+r2)*pow(r2_tail_core_size+r2,-r_tail_power_law_index/2.)
+            r2_core = t_core**2
+            r2 = (x_rel * t_xsca)**2 + (y_rel * t_ysca)**2
+            # Add epsilon to prevent division by zero at r=0
+            denom = r2_core + r2 + 1e-10
+            tail = t_amp * r2 / denom * (denom)**(-t_inde/2.0)
             psfval += tail
         return psfval
 
@@ -92,7 +98,8 @@ class PSF:
     def all_local_params_fw(self, fiber, wave, bundle_id=-1):
         if bundle_id == -1: bundle_id = self.get_bundle_of_fiber(fiber)
         params = self.params_of_bundles[bundle_id]
-        rel_fiber_idx = fiber - self.fiber_min
+        # rel_fiber_idx is relative to the bundle's first fiber
+        rel_fiber_idx = fiber - params.fiber_min
         local_params = np.zeros(len(params.param_names))
         for i, name in enumerate(params.param_names):
             local_params[i] = params.param_models[name][rel_fiber_idx].value(wave)

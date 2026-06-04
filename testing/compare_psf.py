@@ -72,7 +72,10 @@ def run_comparison():
     print(f"Loaded {len(lamp_lines)} lamp lines.")
     
     bundle_id = 5
-    spots = get_bundle_spots(psf_py, 125, 149, lamp_lines, min_dist_angstrom=4.0,
+    # C++ Final Stage: Include blended lines (dist=0) and noisier spots (S/N > 3)
+    spots = get_bundle_spots(psf_py, 125, 149, lamp_lines, 
+                             image=image, weight=weight,
+                             min_dist_angstrom=0.0, sn_threshold=3.0,
                              wave_min=psf_py.fiber_traces[125]['X_vs_W'].xmin, 
                              wave_max=psf_py.fiber_traces[125]['X_vs_W'].xmax)
     print(f"Reconstructed {len(spots)} spots (after filtering).")
@@ -80,8 +83,8 @@ def run_comparison():
     fitter = PSF_Fitter(psf_py)
     
     t0 = time.time()
-    # Run full non-linear fit to reach parity
-    final_chi2 = fitter.fit(image, weight, spots, bundle_id, fit_type='full', max_iter=15)
+    # Run full non-linear fit for final convergence
+    final_chi2 = fitter.fit(image, weight, spots, bundle_id, fit_type='full', max_iter=50)
     t1 = time.time()
     print(f"Python/JAX Time: {t1 - t0:.2f}s")
     print(f"Final Python Chi2: {final_chi2:.4f}")

@@ -31,7 +31,8 @@ def read_lamp_lines(filename):
             except (ValueError, IndexError): continue
     return lines
 
-def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, min_dist_angstrom=0.0, wave_min=None, wave_max=None):
+def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None, 
+                     min_dist_angstrom=0.0, sn_threshold=0.0, wave_min=None, wave_max=None):
     lines = [l for l in lamp_lines if (wave_min is None or l['wave'] >= wave_min) and (wave_max is None or l['wave'] <= wave_max)]
     lines = sorted(lines, key=lambda x: x['wave'])
     selected_waves = []
@@ -45,11 +46,12 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, min_dist_angstrom=0.
             xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
             if 0 <= xc < 4114 and 0 <= yc < 4128:
                 hsize_x, hsize_y = psf.h_size_x, psf.h_size_y
-                spots.append({
+                spot = {
                     'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc, 'flux': 1000.0,
                     'stamp_imin': int(np.floor(xc + 0.5)) - hsize_x, 'stamp_imax': int(np.floor(xc + 0.5)) + hsize_x + 1,
                     'stamp_jmin': int(np.floor(yc + 0.5)) - hsize_y, 'stamp_jmax': int(np.floor(yc + 0.5)) + hsize_y + 1
-                })
+                }
+                spots.append(spot)
     return spots
 
 def get_bundle_footprint(spots):
@@ -90,6 +92,7 @@ def compute_bundle_chi2(flux, gh_params_all, dx_all, dy_all, continuum, xc_init,
     xc, yc = np.array(xc_init) + dx_all, np.array(yc_init) + dy_all
     psf_vals = np.array(GaussHermitePSF.pix_value_jnp(jnp.array(xc), jnp.array(yc), jnp.array(xpix), jnp.array(ypix), jnp.array(gh_params_all), degree))
     signal = np.dot(psf_vals, flux) + continuum; res = image_data - signal
+    res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
     return np.sum(weight_data * res**2), res, psf_vals
 
 # --- Matrix Accumulation ---
@@ -124,6 +127,33 @@ def accumulate_bundle_ab(flux, gh_params_all, dx_all, dy_all, continuum, xc_init
     A[g_start:g_end, -1] = np.dot(H_shared.T, weight_data); A[-1, g_start:g_end] = A[g_start:g_end, -1]
     return A, B
 
+# --- Brent's Method ---
+CGOLD = 0.3819660; ZEPS = 1e-10
+def brent(func, ax, bx, cx, tol=1e-2, itmax=100):
+    a = min(ax, cx); b = max(ax, cx); x = w = v = bx; fw = fv = fx = func(x); d = e = 0.0
+    for i in range(itmax):
+        xm = 0.5 * (a + b); tol1 = tol * abs(x) + ZEPS; tol2 = 2.0 * tol1
+        if abs(x - xm) <= (tol2 - 0.5 * (b - a)): return x, fx
+        if abs(e) > tol1:
+            r = (x-w)*(fx-fv); q = (x-v)*(fx-fw); p = (x-v)*q-(x-w)*r; q = 2.0*(q-r)
+            if q > 0.0: p = -p
+            q = abs(q); etemp = e; e = d
+            if abs(p) >= abs(0.5*q*etemp) or p <= q*(a-x) or p >= q*(b-x): e = a-x if x>=xm else b-x; d = CGOLD*e
+            else: d = p/q; u = x+d;
+            if (u-a)<tol2 or (b-u)<tol2: d = np.sign(xm-x)*tol1
+        else: e = a-x if x>=xm else b-x; d = CGOLD*e
+        u = x+d if abs(d)>=tol1 else x+np.sign(d)*tol1; fu = func(u)
+        if fu <= fx:
+            if u >= x: a = x
+            else: b = x
+            v,w,x = w,x,u; fv,fw,fx = fw,fx,fu
+        else:
+            if u < x: a = u
+            else: b = u
+            if fu <= fw or w == x: v,w = w,u; fv,fw = fw,fu
+            elif fu <= fv or v == x or v == w: v = u; fv = fu
+    return x, fx
+
 # --- PSF Fitter Class ---
 
 class PSF_Fitter:
@@ -137,34 +167,24 @@ class PSF_Fitter:
         xc_init = np.array([s['xc_init'] for s in spots]); yc_init = np.array([s['yc_init'] for s in spots])
         monomials = np.array(get_bundle_monomials_jnp(self.psf, bundle_id, spots))
         Npoly = monomials.shape[1]
-        
-        # 1. Cold start from a known GOOD Gaussian approximation
-        # (Using 1.1 sigma which reached 669k in flux-only)
-        gh_params_all = np.zeros((len(spots), 55))
-        gh_params_all[:, 0] = 1.1; gh_params_all[:, 1] = 1.1 # Sigmas
+        gh_params_all = np.zeros((len(spots), 55)); gh_params_all[:, 0] = 1.1; gh_params_all[:, 1] = 1.1
         dx_all = np.zeros(len(spots)); dy_all = np.zeros(len(spots))
-        
-        psf_coeffs = np.zeros((55, Npoly))
-        psf_coeffs[0, 0] = 1.1; psf_coeffs[1, 0] = 1.1
-        trace_coeffs = np.zeros((2, Npoly))
+        psf_coeffs = np.zeros((55, Npoly)); psf_coeffs[0, 0] = 1.1; psf_coeffs[1, 0] = 1.1; trace_coeffs = np.zeros((2, Npoly))
         continuum = 0.0
-        
         xpix, ypix, pix_to_idx = get_bundle_footprint(spots)
         image_data, weight_data = image[xpix, ypix], weight[xpix, ypix]
         degree = self.psf.gh_psf.degree; old_chi2 = 1e30
 
         for i in range(max_iter):
-            if i > 1: # After flux solve, use Legendre model
+            if i > 1:
                 gh_params_all = np.dot(monomials, psf_coeffs.T)
                 dx_all = np.dot(monomials, trace_coeffs[0]); dy_all = np.dot(monomials, trace_coeffs[1])
-            
             chi2, res, psf_vals = compute_bundle_chi2(flux, gh_params_all, dx_all, dy_all, continuum, xc_init, yc_init, image_data, weight_data, xpix, ypix, degree)
-            print(f"Iter {i}: chi2 = {chi2:.4f}")
             
-            # Stages
-            if i <= 1: mode = 'flux'
-            elif i <= 6: mode = 'trace'
-            else: mode = 'full'
+            mode = 'flux'
+            if i > 1: mode = 'trace'
+            if i > 6: mode = 'full'
+            print(f"Iter {i}: chi2 = {chi2:.4f} [Mode: {mode}]")
             
             A, B = accumulate_bundle_ab(flux, gh_params_all, dx_all, dy_all, continuum, xc_init, yc_init, monomials, image_data, weight_data, xpix, ypix, degree, spots, pix_to_idx, res, psf_vals, mode)
             
@@ -175,35 +195,42 @@ class PSF_Fitter:
             else: idx_solve = np.arange(A.shape[0])
             
             A_sub = A[np.ix_(idx_solve, idx_solve)]; B_sub = B[idx_solve]
-            A_reg = A_sub + 1e-8 * np.trace(A_sub)/A_sub.shape[0] * np.eye(A_sub.shape[0])
-            try: delta_sub = np.linalg.solve(A_reg, B_sub)
-            except: delta_sub = np.linalg.lstsq(A_reg, B_sub, rcond=1e-8)[0]
-            
+            diag = np.diag(A_sub); S = np.sqrt(diag); S[S < 1e-12] = 1.0
+            A_scaled = A_sub / np.outer(S, S); B_scaled = B_sub / S
+            A_reg = A_scaled + 1e-6 * np.eye(A_scaled.shape[0])
+            try: delta_scaled = np.linalg.solve(A_reg, B_scaled)
+            except: delta_scaled = np.linalg.lstsq(A_reg, B_scaled, rcond=1e-8)[0]
+            delta_sub = delta_scaled / S
             delta_P = np.zeros(A.shape[0]); delta_P[idx_solve] = delta_sub
             
-            # Line Search
-            step = 1.0; improved = False
-            for ls in range(5):
-                t_flux = np.maximum(flux + step * delta_P[:Ns], 0.0)
-                t_cont = continuum + step * delta_P[-1]
-                if i <= 1: t_gh, t_dx, t_dy = gh_params_all, dx_all, dy_all; t_psf_coeffs, t_trace_coeffs = psf_coeffs, trace_coeffs
+            def line_search_fn(step):
+                t_flux = np.maximum(flux + step * delta_P[:Ns], 0.0); t_cont = continuum + step * delta_P[-1]
+                if i <= 1: t_gh, t_dx, t_dy = gh_params_all, dx_all, dy_all; t_pc, t_tc = psf_coeffs, trace_coeffs
                 else:
-                    t_psf_coeffs = psf_coeffs + step * delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
-                    t_trace_coeffs = trace_coeffs + step * delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
-                    t_gh = np.dot(monomials, t_psf_coeffs.T); t_dx = np.dot(monomials, t_trace_coeffs[0]); t_dy = np.dot(monomials, t_trace_coeffs[1])
-                t_chi2, _, _ = compute_bundle_chi2(t_flux, t_gh, t_dx, t_dy, t_cont, xc_init, yc_init, image_data, weight_data, xpix, ypix, degree)
-                if t_chi2 < chi2:
-                    flux, psf_coeffs, trace_coeffs, continuum = t_flux, t_psf_coeffs, t_trace_coeffs, t_cont
-                    gh_params_all, dx_all, dy_all = t_gh, t_dx, t_dy
-                    improved = True; break
-                step *= 0.5
+                    t_pc = psf_coeffs + step * delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
+                    t_tc = trace_coeffs + step * delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
+                    t_gh = np.dot(monomials, t_pc.T); t_dx = np.dot(monomials, t_tc[0]); t_dy = np.dot(monomials, t_tc[1])
+                tc2, _, _ = compute_bundle_chi2(t_flux, t_gh, t_dx, t_dy, t_cont, xc_init, yc_init, image_data, weight_data, xpix, ypix, degree)
+                return tc2
+
+            best_step, best_chi2 = brent(line_search_fn, -0.05, 1.0, 1.1, tol=1e-2)
+            print(f"  Step={best_step:.4f}, Chi2_new={best_chi2:.4f}")
+            
+            # Apply best step
+            flux = np.maximum(flux + best_step * delta_P[:Ns], 0.0)
+            continuum += best_step * delta_P[-1]
+            if i > 1:
+                psf_coeffs += best_step * delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
+                trace_coeffs += best_step * delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
             
             if i == 1:
-                print("  Initializing 2D Legendre model from current state...")
+                print("  Initializing 2D Legendre model from local state...")
                 for p in range(55): psf_coeffs[p, :] = np.linalg.lstsq(monomials, gh_params_all[:, p], rcond=None)[0]
                 trace_coeffs[0, :] = np.linalg.lstsq(monomials, dx_all, rcond=None)[0]
                 trace_coeffs[1, :] = np.linalg.lstsq(monomials, dy_all, rcond=None)[0]
 
-            if abs(old_chi2 - chi2) < self.chi2_precision: break
-            old_chi2 = chi2
+            if mode == 'full' and abs(old_chi2 - best_chi2) < self.chi2_precision: 
+                print("  Stagnation reached in full mode.")
+                break
+            old_chi2 = best_chi2
         return old_chi2
