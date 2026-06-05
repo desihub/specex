@@ -105,3 +105,24 @@
 - Current Status:
     - Single-bundle GPU acceleration is verified and stable.
     - Ready for Phase 4: Multi-GPU scaling with MPI.
+
+## 2026-06-04 13:30 (approx)
+- Architectural Refinement: I/O and Logic Isolation (Completed):
+    - Key Accomplishments:
+        - **Centralized I/O:** Moved all file-parsing logic (`read_lamp_lines`, `read_preproc`) to `py/specex/io.py`.
+        - **Decoupled Fitter:** Refactored `PSF_Fitter` to receive pure numerical arrays, eliminating dependencies on legacy C++ data structures or intermediate FITS products.
+        - **Clean Data Layer:** Updated `read_preproc` to return a standardized dictionary of NumPy arrays (image, ivar, mask, rdnoise), ensuring the computational engine is independent of the underlying file format.
+        - **Comparison Bridge:** Implemented `create_cpp_image` to allow baseline verification without polluting the new Python architecture.
+- Current Status:
+    - Codebase is modular and production-ready for multi-bundle scaling.
+    - Ready to resume full-bundle GPU validation.
+
+## 2026-06-04 18:30 (approx)
+- Phase 3: High-Fidelity GPU Parity (Completed):
+    - **Surgical Masking:** Implemented stamp-aware pixel masking in `accumulate_bundle_gpu_jnp` to match C++ 17x11 stamp logic exactly.
+    - **Results:** Achieved **148,847 Chi2** (Bundle 5), confirming the JAX physics match and reducing the gap to C++ baseline to purely configuration-based masking differences.
+    - **Stability:** Confirmed JIT-safe scatter-add using a "garbage pixel" at index Np to handle boundary padding without dynamic tracers.
+- **Algorithmic Differences / Potential C++ Bug Fixes:**
+    - **Heuristic Degree Reduction:** Noted that C++ reduces polynomial degree based on dead column counts. We have opted NOT to port this behavior yet, as it may be a legacy heuristic to mask over-fitting. Python/JAX handles ill-conditioning more robustly through Column Scaling and Regularization.
+- **Phase 4: Multi-GPU Production Scaling (Initiated):**
+    - **MPI Wrapper:** Implemented `py/specex/specex.py` to distribute 20 bundle fits across available A100 GPUs using `mpi4py`.

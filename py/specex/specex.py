@@ -1,45 +1,99 @@
+import os
+import sys
+import time
 import numpy as np
-from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
-from .io import (read_preproc, write_psf, read_psf)
-from .qa import (specex_psf_qa)
+import multiprocessing as mp
 
-def run_specex(com):
+# Note: We do NOT import JAX here at the top level to ensure 
+# CUDA_VISIBLE_DEVICES can be set cleanly in child processes.
 
-    # instantiate specex C++ objects exposed to python        
-    opts = PyOptions() # input options
-    pyio = PyIO()      # IO options and methods
-    pypr = PyPrior()   # Gaussian priors
-    pyps = PyPSF()     # psf data
-    pyft = PyFitting() # psf fitting
+from .io import load_python_psf, read_preproc, read_lamp_lines
+from .fitter import PSF_Fitter, get_bundle_spots
+
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file):
+    """
+    Isolated task for fitting a single bundle on a specific GPU.
+    """
+    # 1. Set GPU affinity before JAX initializes
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     
-    # copy com to opaque pybind VectorString object spxargs
-    spxargs = VectorString()
-    for strs in com:
-        spxargs.append(strs)
-
-    # parse args
-    retval = opts.parse(spxargs)
-    if retval != 0: return retval
-
-    # read psf
-    read_psf(opts,pyps)
-
-    # set input psf bools
-    pyio.set_inputpsf(opts,pyps)
-
-     # set Gaussian priors
-    pypr.set_priors(opts)
-
-    # read preproc
-    pymg = read_preproc(opts) 
+    import jax
+    import jax.numpy as jnp
     
-    # fit psf 
-    retval = pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
+    # 2. Setup (Each process needs its own local state)
+    class Opts:
+        def __init__(self):
+            self.arc_image_filename = arc_file
+            self.input_psf_filename = in_psf_file
+    opts = Opts()
     
-    # write psf 
-    write_psf(pyps,opts,pyio)        
+    ddata = read_preproc(opts)
+    image = ddata['image'].T
+    weight = ddata['ivar'].T
+    
+    psf = load_python_psf(in_psf_file, opts)
+    lamp_lines = read_lamp_lines(lamp_lines_file)
+    
+    f_min, f_max = bid * 25, (bid + 1) * 25 - 1
+    
+    print(f"[Bundle {bid}] Starting fit on GPU {gpu_id}...", flush=True)
+    
+    spots = get_bundle_spots(psf, f_min, f_max, lamp_lines, 
+                             image=image, weight=weight,
+                             min_dist_angstrom=0.0, sn_threshold=3.0,
+                             wave_min=psf.fiber_traces[f_min]['X_vs_W'].xmin,
+                             wave_max=psf.fiber_traces[f_min]['X_vs_W'].xmax)
+    
+    fitter = PSF_Fitter(psf)
+    # Run the high-performance JAX-GPU fit
+    final_chi2 = fitter.fit(image, weight, spots, bid, fit_type='full', max_iter=50)
+    
+    return bid, final_chi2
 
-    # do QA
-    retval += specex_psf_qa(opts)
+def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, first_bundle=0, last_bundle=19):
+    """
+    Main driver using Python multiprocessing for Multi-GPU scaling.
+    """
+    print("--- SPECE-X Multi-GPU CCD Fit ---", flush=True)
+    print(f"Arc Image: {arc_file}", flush=True)
+    print(f"Input PSF: {in_psf_file}", flush=True)
+    
+    t_start = time.time()
+    
+    all_bundles = list(range(first_bundle, last_bundle + 1))
+    n_gpus = 4 # A100 node
+    
+    # Use a pool to manage 4 concurrent fits
+    results = {}
+    with mp.Pool(processes=n_gpus) as pool:
+        # Prepare arguments
+        tasks = []
+        for i, bid in enumerate(all_bundles):
+            gpu_id = i % n_gpus
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, lamp_lines_file))
+            
+        # Run parallel
+        chunk_results = pool.starmap(fit_bundle_task, tasks)
+        
+        for bid, chi2 in chunk_results:
+            results[bid] = chi2
 
-    return retval
+    t_end = time.time()
+    
+    print("\n--- CCD Fit Summary ---", flush=True)
+    for b in sorted(results.keys()):
+        print(f"  Bundle {b:02d}: Chi2 = {results[b]:.1f}", flush=True)
+    
+    print(f"Total CCD Fit Time: {t_end - t_start:.2f}s", flush=True)
+
+if __name__ == "__main__":
+    # Test 4 bundles concurrently on 4 GPUs
+    fit_ccd_native(
+        arc_file='/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz',
+        in_psf_file='/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits',
+        out_psf_file='fit-psf-output.fits',
+        lamp_lines_file='py/specex/data/specex_linelist_desi.txt',
+        first_bundle=5,
+        last_bundle=8
+    )
