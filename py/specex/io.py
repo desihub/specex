@@ -1,6 +1,5 @@
 import os
 import numpy as np
-import specex._libspecex as spx
 import fitsio
 from fitsio import FITS, FITSHDR
 from datetime import datetime
@@ -8,6 +7,7 @@ from .psf import PSF, PSF_Params
 from .math import SparseLegendre2DPol, Legendre1DPol
 
 def meta2header(meta):
+    import specex._libspecex as spx
     header = spx.MapStringString()
     for key in meta:
         mkey = meta[key]
@@ -96,13 +96,26 @@ def read_image(filename):
     return {'image': image, 'ivar': ivar, 'mask': mask, 'meta': meta}
 
 def read_preproc(opts):
+    """
+    Reads and pre-processes image data, returning a clean dictionary of NumPy arrays.
+    """
     ddata = read_image(opts.arc_image_filename)
-    ddata['ivar'][ddata['mask']!=0] = 0.0
-    hdr = meta2header(ddata['meta'])
+    # Masking logic
+    ddata['ivar'][ddata['mask'] != 0] = 0.0
+    
+    # Metadata for readout noise
     rdnoise_meta = ddata['meta'].get('RDNOISE', 0.0)
-    rdnoise_arr = np.full_like(ddata['image'], float(rdnoise_meta))
-    pymg = spx.PyImage(ddata['image'], ddata['ivar'], ddata['mask'], rdnoise_arr, hdr)
-    return pymg
+    ddata['rdnoise'] = np.full_like(ddata['image'], float(rdnoise_meta))
+    
+    return ddata
+
+def create_cpp_image(ddata):
+    """
+    Bridge helper to create a legacy C++ PyImage if needed for baseline comparison.
+    """
+    import specex._libspecex as spx
+    hdr = meta2header(ddata['meta'])
+    return spx.PyImage(ddata['image'], ddata['ivar'], ddata['mask'], ddata['rdnoise'], hdr)
 
 def read_psf(opts, pyps):
     """
@@ -140,6 +153,9 @@ def read_psf(opts, pyps):
         pyps.table_WAVEMIN   = psf_header['WAVEMIN']
         pyps.table_WAVEMAX   = psf_header['WAVEMAX']
         pyps.LEGDEG          = psf_header['LEGDEG']
+        
+        # Table data handling (requires spx imports internally)
+        import specex._libspecex as spx
         table_col0 = spx.VectorString()
         table_col1 = spx.VectorDouble()
         table_col2 = spx.VectorInt()
@@ -167,3 +183,20 @@ def get_desi_linelist_file():
         from importlib import resources
         specexdata = resources.files('specex').joinpath('data')
     return os.path.join(specexdata,'specex_linelist_desi.txt')
+
+def read_lamp_lines(filename):
+    """
+    Reads lamp line ASCII files.
+    """
+    lines = []
+    with open(filename, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'): continue
+            parts = line.split()
+            if len(parts) < 2: continue
+            try:
+                wave = float(parts[1]); name = parts[0]
+                lines.append({'wave': wave, 'name': name})
+            except (ValueError, IndexError): continue
+    return lines

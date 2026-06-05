@@ -80,8 +80,10 @@ class PSF_Params:
 
 class PSF:
     def __init__(self, degree=6):
-        self.name = "GaussHermitePSF"; self.h_size_x = 12; self.h_size_y = 12
-        self.gain = 1.0; self.readout_noise = 1.0; self.psf_error = 0.0
+        self.name = "GaussHermitePSF"
+        self.h_size_x = 8 
+        self.h_size_y = 8
+        self.gain = 1.0
         self.fiber_min = 0; self.params_of_bundles = {}; self.fiber_traces = {}
         self.gh_psf = GaussHermitePSF(degree=degree)
 
