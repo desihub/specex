@@ -10,7 +10,7 @@ current_dir = os.getcwd()
 sys.path.insert(0, os.path.join(current_dir, 'py'))
 
 # from specex._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
-from specex.io import read_preproc, read_psf, load_python_psf, read_image, read_lamp_lines
+from specex.io import read_preproc, load_python_psf, read_image, read_lamp_lines
 from specex.fitter import PSF_Fitter, get_bundle_spots
 
 class DummyOptions:
@@ -41,6 +41,8 @@ def run_comparison():
     
     # psf_py is our pure-python PSF object
     psf_py = load_python_psf(opts.input_psf_filename, opts)
+    psf_py.h_size_x = 7 # Trial: match C++ 15-pix footprint
+    psf_py.h_size_y = 5 # Production baseline uses HSIZEY=5
     lamp_lines = read_lamp_lines(lamp_lines_file)
     print(f"Loaded {len(lamp_lines)} lamp lines.")
     
@@ -48,16 +50,14 @@ def run_comparison():
     # C++ Final Stage: Include blended lines (dist=0) and noisier spots (S/N > 3)
     spots = get_bundle_spots(psf_py, 125, 149, lamp_lines, 
                              image=image, weight=weight,
-                             min_dist_angstrom=0.0, sn_threshold=3.0,
-                             wave_min=psf_py.fiber_traces[125]['X_vs_W'].xmin, 
-                             wave_max=psf_py.fiber_traces[125]['X_vs_W'].xmax)
+                             min_dist_angstrom=0.0, sn_threshold=3.0)
     print(f"Reconstructed {len(spots)} spots (after filtering).")
     
     fitter = PSF_Fitter(psf_py)
     
     t0 = time.time()
     # Run full non-linear fit for final convergence
-    final_chi2 = fitter.fit(image, weight, spots, bundle_id, fit_type='full', max_iter=50)
+    final_chi2, pc, tc, cont = fitter.fit(image, weight, spots, bundle_id, fit_type='full', max_iter=50)
     t1 = time.time()
     print(f"Python/JAX Time: {t1 - t0:.2f}s")
     print(f"Final Python Chi2: {final_chi2:.4f}")

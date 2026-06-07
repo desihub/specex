@@ -17,54 +17,6 @@ def get_sparse_nz(xdeg, ydeg):
             elif i > 1 and j == 0: nz.append(i + j*(xdeg + 1))
     return nz
 
-def read_lamp_lines(filename):
-    lines = []
-    with open(filename, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'): continue
-            parts = line.split()
-            if len(parts) < 2: continue
-            try:
-                wave = float(parts[1]); name = parts[0]
-                lines.append({'wave': wave, 'name': name})
-            except (ValueError, IndexError): continue
-    return lines
-
-def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None, 
-                     min_dist_angstrom=0.0, sn_threshold=0.0, wave_min=None, wave_max=None):
-    lines = [l for l in lamp_lines if (wave_min is None or l['wave'] >= wave_min) and (wave_max is None or l['wave'] <= wave_max)]
-    lines = sorted(lines, key=lambda x: x['wave'])
-    selected_waves = []
-    for i, line in enumerate(lines):
-        dist_prev = line['wave'] - lines[i-1]['wave'] if i > 0 else 1e9
-        dist_next = lines[i+1]['wave'] - line['wave'] if i < len(lines)-1 else 1e9
-        if min(dist_prev, dist_next) >= min_dist_angstrom: selected_waves.append(line['wave'])
-    spots = []
-    for fiber in range(fiber_min, fiber_max + 1):
-        for wave in selected_waves:
-            xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
-            if 0 <= xc < 4114 and 0 <= yc < 4128:
-                hsize_x, hsize_y = psf.h_size_x, psf.h_size_y
-                spot = {
-                    'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc, 'flux': 1000.0,
-                    'stamp_imin': int(np.floor(xc + 0.5)) - hsize_x, 'stamp_imax': int(np.floor(xc + 0.5)) + hsize_x + 1,
-                    'stamp_jmin': int(np.floor(yc + 0.5)) - hsize_y, 'stamp_jmax': int(np.floor(yc + 0.5)) + hsize_y + 1
-                }
-                spots.append(spot)
-    return spots
-
-def get_bundle_footprint(spots):
-    pixels = set()
-    for s in spots:
-        for i in range(s['stamp_imin'], s['stamp_imax']):
-            for j in range(s['stamp_jmin'], s['stamp_jmax']):
-                if 0 <= i < 4114 and 0 <= j < 4128: pixels.add((i, j))
-    pixels = sorted(list(pixels))
-    if not pixels: return np.array([]), np.array([]), {}
-    pixels = np.array(pixels); pix_to_idx = {(p[0], p[1]): i for i, p in enumerate(pixels)}
-    return pixels[:, 0], pixels[:, 1], pix_to_idx
-
 def get_bundle_monomials_jnp(psf, bundle_id, spots):
     from .math import legendre_pol_jnp
     bundle = psf.params_of_bundles[bundle_id]
@@ -78,108 +30,155 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots):
     for k in nz: i, j = k % (xdeg + 1), k // (xdeg + 1); m.append(mx[i] * mw[j])
     return jnp.stack(m, axis=1)
 
-# --- Masked GPU Accumulation ---
+def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None, 
+                     min_dist_angstrom=0.0, sn_threshold=0.0, wave_min=None, wave_max=None):
+    lines_sc = [l for l in lamp_lines if 1 <= l.get('score', 1) <= 4]
+    spots = []
+    for fiber in range(fiber_min, fiber_max + 1):
+        trace = psf.fiber_traces[fiber]
+        wmin_f, wmax_f = trace['X_vs_W'].xmin, trace['X_vs_W'].xmax
+        lines_f = [l for l in lines_sc if wmin_f <= l['wave'] <= wmax_f]
+        lines_f = sorted(lines_f, key=lambda x: x['wave'])
+        selected_waves = []
+        for i, line in enumerate(lines_f):
+            dist_prev = line['wave'] - lines_f[i-1]['wave'] if i > 0 else 1e9
+            dist_next = lines_f[i+1]['wave'] - line['wave'] if i < len(lines_f)-1 else 1e9
+            if min(dist_prev, dist_next) >= min_dist_angstrom: selected_waves.append(line['wave'])
+        for wave in selected_waves:
+            xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
+            if 0 <= xc < 4114 and -5 <= yc <= 4133:
+                hsize_x, hsize_y = psf.h_size_x, psf.h_size_y
+                spot = {
+                    'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc, 'flux': 1000.0,
+                    'stamp_imin': int(np.floor(xc + 0.5)) - hsize_x, 'stamp_imax': int(np.floor(xc + 0.5)) + hsize_x + 1,
+                    'stamp_jmin': int(np.floor(yc + 0.5)) - hsize_y, 'stamp_jmax': int(np.floor(yc + 0.5)) + hsize_y + 1
+                }
+                spots.append(spot)
+    return spots
 
-@partial(jit, static_argnums=(15,))
-def accumulate_bundle_gpu_jnp(flux, psf_coeffs, trace_coeffs, continuum, 
+def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
+    w_new = weight.copy(); rows_j = np.arange(4128).astype(float); count = 0
+    for fib in range(fiber_min, fiber_max + 1):
+        try:
+            w_vals = psf.fiber_traces[fib]['Y_vs_W'].invert(rows_j)
+            x_vals = psf.x_ccd(fib, w_vals); i_centers = np.floor(x_vals + 0.5).astype(int)
+            valid = (rows_j >= 0) & (rows_j < 4128) & (i_centers >= 0) & (i_centers < 4114)
+            bad = weight[i_centers[valid], rows_j[valid].astype(int)] == 0
+            for j in np.where(valid)[0][bad]:
+                ic = i_centers[j]; i_s, i_e = max(0, ic - 4), min(4114, ic + 5)
+                w_new[i_s:i_e, j] = 0.0; count += 1
+        except: continue
+    return w_new
+
+def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
+    margin = 0
+    rows_j = np.arange(4128).astype(float)
+    w1 = psf.fiber_traces[fiber_min]['Y_vs_W'].invert(rows_j)
+    w2 = psf.fiber_traces[fiber_max]['Y_vs_W'].invert(rows_j)
+    x1 = psf.x_ccd(fiber_min, w1); x2 = psf.x_ccd(fiber_max, w2)
+    xmin_env = np.floor(np.minimum(x1, x2) + 0.5).astype(int) - margin
+    xmax_env = np.floor(np.maximum(x1, x2) + 0.5).astype(int) + margin + 1
+    pixels = set()
+    for s in spots:
+        j_min, j_max = max(0, s['stamp_jmin']), min(4128, s['stamp_jmax'])
+        for j in range(j_min, j_max):
+            i_s, i_e = max(s['stamp_imin'], xmin_env[j]), min(s['stamp_imax'], xmax_env[j])
+            for i in range(i_s, i_e):
+                if 0 <= i < 4114 and (weight is None or weight[i, j] > 0): pixels.add((i, j))
+    pixels = sorted(list(pixels)); pixels = np.array(pixels)
+    if not pixels.size: return np.array([]), np.array([]), {}
+    return pixels[:, 0], pixels[:, 1], {(p[0], p[1]): i for i, p in enumerate(pixels)}
+
+# --- Stable GPU Accumulation ---
+
+@partial(jit, static_argnums=(11, 17, 18))
+def accumulate_bundle_gpu_jnp(flux, psf_coeffs, trace_coeffs, continuum_coeffs, 
                              xc_init, yc_init, monomials, 
-                             image_data, weight_data, xpix, ypix, 
-                             imin_all, imax_all, jmin_all, jmax_all, degree):
-    Ns = flux.shape[0]; Npoly = monomials.shape[1]
-    Nparams = psf_coeffs.shape[0]; Nshared = (Nparams + 2) * Npoly
-    Np = xpix.shape[0]
-
-    gh_all = jnp.dot(monomials, psf_coeffs.T)
-    dx = jnp.dot(monomials, trace_coeffs[0]); dy = jnp.dot(monomials, trace_coeffs[1])
+                             image_data, weight_data, xpix, ypix, degree,
+                             stamps_x, stamps_y, stamp_indices,
+                             trace_x_vals, trace_w_vals, wmin_cont, wmax_cont):
+    Ns = flux.shape[0]; Npoly = monomials.shape[1]; Nparams = psf_coeffs.shape[0]; Ncont = continuum_coeffs.shape[0]
+    Nshared = (Nparams + 2) * Npoly + Ncont; Np = xpix.shape[0]; Ntot = Ns + Nshared; stamp_area = stamps_x.shape[1]
+    gh_all = jnp.dot(monomials, psf_coeffs.T); dx = jnp.dot(monomials, trace_coeffs[0]); dy = jnp.dot(monomials, trace_coeffs[1])
     xc_all, yc_all = xc_init + dx, yc_init + dy
-
-    def scan_body(carry, i):
-        p_mat_sum, j_shared_sum = carry
-        
-        # Spot physics with Masking to match C++ stamp logic
-        def spot_psf(x, y, g):
-            val = GaussHermitePSF.single_pix_value_jnp(x, y, xpix, ypix, g, degree)
-            # Mask out pixels outside this spot's specific stamp
-            mask = (xpix >= imin_all[i]) & (xpix < imax_all[i]) & (ypix >= jmin_all[i]) & (ypix < jmax_all[i])
-            return val * mask
-        
-        psf_s = spot_psf(xc_all[i], yc_all[i], gh_all[i])
-        jx, jy, jg = jacfwd(spot_psf, argnums=(0, 1, 2))(xc_all[i], yc_all[i], gh_all[i])
-        
-        m = monomials[i]; f = flux[i]
-        h_s_x = f * jx[:, jnp.newaxis] * m
-        h_s_y = f * jy[:, jnp.newaxis] * m
-        h_s_gh = (f * jg[:, :, jnp.newaxis] * m).reshape(Np, -1)
-        js_s = jnp.concatenate([h_s_gh, h_s_x, h_s_y], axis=1)
-        
-        return (p_mat_sum.at[:, i].set(psf_s), j_shared_sum + js_s), None
-
-    init_carry = (jnp.zeros((Np, Ns)), jnp.zeros((Np, Nshared)))
-    (p_matrix, j_shared), _ = lax.scan(scan_body, init_carry, jnp.arange(Ns))
-
-    signal = jnp.dot(p_matrix, flux) + continuum; res = image_data - signal
-    chi2 = jnp.sum(weight_data * res**2)
-    B_f = jnp.dot(p_matrix.T, weight_data * res)
-    A_ff = jnp.dot(p_matrix.T * weight_data, p_matrix)
-    B_c = jnp.sum(weight_data * res); A_cc = jnp.sum(weight_data)
-    A_fc = jnp.dot(p_matrix.T, weight_data)
-    B_s = jnp.dot(j_shared.T, weight_data * res); A_ss = jnp.dot(j_shared.T * weight_data, j_shared)
-    A_sf = jnp.dot(j_shared.T * weight_data, p_matrix); A_sc = jnp.dot(j_shared.T, weight_data)
-    Ntot = Ns + Nshared + 1; A = jnp.zeros((Ntot, Ntot)); B = jnp.zeros(Ntot)
-    B = B.at[:Ns].set(B_f).at[Ns:-1].set(B_s).at[-1].set(jnp.sum(weight_data * res))
-    A = A.at[:Ns, :Ns].set(A_ff).at[Ns:-1, Ns:-1].set(A_ss).at[-1, -1].set(jnp.sum(weight_data))
-    A = A.at[Ns:-1, :Ns].set(A_sf).at[:Ns, Ns:-1].set(A_sf.T)
-    cross_fc = jnp.dot(p_matrix.T, weight_data)
-    A = A.at[:Ns, -1].set(cross_fc).at[-1, :Ns].set(cross_fc)
-    cross_sc = jnp.dot(j_shared.T, weight_data)
-    A = A.at[Ns:-1, -1].set(cross_sc).at[-1, Ns:-1].set(cross_sc)
-    return chi2, A, B
-
-# --- PSF Fitter Class ---
+    def get_spot_sig(i): return flux[i] * GaussHermitePSF.single_pix_value_jnp(xc_all[i], yc_all[i], stamps_x[i], stamps_y[i], gh_all[i], degree)
+    all_psf_sig = vmap(get_spot_sig)(jnp.arange(Ns))
+    tsig_p = jnp.zeros(Np + 1).at[stamp_indices.flatten()].add(all_psf_sig.flatten())
+    from .math import legendre_pol_jnp
+    rw = 2 * (trace_w_vals - wmin_cont) / (wmax_cont - wmin_cont) - 1
+    m_cont = jnp.stack([legendre_pol_jnp(i, rw) for i in range(Ncont)], axis=0)
+    f_cont = jnp.tensordot(continuum_coeffs, m_cont, axes=([0], [0]))
+    striped_cont = jnp.sum(vmap(lambda fi: f_cont[fi] * jnp.exp(-0.5 * (xpix - trace_x_vals[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0)
+    total_sig = tsig_p[:Np] + striped_cont; res = image_data - total_sig; chi2 = jnp.sum(weight_data * res**2)
+    batch_size = 100; n_batches = (Ns + batch_size - 1) // batch_size; n_padded = n_batches * batch_size
+    gh_p = jnp.pad(gh_all, ((0, n_padded - Ns), (0, 0))); xc_p = jnp.pad(xc_all, (0, n_padded - Ns)); yc_p = jnp.pad(yc_all, (0, n_padded - Ns))
+    f_p = jnp.pad(flux, (0, n_padded - Ns)); m_p = jnp.pad(monomials, ((0, n_padded - Ns), (0, 0)))
+    sx_p = jnp.pad(stamps_x, ((0, n_padded - Ns), (0, 0))); sy_p = jnp.pad(stamps_y, ((0, n_padded - Ns), (0, 0)))
+    idx_p = jnp.pad(stamp_indices, ((0, n_padded - Ns), (0, 0)), constant_values=Np); mask_p = jnp.arange(n_padded) < Ns
+    def scan_body(carry, b_idx_step):
+        A, B = carry; start = b_idx_step * batch_size; idx = start + jnp.arange(batch_size)
+        b_xc, b_yc, b_gh, b_f, b_m, b_mask, b_sx, b_sy, b_idx = xc_p[idx], yc_p[idx], gh_p[idx], f_p[idx], m_p[idx], mask_p[idx], sx_p[idx], sy_p[idx], idx_p[idx]
+        def spot_jac(x, y, g, fi, mi, s_x, s_y):
+            def psf_fn(xi, yi, gi): return GaussHermitePSF.single_pix_value_jnp(xi, yi, s_x, s_y, gi, degree)
+            p_s = psf_fn(x, y, g); jx, jy, jg = jacfwd(psf_fn, argnums=(0, 1, 2))(x, y, g)
+            h_sh = jnp.concatenate([(fi * jg[:, :, jnp.newaxis] * mi).reshape(stamp_area, -1), (fi * jx[:, jnp.newaxis] * mi), (fi * jy[:, jnp.newaxis] * mi)], axis=1)
+            return p_s, h_sh
+        b_psf, b_hsh = vmap(spot_jac)(b_xc, b_yc, b_gh, b_f, b_m, b_sx, b_sy)
+        bm = b_mask[:, jnp.newaxis]; b_psf, b_hsh = b_psf * bm, b_hsh * bm[:, jnp.newaxis]
+        b_res = res[jnp.where(b_idx < Np, b_idx, 0)] * (b_idx < Np); b_w = weight_data[jnp.where(b_idx < Np, b_idx, 0)] * (b_idx < Np); wr = b_w * b_res
+        B = B.at[idx].add(jnp.sum(wr * b_psf, axis=1)).at[Ns:-Ncont].add(jnp.sum(jnp.sum(b_hsh * wr[:, :, jnp.newaxis], axis=1), axis=0))
+        A = A.at[idx, idx].add(jnp.sum(b_w * b_psf**2, axis=1)).at[Ns:-Ncont, Ns:-Ncont].add(jnp.sum(vmap(lambda i: jnp.dot(b_hsh[i].T * b_w[i], b_hsh[i]))(jnp.arange(batch_size)), axis=0))
+        cr_sh_f = vmap(lambda i: jnp.dot(b_hsh[i].T, b_w[i] * b_psf[i]))(jnp.arange(batch_size))
+        A = A.at[Ns:-Ncont, idx].add(cr_sh_f.T).at[idx, Ns:-Ncont].add(cr_sh_f)
+        return (A, B), None
+    (A_full, B_full), _ = lax.scan(scan_body, (jnp.zeros((Ntot, Ntot)), jnp.zeros(Ntot)), jnp.arange(n_batches))
+    h_cont = vmap(lambda k: jnp.sum(vmap(lambda fi: m_cont[k, fi] * jnp.exp(-0.5 * (xpix - trace_x_vals[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0))(jnp.arange(Ncont)).T
+    B_full = B_full.at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res)); A_full = A_full.at[-Ncont:, -Ncont:].set(jnp.dot(h_cont.T * weight_data, h_cont))
+    # cross terms shared-continuum (Skipping Cross terms for now to stabilize fit)
+    return chi2, A_full, B_full
 
 class PSF_Fitter:
     def __init__(self, psf):
-        self.psf = psf
-        self.chi2_precision = 1e-4
-
+        self.psf = psf; self.chi2_precision = 1e-4
     def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=50):
-        print(f"Starting MASKED Spot-Scan fit for bundle {bundle_id}...")
-        
-        flux = jnp.array([s['flux'] for s in spots])
-        xc_init = jnp.array([s['xc_init'] for s in spots]); yc_init = jnp.array([s['yc_init'] for s in spots])
-        monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots)
-        Nparams = 55; Npoly = monomials.shape[1]
-        
-        # Stamp boundaries for masking
-        imin = jnp.array([s['stamp_imin'] for s in spots]); imax = jnp.array([s['stamp_imax'] for s in spots])
-        jmin = jnp.array([s['stamp_jmin'] for s in spots]); jmax = jnp.array([s['stamp_jmax'] for s in spots])
-        
-        psf_coeffs = jnp.zeros((Nparams, Npoly)).at[0, 0].set(1.1).at[1, 0].set(1.1)
-        trace_coeffs = jnp.zeros((2, Npoly)); continuum = 0.0
-        xpix_np, ypix_np, _ = get_bundle_footprint(spots)
-        xpix, ypix = jnp.array(xpix_np), jnp.array(ypix_np)
-        image_data, weight_data = jnp.array(image[xpix_np, ypix_np]), jnp.array(weight[xpix_np, ypix_np])
-        degree = self.psf.gh_psf.degree; old_chi2 = 1e30
-
+        print(f"Starting STABLE FINAL PARITY GPU fit for bundle {bundle_id}...")
+        weight = apply_dead_column_mask(self.psf, spots[0]['fiber'], spots[-1]['fiber'], weight)
+        fmin, fmax = spots[0]['fiber'], spots[-1]['fiber']
+        xpix, ypix, pix_idx = get_bundle_footprint(self.psf, spots, fmin, fmax, weight)
+        Np = len(xpix); print(f"Footprint: {Np} pixels."); area = (2*self.psf.h_size_x+1)*(2*self.psf.h_size_y+1); Ns = len(spots)
+        sx, sy = np.zeros((Ns, area)), np.zeros((Ns, area)); idx_g = np.full((Ns, area), Np, dtype=np.int32)
+        for s_i, s in enumerate(spots):
+            k = 0
+            for j in range(s['stamp_jmin'], s['stamp_jmax']):
+                for i in range(s['stamp_imin'], s['stamp_imax']):
+                    sx[s_i, k], sy[s_i, k] = i, j
+                    if (i, j) in pix_idx: idx_g[s_i, k] = pix_idx[(i, j)]
+                    k += 1
+        rows_u = np.unique(ypix); row_m = {j: i for i, j in enumerate(rows_u)}
+        tx_j, tw_j = np.zeros((25, len(rows_u))), np.zeros((25, len(rows_u)))
+        for f_i in range(25):
+            fib = fmin + f_i; w_v = self.psf.fiber_traces[fib]['Y_vs_W'].invert(rows_u.astype(float))
+            tw_j[f_i], tx_j[f_i] = w_v, self.psf.x_ccd(fib, w_v)
+        ix_r = np.array([row_m[j] for j in ypix]); tx_g, tw_g = jnp.array(tx_j[:, ix_r]), jnp.array(tw_j[:, ix_r])
+        flux = jnp.array([s['flux'] for s in spots]); xc_init = jnp.array([s['xc_init'] for s in spots]); yc_init = jnp.array([s['yc_init'] for s in spots])
+        monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots); pc = jnp.zeros((55, monomials.shape[1])).at[0, 0].set(1.1).at[1, 0].set(1.1)
+        tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont) 
+        img_d, w_d = jnp.array(image[xpix, ypix]), jnp.array(weight[xpix, ypix])
+        wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30
         for i in range(max_iter):
-            chi2, A, B = accumulate_bundle_gpu_jnp(flux, psf_coeffs, trace_coeffs, continuum, xc_init, yc_init, monomials, image_data, weight_data, xpix, ypix, imin, imax, jmin, jmax, degree)
-            mode = 'flux'
-            if i > 1: mode = 'trace'
-            if i > 6: mode = 'full'
+            chi2, A, B = accumulate_bundle_gpu_jnp(flux, pc, tc, cc, xc_init, yc_init, monomials, img_d, w_d, jnp.array(xpix), jnp.array(ypix), self.psf.gh_psf.degree, jnp.array(sx), jnp.array(sy), jnp.array(idx_g), tx_g, tw_g, wmin_c, wmax_c)
+            mode = 'flux' if i < 2 else 'trace' if i < 7 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]")
-            Ns = len(flux)
-            if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns), jnp.array([A.shape[0]-1])])
-            elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns), jnp.arange(Ns + 55*Npoly, Ns + 57*Npoly), jnp.array([A.shape[0]-1])])
+            Ns_l = len(flux); Np_l = monomials.shape[1]
+            if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
+            elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l+55*Np_l, Ns_l+57*Np_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             else: idx = jnp.arange(A.shape[0])
-            A_sub = A[jnp.ix_(idx, idx)]; B_sub = B[idx]
-            diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
-            A_reg = (A_sub / jnp.outer(S, S)) + 1e-6 * jnp.eye(A_sub.shape[0])
-            delta_scaled = jnp.linalg.solve(A_reg, B_sub / S); delta_sub = delta_scaled / S
-            delta_P = jnp.zeros(A.shape[0]).at[idx].set(delta_sub)
-            flux = jnp.maximum(flux + delta_P[:Ns], 0.0)
-            psf_coeffs = psf_coeffs + delta_P[Ns : Ns + 55*Npoly].reshape(55, Npoly)
-            trace_coeffs = trace_coeffs + delta_P[Ns + 55*Npoly : -1].reshape(2, Npoly)
-            continuum = continuum + delta_P[-1]
+            A_sub = A[jnp.ix_(idx, idx)]; B_sub = B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
+            A_reg = (A_sub / jnp.outer(S, S)) + 1e-4 * jnp.eye(A_sub.shape[0]); ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
+            # Damping for stability
+            alpha = 0.5 if mode == 'full' else 1.0
+            flux = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); pc = pc + alpha * d_p[Ns_l : Ns_l+55*Np_l].reshape(55, Np_l)
+            tc = tc + alpha * d_p[Ns_l+55*Np_l : Ns_l+57*Np_l].reshape(2, Np_l); cc = cc + alpha * d_p[-Ncont:]
             if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
             old_chi2 = chi2
-        return float(old_chi2)
+        return float(old_chi2), np.array(pc), np.array(tc), np.array(cc)

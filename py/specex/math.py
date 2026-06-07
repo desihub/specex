@@ -43,11 +43,13 @@ def legendre_pol_jnp(degree, x):
     return p_curr
 
 class Legendre1DPol:
-    def __init__(self, deg=0, xmin=0.0, xmax=0.0, coeff=None):
+    def __init__(self, deg=0, xmin=-1.0, xmax=1.0, coeff=None):
         self.deg = deg
         self.xmin = xmin
         self.xmax = xmax
-        self.coeff = jnp.array(coeff) if coeff is not None else jnp.zeros(deg + 1)
+        # Use numpy for storage to avoid early JAX/GPU allocation
+        self.coeff = np.array(coeff) if coeff is not None else np.zeros(deg + 1)
+
 
     def monomials(self, x):
         rx = 2 * (x - self.xmin) / (self.xmax - self.xmin) - 1
@@ -56,6 +58,16 @@ class Legendre1DPol:
     def value(self, x):
         m = self.monomials(x)
         return jnp.dot(self.coeff, m)
+
+    def invert(self, y):
+        """
+        Robust inversion of the polynomial using a fine-grid lookup.
+        Finds x such that value(x) == y.
+        """
+        # Create a grid of 1000 points over the domain
+        x_grid = np.linspace(self.xmin, self.xmax, 1000)
+        y_grid = self.value(x_grid)
+        return np.interp(y, y_grid, x_grid)
 
 class SparseLegendre2DPol:
     def __init__(self, xdeg=0, xmin=0.0, xmax=1.0, ydeg=0, ymin=0.0, ymax=1.0, coeff=None, non_zero_indices=None):

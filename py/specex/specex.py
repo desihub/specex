@@ -47,9 +47,15 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file):
     
     fitter = PSF_Fitter(psf)
     # Run the high-performance JAX-GPU fit
-    final_chi2 = fitter.fit(image, weight, spots, bid, fit_type='full', max_iter=50)
+    chi2, pc, tc, cont = fitter.fit(image, weight, spots, bid, fit_type='full', max_iter=50)
     
-    return bid, final_chi2
+    return bid, {
+        'chi2': chi2,
+        'psf_coeffs': pc,
+        'trace_coeffs': tc,
+        'continuum': cont,
+        'spots': spots # Useful for QA
+    }
 
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, first_bundle=0, last_bundle=19):
     """
@@ -65,7 +71,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, first_b
     n_gpus = 4 # A100 node
     
     # Use a pool to manage 4 concurrent fits
-    results = {}
+    bundle_results = {}
     with mp.Pool(processes=n_gpus) as pool:
         # Prepare arguments
         tasks = []
@@ -76,24 +82,30 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, first_b
         # Run parallel
         chunk_results = pool.starmap(fit_bundle_task, tasks)
         
-        for bid, chi2 in chunk_results:
-            results[bid] = chi2
+        for bid, res in chunk_results:
+            bundle_results[bid] = res
 
     t_end = time.time()
     
     print("\n--- CCD Fit Summary ---", flush=True)
-    for b in sorted(results.keys()):
-        print(f"  Bundle {b:02d}: Chi2 = {results[b]:.1f}", flush=True)
+    for b in sorted(bundle_results.keys()):
+        print(f"  Bundle {b:02d}: Chi2 = {bundle_results[b]['chi2']:.1f}", flush=True)
     
     print(f"Total CCD Fit Time: {t_end - t_start:.2f}s", flush=True)
+    
+    # Save Results
+    if out_psf_file:
+        from .io import write_python_psf
+        print(f"Saving results to {out_psf_file}...", flush=True)
+        write_python_psf(out_psf_file, bundle_results, in_psf_file)
 
 if __name__ == "__main__":
-    # Test 4 bundles concurrently on 4 GPUs
+    # Full 20-bundle CCD Stress Test
     fit_ccd_native(
         arc_file='/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz',
         in_psf_file='/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits',
-        out_psf_file='fit-psf-output.fits',
+        out_psf_file='python-gpu-fit-z8-00344649.fits',
         lamp_lines_file='py/specex/data/specex_linelist_desi.txt',
-        first_bundle=5,
-        last_bundle=8
+        first_bundle=0,
+        last_bundle=19
     )
