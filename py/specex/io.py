@@ -76,67 +76,39 @@ def write_python_psf(filename, bundle_results, input_template):
     psf_hdr = fin['PSF'].read_header()
     param_names = [p.strip() for p in psf_table['PARAM']]
     name_to_idx = {name: i for i, name in enumerate(param_names)}
-    
     xdeg_b = 1; wdeg_b = 3; nz_b = get_sparse_nz(xdeg_b, wdeg_b)
-
-    # Initialize all PSF coeffs for bundles we fit to 0.0 (except GH-0-0 which is 1.0)
     for bid in bundle_results.keys():
         fmin, fmax = bid * 25, (bid + 1) * 25 - 1
         for row in range(len(param_names)):
             psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
-            if param_names[row] == 'GH-0-0':
-                psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
-
+            if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
     for bid, res in bundle_results.items():
         fmin, fmax = bid * 25, (bid + 1) * 25 - 1
-        pc = res['psf_coeffs'] # (55, Npoly)
-        tc = res['trace_coeffs'] # (2, Npoly)
+        pc = res['psf_coeffs']; tc = res['trace_coeffs']
         rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
         poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
-
-        # A. Update Traces (Add fitted offsets to original template)
-        # Note: We do NOT zero out traces, we just add the fitted Legendre part.
         for k_nz, k_lin in enumerate(nz_b):
-            i_p, j_p = k_lin % (xdeg_b + 1), k_lin // (xdeg_b + 1)
+            i_p, j_p = k_lin % 2, k_lin // 2
             xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
             ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
-
-        # B. Update PSF Parameters
-        # Our fitter uses 55 params: SigX(0), SigY(1), GH-i-j (2-49, excluding 0-0), Tail(50-54)
         for i_par in range(55):
             if i_par == 0: pname = 'GHSIGX'
             elif i_par == 1: pname = 'GHSIGY'
             elif 2 <= i_par <= 49:
-                # GH terms (excluding 0,0)
-                idx_gh = i_par - 2
-                # Correct mapping for 7x7 grid excluding 0,0
-                gh_i = (idx_gh + 1) % 7
-                gh_j = (idx_gh + 1) // 7
-                pname = f'GH-{gh_i}-{gh_j}'
-            else:
-                pname = ['TAILAMP', 'TAILCORE', 'TAILXSCA', 'TAILYSCA', 'TAILINDE'][i_par - 50]
-            
+                idx_gh = i_par - 2; gh_i = (idx_gh + 1) % 7; gh_j = (idx_gh + 1) // 7; pname = f'GH-{gh_i}-{gh_j}'
+            else: pname = ['TAILAMP', 'TAILCORE', 'TAILXSCA', 'TAILYSCA', 'TAILINDE'][i_par - 50]
             idx = name_to_idx.get(pname)
             if idx is not None:
                 for k_nz, k_lin in enumerate(nz_b):
-                    i_p, j_p = k_lin % (xdeg_b + 1), k_lin // (xdeg_b + 1)
+                    i_p, j_p = k_lin % 2, k_lin // 2
                     psf_table['COEFF'][idx, fmin:fmax+1, j_p] += pc[i_par, k_nz] * poly_f[i_p]
-
         psf_hdr[f'B{bid:02d}RCHI2'] = res['chi2'] / (120000.0)
-
     if os.path.exists(filename): os.remove(filename)
     fout = fitsio.FITS(filename, 'rw')
     fout.write(xtrace_out, header=fin['XTRACE'].read_header(), extname='XTRACE')
     fout.write(ytrace_out, header=fin['YTRACE'].read_header(), extname='YTRACE')
     fout.write(psf_table, header=psf_hdr, extname='PSF')
     fout.close()
-
-def read_preproc(opts):
-    ddata = read_image(opts.arc_image_filename)
-    ddata['ivar'][ddata['mask'] != 0] = 0.0
-    rdnoise_meta = ddata['meta'].get('RDNOISE', 0.0)
-    ddata['rdnoise'] = np.full_like(ddata['image'], float(rdnoise_meta))
-    return ddata
 
 def read_image(filename):
     f = fitsio.FITS(filename)
@@ -146,6 +118,75 @@ def read_image(filename):
     meta = f['IMAGE'].read_header()
     return {'image': image, 'ivar': ivar, 'mask': mask, 'meta': meta}
 
+def read_preproc(opts):
+    """
+    Standard Python preproc.
+    """
+    ddata = read_image(opts.arc_image_filename)
+    ddata['ivar'][ddata['mask'] != 0] = 0.0
+    rdnoise_meta = ddata['meta'].get('RDNOISE', 0.0)
+    ddata['rdnoise'] = np.full_like(ddata['image'], float(rdnoise_meta))
+    return ddata
+
+def read_psf(opts, pyps):
+    """
+    Original behavior for C++ baseline fits.
+    """
+    import specex._libspecex as spx
+    pyps.init_traces(opts)
+    fitsfilename = opts.input_psf_filename
+    fitsfile     = FITS(fitsfilename,'r')
+    xt_hdr = fitsfile['XTRACE'].read_header()
+    pyps.trace_ncoeff  = xt_hdr['NAXIS1']
+    pyps.nfibers       = xt_hdr['NAXIS2']
+    pyps.trace_WAVEMIN = xt_hdr['WAVEMIN']
+    pyps.trace_WAVEMAX = xt_hdr['WAVEMAX']
+    pyps.TRDEGW        = pyps.trace_ncoeff - 1
+    xtrace = fitsfile['XTRACE'].read()
+    ytrace = fitsfile['YTRACE'].read()
+    pyps.set_trace(xtrace,opts.trace_deg_x,1)
+    pyps.set_trace(ytrace,opts.trace_deg_wave,0)
+    pyps.synchronize_traces() 
+    if 'PSF' in fitsfile:
+        psf_hdr = fitsfile['PSF'].read_header()
+        pyps.GHDEGX          = psf_hdr['GHDEGX']
+        pyps.GHDEGY          = psf_hdr['GHDEGY']
+        pyps.mjd             = psf_hdr['MJD']
+        pyps.plate_id        = psf_hdr['PLATEID']
+        pyps.camera_id       = psf_hdr['CAMERA']
+        pyps.arc_exposure_id = psf_hdr['ARCEXP']
+        pyps.NPIX_X          = psf_hdr['NPIX_X']
+        pyps.NPIX_Y          = psf_hdr['NPIX_Y']
+        pyps.hSizeX          = psf_hdr['HSIZEX']
+        pyps.hSizeY          = psf_hdr['HSIZEY']
+        pyps.FIBERMIN        = psf_hdr['FIBERMIN']
+        pyps.FIBERMAX        = psf_hdr['FIBERMAX']
+        pyps.table_WAVEMIN   = psf_hdr['WAVEMIN']
+        pyps.table_WAVEMAX   = psf_hdr['WAVEMAX']
+        pyps.LEGDEG          = psf_hdr['LEGDEG']
+        table_col0 = spx.VectorString(); table_col1 = spx.VectorDouble(); table_col2 = spx.VectorInt(); table_col3 = spx.VectorInt()
+        col0 = fitsfile['PSF']['PARAM'][:]; col1 = fitsfile['PSF']['COEFF'][:]; col2 = fitsfile['PSF']['LEGDEGX'][:]; col3 = fitsfile['PSF']['LEGDEGW'][:]
+        for t in col0: table_col0.append(t)
+        for t in col2: table_col2.append(t)
+        for t in col3: table_col3.append(t)
+        pyps.table_nrows = np.shape(col1)[0]; pyps.nfibers = np.shape(col1)[1]; pyps.ncoeff = np.shape(col1)[2]
+        for r in np.arange(pyps.table_nrows):
+            for f in np.arange(pyps.nfibers):
+                for c in np.arange(pyps.ncoeff): table_col1.append(col1[r,f,c])
+        pyps.set_psf(table_col0,table_col1,table_col2,table_col3)
+
+def read_preproc_cpp(opts):
+    """
+    Bridge helper for C++ baseline.
+    """
+    import specex._libspecex as spx
+    ddata = read_image(opts.arc_image_filename)
+    ddata['ivar'][ddata['mask'] != 0] = 0.0
+    rdnoise_meta = ddata['meta'].get('RDNOISE', 0.0)
+    ddata['rdnoise'] = np.full_like(ddata['image'], float(rdnoise_meta))
+    hdr = meta2header(ddata['meta'])
+    return spx.PyImage(ddata['image'], ddata['ivar'], ddata['mask'], ddata['rdnoise'], hdr)
+
 def read_lamp_lines(filename):
     lines = []
     with open(filename, 'r') as f:
@@ -153,10 +194,9 @@ def read_lamp_lines(filename):
             line = line.strip()
             if not line or line.startswith('#'): continue
             parts = line.split()
-            if len(parts) < 2: continue
+            if len(parts) < 3: continue
             try:
-                wave = float(parts[1]); name = parts[0]
-                score = int(parts[2])
+                wave = float(parts[1]); name = parts[0]; score = int(parts[2])
                 lines.append({'wave': wave, 'name': name, 'score': score})
-            except (ValueError, IndexError): continue
+            except: continue
     return lines
