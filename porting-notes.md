@@ -149,6 +149,13 @@
     - **Cross-Backend Parity:** Verified that Python CPU and GPU modes produce **identical numerical results**, confirming the stability of the JAX engine.
     - **Final Throughput:** Verified fit of entire 500-fiber CCD in **~4.3 minutes** (23x faster than C++ baseline).
 
+- **Phase 6: Automated Validation & Production Integration (Completed):**
+    - **Scraper Tool:** Created `testing/select_test_case.py` to automatically parse production logs and extract correct `--broken-fibers` and file paths for any night/exposure.
+    - **Validation Suite:** Implemented `testing/validate_all_modes.py` for automated 3-way comparisons between C++, JAX-CPU, and JAX-GPU.
+    - **Cross-Camera Support:** Implemented dynamic CCD boundary detection, verified stable fits on Blue (b0), Red (r3), and NIR (z8) detectors.
+    - **Production Wrapper:** Merged the new JAX driver into `py/specex/specex.py`, restoring compatibility with production scripts like `desi_psf_fit` while adding GPU acceleration support.
+    - **Final Verification:** Confirmed **23.4x speedup** and **high-fidelity numerical parity** across all camera arms.
+
 - **Remaining C++ Features (To be Ported):**
     - **Vertical Column Masking:** Implementing the vertical detector scanner to zero out vertical noise stripes. This will close the final 4% Chi2 gap.
     - **Outlier Rejection:** Logic to detect and prune "bad spots" during the iteration rounds (currently we fit all spots).
