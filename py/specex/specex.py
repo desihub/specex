@@ -14,8 +14,7 @@ def run_specex(com):
     Original C++ wrapper. This allows desi_psf_fit to run using the C++ core.
     """
     from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
-    # Note: we import these here to avoid JAX/C++ collisions at top level if possible
-    from .io import read_psf
+    from .io import read_psf, write_psf
     from .qa import specex_psf_qa
     import fitsio
 
@@ -47,8 +46,11 @@ def run_specex(com):
     retval = pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
     
     # write psf 
-    # write_psf(pyps,opts,pyio) # (Need to restore this too if needed)
-    
+    write_psf(pyps,opts,pyio)        
+
+    # do QA
+    # retval += specex_psf_qa(opts)
+
     return retval
 
 # --- New High-Performance Python/JAX Driver ---

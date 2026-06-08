@@ -43,8 +43,8 @@ def load_python_psf(filename, opts):
     for fib in range(psf.fiber_min, psf.fiber_max + 1):
         idx = fib - psf.fiber_min
         psf.fiber_traces[fib] = {
-            'X_vs_W': Legendre1DPol(deg=xt_hdr['NAXIS1']-1, xmin=xt_hdr['WAVEMIN'], xmax=xt_hdr['WAVEMAX'], coeff=xtrace[idx]),
-            'Y_vs_W': Legendre1DPol(deg=xt_hdr['NAXIS1']-1, xmin=xt_hdr['WAVEMIN'], xmax=xt_hdr['WAVEMAX'], coeff=ytrace[idx])
+            'X_vs_W': Legendre1DPol(deg=xtrace.shape[1]-1, xmin=xt_hdr['WAVEMIN'], xmax=xt_hdr['WAVEMAX'], coeff=xtrace[idx]),
+            'Y_vs_W': Legendre1DPol(deg=ytrace.shape[1]-1, xmin=xt_hdr['WAVEMIN'], xmax=xt_hdr['WAVEMAX'], coeff=ytrace[idx])
         }
     if 'PSF' in f:
         table = f['PSF'].read()
@@ -59,9 +59,9 @@ def load_python_psf(filename, opts):
             b_fmin, b_fmax = bid * 25, (bid + 1) * 25 - 1
             bundle = PSF_Params(bid, b_fmin, b_fmax)
             bundle.param_names = param_names; bundle.param_models = {}
-            for i, name in enumerate(bundle.param_names):
+            for i, name in enumerate(bundle.param_models):
                 bundle.param_models[name] = [
-                    Legendre1DPol(deg=hdr['LEGDEG'], xmin=hdr['WAVEMIN'], xmax=hdr['WAVEMAX'], coeff=coeffs_all[i][fib])
+                    Legendre1DPol(deg=coeffs_all.shape[2]-1, xmin=hdr['WAVEMIN'], xmax=hdr['WAVEMAX'], coeff=coeffs_all[i][fib])
                     for fib in range(500)
                 ]
             psf.params_of_bundles[bid] = bundle
@@ -77,11 +77,6 @@ def write_python_psf(filename, bundle_results, input_template):
     param_names = [p.strip() for p in psf_table['PARAM']]
     name_to_idx = {name: i for i, name in enumerate(param_names)}
     xdeg_b = 1; wdeg_b = 3; nz_b = get_sparse_nz(xdeg_b, wdeg_b)
-    for bid in bundle_results.keys():
-        fmin, fmax = bid * 25, (bid + 1) * 25 - 1
-        for row in range(len(param_names)):
-            psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
-            if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
     for bid, res in bundle_results.items():
         fmin, fmax = bid * 25, (bid + 1) * 25 - 1
         pc = res['psf_coeffs']; tc = res['trace_coeffs']
@@ -89,8 +84,12 @@ def write_python_psf(filename, bundle_results, input_template):
         poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
         for k_nz, k_lin in enumerate(nz_b):
             i_p, j_p = k_lin % 2, k_lin // 2
-            xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
-            ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
+            if j_p < xtrace_out.shape[1]:
+                xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
+                ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
+        for row in range(len(param_names)):
+            psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
+            if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
         for i_par in range(55):
             if i_par == 0: pname = 'GHSIGX'
             elif i_par == 1: pname = 'GHSIGY'
@@ -101,7 +100,8 @@ def write_python_psf(filename, bundle_results, input_template):
             if idx is not None:
                 for k_nz, k_lin in enumerate(nz_b):
                     i_p, j_p = k_lin % 2, k_lin // 2
-                    psf_table['COEFF'][idx, fmin:fmax+1, j_p] += pc[i_par, k_nz] * poly_f[i_p]
+                    if j_p < psf_table['COEFF'].shape[2]:
+                        psf_table['COEFF'][idx, fmin:fmax+1, j_p] += pc[i_par, k_nz] * poly_f[i_p]
         psf_hdr[f'B{bid:02d}RCHI2'] = res['chi2'] / (120000.0)
     if os.path.exists(filename): os.remove(filename)
     fout = fitsio.FITS(filename, 'rw')
@@ -110,18 +110,45 @@ def write_python_psf(filename, bundle_results, input_template):
     fout.write(psf_table, header=psf_hdr, extname='PSF')
     fout.close()
 
+def write_psf(pyps, opts, pyio):
+    import specex._libspecex as spx
+    pyio.load_psf(opts, pyps); spx.tablewrite_init(pyps)
+    xtrace = spx.get_trace(pyps, 'x'); ytrace = spx.get_trace(pyps, 'y')
+    xtrace = np.reshape(xtrace, (pyps.nfibers, pyps.trace_ncoeff))
+    ytrace = np.reshape(ytrace, (pyps.nfibers, pyps.trace_ncoeff))
+    table_col0 = spx.VectorString(); table_col1 = spx.VectorDouble(); table_col2 = spx.VectorInt(); table_col3 = spx.VectorInt()
+    table_bundle_id = spx.VectorInt(); table_bundle_ndata = spx.VectorInt(); table_bundle_nparams = spx.VectorInt(); table_bundle_chi2pdf = spx.VectorDouble()
+    spx.get_table(pyps, table_col0, table_col1, table_col2, table_col3, table_bundle_id, table_bundle_ndata, table_bundle_nparams, table_bundle_chi2pdf)
+    col0 = np.zeros(pyps.table_nrows, dtype='S8')
+    col1 = np.zeros((pyps.table_nrows, pyps.nfibers, pyps.ncoeff))
+    col2 = np.zeros(pyps.table_nrows, dtype='i4')
+    col3 = np.zeros(pyps.table_nrows, dtype='i4')
+    i = 0
+    for r in range(pyps.table_nrows):
+        col0[r] = table_col0[r]
+        for t2 in range(pyps.nfibers):
+            for t1 in range(pyps.ncoeff):
+                col1[r, t2, t1] = table_col1[i]; i += 1
+        col2[r] = table_col2[r]; col3[r] = table_col3[r]
+    data = np.zeros(pyps.table_nrows, dtype=[('PARAM', 'S8'), ('COEFF', 'f8', (pyps.nfibers, pyps.ncoeff)), ('LEGDEGX', 'i4'), ('LEGDEGW', 'i4')])
+    data['PARAM'] = col0; data['COEFF'] = col1; data['LEGDEGX'] = col2; data['LEGDEGW'] = col3
+    header = FITSHDR()
+    header['GHDEGX'] = pyps.GHDEGX; header['GHDEGY'] = pyps.GHDEGY; header['MJD'] = pyps.mjd; header['PLATEID'] = pyps.plate_id; header['CAMERA'] = pyps.camera_id
+    header['ARCEXP'] = pyps.arc_exposure_id; header['NPIX_X'] = pyps.NPIX_X; header['NPIX_Y'] = pyps.NPIX_Y; header['HSIZEX'] = pyps.hSizeX; header['HSIZEY'] = pyps.hSizeY
+    header['FIBERMIN'] = pyps.FIBERMIN; header['FIBERMAX'] = pyps.FIBERMAX; header['WAVEMIN'] = pyps.table_WAVEMIN; header['WAVEMAX'] = pyps.table_WAVEMAX; header['LEGDEG'] = pyps.LEGDEG
+    for i in range(len(table_bundle_id)):
+        header[f'B{table_bundle_id[i]:02d}NDATA'] = table_bundle_ndata[i]; header[f'B{table_bundle_id[i]:02d}NPAR'] = table_bundle_nparams[i]; header[f'B{table_bundle_id[i]:02d}RCHI2'] = table_bundle_chi2pdf[i]
+    if os.path.exists(opts.output_fits_filename): os.remove(opts.output_fits_filename)
+    fout = fitsio.FITS(opts.output_fits_filename, 'rw')
+    fout.write(xtrace, extname='XTRACE'); fout.write(ytrace, extname='YTRACE'); fout.write(data, header=header, extname='PSF')
+    fout.close()
+
 def read_image(filename):
     f = fitsio.FITS(filename)
-    image = f['IMAGE'].read().astype(np.float64)
-    ivar = f['IVAR'].read().astype(np.float64)
-    mask = f['MASK'].read().astype(np.int32)
-    meta = f['IMAGE'].read_header()
+    image = f['IMAGE'].read().astype(np.float64); ivar = f['IVAR'].read().astype(np.float64); mask = f['MASK'].read().astype(np.int32); meta = f['IMAGE'].read_header()
     return {'image': image, 'ivar': ivar, 'mask': mask, 'meta': meta}
 
 def read_preproc(opts):
-    """
-    Standard Python preproc.
-    """
     ddata = read_image(opts.arc_image_filename)
     ddata['ivar'][ddata['mask'] != 0] = 0.0
     rdnoise_meta = ddata['meta'].get('RDNOISE', 0.0)
@@ -129,9 +156,6 @@ def read_preproc(opts):
     return ddata
 
 def read_psf(opts, pyps):
-    """
-    Original behavior for C++ baseline fits.
-    """
     import specex._libspecex as spx
     pyps.init_traces(opts)
     fitsfilename = opts.input_psf_filename
@@ -176,9 +200,6 @@ def read_psf(opts, pyps):
         pyps.set_psf(table_col0,table_col1,table_col2,table_col3)
 
 def read_preproc_cpp(opts):
-    """
-    Bridge helper for C++ baseline.
-    """
     import specex._libspecex as spx
     ddata = read_image(opts.arc_image_filename)
     ddata['ivar'][ddata['mask'] != 0] = 0.0
