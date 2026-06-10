@@ -55,7 +55,7 @@ def run_specex(com):
 
 # --- New High-Performance Python/JAX Driver ---
 
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file, broken_fibers=None, sn_threshold=3.0, h_size_y=None):
     """
     Isolated task for fitting a single bundle on a specific GPU.
     """
@@ -76,35 +76,45 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file):
     weight = ddata['ivar'].T
     
     psf = load_python_psf(in_psf_file, opts)
-    psf.h_size_y = 5
+    if h_size_y is not None:
+        psf.h_size_y = h_size_y
+        
     lamp_lines = read_lamp_lines(lamp_lines_file)
     
     f_min, f_max = bid * 25, (bid + 1) * 25 - 1
     spots = get_bundle_spots(psf, f_min, f_max, lamp_lines, 
                              image=image, weight=weight,
-                             min_dist_angstrom=0.0, sn_threshold=3.0)
+                             min_dist_angstrom=0.0, sn_threshold=sn_threshold,
+                             broken_fibers=broken_fibers)
     
     fitter = PSF_Fitter(psf)
     chi2, pc, tc, cc = fitter.fit(image, weight, spots, bid, max_iter=50)
     
     return bid, {'chi2': chi2, 'psf_coeffs': pc, 'trace_coeffs': tc, 'continuum': cc}
 
-def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, first_bundle=0, last_bundle=19):
+def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, 
+                   first_bundle=0, last_bundle=19, n_gpus=4, 
+                   broken_fibers=None, sn_threshold=3.0, h_size_y=5):
     """
     Main driver using Python multiprocessing for Multi-GPU scaling.
     """
     print("--- SPECE-X Multi-GPU CCD Fit ---", flush=True)
+    print(f"  Arc: {arc_file}")
+    print(f"  In PSF: {in_psf_file}")
+    print(f"  Out PSF: {out_psf_file}")
+    print(f"  Broken Fibers: {broken_fibers}")
     t_start = time.time()
     
     all_bundles = list(range(first_bundle, last_bundle + 1))
-    n_gpus = 4 
     
     bundle_results = {}
-    with mp.Pool(processes=n_gpus) as pool:
+    # Use 'spawn' for clean GPU initialization in child processes
+    ctx = mp.get_context('spawn')
+    with ctx.Pool(processes=n_gpus) as pool:
         tasks = []
         for i, bid in enumerate(all_bundles):
             gpu_id = i % n_gpus
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, lamp_lines_file))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, lamp_lines_file, broken_fibers, sn_threshold, h_size_y))
         chunk_results = pool.starmap(fit_bundle_task, tasks)
         for bid, res in chunk_results:
             bundle_results[bid] = res
@@ -115,12 +125,42 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, first_b
     if out_psf_file:
         write_python_psf(out_psf_file, bundle_results, in_psf_file)
 
-if __name__ == "__main__":
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Specex Python/JAX PSF Fitter")
+    parser.add_argument("-a", "--arc", type=str, required=True, help="Input preproc arc image")
+    parser.add_argument("--in-psf", type=str, required=True, help="Input (shifted) PSF file")
+    parser.add_argument("--out-psf", type=str, required=True, help="Output PSF file")
+    parser.add_argument("--lamp-lines", type=str, help="Lamp lines file")
+    parser.add_argument("--first-bundle", type=int, default=0)
+    parser.add_argument("--last-bundle", type=int, default=19)
+    parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
+    parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
+    parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
+    parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
+    
+    args = parser.parse_args()
+    
+    if not args.lamp_lines:
+        # Try to find default lamp lines
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        args.lamp_lines = os.path.join(base, "specex/data/specex_linelist_desi.txt")
+
+    os.environ["JAX_PLATFORM_NAME"] = args.backend
+    
     fit_ccd_native(
-        arc_file='/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz',
-        in_psf_file='/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits',
-        out_psf_file='python-gpu-fit-z8-00344649.fits',
-        lamp_lines_file='py/specex/data/specex_linelist_desi.txt',
-        first_bundle=0,
-        last_bundle=19
+        arc_file=args.arc,
+        in_psf_file=args.in_psf,
+        out_psf_file=args.out_psf,
+        lamp_lines_file=args.lamp_lines,
+        first_bundle=args.first_bundle,
+        last_bundle=args.last_bundle,
+        n_gpus=args.gpu,
+        broken_fibers=args.broken_fibers,
+        sn_threshold=args.sn_threshold,
+        h_size_y=args.h_size_y
     )
+
+if __name__ == "__main__":
+    main()

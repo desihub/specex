@@ -27,6 +27,7 @@ def evaluate_wavelength(psf_file, fiber):
     xt = f['XTRACE'].read()[fiber]
     yt = f['YTRACE'].read()[fiber]
     
+    # Try multiple common keys
     wmin = hdr.get('WAVEMIN', hdr.get('WAVE_MIN', 3500.0))
     wmax = hdr.get('WAVEMAX', hdr.get('WAVE_MAX', 10000.0))
     wave_grid = np.linspace(float(wmin), float(wmax), 100)
@@ -57,15 +58,18 @@ def get_wavelength_diff(psf1_file, psf2_file, bundle_id):
         
         return dx_rms, dy_rms
     except Exception as e:
-        print(f"Error comparing wavelengths: {e}")
+        # print(f"Error comparing wavelengths: {e}")
         return -1.0, -1.0
 
-def run_subprocess_fit(mode, arc_file, psf_file, broken_fibers, camera, bundle_id, sn_threshold=5.0):
+def run_subprocess_fit(mode, arc_file, psf_file, broken_fibers, camera, bundle_id, sn_threshold=3.0):
     """
     Runs a fit in a subprocess to ensure clean backend initialization.
     Returns dict of metrics.
     """
     env = os.environ.copy()
+    env["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    env["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".70" # Leave room for other tasks
+    
     results = {'chi2': -1.0, 'time': 0.0, 'nspots': 0, 'dx_rms': 0.0, 'dy_rms': 0.0, 'error': None}
     
     lamp_lines_file = os.path.join(current_dir, 'py/specex/data/specex_linelist_desi.txt')
@@ -111,7 +115,11 @@ def run_subprocess_fit(mode, arc_file, psf_file, broken_fibers, camera, bundle_i
         env["PYTHONPATH"] = os.path.join(current_dir, 'py') + ":" + env.get("PYTHONPATH", "")
         
         script = f"""
-import sys, os
+import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".70"
+
+import sys
 sys.path.insert(0, '{os.path.join(current_dir, 'py')}')
 from specex.io import read_preproc, load_python_psf, read_lamp_lines, write_python_psf
 from specex.fitter import PSF_Fitter, get_bundle_spots
@@ -170,12 +178,11 @@ def main():
     parser.add_argument("--expid", type=str, default="00344649")
     parser.add_argument("--cameras", type=str, help="Comma-separated list (e.g. b0,r3,z8)")
     parser.add_argument("--bundle", type=int, default=5)
-    parser.add_argument("--sn", type=float, default=5.0)
+    parser.add_argument("--sn", type=float, default=10.0)
     parser.add_argument("--output", type=str, default="instrumentation_analysis.txt")
     
     args = parser.parse_args()
     
-    # Check for select_test_case logic
     from select_test_case import parse_log_line
     log_dir = f"/global/cfs/cdirs/desi/spectro/redux/matterhorn/run/scripts/night/{args.night}"
     log_pattern = os.path.join(log_dir, "arc*.log")
@@ -219,7 +226,7 @@ def main():
                 f.flush()
                 print(line, end="")
                 if res['error']:
-                    print(f"  ERROR: {res['error'][:500]}")
+                    print(f"  ERROR: {res['error']}")
 
 if __name__ == "__main__":
     main()

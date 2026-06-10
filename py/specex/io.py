@@ -59,7 +59,7 @@ def load_python_psf(filename, opts):
             b_fmin, b_fmax = bid * 25, (bid + 1) * 25 - 1
             bundle = PSF_Params(bid, b_fmin, b_fmax)
             bundle.param_names = param_names; bundle.param_models = {}
-            for i, name in enumerate(bundle.param_models):
+            for i, name in enumerate(param_names):
                 bundle.param_models[name] = [
                     Legendre1DPol(deg=coeffs_all.shape[2]-1, xmin=hdr['WAVEMIN'], xmax=hdr['WAVEMAX'], coeff=coeffs_all[i][fib])
                     for fib in range(500)
@@ -213,10 +213,12 @@ def read_lamp_lines(filename):
     with open(filename, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'): continue
+            if not line: continue
             parts = line.split()
             if len(parts) < 3: continue
             try:
+                # C++ istringstream >> ion >> wave >> score >> intensity
+                # If line is "#ArI 7725.887 1 15000", ion is "#ArI", wave is 7725.887
                 wave = float(parts[1]); name = parts[0]; score = int(parts[2])
                 lines.append({'wave': wave, 'name': name, 'score': score})
             except: continue

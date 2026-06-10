@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import argparse
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -9,8 +10,7 @@ import jax.numpy as jnp
 current_dir = os.getcwd()
 sys.path.insert(0, os.path.join(current_dir, 'py'))
 
-# from specex._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
-from specex.io import read_preproc, load_python_psf, read_image, read_lamp_lines
+from specex.io import read_preproc, load_python_psf, read_image, read_lamp_lines, write_python_psf
 from specex.fitter import PSF_Fitter, get_bundle_spots
 
 class DummyOptions:
@@ -19,48 +19,65 @@ class DummyOptions:
         self.input_psf_filename = in_psf
 
 def run_comparison():
-    # 1. Setup options
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--camera', type=str, default='z8')
+    parser.add_argument('--bundle', type=int, default=5)
+    parser.add_argument('--out-psf', type=str, default='test_py.fits')
+    args = parser.parse_args()
+
+    # Construct paths
+    night = '20260401'
+    expid = '00344649'
+    arc_base = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc'
+    psf_base = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures'
+    
+    arc_file = os.path.join(arc_base, night, expid, f'preproc-{args.camera}-{expid}.fits.gz')
+    psf_file = os.path.join(psf_base, night, expid, f'shifted-input-psf-{args.camera}-{expid}.fits')
     lamp_lines_file = os.path.join(current_dir, 'py/specex/data/specex_linelist_desi.txt')
-    arc_file = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz'
-    psf_file = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits'
     
     opts = DummyOptions(arc_file, psf_file)
 
-    # 2. Load data
-    print("Loading data...")
+    # Load data
+    print(f"Loading data for {args.camera} bundle {args.bundle}...")
     ddata = read_preproc(opts)
     image = ddata['image'].T
     weight = ddata['ivar'].T
     
-    # 3. Running C++ Fit (Baseline) - SKIPPED on compute node to avoid libfabric issues
-    print("\n--- SKIPPING C++ Fit (Dependency-free mode) ---")
-
-    # 4. Running Python/JAX Fit
-    print("\n--- Running Python/JAX Fit ---")
-    print(f"JAX devices: {jax.devices()}")
-    
-    # psf_py is our pure-python PSF object
+    # Setup PSF
     psf_py = load_python_psf(opts.input_psf_filename, opts)
-    psf_py.h_size_x = 7 # Trial: match C++ 15-pix footprint
-    psf_py.h_size_y = 5 # Production baseline uses HSIZEY=5
+    psf_py.h_size_x = 8
+    psf_py.h_size_y = 5
     lamp_lines = read_lamp_lines(lamp_lines_file)
-    print(f"Loaded {len(lamp_lines)} lamp lines.")
     
-    bundle_id = 5
-    # C++ Final Stage: Include blended lines (dist=0) and noisier spots (S/N > 3)
-    spots = get_bundle_spots(psf_py, 125, 149, lamp_lines, 
+    # Fiber Range
+    fmin, fmax = args.bundle * 25, (args.bundle + 1) * 25 - 1
+    # Infer broken fibers (simple heuristic: z-band has broken 367 or 473,474)
+    broken = "473,474" if 'z' in args.camera else None
+    
+    # Run Spot Selection
+    spots = get_bundle_spots(psf_py, fmin, fmax, lamp_lines, 
                              image=image, weight=weight,
-                             min_dist_angstrom=0.0, sn_threshold=3.0)
+                             min_dist_angstrom=0.0, sn_threshold=3.15,
+                             broken_fibers=broken)
     print(f"Reconstructed {len(spots)} spots (after filtering).")
     
+    # Run Fit
     fitter = PSF_Fitter(psf_py)
-    
+    fitter.fit(image, weight, spots, args.bundle, max_iter=2) # Warm-up
+
     t0 = time.time()
-    # Run full non-linear fit for final convergence
-    final_chi2, pc, tc, cont = fitter.fit(image, weight, spots, bundle_id, fit_type='full', max_iter=50)
+    final_chi2, pc, tc, cont = fitter.fit(image, weight, spots, args.bundle, fit_type='full', max_iter=50)
     t1 = time.time()
-    print(f"Python/JAX Time: {t1 - t0:.2f}s")
-    print(f"Final Python Chi2: {final_chi2:.4f}")
+    
+    print(f"\nFinal Results for {args.camera} bundle {args.bundle}:")
+    print(f"  Time: {t1 - t0:.2f}s")
+    print(f"  Chi2: {final_chi2:.4f}")
+    print(f"  Spots: {len(spots)}")
+
+    results = {args.bundle: {'chi2': final_chi2, 'psf_coeffs': pc, 'trace_coeffs': tc, 'continuum': cont}}
+    out_file = f'test_py_{args.camera}.fits' if args.out_psf == 'test_py.fits' else args.out_psf
+    write_python_psf(out_file, results, psf_file)
+    print(f"Saved Python result to {out_file}")
 
 if __name__ == "__main__":
     run_comparison()
