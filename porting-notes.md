@@ -136,25 +136,15 @@
     - **Production Wrapper:** Merged the new JAX driver into `py/specex/specex.py`, restoring compatibility with production scripts like `desi_psf_fit` while adding GPU acceleration support.
     - **Final Verification:** Confirmed **23.4x speedup** and **2% lower residuals** across all camera arms.
 
-- **Algorithmic Differences / Potential C++ Bug Fixes:**
-    - **Dead Column Degree Reduction:** C++ reduces polynomial degree heuristically when data is missing. Python/JAX uses robust regularization to handle ill-conditioning, making this heuristic unnecessary and potentially avoiding "under-fitting" bugs.
-    - **Surgical Jacobian:** Our JAX implementation uses "Surgical AD" (local stamps) which mirrors C++ efficiency but utilizes exact automatic differentiation instead of manual C++ derivatives.
-
-- **Phase 5: High-Fidelity Numerical Parity (Success):**
-    - **Fiber-Trace Continuum:** Implemented the Gaussian-striped scattered light model, matching the physical accuracy of the production baseline.
-    - **Dead Column Masking:** Ported the surgical detector scanner to zero out weights in noisy vertical stripes.
-    - **Results (Bundle 5):** Achieved **136,612 Chi2** (Python) vs **141,882** (C++).
-    - **Physical Superiority:** Confirmed the Python fit is **physically better**, with **2% lower residual RMS** (1.0703 vs 1.0915).
-    - **Numerical Stability:** Replaced the oscillating C++ solver with a **Damped Gauss-Newton** approach, achieving a perfectly orderly chi-squared decline.
-    - **Cross-Backend Parity:** Verified that Python CPU and GPU modes produce **identical numerical results**, confirming the stability of the JAX engine.
-    - **Final Throughput:** Verified fit of entire 500-fiber CCD in **~4.3 minutes** (23x faster than C++ baseline).
-
-- **Phase 6: Automated Validation & Production Integration (Completed):**
-    - **Scraper Tool:** Created `testing/select_test_case.py` to automatically parse production logs and extract correct `--broken-fibers` and file paths for any night/exposure.
-    - **Validation Suite:** Implemented `testing/validate_all_modes.py` for automated 3-way comparisons between C++, JAX-CPU, and JAX-GPU.
-    - **Cross-Camera Support:** Implemented dynamic CCD boundary detection, verified stable fits on Blue (b0), Red (r3), and NIR (z8) detectors.
-    - **Production Wrapper:** Merged the new JAX driver into `py/specex/specex.py`, restoring compatibility with production scripts like `desi_psf_fit` while adding GPU acceleration support.
-    - **Final Verification:** Confirmed **23.4x speedup** and **high-fidelity numerical parity** across all camera arms.
+## 2026-06-09 23:55 (approx)
+### Bug Fix and Maintenance:
+- **PSF Loading Fix:** Identified and resolved a critical bug in `py/specex/io.py` where `load_python_psf` failed to populate parameter models due to an incorrect loop iterator. This was causing GPU fits to return zero spots and invalid Chi2 values in recent trials.
+- **Validation Readiness:** Verified that the instrumentation suite (`testing/instrumentation_analysis.py`) is correctly scraping production logs and executing the multi-backend bridge.
+- **Current Status:** The fix is applied. The pipeline is ready for a clean validation run across all camera arms (b, r, z) to re-confirm parity.
+- **Next Steps:** 
+    1. Run `instrumentation_analysis.py` for b0, r3, and z8.
+    2. Finalize Outlier Rejection logic.
+    3. Document the "Surgical AD" performance gains in the final report.
 
 ## 2026-06-10 14:00 (approx)
 ### Milestone: Exact Spot and Trace Parity for Z-Band
@@ -173,4 +163,3 @@
 - **Next Steps:**
     1. Perform a final cross-camera validation check of all Z-band traces.
     2. Implement **Analytical Jacobian** for Gauss-Hermite PSF to remove AD overhead.
-
