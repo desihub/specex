@@ -183,3 +183,11 @@
 - **Next Steps:**
     1. Perform a final cross-camera validation check of all Z-band traces.
     2. Implement **Analytical Jacobian** for Gauss-Hermite PSF to remove AD overhead.
+
+## 2026-06-11 11:30 (approx)
+### CLI Enhancement and Production Parity
+- **Command-Line Interface:** Expanded `py/specex/specex.py` to support standard C++ argument aliases (`--input-image`, `--input-psf`, `--output-psf`, `--first-fiber`, etc.). This ensures the Python pipeline can be used as a drop-in replacement for production scripts like `desi_compute_psf`.
+- **Internal Parallelization:** Verified that the Python CLI correctly handles internal multiprocessing to distribute bundles across all available GPUs (e.g., 4 A100s) without requiring external MPI rank management.
+- **Spot Parity Verification:** Confirmed that the `3.15` S/N threshold provides a 100% match on spot counts for cameras `z2`, `z6`, and `z8`.
+- **Current Status:** The workspace is stable and the CLI is fully operational for team-wide testing.
+

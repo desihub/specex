@@ -58,8 +58,29 @@ class GaussHermitePSF:
         return psfval
 
     @staticmethod
-    def multi_pix_value_jnp(xc, yc, xpix, ypix, params, degree):
-        return vmap(GaussHermitePSF.single_pix_value_jnp, in_axes=(None, None, 0, 0, None, None))(xc, yc, xpix, ypix, params, degree)
+    def get_gh_basis(xi, yi, sx, sy, params, degree):
+        from .math import hermite_pol_jnp
+        from jax.scipy.special import erf as jax_erf
+        sigx = jnp.maximum(params[0], 0.1); sigy = jnp.maximum(params[1], 0.1)
+        isx = 1.0 / sigx; isy = 1.0 / sigy
+        x1 = (jnp.floor(sx + 0.5) - xi - 0.5) * isx; x2 = (jnp.floor(sx + 0.5) - xi + 0.5) * isx
+        y1 = (jnp.floor(sy + 0.5) - yi - 0.5) * isy; y2 = (jnp.floor(sy + 0.5) - yi + 0.5) * isy
+        isq2 = 1.0 / jnp.sqrt(2.0); isq2pi = 1.0 / jnp.sqrt(2.0 * jnp.pi)
+        gx1 = isq2pi * isx * jnp.exp(-0.5 * x1**2); gx2 = isq2pi * isx * jnp.exp(-0.5 * x2**2)
+        gy1 = isq2pi * isy * jnp.exp(-0.5 * y1**2); gy2 = isq2pi * isy * jnp.exp(-0.5 * y2**2)
+        ex = 0.5 * (jax_erf(x2 * isq2) - jax_erf(x1 * isq2)); ey = 0.5 * (jax_erf(y2 * isq2) - jax_erf(y1 * isq2))
+        
+        H_u = jnp.stack([hermite_pol_jnp(n, x1) for n in range(degree + 1)], axis=0)
+        H2_u = jnp.stack([hermite_pol_jnp(n, x2) for n in range(degree + 1)], axis=0)
+        H_v = jnp.stack([hermite_pol_jnp(n, y1) for n in range(degree + 1)], axis=0)
+        H2_v = jnp.stack([hermite_pol_jnp(n, y2) for n in range(degree + 1)], axis=0)
+        
+        def get_basis(n, val, g1, g2, h1, h2, sig):
+            return jnp.where(n == 0, val, sig * (g1 * h1[n-1] - g2 * h2[n-1]))
+        
+        Bx = vmap(lambda n: get_basis(n, ex, gx1, gx2, H_u, H2_u, sigx))(jnp.arange(degree + 1))
+        By = vmap(lambda n: get_basis(n, ey, gy1, gy2, H_v, H2_v, sigy))(jnp.arange(degree + 1))
+        return Bx, By
 
 
     @staticmethod
