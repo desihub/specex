@@ -72,6 +72,33 @@ python -m specex.specex \
     --gpu 4
 ```
 
+Examples:
+fit a single bundle of 25 fibers
+```
+python -m specex.specex \
+     -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz \
+     --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
+     --lamp-lines /global/cfs/cdirs/desi/users/cdwarner/code/specex/py/specex/data/specex_linelist_desi.txt \
+     --out-psf $SCRATCH/pyfit-psf-z8-00344649_05.fits \
+     --first-bundle 5 --last-bundle 5 \
+     --first-fiber 125 --last-fiber 149 \
+     --legendre-deg-wave 3 \
+     --fit-continuum \
+     --broken-fibers 473,474 \
+     --gpu 4
+```
+
+Fit a full CCD PSF (20 bundles)
+```
+python -m specex.specex \
+  --input-image /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz \
+  --input-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
+  --output-psf $SCRATCH/pyfit-psf-z8-00344649.fits \
+  --broken-fibers 473,474 \
+  --gpu 4
+```
+
+
 ### CLI Arguments:
 *   `-a`, `--arc`: Input preprocessed arc image.
 *   `--in-psf`: Input PSF file (the "shifted" version).
@@ -104,3 +131,4 @@ fit_ccd_native(
 *   **Chi2:** A 2-4% difference is currently expected due to "Dead Column Masking" differences in the pre-processor.
 *   **Trace Deltas (XT/YT RMS):** We target values < 0.05 pixels. Current results typically show ~0.02 pixels.
 *   **Chi2: -1.0:** Usually indicates a crash or a failure to find any spots (often due to the PSF loading bug fixed on June 9th).
+
