@@ -213,12 +213,10 @@ def read_lamp_lines(filename):
     with open(filename, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line: continue
+            if not line or line.startswith('#'): continue
             parts = line.split()
             if len(parts) < 3: continue
             try:
-                # C++ istringstream >> ion >> wave >> score >> intensity
-                # If line is "#ArI 7725.887 1 15000", ion is "#ArI", wave is 7725.887
                 wave = float(parts[1]); name = parts[0]; score = int(parts[2])
                 lines.append({'wave': wave, 'name': name, 'score': score})
             except: continue

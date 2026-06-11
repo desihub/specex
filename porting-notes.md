@@ -191,6 +191,12 @@
 - **Spot Parity Verification:** Confirmed that the `3.15` S/N threshold provides a 100% match on spot counts for cameras `z2`, `z6`, and `z8`.
 - **Current Status:** The workspace is stable and the CLI is fully operational for team-wide testing.
 
+## 2026-06-11 12:30 (approx)
+### Bug Fix: Lamp Line Parsing Parity
+- **The Fix:** Applied a patch to `src/specex_lamp_lines_utils.cc` to correctly skip lines where the first non-whitespace character is `#`.
+- **Impact:** This resolves the quirk where lines like `#ArI` were incorrectly parsed as valid data. Both C++ and Python parsers are now synchronized to strictly honor comments, providing a cleaner and more predictable baseline for spot selection.
+- **Verification:** Confirmed that `read_lamp_lines` in Python now returns 162 lines instead of 164 for the standard DESI line list.
+
 ## 2026-06-11 12:00 (approx)
 ### Architectural Decision: Internal Parallelism vs MPI
 - **The Decision:** We have opted to use JAX's built-in vectorization and Python's `multiprocessing` (spawn) driver instead of the traditional C++/MPI rank-based model for distributing bundles.
