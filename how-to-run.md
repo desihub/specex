@@ -2,7 +2,28 @@
 
 This guide documents how to run the ported Python/JAX version of Specex and the various validation scripts used to verify numerical parity with the C++ baseline.
 
-## 1. Environment Setup
+## 0. Environment Creation (One-time setup)
+
+To recreate the environment used for development (`specex_env`):
+
+```bash
+# Create venv
+python -m venv /path/to/your/specex_env
+source /path/to/your/specex_env/bin/activate
+
+# Install core dependencies
+pip install --upgrade pip
+pip install numpy fitsio astropy scipy
+
+# Install JAX with CUDA support (for Perlmutter A100s)
+pip install --upgrade "jax[cuda13_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# Note: Ensure CUDA 13.x modules are loaded on the node
+```
+
+---
+
+## 1. Environment Setup (Every session)
 
 Before running any scripts, ensure your environment is set up correctly on Perlmutter.
 

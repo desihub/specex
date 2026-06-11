@@ -191,3 +191,12 @@
 - **Spot Parity Verification:** Confirmed that the `3.15` S/N threshold provides a 100% match on spot counts for cameras `z2`, `z6`, and `z8`.
 - **Current Status:** The workspace is stable and the CLI is fully operational for team-wide testing.
 
+## 2026-06-11 12:00 (approx)
+### Architectural Decision: Internal Parallelism vs MPI
+- **The Decision:** We have opted to use JAX's built-in vectorization and Python's `multiprocessing` (spawn) driver instead of the traditional C++/MPI rank-based model for distributing bundles.
+- **Rationale:**
+    1. **GPU Memory Orchestration:** Internal parallelization allows for much tighter control over GPU visibility (`CUDA_VISIBLE_DEVICES`) and memory pre-allocation. Managing 4 A100s via MPI ranks often leads to race conditions or sub-optimal VRAM fragmentation during XLA initialization.
+    2. **JIT Reuse:** By managing worker pools internally, we ensure that the expensive JAX JIT compilation cost is amortized more effectively across bundles.
+    3. **Operational Simplicity:** Users can run a full CCD fit with a single `python` command without needing complex `srun` configurations, while still utilizing all 4 GPUs on a node.
+    4. **Maintenance:** This removes the dependency on `mpi4py` and libfabric for the Python pipeline, reducing the complexity of the deployment environment.
+
