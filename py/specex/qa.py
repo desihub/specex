@@ -40,12 +40,9 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
             if fiber not in brokenfibers and fiber+1 not in brokenfibers:
                 log.error("overlapping traces for fibers {} and {} in {}".format(fiber, fiber+1, psf_filename))
                 failcount += 1
-                log.info(f'Failcount is now {failcount}')
                 bad_fibers.append(fiber)
-                log.info(f'Bad fibers are now {bad_fibers}')
                 bad_fibers.append(fiber+1)
-                log.info(f'Bad fibers are now {bad_fibers}')
-                log.info(f'Fibers {fiber} and {fiber+1} are flagged')
+                log.debug(f'Fibers {fiber} and {fiber+1} are flagged as bad')
     log.info(f'Failcount is {failcount}')
 
     return failcount, bad_fibers
@@ -59,30 +56,12 @@ def specex_psf_qa(opts):
     failcount, bad_fibers = trace_psf_qa(psf_filename, broken_fiber_list)
     if len(bad_fibers)>0:
         log.info(f'Setting Status of Bad Fibers {bad_fibers} to 4 in PSF file {psf_filename}')
-        other_psf_hdulist=fits.open(psf_filename)
-        i=np.where(other_psf_hdulist["PSF"].data["PARAM"]=="STATUS")[0][0]
-        status_of_fibers = \
-            other_psf_hdulist["PSF"].data["COEFF"][i][:,0].astype(int)
-        log.info(f'Status of fibers before: {status_of_fibers}')
         with fits.open(psf_filename, mode='update',memmap=False) as file:
             index = np.where(file['PSF'].data["PARAM"]=="STATUS")[0][0]
-            # log.info(f'Index of STATUS parameter is {index}')
             for fiber in bad_fibers:
                 file['PSF'].data["COEFF"][index][fiber, 0] = 4
-            # status_of_fibers = \
-                # file["PSF"].data["COEFF"][i][:,0].astype(int)
-            # log.info(f'Status of fibers: {status_of_fibers}')
-            log.info(f'Bad fibers {bad_fibers} have been set to 4 in PSF file {psf_filename}')
+            log.debug(f'Bad fibers {bad_fibers} have been set to 4 in PSF file {psf_filename}')
             file.flush()
-        log.info(f'File now closed')
 
     log.info(f'QA complete for PSF file {psf_filename} with failcount {failcount} and bad fibers {bad_fibers}')
-    other_psf_hdulist=fits.open(psf_filename,memmap=False)
-
-    # look at what fibers where actually fit
-    i=np.where(other_psf_hdulist["PSF"].data["PARAM"]=="STATUS")[0][0]
-    status_of_fibers = \
-        other_psf_hdulist["PSF"].data["COEFF"][i][:,0].astype(int)
-    log.info(f'Status of fibers after: {status_of_fibers}')
-    other_psf_hdulist.close()
     return failcount
