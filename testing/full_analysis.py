@@ -27,9 +27,7 @@ def get_trace_rms(file_a, file_b):
         print(f"Error comparing traces: {e}")
         return -1, -1
 
-def run_comparison_suite(camera_list=None):
-    night = "20260401"
-    expid = "00344649"
+def run_comparison_suite(camera_list=None, night="20260401", expid="00344649"):
     bundle_id = 5
     sn_threshold = 3.0
     
@@ -43,6 +41,7 @@ def run_comparison_suite(camera_list=None):
     psf_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures"
     lamp_lines = "py/specex/data/specex_linelist_desi.txt"
     
+    print(f"--- Global Analysis: Night {night} Exp {expid} ---")
     print(f"{'Cam':<5} | {'Spots':<10} | {'Time (s)':<20} | {'Chi2':<20} | {'X-Trace RMS'}")
     print(f"{'':<5} | {'Py / C++':<10} | {'Py / C++':<20} | {'Py / C++':<20} |")
     print("-" * 85)
@@ -51,14 +50,15 @@ def run_comparison_suite(camera_list=None):
         arc_file = f"{arc_base}/{night}/{expid}/preproc-{cam}-{expid}.fits.gz"
         in_psf = f"{psf_base}/{night}/{expid}/shifted-input-psf-{cam}-{expid}.fits"
         
-        # Check if files exist before running
-        if not os.path.exists(arc_file) or not os.path.exists(in_psf):
-            print(f"Skipping {cam}, files not found.")
+        # Check if files exist
+        if not os.path.exists(arc_file):
+            print(f"Skipping {cam}, {arc_file} not found.")
             continue
 
         broken = "367" if cam == "z0" else "473,474"
         
         # 1. Run Python GPU Fit
+        # ... logic remains same ...
         # ... rest of logic remains same ...
         os.environ["JAX_PLATFORM_NAME"] = "gpu"
         py_out = f"validation_py_{cam}.fits"
