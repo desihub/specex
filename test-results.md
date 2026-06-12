@@ -51,3 +51,42 @@
 - **R-Band:** 98% Verified (Traces PASS, Spots Near-Match)
 - **B-Band:** 95% Verified (Traces PASS, Spots Near-Match)
 - **Performance:** All cameras fitting in **< 65s** (including JAX JIT). Marginal fit time is **~35s**.
+
+---
+
+## 4. Multi-Night Cross-Band Validation
+**Night:** 2026-01-10  
+**Exposure:** 00331046  
+**Bundle:** 5  
+
+| Arm/Cam | Python Spots | Python Time | C++ Time | X-Trace RMS | Status |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Blue (b0)** | 689 | **33.1s** | 139.0s | **0.006 px** | **PASS** |
+| **Red (r3)** | 1357 | **62.6s** | 458.4s | **0.016 px** | **PASS** |
+| **Z-Band (z8)** | 1567 | **65.7s** | 371.1s | **0.014 px** | **PASS** |
+
+### Reproduction Commands (Example b0):
+
+**Python/GPU:**
+```bash
+python -m specex.specex \
+  -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260110/00331046/preproc-b0-00331046.fits.gz \
+  --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260110/00331046/shifted-input-psf-b0-00331046.fits \
+  --out-psf test_py_b0.fits \
+  --first-bundle 5 --last-bundle 5 \
+  --gpu 4
+```
+
+**C++ (Baseline):**
+```bash
+module load libfabric
+desi_psf_fit \
+  -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260110/00331046/preproc-b0-00331046.fits.gz \
+  --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260110/00331046/shifted-input-psf-b0-00331046.fits \
+  --lamp-lines py/specex/data/specex_linelist_desi.txt \
+  --out-psf test_cpp_b0.fits \
+  --first-bundle 5 --last-bundle 5 \
+  --legendre-deg-wave 3 \
+  --fit-continuum \
+  --broken-fibers 473,474
+```
