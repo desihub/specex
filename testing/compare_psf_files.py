@@ -43,6 +43,10 @@ def compare_psfs(file_a, file_b):
             print(f"{name:<12} | {md:>12.6e} | {rms:>12.6e} | {mx:>12.6e}")
 
 if __name__ == "__main__":
-    file_gpu = 'python-gpu-fit-z8-00344649.fits'
-    file_cpp = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/fit-psf-z8-00344649.fits'
+    if len(sys.argv) < 3:
+        file_gpu = 'python-gpu-fit-z8-00344649.fits'
+        file_cpp = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/fit-psf-z8-00344649.fits'
+    else:
+        file_gpu = sys.argv[1]
+        file_cpp = sys.argv[2]
     compare_psfs(file_gpu, file_cpp)

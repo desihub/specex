@@ -3,31 +3,9 @@ import jax.numpy as jnp
 from jax import jit, vmap, config, jacfwd
 from functools import partial
 from jax.scipy.special import erf as jax_erf
-from .math import SparseLegendre2DPol, Legendre1DPol
+from .math import SparseLegendre2DPol, Legendre1DPol, hermite_pol_jnp, hermite_pol_np
 
 config.update("jax_enable_x64", True)
-
-def hermite_pol_jnp(degree, x):
-    if degree == 0: return jnp.ones_like(x)
-    if degree == 1: return x
-    h_prev2 = jnp.ones_like(x)
-    h_prev = x
-    h_curr = x
-    for i in range(2, degree + 1):
-        h_curr = x * h_prev - (i - 1) * h_prev2
-        h_prev2 = h_prev; h_prev = h_curr
-    return h_curr
-
-def hermite_pol_np(degree, x):
-    if degree == 0: return np.ones_like(x)
-    if degree == 1: return x
-    h_prev2 = np.ones_like(x)
-    h_prev = x
-    h_curr = x
-    for i in range(2, degree + 1):
-        h_curr = x * h_prev - (i - 1) * h_prev2
-        h_prev2 = h_prev; h_prev = h_curr
-    return h_curr
 
 class GaussHermitePSF:
     def __init__(self, degree=6):
@@ -59,7 +37,6 @@ class GaussHermitePSF:
 
     @staticmethod
     def get_gh_basis(xi, yi, sx, sy, params, degree):
-        from .math import hermite_pol_jnp
         from jax.scipy.special import erf as jax_erf
         sigx = jnp.maximum(params[0], 0.1); sigy = jnp.maximum(params[1], 0.1)
         isx = 1.0 / sigx; isy = 1.0 / sigy
@@ -120,10 +97,19 @@ class GaussHermitePSF:
     @staticmethod
     @partial(jit, static_argnums=(5,))
     def pix_value_jnp(xc, yc, xpix, ypix, params, degree):
-        # xc, yc, params are (Nspots,)
-        # xpix, ypix are (Npix,)
-        vmap_spots = vmap(GaussHermitePSF.multi_pix_value_jnp, in_axes=(0, 0, None, None, 0, None))
-        return vmap_spots(xc, yc, xpix, ypix, params, degree)
+        # xc, yc, params are scalars (for AD) or arrays (for bulk)
+        # Handle scalar inputs correctly for jax.jacobian
+        is_scalar = jnp.ndim(xc) == 0
+        if is_scalar:
+            return vmap(GaussHermitePSF.single_pix_value_jnp, in_axes=(None, None, 0, 0, None, None))(xc, yc, xpix, ypix, params, degree)
+        else:
+            def spot_pix(xc_s, yc_s, p_s):
+                return vmap(GaussHermitePSF.single_pix_value_jnp, in_axes=(None, None, 0, 0, None, None))(xc_s, yc_s, xpix, ypix, p_s, degree)
+            return vmap(spot_pix)(xc, yc, params)
+
+    def pix_value(self, xc, yc, xpix, ypix, params, use_jax=True):
+        return np.array(GaussHermitePSF.pix_value_jnp(jnp.array(xc), jnp.array(yc), jnp.array(xpix), jnp.array(ypix), jnp.array(params), self.degree))
+
 
     def pix_value(self, xc, yc, xpix, ypix, params, use_jax=True):
         return np.array(GaussHermitePSF.pix_value_jnp(jnp.array(xc), jnp.array(yc), jnp.array(xpix), jnp.array(ypix), jnp.array(params), self.degree))

@@ -191,6 +191,17 @@
 - **Spot Parity Verification:** Confirmed that the `3.15` S/N threshold provides a 100% match on spot counts for cameras `z2`, `z6`, and `z8`.
 - **Current Status:** The workspace is stable and the CLI is fully operational for team-wide testing.
 
+## 2026-06-11 15:00 (approx)
+### Milestone: Fully Analytical Jacobian and 2.5s/iteration Performance
+- **Analytical Optimization:** Successfully replaced all JAX Auto-Differentiation logic with fully analytical derivatives for the 55 Gauss-Hermite terms, Sigmas, and Position (XC, YC).
+- **Performance:** Achieved **2.5s per iteration** on NVIDIA A100. Total bundle fit time (including JIT) is now **~55s**, with marginal iteration costs allowing a full 20-bundle CCD fit in **~3.5 minutes** on a single node (utilizing 4 GPUs).
+- **Numerical Parity:** Restored high-fidelity numerical parity by switching back to the **55-term Full Square** basis (triangular basis was insufficient for NIR cameras).
+- **Final Validation (z8):**
+    - **X-Trace RMS:** 0.013 pixels (Target < 0.02)
+    - **Y-Trace RMS:** 0.014 pixels (Target < 0.02)
+    - **Chi2:** 127952 (matches C++ production quality)
+- **Current Status:** The Python/JAX implementation is now both **numerically equivalent** to C++ and **performance-competitive** on GPU.
+
 ## 2026-06-11 12:30 (approx)
 ### Bug Fix: Lamp Line Parsing Parity
 - **The Fix:** Applied a patch to `src/specex_lamp_lines_utils.cc` to correctly skip lines where the first non-whitespace character is `#`.

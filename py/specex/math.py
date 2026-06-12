@@ -42,6 +42,28 @@ def legendre_pol_jnp(degree, x):
         p_prev = p_curr
     return p_curr
 
+def hermite_pol_jnp(degree, x):
+    if degree == 0: return jnp.ones_like(x)
+    if degree == 1: return x
+    h_prev2 = jnp.ones_like(x)
+    h_prev = x
+    h_curr = x
+    for i in range(2, degree + 1):
+        h_curr = x * h_prev - (i - 1) * h_prev2
+        h_prev2 = h_prev; h_prev = h_curr
+    return h_curr
+
+def hermite_pol_np(degree, x):
+    if degree == 0: return np.ones_like(x)
+    if degree == 1: return x
+    h_prev2 = np.ones_like(x)
+    h_prev = x
+    h_curr = x
+    for i in range(2, degree + 1):
+        h_curr = x * h_prev - (i - 1) * h_prev2
+        h_prev2 = h_prev; h_prev = h_curr
+    return h_curr
+
 class Legendre1DPol:
     def __init__(self, deg=0, xmin=-1.0, xmax=1.0, coeff=None):
         self.deg = deg

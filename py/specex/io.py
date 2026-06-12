@@ -90,12 +90,15 @@ def write_python_psf(filename, bundle_results, input_template):
         for row in range(len(param_names)):
             psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
             if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
-        for i_par in range(55):
-            if i_par == 0: pname = 'GHSIGX'
-            elif i_par == 1: pname = 'GHSIGY'
-            elif 2 <= i_par <= 49:
-                idx_gh = i_par - 2; gh_i = (idx_gh + 1) % 7; gh_j = (idx_gh + 1) // 7; pname = f'GH-{gh_i}-{gh_j}'
-            else: pname = ['TAILAMP', 'TAILCORE', 'TAILXSCA', 'TAILYSCA', 'TAILINDE'][i_par - 50]
+        # Dynamic name mapping for GH terms (matches fitter.py)
+        param_mapping = ['GHSIGX', 'GHSIGY']
+        for j_gh in range(7): # assuming degree 6
+            for i_gh in range(7):
+                if i_gh == 0 and j_gh == 0: continue
+                if i_gh + j_gh <= 6:
+                    param_mapping.append(f'GH-{i_gh}-{j_gh}')
+        
+        for i_par, pname in enumerate(param_mapping):
             idx = name_to_idx.get(pname)
             if idx is not None:
                 for k_nz, k_lin in enumerate(nz_b):
