@@ -1,125 +1,136 @@
 import os
 import sys
+import time
+import re
 import numpy as np
 import fitsio
-import time
 
-# Ensure we use the workspace code
-sys.path.insert(0, os.path.join(os.getcwd(), 'py'))
+# Ensure we use the current workspace code
+current_dir = os.getcwd()
+sys.path.insert(0, os.path.join(current_dir, 'py'))
+os.environ["PYTHONPATH"] = os.path.join(current_dir, 'py') + ":" + os.path.join(current_dir, 'build') + ":" + os.environ.get("PYTHONPATH", "")
 
-from specex.io import read_preproc, load_python_psf
-from specex.psf import GaussHermitePSF
+from specex.io import read_lamp_lines, load_python_psf, read_image
+from specex.fitter import get_bundle_spots, PSF_Fitter
+from specex.specex import run_specex
 
-def analyze_residuals(psf_file, arc_file, bundle_id=5):
-    # 1. Setup
-    class Opts:
-        def __init__(self):
-            self.arc_image_filename = arc_file
-            self.input_psf_filename = psf_file
-    opts = Opts()
-    
-    # 2. Load Data
-    ddata = read_preproc(opts)
-    image = ddata['image'].T
-    weight = ddata['ivar'].T
-    
-    psf = load_python_psf(psf_file, opts)
-    
-    # 3. Identify footprint for bundle
-    fmin, fmax = bundle_id * 25, (bundle_id + 1) * 25 - 1
-    # For residual analysis, let's look at a 100x100 patch in the center of the bundle
-    # to avoid edge effects and keep it fast.
-    wave_mid = 8500.0
-    xc = psf.x_ccd(fmin + 12, wave_mid)
-    yc = psf.y_ccd(fmin + 12, wave_mid)
-    
-    i0, i1 = int(xc) - 50, int(xc) + 50
-    j0, j1 = int(yc) - 50, int(yc) + 50
-    
-    # Create coordinate grid
-    xx, yy = np.meshgrid(np.arange(i0, i1), np.arange(j0, j1), indexing='ij')
-    xpix = xx.flatten()
-    ypix = yy.flatten()
-    
-    # 4. Generate Model
-    # We need to sum up all fibers and lines that contribute to this patch
-    # For a simple residual check, let's just use the 'FitSeveralSpots' approach:
-    # We'll pull the actual chi2 from the header as it's the global metric.
-    
-    hdr = fitsio.read_header(psf_file, 'PSF')
-    chi2 = hdr.get(f'B{bundle_id:02d}RCHI2', 0.0)
-    # Note: Specex RCHI2 in header is often Chi2/Npix or similar.
-    
-    # Let's do a real residual calculation on the pixels we actually fit
-    # (Using the same footprint logic as the fitter)
-    from specex.fitter import get_bundle_spots, get_bundle_footprint, get_bundle_monomials_jnp
-    from specex.io import read_lamp_lines
-    
-    lamp_lines = read_lamp_lines('py/specex/data/specex_linelist_desi.txt')
-    spots = get_bundle_spots(psf, fmin, fmax, lamp_lines)
-    xpix_f, ypix_f, _ = get_bundle_footprint(psf, spots, fmin, fmax, weight)
-    
-    # We need the fitted parameters for these specific files
-    # (Since I don't want to re-run the whole fit, I'll just look at the header/table values)
-    # The 'COEFF' table in the PSF file contains the 1D Legendres.
-    
-    data_img = image[xpix_f, ypix_f]
-    w_img = weight[xpix_f, ypix_f]
-    
-    # Instead of full reconstruction (slow), we use the aggregate metrics
-    return {
-        'npix': len(xpix_f),
-        'chi2_header': chi2
-    }
+def get_trace_rms(file_a, file_b):
+    try:
+        f_a = fitsio.FITS(file_a)
+        f_b = fitsio.FITS(file_b)
+        xt_a = f_a['XTRACE'].read(); xt_b = f_b['XTRACE'].read()
+        yt_a = f_a['YTRACE'].read(); yt_b = f_b['YTRACE'].read()
+        x_rms = np.std(xt_a - xt_b)
+        y_rms = np.std(yt_a - yt_b)
+        return x_rms, y_rms
+    except Exception as e:
+        print(f"Error comparing traces: {e}")
+        return -1, -1
 
-def print_summary():
-    file_cpp = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/fit-psf-z8-00344649.fits'
-    file_gpu = 'python-gpu-fit-z8-00344649.fits'
-    file_cpu = 'python-cpu-fit-bundle-5.fits'
-    arc_file = '/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz'
+def run_comparison_suite(camera_list=None):
+    night = "20260401"
+    expid = "00344649"
+    bundle_id = 5
+    sn_threshold = 3.0
+    
+    if camera_list is None:
+        cameras = [f"z{i}" for i in range(10)]
+    else:
+        cameras = camera_list
+    
+    # Path templates
+    arc_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc"
+    psf_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures"
+    lamp_lines = "py/specex/data/specex_linelist_desi.txt"
+    
+    print(f"{'Cam':<5} | {'Spots':<10} | {'Time (s)':<20} | {'Chi2':<20} | {'X-Trace RMS'}")
+    print(f"{'':<5} | {'Py / C++':<10} | {'Py / C++':<20} | {'Py / C++':<20} |")
+    print("-" * 85)
+    
+    for cam in cameras:
+        arc_file = f"{arc_base}/{night}/{expid}/preproc-{cam}-{expid}.fits.gz"
+        in_psf = f"{psf_base}/{night}/{expid}/shifted-input-psf-{cam}-{expid}.fits"
+        
+        # Check if files exist before running
+        if not os.path.exists(arc_file) or not os.path.exists(in_psf):
+            print(f"Skipping {cam}, files not found.")
+            continue
 
-    print("--- Mode Analysis: C++ vs. Python CPU vs. Python GPU ---")
-    
-    # 1. Timings (Extracted from logs)
-    # C++: ~411s for bundle 5 fit (single core-ish)
-    # Python CPU: 61s for bundle 5
-    # Python GPU: 17.6s for bundle 5 (part of 244s CCD fit)
-    
-    modes = ['C++ Baseline', 'Python CPU', 'Python GPU']
-    times = [411.0, 61.2, 17.6]
-    
-    print("\n[Timings (per Bundle 5)]")
-    for m, t in zip(modes, times):
-        speedup = times[0] / t
-        print(f"  {m:<15}: {t:>6.1f}s ({speedup:>4.1f}x)")
+        broken = "367" if cam == "z0" else "473,474"
+        
+        # 1. Run Python GPU Fit
+        # ... rest of logic remains same ...
+        os.environ["JAX_PLATFORM_NAME"] = "gpu"
+        py_out = f"validation_py_{cam}.fits"
+        
+        # We'll use a direct fit call to avoid mp overhead for measurement
+        ddata = read_image(arc_file)
+        image = ddata['image'].T; weight = ddata['ivar'].T
+        
+        # Dummy opts
+        class Dummy: pass
+        opts = Dummy(); opts.arc_image_filename = arc_file; opts.input_psf_filename = in_psf
+        
+        psf_py = load_python_psf(in_psf, opts)
+        lines = read_lamp_lines(lamp_lines)
+        
+        fmin, fmax = bundle_id * 25, (bundle_id + 1) * 25 - 1
+        spots = get_bundle_spots(psf_py, fmin, fmax, lines, image=image, weight=weight, sn_threshold=sn_threshold, broken_fibers=broken)
+        n_spots_py = len(spots)
+        
+        fitter = PSF_Fitter(psf_py)
+        t0 = time.time()
+        # Warm-up (already done by first iteration in fit usually, but let's be explicit)
+        chi2_py, pc, tc, cc = fitter.fit(image, weight, spots, bundle_id, max_iter=15)
+        t1 = time.time()
+        dt_py = t1 - t0
+        
+        # Save Python result
+        from specex.io import write_python_psf
+        write_python_psf(py_out, {bundle_id: {'chi2': chi2_py, 'psf_coeffs': pc, 'trace_coeffs': tc, 'continuum': cc}}, in_psf)
 
-    # 2. Chi2 and Residuals
-    print("\n[Numerical Parity (Bundle 5)]")
-    print(f"{'Mode':<15} | {'Chi2':<12} | {'Chi2/Pix':<10} | {'Status'}")
-    print("-" * 55)
-    
-    # C++
-    cpp_chi2 = 141882.0
-    cpp_npix = 119097
-    print(f"{'C++ Baseline':<15} | {cpp_chi2:>12.1f} | {cpp_chi2/cpp_npix:>10.3f} | {'Target'}")
-    
-    # CPU
-    cpu_chi2 = 136612.2
-    cpu_npix = 119249 # Slightsly higher due to expanded margin
-    print(f"{'Python CPU':<15} | {cpu_chi2:>12.1f} | {cpu_chi2/cpu_npix:>10.3f} | {'Better Fit'}")
-    
-    # GPU
-    gpu_chi2 = 136612.2
-    gpu_npix = 119249
-    print(f"{'Python GPU':<15} | {gpu_chi2:>12.1f} | {gpu_chi2/gpu_npix:>10.3f} | {'Bit-Parity'}")
-
-    print("\n[Residual Analysis (RMS)]")
-    # I'll compute the RMS of the residuals directly from the chi2
-    # RMS = sqrt(Chi2 / sum(weights))
-    # Since we are using ivar weights, sqrt(Chi2/Npix) is a good proxy for per-pixel noise
-    for m, c, n in [('C++', 141882, 119097), ('Python', 136612, 119249)]:
-        rms = np.sqrt(c / n)
-        print(f"  {m:<7} Normalized Residual RMS: {rms:.4f}")
+        # 2. Run C++ Fit (via Python wrapper using local build)
+        cpp_out = f"validation_cpp_{cam}.fits"
+        com = [
+            "desi_psf_fit",
+            "-a", arc_file,
+            "--in-psf", in_psf,
+            "--lamp-lines", lamp_lines,
+            "--out-psf", cpp_out,
+            "--first-bundle", str(bundle_id),
+            "--last-bundle", str(bundle_id),
+            "--legendre-deg-wave", "3",
+            "--fit-continuum",
+            "--broken-fibers", broken
+        ]
+        
+        t0 = time.time()
+        # Redirect stdout to capture spot count if needed, but for now just run
+        # Actually run_specex writes to stdout
+        run_specex(com)
+        t1 = time.time()
+        dt_cpp = t1 - t0
+        
+        # Extract C++ info from result file header
+        f_cpp = fitsio.FITS(cpp_out)
+        hdr = f_cpp['PSF'].read_header()
+        chi2_cpp = hdr.get(f'B{bundle_id:02d}RCHI2', -1.0) * (120000.0) # Approx scale back to raw chi2
+        # Actually, let's just get it from the fits comparison script if possible
+        
+        # 3. Compare
+        x_rms, y_rms = get_trace_rms(py_out, cpp_out)
+        
+        # Quick hack to get spot count from debug if we could, but let's assume parity for now
+        # or just read from the C++ log we just created.
+        n_spots_cpp = "?" # would need to parse C++ output
+        
+        line = f"{cam:<5} | {n_spots_py:>4} / {n_spots_cpp:<3} | {dt_py:>7.1f} / {dt_cpp:<7.1f} | {chi2_py:>9.0f} / {chi2_cpp:<9.0f} | {x_rms:>10.6f}"
+        print(line)
 
 if __name__ == "__main__":
-    print_summary()
+    arm = "z"
+    if len(sys.argv) > 1:
+        arm = sys.argv[1]
+    
+    cams = [f"{arm}{i}" for i in range(10)]
+    run_comparison_suite(cams)
