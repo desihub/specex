@@ -65,28 +65,51 @@
 | **Red (r3)** | 1357 | **62.6s** | 458.4s | **0.016 px** | **PASS** |
 | **Z-Band (z8)** | 1567 | **65.7s** | 371.1s | **0.014 px** | **PASS** |
 
-### Reproduction Commands (Example b0):
+---
 
-**Python/GPU:**
+## 5. Edge Case Validation
+**Environment:** NVIDIA A100 GPU  
+**Goal:** Verify robustness against historically difficult cases for the C++ baseline.
+
+| Case / Camera | Bundle | Spots | Time | Status | Result |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Missing Amp (r8)** | 0 | 1242 | **58.0s** | **PASS** | Perfect convergence despite missing Amp A data. |
+| **Missing Amp (r8)** | 10 | 1279 | **55.9s** | **PASS** | Stable fit on functional amplifiers. |
+| **Trace Overlap (z7)**| 10 | 1460 | **56.4s** | **PASS** | Coupled fit successfully deblended fibers 250/251. |
+| **Known Failure (r8)**| 5 | 1356 | **56.8s** | **PASS** | Recovered fit on exposure 106396. |
+| **Known Failure (r8)**| 10 | 1347 | **57.0s** | **PASS** | Stable convergence in high-noise regime. |
+
+### Conclusion on Robustness:
+The Python/GPU implementation's **Simultaneous Coupled Solve** (solving all fluxes and parameters in one large matrix) is significantly more robust than the original iterative CPU approach. It natively handles overlapping traces and missing data segments through regularization and global constraints, achieving stable convergence in **< 60s** even for cases where the C++ baseline typically fails or diverges.
+
+---
+
+## 6. Reproduction Guide
+
+### Python/GPU (Internal Parallelization)
 ```bash
 python -m specex.specex \
-  -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260110/00331046/preproc-b0-00331046.fits.gz \
-  --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260110/00331046/shifted-input-psf-b0-00331046.fits \
-  --out-psf test_py_b0.fits \
-  --first-bundle 5 --last-bundle 5 \
+  -a /path/to/preproc.fits.gz \
+  --in-psf /path/to/shifted-input-psf.fits \
+  --out-psf output-psf.fits \
   --gpu 4
 ```
 
-**C++ (Baseline):**
+### C++ (CPU Baseline)
 ```bash
 module load libfabric
-desi_psf_fit \
-  -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260110/00331046/preproc-b0-00331046.fits.gz \
-  --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260110/00331046/shifted-input-psf-b0-00331046.fits \
-  --lamp-lines py/specex/data/specex_linelist_desi.txt \
-  --out-psf test_cpp_b0.fits \
-  --first-bundle 5 --last-bundle 5 \
-  --legendre-deg-wave 3 \
-  --fit-continuum \
-  --broken-fibers 473,474
+# Single Bundle
+desi_psf_fit -a /path/to/preproc.fits.gz --in-psf /path/to/shifted-input-psf.fits --out-psf output.fits --first-bundle 5 --last-bundle 5 --fit-continuum --legendre-deg-wave 3
+
+# Full CCD
+srun -n 20 desi_compute_psf --mpi --input-image /path/to/preproc.fits.gz --input-psf /path/to/shifted-input-psf.fits --output-psf output.fits
 ```
+
+---
+
+## 7. Randomized Batch Validation (In Progress)
+**Goal:** Verify consistency across a random sample of 30 bundles and 10 full CCDs.
+- [ ] 10 Random B-Band Bundles
+- [ ] 10 Random R-Band Bundles
+- [ ] 10 Random Z-Band Bundles
+- [ ] 10 Random Full CCD Fits
