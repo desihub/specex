@@ -17,7 +17,7 @@ os.environ["PYTHONPATH"] = os.path.join(current_dir, 'py') + ":" + os.path.join(
 # Fix for libfabric on Perlmutter
 libfabric_path = "/opt/cray/libfabric/1.22.0/lib64"
 if os.path.exists(libfabric_path):
-    os.environ["LD_LIBRARY_PATH"] = os.environ.get("LD_LIBRARY_PATH", "") + ":" + libfabric_path
+    os.environ["LD_LIBRARY_PATH"] = libfabric_path + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 def get_trace_rms(file_a, file_b):
     """Calculates the X and Y RMS difference between two PSF files."""
@@ -57,22 +57,12 @@ def write_summary(outdir, data):
         f.write(line)
 
 def get_random_night_exp():
-    """Finds a random (night, expid) pair."""
+    """Finds a random night."""
     preproc_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc"
-    psf_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures"
-    if not os.path.exists(preproc_base): return None, None
+    if not os.path.exists(preproc_base): return None
     nights = sorted([n for n in os.listdir(preproc_base) if n.isdigit() and int(n) > 20210101])
-    if not nights: return None, None
-    for _ in range(100):
-        night = random.choice(nights)
-        night_dir = os.path.join(preproc_base, night)
-        if not os.path.isdir(night_dir): continue
-        exps = sorted([e for e in os.listdir(night_dir) if e.isdigit()])
-        if not exps: continue
-        expid = random.choice(exps)
-        test_file = os.path.join(preproc_base, night, expid, f"preproc-b0-{expid}.fits.gz")
-        if os.path.exists(test_file): return night, expid
-    return None, None
+    if not nights: return None
+    return random.choice(nights)
 
 def run_bundle_test(args):
     night, expid, cam, bundle_id, gpu_id, outdir = args
@@ -107,7 +97,7 @@ def run_bundle_test(args):
         chi2_py, pc, tc, cc = fitter.fit(ddata['image'].T, ddata['ivar'].T, spots, bundle_id, max_iter=15)
         dt_py = time.time() - t0
         write_python_psf(py_out, {bundle_id: {'chi2': chi2_py, 'psf_coeffs': pc, 'trace_coeffs': tc, 'continuum': cc}}, in_psf)
-    except Exception as e: print(f"Python Failed: {e}")
+    except Exception as e: print(f"Python Bundle Failed for {cam} B{bundle_id}: {e}")
 
     # 2. C++ Fit
     dt_cpp = -1
@@ -116,14 +106,15 @@ def run_bundle_test(args):
         env_cpp["OMP_NUM_THREADS"] = "16"
         com_cpp = ["desi_psf_fit", "-a", arc_file, "--in-psf", in_psf, "--lamp-lines", lamp_lines, "--out-psf", cpp_out, "--first-bundle", str(bundle_id), "--last-bundle", str(bundle_id), "--fit-continuum", "--legendre-deg-wave", "3", "--broken-fibers", broken]
         t0 = time.time()
-        subprocess.run(com_cpp, env=env_cpp, check=True, capture_output=True, timeout=300)
+        res = subprocess.run(com_cpp, env=env_cpp, check=True, capture_output=True, timeout=300)
         dt_cpp = time.time() - t0
-    except Exception as e: print(f"C++ Failed: {e}")
+    except Exception as e: 
+        print(f"C++ Bundle Failed for {cam} B{bundle_id}: {e}")
+        if hasattr(e, 'stderr'): print(f"Stderr: {e.stderr.decode()}")
 
     # Calculate Parity
     x_rms, y_rms = get_trace_rms(py_out, cpp_out)
     
-    # Write Summary (one row for comparison result)
     if dt_py > 0:
         write_summary(outdir, {'mode': 'python', 'night': night, 'expid': expid, 'cam': cam, 'bundle': str(bundle_id), 'time': dt_py, 'spots': n_spots, 'x_rms': x_rms, 'y_rms': y_rms})
     if dt_cpp > 0:
@@ -147,9 +138,12 @@ def run_ccd_test(args):
     dt_py = -1
     try:
         t0 = time.time()
-        subprocess.run(["python", "-m", "specex.specex", "-a", arc_file, "--in-psf", in_psf, "--out-psf", py_out, "--gpu", "1", "--broken-fibers", broken], env=env, check=True, capture_output=True, timeout=1800)
+        # Ensure we run from the project root so -m specex works
+        res = subprocess.run(["python", "-m", "specex.specex", "-a", arc_file, "--in-psf", in_psf, "--out-psf", py_out, "--gpu", "1", "--broken-fibers", broken], env=env, check=True, capture_output=True, timeout=1800)
         dt_py = time.time() - t0
-    except Exception as e: print(f"Python CCD Failed: {e}")
+    except Exception as e: 
+        print(f"Python CCD Failed for {cam}: {e}")
+        if hasattr(e, 'stderr'): print(f"Stderr: {e.stderr.decode()}")
     
     # 2. C++ CCD
     dt_cpp = -1
@@ -160,9 +154,11 @@ def run_ccd_test(args):
         else:
             env["OMP_NUM_THREADS"] = "32"
             com_cpp = ["desi_compute_psf", "--input-image", arc_file, "--input-psf", in_psf, "--output-psf", cpp_out, "--broken-fibers", broken]
-        subprocess.run(com_cpp, env=env, check=True, capture_output=True, timeout=3600)
+        res = subprocess.run(com_cpp, env=env, check=True, capture_output=True, timeout=3600)
         dt_cpp = time.time() - t0
-    except Exception as e: print(f"C++ CCD Failed: {e}")
+    except Exception as e: 
+        print(f"C++ CCD Failed for {cam}: {e}")
+        if hasattr(e, 'stderr'): print(f"Stderr: {e.stderr.decode()}")
     
     x_rms, y_rms = get_trace_rms(py_out, cpp_out)
     
@@ -184,7 +180,10 @@ def main():
     args = parser.parse_args()
     
     if not os.path.exists(args.outdir): os.makedirs(args.outdir)
-    random.seed(42)
+    random.seed(int(time.time()))
+
+    preproc_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc"
+    psf_base = "/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures"
 
     # Prepare Tasks
     bundle_tasks = []
@@ -192,12 +191,20 @@ def main():
         for band in ['b', 'r', 'z']:
             count = 0
             while count < args.bundles_per_arm:
-                n, e = (args.night, args.expid) if args.night and args.expid else get_random_night_exp()
-                if n is None: break
+                night = args.night if args.night else get_random_night_exp()
+                if not night: break
+                night_dir = os.path.join(preproc_base, night)
+                if not os.path.isdir(night_dir): continue
+                exps = sorted([e for e in os.listdir(night_dir) if e.isdigit()])
+                if not exps: continue
+                expid = args.expid if args.expid else random.choice(exps)
                 cam = f"{band}{random.randint(0,9)}"
-                arc_file = f"/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/{n}/{e}/preproc-{cam}-{e}.fits.gz"
-                if os.path.exists(arc_file):
-                    bundle_tasks.append((n, e, cam, random.randint(0,19), len(bundle_tasks) % args.workers, args.outdir))
+                
+                arc_file = os.path.join(preproc_base, night, expid, f"preproc-{cam}-{expid}.fits.gz")
+                in_psf = os.path.join(psf_base, night, expid, f"shifted-input-psf-{cam}-{expid}.fits")
+                
+                if os.path.exists(arc_file) and os.path.exists(in_psf):
+                    bundle_tasks.append((night, expid, cam, random.randint(0,19), len(bundle_tasks) % args.workers, args.outdir))
                     count += 1
 
     ccd_tasks = []
@@ -205,12 +212,20 @@ def main():
         for band in ['b', 'r', 'z']:
             count = 0
             while count < args.ccds_per_arm:
-                n, e = (args.night, args.expid) if args.night and args.expid else get_random_night_exp()
-                if n is None: break
+                night = args.night if args.night else get_random_night_exp()
+                if not night: break
+                night_dir = os.path.join(preproc_base, night)
+                if not os.path.isdir(night_dir): continue
+                exps = sorted([e for e in os.listdir(night_dir) if e.isdigit()])
+                if not exps: continue
+                expid = args.expid if args.expid else random.choice(exps)
                 cam = f"{band}{random.randint(0,9)}"
-                arc_file = f"/dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/{n}/{e}/preproc-{cam}-{e}.fits.gz"
-                if os.path.exists(arc_file):
-                    ccd_tasks.append((n, e, cam, len(ccd_tasks) % args.workers, args.outdir))
+                
+                arc_file = os.path.join(preproc_base, night, expid, f"preproc-{cam}-{expid}.fits.gz")
+                in_psf = os.path.join(psf_base, night, expid, f"shifted-input-psf-{cam}-{expid}.fits")
+                
+                if os.path.exists(arc_file) and os.path.exists(in_psf):
+                    ccd_tasks.append((night, expid, cam, len(ccd_tasks) % args.workers, args.outdir))
                     count += 1
 
     # Run Bundle Tests
