@@ -67,7 +67,7 @@ def load_python_psf(filename, opts):
             psf.params_of_bundles[bid] = bundle
     return psf
 
-def write_python_psf(filename, bundle_results, input_template):
+def write_python_psf(filename, bundle_results, input_template, global_corr=None):
     import fitsio
     fin = fitsio.FITS(input_template)
     xtrace_out = fin['XTRACE'].read().astype(np.float64)
@@ -106,11 +106,21 @@ def write_python_psf(filename, bundle_results, input_template):
                     if j_p < psf_table['COEFF'].shape[2]:
                         psf_table['COEFF'][idx, fmin:fmax+1, j_p] += pc[i_par, k_nz] * poly_f[i_p]
         psf_hdr[f'B{bid:02d}RCHI2'] = res['chi2'] / (120000.0)
+    
     if os.path.exists(filename): os.remove(filename)
     fout = fitsio.FITS(filename, 'rw')
     fout.write(xtrace_out, header=fin['XTRACE'].read_header(), extname='XTRACE')
     fout.write(ytrace_out, header=fin['YTRACE'].read_header(), extname='YTRACE')
     fout.write(psf_table, header=psf_hdr, extname='PSF')
+    
+    if global_corr is not None:
+        # global_corr should be a dict with 'WAVE', 'DWAVE', 'DWAVE_ERR' lists
+        data = np.zeros(len(global_corr['WAVE']), dtype=[('WAVE', 'f4'), ('DWAVE', 'f4'), ('DWAVE_ERR', 'f4')])
+        data['WAVE'] = global_corr['WAVE']
+        data['DWAVE'] = global_corr['DWAVE']
+        data['DWAVE_ERR'] = global_corr['DWAVE_ERR']
+        fout.write(data, extname='WAVECORR')
+        
     fout.close()
 
 def write_psf(pyps, opts, pyio):

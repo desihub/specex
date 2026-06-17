@@ -1,5 +1,7 @@
 import os
+import time
 import numpy as np
+from functools import partial
 
 from .psf import GaussHermitePSF
 
@@ -28,68 +30,157 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots):
     for k in nz: i, j = k % (xdeg + 1), k // (xdeg + 1); m.append(mx[i] * mw[j])
     return jnp.stack(m, axis=1)
 
-def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None, 
-                     sn_threshold=3.15, min_dist_angstrom=0.0, wave_min=None, wave_max=None,
-                     broken_fibers=None):
-    """
-    Match C++ Specex spot selection with correct CCD boundaries and outlier rejection.
-    """
-    lines_sc = [l for l in lamp_lines if 1 <= l.get('score', 1) <= 4]
-    broken_list = []
-    if broken_fibers:
-        if isinstance(broken_fibers, str): broken_list = [int(f) for f in broken_fibers.split(",") if f.strip()]
-        else: broken_list = list(broken_fibers)
+# --- Global JIT Kernels (Standardized signatures) ---
+
+def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
+                        xc_init, yc_init, monomials, xpix, ypix,
+                        sx_g, sy_g, idx_gg, degree,
+                        tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data):
+    import jax.numpy as jnp
+    from jax import vmap
+    from .math import legendre_pol_jnp
     
-    nx, ny = (4114, 4128)
-    if image is not None: nx, ny = image.shape
+    Ns = flux.shape[0]; Npoly = monomials.shape[1]; Np = xpix.shape[0]
+    gh_all = jnp.dot(monomials, psf_coeffs.T)
+    dx, dy = jnp.dot(monomials, trace_coeffs[0]), jnp.dot(monomials, trace_coeffs[1])
+    xc_all, yc_all = xc_init + dx, yc_init + dy
     
-    candidates = []
-    for fiber in range(fiber_min, fiber_max + 1):
-        if fiber in broken_list: continue
-        if fiber not in psf.fiber_traces: continue
-        for line in lines_sc:
-            wave = line['wave']
-            xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
-            if 0 <= xc < nx and -4 <= yc < ny + 4:
-                hsize_x, hsize_y = psf.h_size_x, psf.h_size_y
-                candidates.append({
-                    'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc,
-                    'stamp_imin': int(np.floor(xc + 0.5)) - hsize_x, 'stamp_imax': int(np.floor(xc + 0.5)) + hsize_x + 1,
-                    'stamp_jmin': int(np.floor(yc + 0.5)) - hsize_y, 'stamp_jmax': int(np.floor(yc + 0.5)) + hsize_y + 1
-                })
-    if not candidates: return []
-    for spot in candidates:
-        if image is None: 
-            spot['snr'] = 100.0; spot['flux'] = 1000.0; spot['chi2'] = 0.0
-            continue
-        i0, i1 = max(0, spot['stamp_imin']), min(nx, spot['stamp_imax'])
-        j0, j1 = max(0, spot['stamp_jmin']), min(ny, spot['stamp_jmax'])
-        gh = psf.gh_params(spot['fiber'], spot['wave'])
-        ix, iy = np.meshgrid(np.arange(i0, i1), np.arange(j0, j1), indexing='ij')
-        psf_val = GaussHermitePSF.single_pix_value_np(spot['xc_init'], spot['yc_init'], ix.flatten(), iy.flatten(), gh, psf.gh_psf.degree)
-        img_val = image[i0:i1, j0:j1].flatten()
-        w_val = weight[i0:i1, j0:j1].flatten() if weight is not None else 1.0
-        A = np.sum(w_val * psf_val**2); B = np.sum(w_val * img_val * psf_val)
-        if A > 0:
-            flux = B/A; spot['flux'] = flux; spot['snr'] = flux/np.sqrt(1.0/A)
-            res = img_val - flux * psf_val; spot['chi2'] = np.sum(w_val * res**2)
-        else:
-            spot['flux'] = 0.0; spot['snr'] = -1.0; spot['chi2'] = 1e10
-    nsig = 4.0
-    for i, s in enumerate(candidates):
-        if s['chi2'] > 1e9: continue
-        others = [candidates[j]['chi2'] for j in range(len(candidates)) if i != j and abs(candidates[j]['wave'] - s['wave']) < 1.0]
-        if len(others) < 2: continue
-        m_c2 = np.mean(others); rms_c2 = np.std(others)
-        if s['chi2'] > (m_c2 + nsig * rms_c2): s['snr'] = -2.0
-    selected = []
-    for i, s in enumerate(candidates):
-        if s['snr'] < sn_threshold: continue
-        if min_dist_angstrom > 0:
-            if any(abs(o['wave'] - s['wave']) < min_dist_angstrom for j, o in enumerate(candidates) if i != j and o['fiber'] == s['fiber']):
-                continue
-        selected.append(s)
-    return selected
+    def spot_sig(i):
+        Bx, By = GaussHermitePSF.get_gh_basis(xc_all[i], yc_all[i], sx_g[i], sy_g[i], gh_all[i], degree)
+        psf_v = By[0] * Bx[0] 
+        nx_p, ny_p = degree + 1, degree + 1; k = 2
+        for j_p in range(ny_p):
+            bj = By[j_p]; imin_p = 1 if j_p == 0 else 0
+            for i_p in range(imin_p, nx_p):
+                psf_v += gh_all[i, k] * bj * Bx[i_p]; k += 1
+        return psf_v
+    
+    unit_sigs = vmap(spot_sig)(jnp.arange(Ns))
+    tsig_p = jnp.zeros(Np + 1).at[idx_gg.flatten()].add((unit_sigs * flux[:, jnp.newaxis]).flatten())
+    
+    Ncont = continuum_coeffs.shape[0]
+    rw = 2 * (tw_g - wmin_c) / (wmax_c - wmin_c) - 1
+    m_c = jnp.stack([legendre_pol_jnp(k, rw) for k in range(Ncont)], axis=0)
+    f_c = jnp.tensordot(continuum_coeffs, m_c, axes=([0], [0]))
+    striped_cont = jnp.sum(vmap(lambda fi: f_c[fi] * jnp.exp(-0.5 * (xpix - tx_g[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0)
+    
+    total_sig = tsig_p[:Np] + striped_cont
+    return jnp.sum(weight_data * (image_data - total_sig)**2)
+
+from jax import jit
+_predict_bundle_jax_jit = jit(_predict_bundle_jax, static_argnums=(12,))
+
+def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs, 
+                           xc_init, yc_init, monomials, xpix, ypix,
+                           sx_g, sy_g, idx_gg, degree,
+                           tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data):
+    import jax
+    import jax.numpy as jnp
+    from jax import vmap, lax
+    
+    Ns = flux.shape[0]; Npoly = monomials.shape[1]; Np = xpix.shape[0]; Ncont = continuum_coeffs.shape[0]
+    Nparams = psf_coeffs.shape[0]; Nsh = (Nparams + 2) * Npoly; Ntot = Ns + Nsh + Ncont; stamp_area = sx_g.shape[1]
+    
+    gh_all = jnp.dot(monomials, psf_coeffs.T); dx, dy = jnp.dot(monomials, trace_coeffs[0]), jnp.dot(monomials, trace_coeffs[1])
+    xc_all, yc_all = xc_init + dx, yc_init + dy
+    
+    batch_size = 2000; n_pad = batch_size - Ns
+    gh_p = jnp.pad(gh_all, ((0, n_pad), (0, 0))); xc_p, yc_p, f_p = jnp.pad(xc_all, (0, n_pad)), jnp.pad(yc_all, (0, n_pad)), jnp.pad(flux, (0, n_pad))
+    m_p = jnp.pad(monomials, ((0, n_pad), (0, 0))); sx_p = jnp.pad(sx_g, ((0, n_pad), (0, 0))); sy_p = jnp.pad(sy_g, ((0, n_pad), (0, 0)))
+    idx_p = jnp.pad(idx_gg, ((0, n_pad), (0, 0)), constant_values=Np); mask_p = jnp.arange(batch_size) < Ns
+
+    def get_all_grads(xi, yi, gi, si_x, si_y):
+        sigx = jnp.maximum(gi[0], 0.1); sigy = jnp.maximum(gi[1], 0.1)
+        isx = 1.0 / sigx; isy = 1.0 / sigy
+        x1 = (jnp.floor(si_x + 0.5) - xi - 0.5) * isx; x2 = (jnp.floor(si_x + 0.5) - xi + 0.5) * isx
+        y1 = (jnp.floor(si_y + 0.5) - yi - 0.5) * isy; y2 = (jnp.floor(si_y + 0.5) - yi + 0.5) * isy
+        isq2 = 1.0 / jnp.sqrt(2.0); isq2pi = 1.0 / jnp.sqrt(2.0 * jnp.pi)
+        gx1 = isq2pi * isx * jnp.exp(-0.5 * x1**2); gx2 = isq2pi * isx * jnp.exp(-0.5 * x2**2)
+        gy1 = isq2pi * isy * jnp.exp(-0.5 * y1**2); gy2 = isq2pi * isy * jnp.exp(-0.5 * y2**2)
+        ex = 0.5 * (jax.scipy.special.erf(x2 * isq2) - jax.scipy.special.erf(x1 * isq2))
+        ey = 0.5 * (jax.scipy.special.erf(y2 * isq2) - jax.scipy.special.erf(y1 * isq2))
+        
+        from .psf import hermite_pol_jnp
+        nx_p = degree + 1; ny_p = degree + 1
+        H1_u = jnp.stack([hermite_pol_jnp(n, x1) for n in range(nx_p)], axis=0)
+        H2_u = jnp.stack([hermite_pol_jnp(n, x2) for n in range(nx_p)], axis=0)
+        H1_v = jnp.stack([hermite_pol_jnp(n, y1) for n in range(ny_p)], axis=0)
+        H2_v = jnp.stack([hermite_pol_jnp(n, y2) for n in range(ny_p)], axis=0)
+        
+        def get_P(n, val, g1, g2, h1, h2, sig):
+            return jnp.where(n == 0, val, sig * (g1 * h1[n-1] - g2 * h2[n-1]))
+        
+        Bx = vmap(lambda n: get_P(n, ex, gx1, gx2, H1_u, H2_u, sigx))(jnp.arange(nx_p))
+        By = vmap(lambda n: get_P(n, ey, gy1, gy2, H1_v, H2_v, sigy))(jnp.arange(ny_p))
+        dexdsx = (x1 * gx1 - x2 * gx2); deydsy = (y1 * gy1 - y2 * gy2); dexdx = (gx1 - gx2); deydy = (gy1 - gy2)
+        
+        def get_dPds(n, g1, g2, h1, h2, x1, x2, val, dvalds, sig):
+            h1_m1 = h1[jnp.maximum(n-1, 0)]; h2_m1 = h2[jnp.maximum(n-1, 0)]
+            h1_m2 = h1[jnp.maximum(n-2, 0)]; h2_m2 = h2[jnp.maximum(n-2, 0)]
+            t1 = sig * g1 * h1_m1; t2 = sig * g2 * h2_m1
+            h_prime1 = (n-1)*h1_m2; h_prime2 = (n-1)*h2_m2
+            res = (-g1*x1*h_prime1 + g2*x2*h_prime2) + (t1*x1*x1/sig - t2*x2*x2/sig)
+            return jnp.where(n == 0, dvalds, res)
+
+        def get_dPdx(n, g1, g2, h1, h2, x1, x2, val, dvaldx, sig):
+            h1_m1 = h1[jnp.maximum(n-1, 0)]; h2_m1 = h2[jnp.maximum(n-1, 0)]
+            h1_m2 = h1[jnp.maximum(n-2, 0)]; h2_m2 = h2[jnp.maximum(n-2, 0)]
+            t1 = sig * g1 * h1_m1; t2 = sig * g2 * h2_m1
+            h_prime1 = (n-1)*h1_m2; h_prime2 = (n-1)*h2_m2
+            res = -1.0/sig * (sig*g1*h_prime1 - sig*g2*h_prime2 - x1*t1 + x2*t2)
+            return jnp.where(n == 0, dvaldx, res)
+
+        dBxdsx = vmap(lambda n: get_dPds(n, gx1, gx2, H1_u, H2_u, x1, x2, ex, dexdsx, sigx))(jnp.arange(nx_p))
+        dBydsy = vmap(lambda n: get_dPds(n, gy1, gy2, H1_v, H2_v, y1, y2, ey, deydsy, sigy))(jnp.arange(ny_p))
+        dBxdx = vmap(lambda n: get_dPdx(n, gx1, gx2, H1_u, H2_u, x1, x2, ex, dexdx, sigx))(jnp.arange(nx_p))
+        dBydy = vmap(lambda n: get_dPdx(n, gy1, gy2, H1_v, H2_v, y1, y2, ey, deydy, sigy))(jnp.arange(ny_p))
+
+        psf_v = By[0] * Bx[0]; basis_gh = []; k = 2
+        dsigx = dBxdsx[0] * By[0]; dsigy = Bx[0] * dBydsy[0]
+        dxc = dBxdx[0] * By[0]; dyc = Bx[0] * dBydy[0]
+        for j in range(ny_p):
+            bj = By[j]; dbjdsy = dBydsy[j]; dbjdy = dBydy[j]
+            imin = 1 if j == 0 else 0
+            for i in range(imin, nx_p):
+                bi = Bx[i]; dbidsx = dBxdsx[i]; dbidx = dBxdx[i]
+                term = bj * bi; psf_v += gi[k] * term; basis_gh.append(term)
+                dsigx += gi[k] * bj * dbidsx; dsigy += gi[k] * bi * dbjdsy
+                dxc += gi[k] * bj * dbidx; dyc += gi[k] * bi * dbjdy
+                k += 1
+        return psf_v, jnp.stack(basis_gh, axis=1), dsigx, dsigy, dxc, dyc
+
+    b_psf, b_gh_basis, b_jsigx, b_jsigy, b_jx, b_jy = vmap(get_all_grads)(xc_p, yc_p, gh_p, sx_p, sy_p)
+    bm = mask_p[:, jnp.newaxis]; b_psf *= bm
+    j_sx = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jsigx[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
+    j_sy = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jsigy[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
+    j_gh = (f_p[:, jnp.newaxis, jnp.newaxis, jnp.newaxis] * b_gh_basis[:, :, :, jnp.newaxis] * m_p[:, jnp.newaxis, jnp.newaxis, :]).reshape(batch_size, stamp_area, -1)
+    j_xc = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jx[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
+    j_yc = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jy[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
+    b_jac = jnp.concatenate([j_sx, j_sy, j_gh, j_xc, j_yc], axis=2) * bm[:, jnp.newaxis]
+
+    flat_idx = idx_p.flatten(); valid = flat_idx < Np
+    total_sig = jnp.zeros(Np + 1).at[flat_idx].add((b_psf * f_p[:, jnp.newaxis]).flatten())
+    from .math import legendre_pol_jnp
+    rw = 2 * (tw_g - wmin_c) / (wmax_c - wmin_c) - 1
+    m_cont = jnp.stack([legendre_pol_jnp(k, rw) for k in range(Ncont)], axis=0)
+    f_cont = jnp.tensordot(continuum_coeffs, m_cont, axes=([0], [0]))
+    striped_cont = jnp.sum(vmap(lambda fi: f_cont[fi] * jnp.exp(-0.5 * (xpix - tx_g[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0)
+    res = image_data - (total_sig[:Np] + striped_cont); chi2 = jnp.sum(weight_data * res**2)
+    h_cont = vmap(lambda k: jnp.sum(vmap(lambda fi: m_cont[k, fi] * jnp.exp(-0.5 * (xpix - tx_g[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0))(jnp.arange(Ncont)).T
+
+    b_res = jnp.where(valid, res[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
+    b_w = jnp.where(valid, weight_data[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area); wr = b_w * b_res
+    B = jnp.zeros(Ntot).at[:Ns].set(jnp.sum(wr * b_psf, axis=1)[:Ns]).at[Ns:Ns+Nsh].set(jnp.sum(jnp.sum(b_jac * wr[:, :, jnp.newaxis], axis=1), axis=0)).at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res))
+    A = jnp.zeros((Ntot, Ntot)).at[jnp.arange(Ns), jnp.arange(Ns)].set(jnp.sum(b_w * b_psf**2, axis=1)[:Ns])
+    A = A.at[Ns:Ns+Nsh, Ns:Ns+Nsh].set(jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_jac))
+    A_fs = jnp.einsum('bij,bi,bi->bj', b_jac, b_w, b_psf); A = A.at[Ns:Ns+Nsh, :Ns].set(A_fs[:Ns].T).at[:Ns, Ns:Ns+Nsh].set(A_fs[:Ns])
+    h_lookup = h_cont[jnp.where(valid, flat_idx, 0)]; b_hcont = jnp.where(valid[:, jnp.newaxis], h_lookup, 0.0).reshape(batch_size, stamp_area, Ncont)
+    A_fc = jnp.einsum('bi,bi,bik->bk', b_psf, b_w, b_hcont); A = A.at[:Ns, -Ncont:].set(A_fc[:Ns]).at[-Ncont:, :Ns].set(A_fc[:Ns].T)
+    A_sc = jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_hcont); A = A.at[Ns:Ns+Nsh, -Ncont:].set(A_sc).at[-Ncont:, Ns:Ns+Nsh].set(A_sc.T)
+    A = A.at[-Ncont:, -Ncont:].set(jnp.dot(h_cont.T * weight_data, h_cont))
+    return chi2, A[:Ns+Nsh+Ncont, :Ns+Nsh+Ncont], B[:Ns+Nsh+Ncont]
+
+_accumulate_bundle_jax_jit = jit(_accumulate_bundle_jax, static_argnums=(12,))
 
 def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
     nx, ny = weight.shape
@@ -107,217 +198,115 @@ def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
     return w_new
 
 def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
-    nx, ny = (4114, 4128)
+    t0 = time.time(); nx, ny = (4114, 4128)
     if weight is not None: nx, ny = weight.shape
     rows_j = np.arange(ny).astype(float)
     w1 = psf.fiber_traces[fiber_min]['Y_vs_W'].invert(rows_j); w2 = psf.fiber_traces[fiber_max]['Y_vs_W'].invert(rows_j)
     x1, x2 = psf.x_ccd(fiber_min, w1), psf.x_ccd(fiber_max, w2)
     xmin_env, xmax_env = np.floor(np.minimum(x1, x2) + 0.5).astype(int), np.floor(np.maximum(x1, x2) + 0.5).astype(int) + 1
-    pixels = set()
+    j_min_all = max(0, min(s['stamp_jmin'] for s in spots)); j_max_all = min(ny, max(s['stamp_jmax'] for s in spots))
+    i_min_all = max(0, min(s['stamp_imin'] for s in spots)); i_max_all = min(nx, max(s['stamp_imax'] for s in spots))
+    active_mask = np.zeros((i_max_all - i_min_all, j_max_all - j_min_all), dtype=bool)
     for s in spots:
-        j_min, j_max = max(0, s['stamp_jmin']), min(ny, s['stamp_jmax'])
-        for j in range(j_min, j_max):
-            i_s, i_e = max(s['stamp_imin'], xmin_env[j]), min(s['stamp_imax'], xmax_env[j])
-            for i in range(i_s, i_e):
-                if 0 <= i < nx and (weight is None or weight[i, j] > 0): pixels.add((i, j))
-    pixels = sorted(list(pixels)); pixels = np.array(pixels)
-    if not pixels.size: return np.array([]), np.array([]), {}
+        i0, i1 = max(i_min_all, s['stamp_imin']), min(i_max_all, s['stamp_imax'])
+        j0, j1 = max(j_min_all, s['stamp_jmin']), min(j_max_all, s['stamp_jmax'])
+        active_mask[i0 - i_min_all : i1 - i_min_all, j0 - j_min_all : j1 - j_min_all] = True
+    ii, jj = np.where(active_mask); global_i, global_j = ii + i_min_all, jj + j_min_all
+    valid_env = (global_i >= xmin_env[global_j]) & (global_i < xmax_env[global_j])
+    if weight is not None:
+        valid_weight = weight[global_i[valid_env], global_j[valid_env]] > 0
+        fi, fj = global_i[valid_env][valid_weight], global_j[valid_env][valid_weight]
+    else: fi, fj = global_i[valid_env], global_j[valid_env]
+    pixels = np.stack([fi, fj], axis=1); pixels = pixels[np.lexsort((pixels[:, 1], pixels[:, 0]))]
+    print(f"  Footprint generation took {time.time() - t0:.2f}s ({len(pixels)} pixels)", flush=True)
     return pixels[:, 0], pixels[:, 1], {(p[0], p[1]): i for i, p in enumerate(pixels)}
 
-# --- High-Performance Hybrid GPU Driver ---
-
-def accumulate_bundle_gpu_jnp(flux, psf_coeffs, trace_coeffs, continuum_coeffs, 
-                             xc_init, yc_init, monomials, 
-                             image_data, weight_data, xpix, ypix, degree,
-                             stamps_x, stamps_y, stamp_indices,
-                             trace_x_vals, trace_w_vals, wmin_cont, wmax_cont):
-    import jax
+def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None, 
+                     sn_threshold=3.15, min_dist_angstrom=0.0, wave_min=None, wave_max=None,
+                     broken_fibers=None):
     import jax.numpy as jnp
-    from jax import jit, vmap, lax
-    from functools import partial
-    
-    @partial(jit, static_argnums=(11, 17, 18))
-    def _accumulate(flux, psf_coeffs, trace_coeffs, continuum_coeffs, 
-                    xc_init, yc_init, monomials, 
-                    image_data, weight_data, xpix, ypix, degree,
-                    stamps_x, stamps_y, stamp_indices,
-                    trace_x_vals, trace_w_vals, wmin_cont, wmax_cont):
-        Ns = flux.shape[0]; Npoly = monomials.shape[1]; Nparams = psf_coeffs.shape[0]; Ncont = continuum_coeffs.shape[0]
-        Np = xpix.shape[0]; Nsh = (Nparams + 2) * Npoly; Ntot = Ns + Nsh + Ncont; stamp_area = stamps_x.shape[1]
-        
-        gh_all = jnp.dot(monomials, psf_coeffs.T); dx, dy = jnp.dot(monomials, trace_coeffs[0]), jnp.dot(monomials, trace_coeffs[1])
-        xc_all, yc_all = xc_init + dx, yc_init + dy
-        
-        batch_size = 2000; n_pad = batch_size - Ns
-        gh_p = jnp.pad(gh_all, ((0, n_pad), (0, 0))); xc_p, yc_p, f_p = jnp.pad(xc_all, (0, n_pad)), jnp.pad(yc_all, (0, n_pad)), jnp.pad(flux, (0, n_pad))
-        m_p = jnp.pad(monomials, ((0, n_pad), (0, 0))); sx_p = jnp.pad(stamps_x, ((0, n_pad), (0, 0))); sy_p = jnp.pad(stamps_y, ((0, n_pad), (0, 0)))
-        idx_p = jnp.pad(stamp_indices, ((0, n_pad), (0, 0)), constant_values=Np); mask_p = jnp.arange(batch_size) < Ns
+    t0 = time.time(); lines_sc = [l for l in lamp_lines if 1 <= l.get('score', 1) <= 4]
+    broken_list = []
+    if broken_fibers:
+        if isinstance(broken_fibers, str): broken_list = [int(f) for f in broken_fibers.split(",") if f.strip()]
+        else: broken_list = list(broken_fibers)
+    nx, ny = (4114, 4128)
+    if image is not None: nx, ny = image.shape
+    candidates = []
+    for fiber in range(fiber_min, fiber_max + 1):
+        if fiber in broken_list or fiber not in psf.fiber_traces: continue
+        for line in lines_sc:
+            wave = line['wave']; xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
+            if 0 <= xc < nx and -4 <= yc < ny + 4:
+                candidates.append({'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc})
+    if not candidates: return []
+    Ns = len(candidates)
+    if image is not None:
+        c_xc = jnp.array([s['xc_init'] for s in candidates]); c_yc = jnp.array([s['yc_init'] for s in candidates])
+        gh_all = jnp.array([psf.gh_params(s['fiber'], s['wave']) for s in candidates])
+        fluxes, snrs, chi2s = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, psf.h_size_x, psf.h_size_y)
+        fluxes, snrs, chi2s = np.array(fluxes), np.array(snrs), np.array(chi2s); nsig = 4.0; waves = np.array([s['wave'] for s in candidates])
+        for i in range(Ns):
+            if chi2s[i] > 1e9: continue
+            mask = (np.abs(waves - waves[i]) < 1.0); mask[i] = False
+            if np.sum(mask) >= 2:
+                m_c2 = np.mean(chi2s[mask]); rms_c2 = np.std(chi2s[mask])
+                if chi2s[i] > (m_c2 + nsig * rms_c2): snrs[i] = -2.0
+        selected = []
+        for i in range(Ns):
+            if snrs[i] < sn_threshold: continue
+            s = candidates[i]; s.update({'flux': float(fluxes[i]), 'snr': float(snrs[i]), 'chi2': float(chi2s[i]), 'stamp_imin': int(np.floor(s['xc_init'] + 0.5)) - psf.h_size_x, 'stamp_imax': int(np.floor(s['xc_init'] + 0.5)) + psf.h_size_x + 1, 'stamp_jmin': int(np.floor(s['yc_init'] + 0.5)) - psf.h_size_y, 'stamp_jmax': int(np.floor(s['yc_init'] + 0.5)) + psf.h_size_y + 1})
+            selected.append(s)
+        print(f"  Spot selection took {time.time() - t0:.2f}s ({len(selected)} spots)", flush=True)
+        return selected
+    return candidates
 
-        # 1. ANALYTICAL BASIS and ALL DERIVATIVES
-        def get_all_grads(xi, yi, gi, si_x, si_y):
-            # Basis terms
-            sigx = jnp.maximum(gi[0], 0.1); sigy = jnp.maximum(gi[1], 0.1)
-            isx = 1.0 / sigx; isy = 1.0 / sigy
-            x1 = (jnp.floor(si_x + 0.5) - xi - 0.5) * isx; x2 = (jnp.floor(si_x + 0.5) - xi + 0.5) * isx
-            y1 = (jnp.floor(si_y + 0.5) - yi - 0.5) * isy; y2 = (jnp.floor(si_y + 0.5) - yi + 0.5) * isy
-            isq2 = 1.0 / jnp.sqrt(2.0); isq2pi = 1.0 / jnp.sqrt(2.0 * jnp.pi)
-            gx1 = isq2pi * isx * jnp.exp(-0.5 * x1**2); gx2 = isq2pi * isx * jnp.exp(-0.5 * x2**2)
-            gy1 = isq2pi * isy * jnp.exp(-0.5 * y1**2); gy2 = isq2pi * isy * jnp.exp(-0.5 * y2**2)
-            ex = 0.5 * (jax.scipy.special.erf(x2 * isq2) - jax.scipy.special.erf(x1 * isq2))
-            ey = 0.5 * (jax.scipy.special.erf(y2 * isq2) - jax.scipy.special.erf(y1 * isq2))
-            
-            # Basis derivatives wrt reduced coordinates
-            from .psf import hermite_pol_jnp
-            nx_p = degree + 1; ny_p = degree + 1
-            H1_u = jnp.stack([hermite_pol_jnp(n, x1) for n in range(nx_p)], axis=0)
-            H2_u = jnp.stack([hermite_pol_jnp(n, x2) for n in range(nx_p)], axis=0)
-            H1_v = jnp.stack([hermite_pol_jnp(n, y1) for n in range(ny_p)], axis=0)
-            H2_v = jnp.stack([hermite_pol_jnp(n, y2) for n in range(ny_p)], axis=0)
-            
-            def get_P(n, val, g1, g2, h1, h2, sig):
-                return jnp.where(n == 0, val, sig * (g1 * h1[n-1] - g2 * h2[n-1]))
-            
-            Bx = vmap(lambda n: get_P(n, ex, gx1, gx2, H1_u, H2_u, sigx))(jnp.arange(nx_p))
-            By = vmap(lambda n: get_P(n, ey, gy1, gy2, H1_v, H2_v, sigy))(jnp.arange(ny_p))
-            
-            # Derivatives wrt sigma and position (analytical)
-            dexdsx = (x1 * gx1 - x2 * gx2); deydsy = (y1 * gy1 - y2 * gy2)
-            dexdx = (gx1 - gx2); deydy = (gy1 - gy2)
-            
-            def get_dPds(n, g1, g2, h1, h2, x1, x2, val, dvalds, sig):
-                h1_m1 = h1[jnp.maximum(n-1, 0)]; h2_m1 = h2[jnp.maximum(n-1, 0)]
-                h1_m2 = h1[jnp.maximum(n-2, 0)]; h2_m2 = h2[jnp.maximum(n-2, 0)]
-                t1 = sig * g1 * h1_m1; t2 = sig * g2 * h2_m1
-                h_prime1 = (n-1)*h1_m2; h_prime2 = (n-1)*h2_m2
-                res = (-g1*x1*h_prime1 + g2*x2*h_prime2) + (t1*x1*x1/sig - t2*x2*x2/sig)
-                return jnp.where(n == 0, dvalds, res)
-
-            def get_dPdx(n, g1, g2, h1, h2, x1, x2, val, dvaldx, sig):
-                h1_m1 = h1[jnp.maximum(n-1, 0)]; h2_m1 = h2[jnp.maximum(n-1, 0)]
-                h1_m2 = h1[jnp.maximum(n-2, 0)]; h2_m2 = h2[jnp.maximum(n-2, 0)]
-                t1 = sig * g1 * h1_m1; t2 = sig * g2 * h2_m1
-                h_prime1 = (n-1)*h1_m2; h_prime2 = (n-1)*h2_m2
-                res = -1.0/sig * (sig*g1*h_prime1 - sig*g2*h_prime2 - x1*t1 + x2*t2)
-                return jnp.where(n == 0, dvaldx, res)
-
-            dBxdsx = vmap(lambda n: get_dPds(n, gx1, gx2, H1_u, H2_u, x1, x2, ex, dexdsx, sigx))(jnp.arange(nx_p))
-            dBydsy = vmap(lambda n: get_dPds(n, gy1, gy2, H1_v, H2_v, y1, y2, ey, deydsy, sigy))(jnp.arange(ny_p))
-            dBxdx = vmap(lambda n: get_dPdx(n, gx1, gx2, H1_u, H2_u, x1, x2, ex, dexdx, sigx))(jnp.arange(nx_p))
-            dBydy = vmap(lambda n: get_dPdx(n, gy1, gy2, H1_v, H2_v, y1, y2, ey, deydy, sigy))(jnp.arange(ny_p))
-
-            psf_v = By[0] * Bx[0]; basis_gh = []; k = 2
-            dsigx = dBxdsx[0] * By[0]; dsigy = Bx[0] * dBydsy[0]
-            dxc = dBxdx[0] * By[0]; dyc = Bx[0] * dBydy[0]
-            
-            for j in range(ny_p):
-                bj = By[j]; dbjdsy = dBydsy[j]; dbjdy = dBydy[j]
-                imin = 1 if j == 0 else 0
-                for i in range(imin, nx_p):
-                    bi = Bx[i]; dbidsx = dBxdsx[i]; dbidx = dBxdx[i]
-                    term = bj * bi; psf_v += gi[k] * term; basis_gh.append(term)
-                    dsigx += gi[k] * bj * dbidsx; dsigy += gi[k] * bi * dbjdsy
-                    dxc += gi[k] * bj * dbidx; dyc += gi[k] * bi * dbjdy
-                    k += 1
-            return psf_v, jnp.stack(basis_gh, axis=1), dsigx, dsigy, dxc, dyc
-
-        b_psf, b_gh_basis, b_jsigx, b_jsigy, b_jx, b_jy = vmap(get_all_grads)(xc_p, yc_p, gh_p, sx_p, sy_p)
-        
-        # Reconstruct Jacobian components
-        bm = mask_p[:, jnp.newaxis]; b_psf *= bm
-        
-        # [SIGX, SIGY, GH_2...GH_N, XC, YC]
-        j_sx = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jsigx[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-        j_sy = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jsigy[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-        j_gh = (f_p[:, jnp.newaxis, jnp.newaxis, jnp.newaxis] * b_gh_basis[:, :, :, jnp.newaxis] * m_p[:, jnp.newaxis, jnp.newaxis, :]).reshape(batch_size, stamp_area, -1)
-        j_xc = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jx[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-        j_yc = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jy[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-        
-        b_jac = jnp.concatenate([j_sx, j_sy, j_gh, j_xc, j_yc], axis=2) * bm[:, jnp.newaxis]
-
-        flat_idx = idx_p.flatten(); valid = flat_idx < Np
-        total_sig = jnp.zeros(Np + 1).at[flat_idx].add((b_psf * f_p[:, jnp.newaxis]).flatten())
-        
-        from .math import legendre_pol_jnp
-        rw = 2 * (trace_w_vals - wmin_cont) / (wmax_cont - wmin_cont) - 1
-        m_cont = jnp.stack([legendre_pol_jnp(k, rw) for k in range(Ncont)], axis=0)
-        f_cont = jnp.tensordot(continuum_coeffs, m_cont, axes=([0], [0]))
-        striped_cont = jnp.sum(vmap(lambda fi: f_cont[fi] * jnp.exp(-0.5 * (xpix - trace_x_vals[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0)
-        res = image_data - (total_sig[:Np] + striped_cont); chi2 = jnp.sum(weight_data * res**2)
-        h_cont = vmap(lambda k: jnp.sum(vmap(lambda fi: m_cont[k, fi] * jnp.exp(-0.5 * (xpix - trace_x_vals[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0))(jnp.arange(Ncont)).T
-
-        b_res = jnp.where(valid, res[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
-        b_w = jnp.where(valid, weight_data[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
-        wr = b_w * b_res
-        
-        B = jnp.zeros(Ntot).at[:Ns].set(jnp.sum(wr * b_psf, axis=1)[:Ns]).at[Ns:Ns+Nsh].set(jnp.sum(jnp.sum(b_jac * wr[:, :, jnp.newaxis], axis=1), axis=0)).at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res))
-        A = jnp.zeros((Ntot, Ntot)).at[jnp.arange(Ns), jnp.arange(Ns)].set(jnp.sum(b_w * b_psf**2, axis=1)[:Ns])
-        A = A.at[Ns:Ns+Nsh, Ns:Ns+Nsh].set(jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_jac))
-        A_fs = jnp.einsum('bij,bi,bi->bj', b_jac, b_w, b_psf); A = A.at[Ns:Ns+Nsh, :Ns].set(A_fs[:Ns].T).at[:Ns, Ns:Ns+Nsh].set(A_fs[:Ns])
-        h_lookup = h_cont[jnp.where(valid, flat_idx, 0)]; b_hcont = jnp.where(valid[:, jnp.newaxis], h_lookup, 0.0).reshape(batch_size, stamp_area, Ncont)
-        A_fc = jnp.einsum('bi,bi,bik->bk', b_psf, b_w, b_hcont); A = A.at[:Ns, -Ncont:].set(A_fc[:Ns]).at[-Ncont:, :Ns].set(A_fc[:Ns].T)
-        A_sc = jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_hcont); A = A.at[Ns:Ns+Nsh, -Ncont:].set(A_sc).at[-Ncont:, Ns:Ns+Nsh].set(A_sc.T)
-        A = A.at[-Ncont:, -Ncont:].set(jnp.dot(h_cont.T * weight_data, h_cont))
-        return chi2, A[:Ns+Nsh+Ncont, :Ns+Nsh+Ncont], B[:Ns+Nsh+Ncont], None
-
-    return _accumulate(flux, psf_coeffs, trace_coeffs, continuum_coeffs, xc_init, yc_init, monomials, image_data, weight_data, xpix, ypix, degree, stamps_x, stamps_y, stamp_indices, trace_x_vals, trace_w_vals, wmin_cont, wmax_cont)
+def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsize_x, hsize_y):
+    import jax.numpy as jnp
+    from jax import vmap, jit
+    nx, ny = image.shape; area = (2*hsize_x+1)*(2*hsize_y+1)
+    ix_rel, iy_rel = jnp.meshgrid(jnp.arange(2*hsize_x+1), jnp.arange(2*hsize_y+1), indexing='ij')
+    dx = ix_rel.flatten() - hsize_x; dy = iy_rel.flatten() - hsize_y
+    def spot_stats(xc, yc, gh):
+        im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int); gix = im + dx; giy = jm + dy
+        valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
+        p_val = GaussHermitePSF.single_pix_value_jnp(xc, yc, gix, giy, gh, degree)
+        p_val = jnp.where(valid, p_val, 0.0); d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]; w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]; w_val = jnp.where(valid, w_val, 0.0)
+        A = jnp.sum(w_val * p_val**2); B = jnp.sum(w_val * d_val * p_val); flux = jnp.where(A > 0, B/A, 0.0); snr = jnp.where(A > 0, flux / jnp.sqrt(1.0/A), -1.0); chi2 = jnp.sum(w_val * (d_val - flux * p_val)**2)
+        return flux, snr, chi2
+    return jit(vmap(spot_stats))(cand_xc, cand_yc, gh_params)
 
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 10.0
     def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=15):
         import jax.numpy as jnp
-        from jax import jit, vmap
-        print(f"Starting HIGH-PERFORMANCE OPTIMIZED COUPLED GPU fit for bundle {bundle_id}...")
-        weight = apply_dead_column_mask(self.psf, spots[0]['fiber'], spots[-1]['fiber'], weight)
+        print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
         fmin, fmax = spots[0]['fiber'], spots[-1]['fiber']
+        weight = apply_dead_column_mask(self.psf, fmin, fmax, weight)
         xpix, ypix, pix_idx = get_bundle_footprint(self.psf, spots, fmin, fmax, weight)
         Np = len(xpix); area = (2*self.psf.h_size_x+1)*(2*self.psf.h_size_y+1); Ns = len(spots)
-        sx, sy = np.zeros((Ns, area)), np.zeros((Ns, area)); idx_g = np.full((Ns, area), Np, dtype=np.int32)
+        t0 = time.time(); sx, sy = np.zeros((Ns, area)), np.zeros((Ns, area)); idx_g = np.full((Ns, area), Np, dtype=np.int32)
+        nx, ny = image.shape; idx_map = np.full((nx, ny), -1, dtype=np.int32); idx_map[xpix, ypix] = np.arange(Np)
         for s_i, s in enumerate(spots):
-            k = 0
-            for j in range(s['stamp_jmin'], s['stamp_jmax']):
-                for i in range(s['stamp_imin'], s['stamp_imax']):
-                    sx[s_i, k], sy[s_i, k] = i, j
-                    if (i, j) in pix_idx: idx_g[s_i, k] = pix_idx[(i, j)]
-                    k += 1
+            ix, iy = np.meshgrid(np.arange(s['stamp_imin'], s['stamp_imax']), np.arange(s['stamp_jmin'], s['stamp_jmax']), indexing='ij')
+            sx[s_i], sy[s_i] = ix.flatten(), iy.flatten(); st_idx = idx_map[ix.astype(int), iy.astype(int)].flatten(); mask = st_idx >= 0; idx_g[s_i, mask] = st_idx[mask]
+        print(f"  Stamp indexing took {time.time() - t0:.2f}s", flush=True)
         rows_u = np.unique(ypix); row_m = {j: i for i, j in enumerate(rows_u)}
         tx_j, tw_j = np.zeros((25, len(rows_u))), np.zeros((25, len(rows_u)))
         for f_i in range(25):
-            fib = fmin + f_i; w_v = self.psf.fiber_traces[fib]['Y_vs_W'].invert(rows_u.astype(float))
-            tw_j[f_i], tx_j[f_i] = w_v, self.psf.x_ccd(fib, w_v)
+            fib = fmin + f_i; w_v = self.psf.fiber_traces[fib]['Y_vs_W'].invert(rows_u.astype(float)); tw_j[f_i], tx_j[f_i] = w_v, self.psf.x_ccd(fib, w_v)
         ix_r = np.array([row_m[j] for j in ypix]); tx_g, tw_g = jnp.array(tx_j[:, ix_r]), jnp.array(tw_j[:, ix_r])
         flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
         monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots)
-        gh_deg = self.psf.gh_psf.degree
-        n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
+        gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
         pc = jnp.zeros((n_gh + 2, monomials.shape[1])).at[0, 0].set(1.1).at[1, 0].set(1.1)
         tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont) 
         img_d, w_d = jnp.array(image[xpix, ypix]), jnp.array(weight[xpix, ypix])
         wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
-        @jit
-        def get_chi2(f, p, t, c):
-            Ns_l = f.shape[0]; gh_all = jnp.dot(monomials, p.T); dx, dy = jnp.dot(monomials, t[0]), jnp.dot(monomials, t[1]); xc_all, yc_all = xc_init + dx, yc_init + dy
-            def spot_sig(i):
-                Bx, By = GaussHermitePSF.get_gh_basis(xc_all[i], yc_all[i], sx_g[i], sy_g[i], gh_all[i], gh_deg)
-                psf_v = By[0] * Bx[0] 
-                nx_p, ny_p = gh_deg + 1, gh_deg + 1
-                k = 2
-                for j_p in range(ny_p):
-                    bj = By[j_p]
-                    imin_p = 1 if j_p == 0 else 0
-                    for i_p in range(imin_p, nx_p):
-                        psf_v += gh_all[i, k] * bj * Bx[i_p]; k += 1
-                return psf_v
-            unit_sigs = vmap(spot_sig)(jnp.arange(Ns_l))
-            tsig_p = jnp.zeros(Np + 1).at[idx_gg.flatten()].add((unit_sigs * f[:, jnp.newaxis]).flatten())
-            from .math import legendre_pol_jnp
-            rw = 2 * (tw_g - wmin_c) / (wmax_c - wmin_c) - 1
-            m_c = jnp.stack([legendre_pol_jnp(k, rw) for k in range(Ncont)], axis=0); f_c = jnp.tensordot(c, m_c, axes=([0], [0]))
-            striped_cont = jnp.sum(vmap(lambda fi: f_c[fi] * jnp.exp(-0.5 * (xpix - tx_g[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0)
-            total_sig = tsig_p[:Np] + striped_cont; return jnp.sum(w_d * (img_d - total_sig)**2)
         for i in range(max_iter):
-            chi2, A, B, _ = accumulate_bundle_gpu_jnp(flux, pc, tc, cc, xc_init, yc_init, monomials, img_d, w_d, jnp.array(xpix), jnp.array(ypix), gh_deg, sx_g, sy_g, idx_gg, tx_g, tw_g, wmin_c, wmax_c)
+            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
             mode = 'flux' if i < 2 else 'trace' if i < 5 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]", flush=True)
             Npoly = monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly
@@ -325,15 +314,17 @@ class PSF_Fitter:
             elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             else: idx = jnp.arange(A.shape[0])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
-            A_reg = (A_sub / jnp.outer(S, S)) + 1e-4 * jnp.eye(A_sub.shape[0]); ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
+            A_reg = (A_sub / jnp.outer(S, S)) + 1e-4 * jnp.eye(A_sub.shape[0])
+            try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
+            except: d_p = jnp.zeros(A.shape[0])
             best_alpha, best_chi2 = 0.0, float(chi2)
-            for alpha in [0.2, 0.5, 1.0, 1.5]:
-                f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); c_try = cc + alpha * d_p[-Ncont:]; c2 = get_chi2(f_try, p_try, t_try, c_try)
-                if c2 < best_chi2: best_alpha, best_chi2 = alpha, c2
-            if best_alpha == 0: 
-                if i > 5: break
-                best_alpha = 0.1
+            if jnp.any(d_p != 0):
+                for alpha in [0.2, 0.5, 1.0]:
+                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+                    if c2 < best_chi2: best_alpha, best_chi2 = alpha, c2
+            if best_alpha == 0 and i > 5: break
+            if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); cc = cc + best_alpha * d_p[-Ncont:]
             if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
             old_chi2 = chi2
-        return float(old_chi2), np.array(pc), np.array(tc), np.array(cc)
+        return float(old_chi2), np.array(pc), np.array(tc), np.array(cc), np.array(flux)
