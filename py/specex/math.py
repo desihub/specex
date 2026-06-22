@@ -81,6 +81,32 @@ class Legendre1DPol:
         m = self.monomials(x)
         return jnp.dot(self.coeff, m)
 
+    def derivative(self, x):
+        """
+        Calculates the first derivative of the Legendre polynomial at x.
+        """
+        rx = 2 * (x - self.xmin) / (self.xmax - self.xmin) - 1
+        drx_dx = 2.0 / (self.xmax - self.xmin)
+        
+        # dP_n/dx = drx/dx * dP_n/drx
+        # For Legendre: (1-x^2) P'_n(x) = n(P_{n-1}(x) - x P_n(x))
+        # But it's easier to just use the recurrence for derivatives:
+        # P'_n(x) = x P'_{n-1}(x) + n P_{n-1}(x)
+        
+        p_prev2 = jnp.ones_like(rx); p_prev = rx
+        d_prev2 = jnp.zeros_like(rx); d_prev = jnp.ones_like(rx)
+        
+        derivs = [jnp.zeros_like(rx), jnp.ones_like(rx)]
+        for i in range(2, self.deg + 1):
+            p_curr = ((2 * i - 1) * rx * p_prev - (i - 1) * p_prev2) / i
+            d_curr = d_prev2 + (2 * i - 1) * p_prev
+            derivs.append(d_curr)
+            p_prev2 = p_prev; p_prev = p_curr
+            d_prev2 = d_prev; d_prev = d_curr
+            
+        d_monomials = jnp.stack(derivs[:self.deg+1], axis=0)
+        return jnp.dot(self.coeff, d_monomials) * drx_dx
+
     def invert(self, y):
         """
         Robust inversion of the polynomial using a fine-grid lookup.
