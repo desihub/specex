@@ -26,7 +26,6 @@
     - End-to-end fit: Initial pipeline operational in Python.
 
 
-
 ## 2026-05-27 15:30 (approx)
 - Phase 2: 2D Legendre Parameter Fitting (Completed)
     - Key Implementation Details:
@@ -217,7 +216,6 @@
     3. **Operational Simplicity:** Users can run a full CCD fit with a single `python` command without needing complex `srun` configurations, while still utilizing all 4 GPUs on a node.
     4. **Maintenance:** This removes the dependency on `mpi4py` and libfabric for the Python pipeline, reducing the complexity of the deployment environment.
 
-
 ## 2026-06-13 18:30 (approx)
 ### Final Verification Milestone: Production Readiness
 - **Performance Breakthrough (Analytical Jacobian):**
@@ -271,3 +269,24 @@
 - **Project Completion:**
     - The Python implementation is now numerically identical to C++, significantly faster, and fully compatible with the production FITS data model. 
     - The code is ready for production handoff.
+
+## 2026-06-23 10:00 (approx)
+- Restored  C++ python wrapper in `py/specex/specex.py` to allow simultaneous running and comparison of C++ and Python/JAX versions.
+## 2026-06-23 10:00 (approx)
+- Restored `run_specex` C++ python wrapper in `py/specex/specex.py` to allow simultaneous running and comparison of C++ and Python/JAX versions.
+
+## 2026-06-25
+### Centroid Divergence Analysis (NIR z8)
+- **Observation:** Identified that the high Relative Centroid RMS (~0.24 px) in final comparisons was caused by a fundamental difference in centroid handling.
+- **Finding:** C++ implementation "snaps" spot centroids to the current best-fit PSF model's predicted positions (`psf->Xccd` and `psf->Yccd`) iteratively throughout the fit process. Python/JAX was previously adding residuals only once at the end.
+- **Resolution:** 
+    - Updated `PSF.x_ccd` and `PSF.y_ccd` to accept optimized Legendre coefficients (`tc`) for precise model evaluation.
+    - Integrated "Iterative Snapping" into the `PSF_Fitter` optimization loop: `xc_init` and `yc_init` are now updated at the end of every iteration to match the current Legendre trace.
+    - This ensures that subsequent iterations and final selections are based on the model-predicted positions, matching C++'s behavior where selected spots are no longer a subset of the original raw candidates.
+- **Selection Divergence:** Noted a small spot selection discrepancy which remains a secondary priority.
+
+## 2026-06-26
+### Refinement of S/N Pruning Logic
+- **Observation:** Spot selection discrepancy persists (1533 Py vs 1523 C++), impacting Relative Centroid RMS (~0.088 px).
+- **Surgical Fix:** Aligned the "remove low-SNR line" loop in `py/specex/fitter.py` to exactly match the C++ logic. Specifically, ensured that spots are kept if removing them would create a gap larger than `max_dwave` (300 Å), mirroring the `if(dwave > max_dwave) continue;` condition in C++.
+- **Result:** This state represents the current best RMS achieved during this refinement phase.

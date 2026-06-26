@@ -1,0 +1,32 @@
+# Specex Porting: Data Summary (2026-06-08)
+
+This file summarizes the validation datasets and metrics captured during today's GPU session.
+
+## Verified Test Cases
+- **Exposure ID:** 00344649
+- **Night:** 20260401
+- **Target Bundle:** 5 (Fibers 125-149)
+
+### Quantitative Comparison (Bundle 5)
+| Camera | Mode | Time (s) | Chi2 | Spots | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **b0** | C++ Baseline | 137.8 | 70,215.1 | 720 | Production Reference |
+| **b0** | Python JAX-GPU| 31.3 | 40,815.5 | 448 | Lower Chi2 (Fewer Spots) |
+| **r3** | C++ Baseline | 138.6 | 224,103.2 | 1370| Reference |
+| **z8** | C++ Baseline | 411.0 | 141,882.0 | 1141| Reference |
+| **z8** | Python JAX-GPU| 17.6 | 136,612.2 | 1141| Final Parity Achieved |
+
+## Physical Precision (Python vs C++)
+- **Wavelength RMS (b0):** 0.18 pixels
+- **Trace Consistency:** Within 0.02 pixels for NIR arm.
+- **Backend Parity:** Verified that Python CPU and GPU produce identical results (to 12+ decimal places).
+
+## Remaining Alignment Tasks
+1. **Spot Selection Logic:** Python is currently selecting ~30% fewer spots than C++ on the Blue arm due to stricter S/N and neighbor distance filtering. This explains the lower total Chi2 in the Python runs.
+2. **Red Arm Coupled Fit:** The Red arm fit is stable but requires more iterations than Blue/NIR to reach full parity.
+3. **Continuum Coupling:** The Striped Continuum model is now fully integrated into the Jacobian but requires fine-tuning of the regularization to match C++ baseline backgrounds perfectly.
+
+## Files Preserved
+- `fit_cpp_b0_b5.fits`: Final C++ baseline for Blue arm.
+- `fit_py_gpu_b0_b5.fits`: Final Python GPU fit for Blue arm.
+- `instrumentation_analysis.txt`: Log of timing and numerical metrics.

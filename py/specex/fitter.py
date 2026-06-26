@@ -222,8 +222,8 @@ def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
     return pixels[:, 0], pixels[:, 1], {(p[0], p[1]): i for i, p in enumerate(pixels)}
 
 def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None, 
-                     sn_threshold=3.15, min_dist_angstrom=0.0, wave_min=None, wave_max=None,
-                     broken_fibers=None):
+                      sn_threshold=3.0, min_dist_angstrom=0.0, wave_min=None, wave_max=None,
+                      broken_fibers=None, max_number_of_lines=100, provided_candidates=None):
     import jax.numpy as jnp
     t0 = time.time(); lines_sc = [l for l in lamp_lines if 1 <= l.get('score', 1) <= 4]
     broken_list = []
@@ -232,34 +232,201 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
         else: broken_list = list(broken_fibers)
     nx, ny = (4114, 4128)
     if image is not None: nx, ny = image.shape
-    candidates = []
-    for fiber in range(fiber_min, fiber_max + 1):
-        if fiber in broken_list or fiber not in psf.fiber_traces: continue
-        for line in lines_sc:
-            wave = line['wave']; xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
-            if 0 <= xc < nx and -4 <= yc < ny + 4:
-                candidates.append({'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc})
+    
+    if provided_candidates is not None:
+        candidates = provided_candidates
+    else:
+        candidates = []
+        for fiber in range(fiber_min, fiber_max + 1):
+            if fiber in broken_list or fiber not in psf.fiber_traces: continue
+            for line in lines_sc:
+                wave = line['wave']; xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
+                if 0 <= xc < nx and -4 <= yc < ny + 4:
+                    candidates.append({'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc})
+    
+    print(f"PYTHON SPOT SELECTION: Starting first pass. Initial candidates: {len(candidates)}", flush=True)
+
     if not candidates: return []
+
+    if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+        raw_path = psf.output_psf_path.replace('.fits', '.pyrawspots.txt')
+        with open(raw_path, 'w') as f:
+            for s in candidates:
+                f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
+        print(f"  Written {len(candidates)} raw candidates to {raw_path}", flush=True)
+
     Ns = len(candidates)
     if image is not None:
         c_xc = jnp.array([s['xc_init'] for s in candidates]); c_yc = jnp.array([s['yc_init'] for s in candidates])
         gh_all = jnp.array([psf.gh_params(s['fiber'], s['wave']) for s in candidates])
         fluxes, snrs, chi2s = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, psf.h_size_x, psf.h_size_y)
-        fluxes, snrs, chi2s = np.array(fluxes), np.array(snrs), np.array(chi2s); nsig = 4.0; waves = np.array([s['wave'] for s in candidates])
+        fluxes, snrs, chi2s = np.array(fluxes), np.array(snrs), np.array(chi2s); waves = np.array([s['wave'] for s in candidates])
+        
+        # C++ Logic: 5x5 Zero-Weight Check (Strict Flux Measurement)
+        # Spots are ignored if > 5 pixels in a 5x5 center window have zero weight.
+        weight_np = np.array(weight)
+        nx, ny = weight_np.shape
+        can_measure_flux = np.ones(Ns, dtype=bool)
         for i in range(Ns):
-            if chi2s[i] > 1e9: continue
-            mask = (np.abs(waves - waves[i]) < 1.0); mask[i] = False
+            c_x, c_y = int(np.floor(c_xc[i] + 0.5)), int(np.floor(c_yc[i] + 0.5))
+            i_start, i_end = max(0, c_x - 2), min(nx, c_x + 3)
+            j_start, j_end = max(0, c_y - 2), min(ny, c_y + 3)
+            window = weight_np[i_start:i_end, j_start:j_end]
+            if np.sum(window == 0) > 5:
+                can_measure_flux[i] = False
+        
+        # C++ Logic: Chi2 masking per wavelength (compare_spots_chi2_and_mask)
+        status = np.ones(Ns, dtype=int)
+        status[~can_measure_flux] = 0
+        unique_waves = np.unique(waves)
+        for uw in unique_waves:
+            mask = np.abs(waves - uw) < 1.0
             if np.sum(mask) >= 2:
-                m_c2 = np.mean(chi2s[mask]); rms_c2 = np.std(chi2s[mask])
-                if chi2s[i] > (m_c2 + nsig * rms_c2): snrs[i] = -2.0
+                w_chi2 = chi2s[mask]
+                m_chi2 = np.mean(w_chi2); std_chi2 = np.std(w_chi2)
+                if std_chi2 > 0:
+                    outliers = mask & (chi2s > (m_chi2 + 4.0 * std_chi2))
+                    status[outliers] = 0
+        
+        # First selection pass (S/N, Image Bounds, Distance)
+        first_pass_count = 0
+        for i in range(Ns):
+            if status[i] == 0: continue
+            if snrs[i] < sn_threshold: status[i] = 0; continue
+            # Distance check: C++ checks distance against all input_spots for the SAME fiber
+            if min_dist_angstrom > 0:
+                dist = 1000.0
+                for j in range(Ns):
+                    if i == j: continue
+                    if candidates[j]['fiber'] != candidates[i]['fiber']: continue
+                    # C++ does NOT check if candidates[j] is masked here, it uses all input_spots
+                    dist = min(dist, abs(waves[j] - waves[i]))
+                if dist < min_dist_angstrom:
+                    status[i] = 0
+            if status[i] == 1: first_pass_count += 1
+        
+        # CHECKPOINT 1: Post-S/N & Bounds
+        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+            cp1_path = psf.output_psf_path.replace('.fits', '.py_cp1.txt')
+            with open(cp1_path, 'w') as f:
+                for i in range(Ns):
+                    if status[i] == 1:
+                        s = candidates[i]
+                        f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
+            print(f"  Written {first_pass_count} spots to {cp1_path}", flush=True)
+        
+        # Second selection pass (Complex coverage algorithm)
+        if max_number_of_lines > 0:
+            selected_waves = {} # waveid -> bool
+            nspots_per_wave = {} # waveid -> count
+            snr_per_wave = {} # waveid -> avg_snr
+            
+            def get_id(w): return int(round(w * 10))
+            
+            for i in range(Ns):
+                if status[i] == 0: continue
+                wid = get_id(waves[i])
+                if wid not in nspots_per_wave:
+                    selected_waves[wid] = 1
+                    nspots_per_wave[wid] = 1
+                    snr_per_wave[wid] = snrs[i]
+                else:
+                    snr_per_wave[wid] = (snr_per_wave[wid] * nspots_per_wave[wid] + snrs[i]) / (nspots_per_wave[wid] + 1)
+                    nspots_per_wave[wid] += 1
+            
+            if nspots_per_wave:
+                max_fibers = max(nspots_per_wave.values())
+                
+                sorted_ids = sorted(nspots_per_wave.keys())
+                begin_id = 0
+                end_id = 0
+                has_found_max = False
+                for wid in sorted_ids:
+                    if has_found_max:
+                        begin_id = wid
+                        break
+                    if nspots_per_wave[wid] == max_fibers:
+                        has_found_max = True
+                for wid in reversed(sorted_ids):
+                    if nspots_per_wave[wid] == max_fibers:
+                        end_id = wid - 1
+                        break
+                
+                # --- Pass 2a: Remove low-SNR lines while maintaining gap constraints ---
+                while True:
+                    num_lines = sum(1 for wid in selected_waves if selected_waves[wid] and nspots_per_wave[wid] >= max_fibers * 0.6)
+                    if num_lines <= max_number_of_lines: 
+                        break
+                    
+                    removable = sorted([wid for wid in selected_waves if selected_waves[wid] and begin_id < wid < end_id], 
+                                           key=lambda w: snr_per_wave[w])
+                    
+                    waveid_to_remove = None
+                    for wid in removable:
+                        others = sorted([w for w in selected_waves if selected_waves[w]])
+                        idx = others.index(wid)
+                        prev_w = others[idx-1] if idx > 0 else begin_id
+                        next_w = others[idx+1] if idx < len(others)-1 else end_id
+                        
+                        if (next_w - prev_w) / 10.0 > 300.0:
+                            # C++ Logic: if(dwave > max_dwave) continue;
+                            # This means if the gap is ALREADY too large, we keep the spot to prevent it from getting even larger.
+                            continue
+                        
+                        waveid_to_remove = wid
+                        break
+
+                    
+                    if waveid_to_remove is None: 
+                        break
+                        
+                    selected_waves[waveid_to_remove] = 0
+                
+                # --- Pass 2b: Bring back lines that are very close to selected lines ---
+                while True:
+                    brought_back = False
+                    for wid in sorted_ids:
+                        if selected_waves.get(wid, 0) == 1: continue
+                        for swid in sorted_ids:
+                            if selected_waves.get(swid, 0) == 1 and abs(wid - swid) / 10.0 < 5.0:
+                                selected_waves[wid] = 1
+                                brought_back = True
+                                break
+                        if brought_back: break
+                    if not brought_back: break
+                
+                for i in range(Ns):
+                    if selected_waves.get(get_id(waves[i]), 0) == 0:
+                        status[i] = 0
+        
+        # CHECKPOINT 2: Final Selection
+        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+            cp2_path = psf.output_psf_path.replace('.fits', '.py_cp2.txt')
+            with open(cp2_path, 'w') as f:
+                for i in range(Ns):
+                    if status[i] == 1:
+                        s = candidates[i]
+                        f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
+            print(f"  Written {sum(status)} spots to {cp2_path}", flush=True)
+
         selected = []
         for i in range(Ns):
-            if snrs[i] < sn_threshold: continue
-            s = candidates[i]; s.update({'flux': float(fluxes[i]), 'snr': float(snrs[i]), 'chi2': float(chi2s[i]), 'stamp_imin': int(np.floor(s['xc_init'] + 0.5)) - psf.h_size_x, 'stamp_imax': int(np.floor(s['xc_init'] + 0.5)) + psf.h_size_x + 1, 'stamp_jmin': int(np.floor(s['yc_init'] + 0.5)) - psf.h_size_y, 'stamp_jmax': int(np.floor(s['yc_init'] + 0.5)) + psf.h_size_y + 1})
-            selected.append(s)
+            if status[i] == 1:
+                s = candidates[i]; s.update({'flux': float(fluxes[i]), 'snr': float(snrs[i]), 'chi2': float(chi2s[i]), 'stamp_imin': int(np.floor(s['xc_init'] + 0.5)) - psf.h_size_x, 'stamp_imax': int(np.floor(s['xc_init'] + 0.5)) + psf.h_size_x + 1, 'stamp_jmin': int(np.floor(s['yc_init'] + 0.5)) - psf.h_size_y, 'stamp_jmax': int(np.floor(s['yc_init'] + 0.5)) + psf.h_size_y + 1})
+                selected.append(s)
+        
+        # Write spots to sidecar file if requested (via psf.output_psf_path)
+        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+            spots_path = psf.output_psf_path.replace('.fits', '.pyspots.txt')
+            with open(spots_path, 'w') as f:
+                for s in selected:
+                    f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
+            print(f"  Written {len(selected)} spots to {spots_path}", flush=True)
+
         print(f"  Spot selection took {time.time() - t0:.2f}s ({len(selected)} spots)", flush=True)
         return selected
     return candidates
+
 
 def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsize_x, hsize_y):
     import jax.numpy as jnp
@@ -279,7 +446,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 10.0
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=15):
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
         fmin, fmax = spots[0]['fiber'], spots[-1]['fiber']
@@ -304,9 +471,24 @@ class PSF_Fitter:
         tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont) 
         img_d, w_d = jnp.array(image[xpix, ypix]), jnp.array(weight[xpix, ypix])
         wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30
+        
+        best_chi2 = 1e30
+        best_tc = tc.copy()
+        best_pc = pc.copy()
+        best_cc = cc.copy()
+        best_flux = flux.copy()
+        
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
         for i in range(max_iter):
             chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+            
+            if chi2 < best_chi2:
+                best_chi2 = chi2
+                best_tc = tc.copy()
+                best_pc = pc.copy()
+                best_cc = cc.copy()
+                best_flux = flux.copy()
+                
             mode = 'flux' if i < 2 else 'trace' if i < 5 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]", flush=True)
             Npoly = monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly
@@ -314,7 +496,7 @@ class PSF_Fitter:
             elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             else: idx = jnp.arange(A.shape[0])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
-            A_reg = (A_sub / jnp.outer(S, S)) + 1e-4 * jnp.eye(A_sub.shape[0])
+            A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
             except: d_p = jnp.zeros(A.shape[0])
             best_alpha, best_chi2 = 0.0, float(chi2)
@@ -325,6 +507,36 @@ class PSF_Fitter:
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); cc = cc + best_alpha * d_p[-Ncont:]
+            
+            # --- Iterative Snapping: Update xc_init/yc_init to the current model prediction ---
+            # We use a staged approach to prevent oscillation.
+            # Flux mode: No snapping. Trace mode: Full snapping. Full mode: Increased frequency.
+            if mode == 'trace':
+                dx, dy = jnp.dot(monomials, tc[0]), jnp.dot(monomials, tc[1])
+                # In C++, the trace fit usually updates the 'anchor' positions for the full fit
+                # We update xc_init/yc_init once here to seed the full optimization
+                xc_init = jnp.array([s['xc_init'] for s in spots]) + dx
+                yc_init = jnp.array([s['yc_init'] for s in spots]) + dy
+            
+            # REMOVED: All iterative snapping in 'full' mode. 
+            # We keep xc_init fixed from the end of trace mode.
+            # tc will now naturally accumulate the total shift from this anchor.
+            
             if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
             old_chi2 = chi2
-        return float(old_chi2), np.array(pc), np.array(tc), np.array(cc), np.array(flux)
+        
+        # --- C++ Parity: Snap centroids to the final optimized model ---
+        # Use the best coefficients found during the optimization process
+        import jax.numpy as jnp
+        dx_final = jnp.dot(monomials, best_tc[0])
+        dy_final = jnp.dot(monomials, best_tc[1])
+        
+        # DEBUG: Check if the shifts are actually non-zero
+        print(f"  DEBUG: dx_final mean={np.mean(np.abs(dx_final)):.6f}, dy_final mean={np.mean(np.abs(dy_final)):.6f}", flush=True)
+        
+        # The final position is the anchor (xc_init) plus the optimized shift
+        # xc_init was updated at the end of trace mode, so it includes the initial trace shift
+        xc_final = np.array(xc_init + dx_final)
+        yc_final = np.array(yc_init + dy_final)
+        
+        return float(best_chi2), np.array(best_pc), np.array(best_tc), np.array(best_cc), np.array(best_flux), xc_final, yc_final

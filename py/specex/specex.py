@@ -7,9 +7,55 @@ import multiprocessing as mp
 from .io import load_python_psf, read_preproc, read_lamp_lines, write_python_psf, get_sparse_nz
 from .fitter import PSF_Fitter, get_bundle_spots
 
+# --- Original C++ Wrapper (for baseline and legacy tools) ---
+
+def run_specex(com):
+    """
+    Original C++ wrapper. This allows desi_psf_fit to run using the C++ core.
+    """
+    from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
+    from .io import read_psf, write_psf
+    from .qa import specex_psf_qa
+    import fitsio
+
+    # instantiate specex C++ objects exposed to python        
+    opts = PyOptions() 
+    pyio = PyIO()      
+    pypr = PyPrior()   
+    pyps = PyPSF()     
+    pyft = PyFitting() 
+    
+    spxargs = VectorString()
+    for strs in com:
+        spxargs.append(strs)
+
+    # parse args
+    retval = opts.parse(spxargs)
+    if retval != 0: return retval
+
+    # read psf
+    read_psf(opts, pyps)
+
+    pyio.set_inputpsf(opts,pyps)
+    pypr.set_priors(opts)
+    
+    # We need read_preproc to return a C++ PyImage for the C++ fitter
+    from .io import read_preproc_cpp
+    pymg = read_preproc_cpp(opts) 
+    
+    retval = pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
+    
+    # write psf 
+    write_psf(pyps,opts,pyio)        
+
+    # do QA
+    # retval += specex_psf_qa(opts)
+
+    return retval
+
 # --- New High-Performance Python/JAX Driver ---
 
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0):
     """
     Isolated task for fitting a single bundle.
     """
@@ -39,6 +85,9 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file, backend
         psf = load_python_psf(in_psf_file, opts)
         if h_size_y is not None:
             psf.h_size_y = h_size_y
+        
+        # Add output path for spot writing
+        psf.output_psf_path = out_psf_file
             
         lamp_lines = read_lamp_lines(lamp_lines_file)
         
@@ -52,17 +101,52 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, lamp_lines_file, backend
             return bid, {"error": "No spots found for bundle"}
 
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux = fitter.fit(image, weight, spots, bid, max_iter=50)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50)
         
-        # Minimimal data for Phase 2 to prevent pipe hangups
+        # --- C++ Parity: Update spots with refined model centroids ---
+        # The C++ implementation snaps final spots to the model PSF position
+        # We need to preserve the original raw values for the debug file
+        raw_centroids = [(s['xc_init'], s['yc_init']) for s in spots]
+        
+        # Use the xc_final/yc_final already computed by the fitter
+        for i in range(len(spots)):
+            spots[i]['xc_init'] = float(xc_final[i])
+            spots[i]['yc_init'] = float(yc_final[i])
+
+        # CRITICAL: Overwrite pyspots.txt with refined centroids.
+        # get_bundle_spots wrote the raw selection; we must update it with fit results.
+        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+            spots_path = psf.output_psf_path.replace('.fits', '.pyspots.txt')
+            with open(spots_path, 'w') as f:
+                for s in spots:
+                    f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
+
+        # Debug export: verify that xc_final/yc_final differ from initial raw values
+        debug_path = out_psf_file.replace('.fits', '.refined_centroids_debug.txt')
+        with open(debug_path, 'w') as f:
+            for i in range(len(spots)):
+                f.write(f"spot {i}: raw({raw_centroids[i][0]:.15f}, {raw_centroids[i][1]:.15f}) -> refined({float(xc_final[i]):.15f}, {float(yc_final[i]):.15f})\n")
+
+        # We no longer re-run selection with the refined centroids as a second pass.
+        # This matches the iterative snapping logic now implemented inside the fitter,
+        # and prevents the "Selected is subset of Raw: True" behavior.
+        # We simply update the 'spots' metadata for the final result.
+        final_selected = spots
+        for i in range(len(final_selected)):
+            final_selected[i]['flux'] = float(final_flux[i])
+            final_selected[i]['xc_init'] = float(xc_final[i])
+            final_selected[i]['yc_init'] = float(yc_final[i])
+        
+        # Minimal data for Phase 2 to prevent pipe hangups
         return bid, {
+
             'psf_coeffs': np.array(pc),
             'trace_coeffs': np.array(tc),
             'continuum_coeffs': np.array(cc),
             'chi2': float(chi2),
-            's_fiber': np.array([s['fiber'] for s in spots]),
-            's_wave': np.array([s['wave'] for s in spots]),
-            's_flux': np.array(final_flux)
+            's_fiber': np.array([s['fiber'] for s in final_selected]),
+            's_wave': np.array([s['wave'] for s in final_selected]),
+            's_flux': np.array([s['flux'] for s in final_selected])
         }
     except Exception as e:
         import traceback
@@ -94,7 +178,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s))
         
         print(f"Launching {len(tasks)} workers with stagger...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)

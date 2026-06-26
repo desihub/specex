@@ -1,0 +1,36 @@
+Cupy version?
+Stand-alone script with output
+Repeatability test for not ignoring #
+
+  1. CLI and FITS Output Verification
+  Yes, the command you provided will run the full Python/GPU pipeline and produce a FITS file.
+   * Format: The output FITS file uses the exact same data model as C++ Specex (extensions for PSF, XTRACE, YTRACE).
+   * Completeness: It will fit all 20 bundles (0-19) by default, or the range you specify, and merge them into a single file.
+   * Logic: It currently utilizes the "Coupled Fitting" logic, which is the gold standard for C++ Specex production runs.
+
+  2. Demonstration of C++ Lamp Line Quirk
+  I have created a script testing/demo_line_quirk.py that demonstrates this behavior in under 5 seconds.
+   * What it shows: It compares a standard "clean" parse (ignoring all lines starting with #) vs. the actual Specex parse logic.
+   * The Result: It shows that Specex loads 2 extra ArI lines (7725.887 and 7726.333) because the # is attached to the name (e.g., #ArI), which C++ treats as a valid string rather than a comment indicator.
+   * Run it with: python testing/demo_line_quirk.py
+
+  3. JAX vs. NumPy/Numba/CuPy
+  Regarding your supervisor's question on feasibility:
+   * Feasibility: It is 100% feasible to reproduce these results with Numba/CuPy, but with a significant increase in development effort.
+   * The "JAX Advantage": The primary reason we used JAX was Automatic Differentiation (AD). The Gauss-Hermite PSF model requires complex derivatives for 55+ parameters per spot. In JAX, this is one line of code (jax.grad). In Numba/CuPy, we would have to manually derive, code, and unit-test thousands of lines of
+     math, effectively re-implementing the C++ manual derivative logic.
+   * Performance: JAX's XLA compiler performs global optimizations (like kernel fusion) that are difficult to achieve manually in CuPy without writing custom CUDA C++ kernels.
+   * Recommendation: JAX is now the standard for this type of "Differentiable Physics" problem. It is much more maintainable and less prone to human error in the derivative math.
+
+Yes, you are exactly correct.
+  In src/specex_lamp_lines_utils.cc, the code reads the file line-by-line using std::getline and then attempts to stream values into variables:
+
+   1 string ion; double wave; int score; double intensity;
+   2 // ...
+   3 while (std::getline(is, line)) {
+   4     std::istringstream iss(line);
+   5     if( !( iss >> ion >> wave >> score >> intensity) ) continue;
+
+   * Case 1 (# ArI 4201.858 ...): The first string extracted into ion is simply #. The stream then tries to read ArI into the double wave variable. This fails, the if statement becomes true, and the code calls continue, successfully skipping the line.
+   * Case 2 (#ArI 7725.887 ...): The first string extracted into ion is #ArI. The next value 7725.887 is successfully read into double wave. The parse succeeds, and the line is unintentionally included in the fit.
+

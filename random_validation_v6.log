@@ -1,0 +1,14 @@
+
+>>> Running 30 Random Bundle Tests in parallel...
+CHECKPOINT BUNDLE: {'cam': 'b1', 'bundle': 0, 'dt_py': 1032.192363500595, 'dt_cpp': 40.31642508506775, 'x_rms': np.float64(0.016312077141088673)}
+CHECKPOINT BUNDLE: {'cam': 'b1', 'bundle': 17, 'dt_py': 1097.737271308899, 'dt_cpp': 36.50369143486023, 'x_rms': np.float64(0.022017223362113533)}
+CHECKPOINT BUNDLE: {'cam': 'b3', 'bundle': 4, 'dt_py': 1129.1090424060822, 'dt_cpp': 33.787209272384644, 'x_rms': np.float64(0.020042623646151926)}
+CHECKPOINT BUNDLE: {'cam': 'b4', 'bundle': 7, 'dt_py': 1163.02707695961, 'dt_cpp': 34.45217037200928, 'x_rms': np.float64(0.03687413162000631)}
+CHECKPOINT BUNDLE: {'cam': 'b1', 'bundle': 18, 'dt_py': 945.1521792411804, 'dt_cpp': 34.43446969985962, 'x_rms': np.float64(0.019762393644408762)}
+CHECKPOINT BUNDLE: {'cam': 'b6', 'bundle': 1, 'dt_py': 1042.3028538227081, 'dt_cpp': 38.39369606971741, 'x_rms': np.float64(0.01886824973690331)}
+CHECKPOINT BUNDLE: {'cam': 'b0', 'bundle': 2, 'dt_py': 1066.8184413909912, 'dt_cpp': 34.50125575065613, 'x_rms': np.float64(0.025122824543600594)}
+CHECKPOINT BUNDLE: {'cam': 'b3', 'bundle': 7, 'dt_py': 1098.761233329773, 'dt_cpp': 35.36169695854187, 'x_rms': np.float64(0.015035792296694288)}
+CHECKPOINT BUNDLE: {'cam': 'b8', 'bundle': 19, 'dt_py': 1012.084142446518, 'dt_cpp': 35.974048137664795, 'x_rms': np.float64(0.014014816899762654)}
+CHECKPOINT BUNDLE: {'cam': 'b0', 'bundle': 17, 'dt_py': 1074.5893573760986, 'dt_cpp': 35.42997217178345, 'x_rms': np.float64(0.029186409244780425)}
+CHECKPOINT BUNDLE: {'cam': 'r3', 'bundle': 17, 'dt_py': 1539.1880466938019, 'dt_cpp': 257.30541729927063, 'x_rms': np.float64(0.011755300700085198)}
+CHECKPOINT BUNDLE: {'cam': 'r6', 'bundle': 7, 'dt_py': 1638.0116775035858, 'dt_cpp': 207.70888543128967, 'x_rms': np.float64(0.05194293991265102)}

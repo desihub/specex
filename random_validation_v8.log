@@ -1,0 +1,16 @@
+
+>>> Running 30 Random Bundle Tests...
+[1/30] Testing b1 Bundle 0... RMS=0.016312 Time=222.7s
+[2/30] Testing b4 Bundle 7... RMS=0.036874 Time=253.2s
+[3/30] Testing b3 Bundle 4... RMS=0.020043 Time=251.7s
+[4/30] Testing b1 Bundle 17... RMS=0.022017 Time=234.2s
+[5/30] Testing b1 Bundle 18... RMS=0.019762 Time=219.6s
+[6/30] Testing b6 Bundle 1... RMS=0.018868 Time=227.4s
+[7/30] Testing b0 Bundle 2... RMS=0.025123 Time=244.2s
+[8/30] Testing b3 Bundle 7... RMS=0.015036 Time=226.3s
+[9/30] Testing b8 Bundle 19... RMS=0.014015 Time=215.4s
+[10/30] Testing b0 Bundle 17... RMS=0.029186 Time=244.8s
+[11/30] Testing r3 Bundle 17... RMS=0.011755 Time=280.4s
+[12/30] Testing r6 Bundle 7... RMS=0.051943 Time=302.8s
+[13/30] Testing r7 Bundle 18... RMS=0.018521 Time=260.2s
+[14/30] Testing r4 Bundle 0... 

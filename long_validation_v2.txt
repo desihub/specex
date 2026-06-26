@@ -1,0 +1,122 @@
+INFO Initializing a GAUSSHERMITE PSF
+INFO trace_deg_x=6 trace_deg_wave=6
+INFO synchronizing traces
+INFO X_vs_W deg=6
+INFO Y_vs_W deg=6
+INFO X_vs_Y deg=7
+INFO W_vs_Y deg=7
+INFO prepare XTRACE
+INFO write YTRACE
+INFO load PSF
+INFO loaded [x,y]trace and PSF
+INFO z8-00344649-05: using lamp lines file /global/cfs/cdirs/desicollab/users/cdwarner/code/specex/py/specex/data/specex_linelist_desi.txt
+INFO z8-00344649-05: Median distance between fibers = 7.25636
+INFO z8-00344649-05: number of fibers per bundle    = 25
+INFO z8-00344649-05: CAMERA = 'z8      '
+INFO z8-00344649-05: PSF 'GAUSSHERMITE' stamp size = 8x5
+INFO z8-00344649-05: valid y(=rows) range = -4 4132
+INFO z8-00344649-05: reading /global/cfs/cdirs/desicollab/users/cdwarner/code/specex/py/specex/data/specex_linelist_desi.txt
+INFO z8-00344649-05: loaded 164 lines
+INFO z8-00344649-05: number of spots = 1750
+INFO z8-00344649-05: starting to fit PSF with 1750 spots
+INFO z8-00344649-05: detecting dead columns in fiber traces 
+INFO z8-00344649-05: fiber 128 ndead=16
+INFO z8-00344649-05: fiber 129 ndead=24
+INFO z8-00344649-05: fiber 130 ndead=24
+INFO z8-00344649-05: fiber 131 ndead=25
+INFO z8-00344649-05: fiber 132 ndead=26
+INFO z8-00344649-05: fiber 133 ndead=25
+INFO z8-00344649-05: fiber 134 ndead=3
+INFO z8-00344649-05: fiber 137 ndead=1
+INFO z8-00344649-05: fiber 147 ndead=10
+INFO z8-00344649-05: fiber 148 ndead=17
+INFO z8-00344649-05: Use range for traces wmin,wmax=7339,9915 xmin,xmax=1083.62,1266.24
+INFO z8-00344649-05: Number of fibers 25
+INFO z8-00344649-05: Max number of spots per fiber 70
+INFO z8-00344649-05: Setting PSF polynomial degrees 1 3
+size of default_params: 55
+INFO z8-00344649-05: Default PSF params = [ 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 2 ]
+INFO z8-00344649-05: Total number of PSF params = 306
+INFO z8-00344649-05: fitting independently the flux of each spot
+INFO z8-00344649-05: selected 963 spots out of 1750 with S/N>5 and min dist = 4 A
+INFO z8-00344649-05:   with a max. number of lines of 200 (approximately) and keeping neighboring blended lines within 5A and avoiding gaps larger than 300 A
+INFO z8-00344649-05: fitting independently the flux of each spot
+INFO z8-00344649-05: selected 963 spots out of 1750 with S/N>5 and min dist = 4 A
+INFO z8-00344649-05:   with a max. number of lines of 200 (approximately) and keeping neighboring blended lines within 5A and avoiding gaps larger than 300 A
+INFO z8-00344649-05: Starting FitSeveralSpots FLUX+TRACE 
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 47183
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=145446 chi2pdf = 6.72755 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=7123.63 chi2pdf = 6.57225 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=612.508 chi2pdf = 6.5589 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=79.6585 chi2pdf = 6.55716 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=12.7431 chi2pdf = 6.55689 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=2.29301 chi2pdf = 6.55684 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=0.441308 chi2pdf = 6.55683 npar = 1313
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots successful brent fit with step = 1 dchi2=0.0883707 chi2pdf = 6.55683 npar = 1313
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +flux+trace chi2= 300762 niter=8
+INFO z8-00344649-05: Max delta(x,y) = 0.350506
+INFO z8-00344649-05: fitting independently the flux of each spot
+INFO z8-00344649-05: selected 963 spots out of 1750 with S/N>5 and min dist = 4 A
+INFO z8-00344649-05:   with a max. number of lines of 200 (approximately) and keeping neighboring blended lines within 5A and avoiding gaps larger than 300 A
+INFO z8-00344649-05: Choose the parameters that participate to the fit : only gaussian terms
+INFO z8-00344649-05: Starting FitSeveralSpots PSF+FLUX only gaussian terms
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 47185
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=135824 chi2pdf = 3.57684 npar = 975
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=2941.77 chi2pdf = 3.51318 npar = 975
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=41.4284 chi2pdf = 3.51228 npar = 975
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=0.719833 chi2pdf = 3.51227 npar = 975
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=0.0134681 chi2pdf = 3.51227 npar = 975
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +flux+psf chi2= 162302 niter=5
+INFO z8-00344649-05: fitting independently the flux of each spot
+INFO z8-00344649-05: selected 1615 spots out of 1750 with S/N>3 and min dist = 0 A
+INFO z8-00344649-05:   with a max. number of lines of 200 (approximately) and keeping neighboring blended lines within 5A and avoiding gaps larger than 300 A
+INFO z8-00344649-05: Starting FitSeveralSpots TAIL&CONTINUUM
+INFO z8-00344649-05: WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails or continuum)
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 621126
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=0 chi2pdf = 9.75635 npar = 3
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +continuum chi2= 6.05989e+06 niter=1
+INFO z8-00344649-05: continuum amplitude, 4.3372
+INFO z8-00344649-05: Starting FitSeveralSpots PSF+FLUX #1
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 122013
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=235818 chi2pdf = 1.23715 npar = 1903
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=6304.04 chi2pdf = 1.18466 npar = 1903
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=397.702 chi2pdf = 1.18135 npar = 1903
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=10.3906 chi2pdf = 1.18127 npar = 1903
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=0.157749 chi2pdf = 1.18126 npar = 1903
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=0.00364499 chi2pdf = 1.18126 npar = 1903
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +flux+psf chi2= 141882 niter=6
+INFO z8-00344649-05: Starting FitSeveralSpots TAIL&CONTINUUM
+INFO z8-00344649-05: WEIGHTS: Set weight to ZERO at the CORE of spots (to fit tails or continuum)
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 621126
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=0 chi2pdf = 9.65494 npar = 3
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +continuum chi2= 5.99691e+06 niter=1
+INFO z8-00344649-05: continuum amplitude, 4.3372
+INFO z8-00344649-05: Starting FitSeveralSpots PSF #2
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 122013
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=3.6991e-08 chi2pdf = 1.16559 npar = 288
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +psf chi2= 141882 niter=1
+INFO z8-00344649-05: Starting FitSeveralSpots PSF+FLUX #2
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots inc. signal in w=0, npix footprint = 122013
+INFO z8-00344649-05: specex::PSF_Fitter::FitSeveralSpots dchi2=1.63788e-05 chi2pdf = 1.18126 npar = 1903
+INFO specex::PSF_Fitter::FitSeveralSpots successful fit of +flux+psf chi2= 141882 niter=1
+INFO z8-00344649-05: Bundle 5 PSF fit status   = 0
+INFO z8-00344649-05: Bundle 5 PSF fit chi2/ndf = 141882/120110 = 1.18126
+INFO z8-00344649-05: Bundle 5 PSF fit ndata    = 122013
+INFO z8-00344649-05: Bundle 5 PSF fit nspots   = 1615
+INFO z8-00344649-05: Bundle 5 PSF fit chi2/ndata (core) = 87965.6/37992 = 2.31537
+An NVIDIA GPU may be present on this machine, but a CUDA-enabled jaxlib is not installed. Falling back to cpu.
+Loading data...
+
+--- SKIPPING C++ Fit ---
+C++ Time: 461.42s, Return: 0
+
+--- Running Python/JAX Fit ---
+JAX devices: [CpuDevice(id=0)]
+Loaded 162 lamp lines.
+Reconstructed 1150 spots (after filtering).
+Starting Python/JAX staged fit for bundle 5...
+Iter 0: chi2 = 5973475.7149 [Mode: flux]
+Iter 1: chi2 = 476925.4644 [Mode: flux]
+  Initializing 2D Legendre model from local state...
+Python/JAX Time: 162.69s
+Final Python Chi2: 476925.4644

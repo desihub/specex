@@ -6,6 +6,7 @@
 #include <map>
 
 #include <specex_unbls.h>
+#include <fstream>
 
 #include "specex_psf.h"
 #include "specex_spot.h"
@@ -197,7 +198,7 @@ class PSF_Fitter {
   bool FitEverything(std::vector<Spot_p>& spots, bool init_psf=false);
   
   void compare_spots_chi2_and_mask(std::vector<specex::Spot_p>& spots, const double& nsig=4.);
-  std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0, double chi2_nsig=4);
+  std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0, double chi2_nsig=4, const std::string& output_filename="");
   
 
 };

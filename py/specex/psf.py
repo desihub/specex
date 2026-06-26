@@ -150,11 +150,59 @@ class PSF:
                 else: p.append(0.0)
         return np.array(p)
 
-    def x_ccd(self, fiber, wave):
-        if fiber in self.fiber_traces: return self.fiber_traces[fiber]['X_vs_W'].value(wave)
+    def x_ccd(self, fiber, wave, tc_x=None):
+        if fiber in self.fiber_traces:
+            val = self.fiber_traces[fiber]['X_vs_W'].value(wave)
+            if tc_x is not None:
+                bundle_id = self.get_bundle_of_fiber(fiber)
+                bundle = self.params_of_bundles[bundle_id]
+                fmin, fmax = bundle.fiber_min, bundle.fiber_max
+                wmin, wmax = self.fiber_traces[fmin]['X_vs_W'].xmin, self.fiber_traces[fmin]['X_vs_W'].xmax
+                rf = 2 * (fiber - fmin) / (fmax - fmin) - 1
+                rw = 2 * (wave - wmin) / (wmax - wmin) - 1
+                from .math import legendre_pol_jnp
+                xdeg, wdeg = 1, 3
+                mx = [legendre_pol_jnp(i, rf) for i in range(xdeg + 1)]
+                mw = [legendre_pol_jnp(j, rw) for j in range(wdeg + 1)]
+                nz = []
+                for j in range(wdeg + 1):
+                    for i in range(xdeg + 1):
+                        if i == 0: nz.append(i + j*(xdeg + 1))
+                        elif i == 1 and j < 2: nz.append(i + j*(xdeg + 1))
+                        elif i > 1 and j == 0: nz.append(i + j*(xdeg + 1))
+                m = []
+                for k in nz:
+                    i, j = k % (xdeg + 1), k // (xdeg + 1)
+                    m.append(mx[i] * mw[j])
+                val += np.dot(m, tc_x)
+            return val
         return 0.0
-    def y_ccd(self, fiber, wave):
-        if fiber in self.fiber_traces: return self.fiber_traces[fiber]['Y_vs_W'].value(wave)
+    def y_ccd(self, fiber, wave, tc_y=None):
+        if fiber in self.fiber_traces:
+            val = self.fiber_traces[fiber]['Y_vs_W'].value(wave)
+            if tc_y is not None:
+                bundle_id = self.get_bundle_of_fiber(fiber)
+                bundle = self.params_of_bundles[bundle_id]
+                fmin, fmax = bundle.fiber_min, bundle.fiber_max
+                wmin, wmax = self.fiber_traces[fmin]['X_vs_W'].xmin, self.fiber_traces[fmin]['X_vs_W'].xmax
+                rf = 2 * (fiber - fmin) / (fmax - fmin) - 1
+                rw = 2 * (wave - wmin) / (wmax - wmin) - 1
+                from .math import legendre_pol_jnp
+                xdeg, wdeg = 1, 3
+                mx = [legendre_pol_jnp(i, rf) for i in range(xdeg + 1)]
+                mw = [legendre_pol_jnp(j, rw) for j in range(wdeg + 1)]
+                nz = []
+                for j in range(wdeg + 1):
+                    for i in range(xdeg + 1):
+                        if i == 0: nz.append(i + j*(xdeg + 1))
+                        elif i == 1 and j < 2: nz.append(i + j*(xdeg + 1))
+                        elif i > 1 and j == 0: nz.append(i + j*(xdeg + 1))
+                m = []
+                for k in nz:
+                    i, j = k % (xdeg + 1), k // (xdeg + 1)
+                    m.append(mx[i] * mw[j])
+                val += np.dot(m, tc_y)
+            return val
         return 0.0
     def get_bundle_of_fiber(self, fiber):
         for bundle_id, params in self.params_of_bundles.items():
