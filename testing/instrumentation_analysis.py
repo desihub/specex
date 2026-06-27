@@ -145,12 +145,17 @@ psf_py = load_python_psf(psf, opts)
 psf_py.h_size_y = 5
 lamp_lines = read_lamp_lines(lines_file)
 
+# ... existing code ...
 fmin, fmax = bid * 25, (bid + 1) * 25 - 1
 spots = get_bundle_spots(psf_py, fmin, fmax, lamp_lines, image=image, weight=weight, sn_threshold=sn, broken_fibers=broken)
 print(f"NSPOTS_RESULT: {{len(spots)}}")
 
 fitter = PSF_Fitter(psf_py)
-chi2, pc, tc, cc = fitter.fit(image, weight, spots, bid, max_iter=50)
+fit_res = fitter.fit(image, weight, spots, bid, max_iter=50)
+chi2 = fit_res[0]
+pc = fit_res[1]
+tc = fit_res[2]
+cc = fit_res[3]
 print(f"CHI2_RESULT: {{chi2}}")
 
 res_map = {{bid: {{'chi2': chi2, 'psf_coeffs': pc, 'trace_coeffs': tc, 'continuum': cc}}}}

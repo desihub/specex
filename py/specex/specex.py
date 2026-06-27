@@ -54,8 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None):
     """
     Isolated task for fitting a single bundle.
     """
@@ -92,10 +91,42 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         lamp_lines = read_lamp_lines(lamp_lines_file)
         
         f_min, f_max = bid * 25, (bid + 1) * 25 - 1
-        spots = get_bundle_spots(psf, f_min, f_max, lamp_lines, 
-                                 image=image, weight=weight,
-                                 sn_threshold=sn_threshold,
-                                 broken_fibers=broken_fibers)
+        
+        if force_spots_path:
+            # Load spots from file: fiber,wave,xc,yc
+            spots = []
+            with open(force_spots_path, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) < 4: continue
+                    s = {'fiber': int(parts[0]), 'wave': float(parts[1]), 'xc_init': float(parts[2]), 'yc_init': float(parts[3])}
+                    # Pre-calculate stamp boundaries to avoid KeyError in fitter.get_bundle_footprint
+                    s['stamp_imin'] = int(np.floor(s['xc_init'] + 0.5)) - psf.h_size_x
+                    s['stamp_imax'] = int(np.floor(s['xc_init'] + 0.5)) + psf.h_size_x + 1
+                    s['stamp_jmin'] = int(np.floor(s['yc_init'] + 0.5)) - psf.h_size_y
+                    s['stamp_jmax'] = int(np.floor(s['yc_init'] + 0.5)) + psf.h_size_y + 1
+                    spots.append(s)
+            print(f"  Forcing {len(spots)} spots from {force_spots_path}", flush=True)
+            
+            # C++ spots files don't have flux; we must estimate it to initialize the fitter
+            # We do this by running the internal spot stats tool once.
+            import jax.numpy as jnp
+            from .fitter import _get_spot_stats_jax
+            c_xc = jnp.array([s['xc_init'] for s in spots])
+            c_yc = jnp.array([s['yc_init'] for s in spots])
+            gh_all = jnp.array([psf.gh_params(s['fiber'], s['wave']) for s in spots])
+            fluxes, snrs, chi2s = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, psf.h_size_x, psf.h_size_y)
+            fluxes = np.array(fluxes)
+            for i in range(len(spots)):
+                spots[i]['flux'] = float(fluxes[i])
+        else:
+            spots = get_bundle_spots(psf, f_min, f_max, lamp_lines, 
+                                     image=image, weight=weight,
+                                     sn_threshold=sn_threshold,
+                                     broken_fibers=broken_fibers)
+
+
+
         
         if not spots:
             return bid, {"error": "No spots found for bundle"}
@@ -154,9 +185,10 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         print(f"FAILED Bundle {bid} on {backend.upper()} {gpu_id}:\n{err_msg}", flush=True)
         return bid, {"error": str(e), "traceback": err_msg}
 
+
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, 
-                   first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
-                   broken_fibers=None, sn_threshold=3.0, h_size_y=5):
+                    first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
+                    broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None):
     """
     Fits a full CCD (20 bundles) using parallel processes.
     """
@@ -178,7 +210,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path))
         
         print(f"Launching {len(tasks)} workers with stagger...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -326,6 +358,7 @@ def main():
     parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
     parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
     parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
+    parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
     
     args = parser.parse_args()
     
@@ -346,7 +379,8 @@ def main():
         backend=args.backend,
         broken_fibers=args.broken_fibers,
         sn_threshold=args.sn_threshold,
-        h_size_y=args.h_size_y
+        h_size_y=args.h_size_y,
+        force_spots_path=args.force_spots
     )
 
 if __name__ == "__main__":

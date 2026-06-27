@@ -279,6 +279,11 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
     if image is not None:
         c_xc = jnp.array([s['xc_init'] for s in candidates]); c_yc = jnp.array([s['yc_init'] for s in candidates])
         gh_all = jnp.array([psf.gh_params(s['fiber'], s['wave']) for s in candidates])
+        # C++ Logic: Fit each spot first to get robust flux/S/N (mirrors FitIndividualSpotFluxes)
+        # In our current JAX implementation, _get_spot_stats_jax already performs the a-priori 
+        # flux estimation (B/A). To strictly mirror C++, we ensure the S/N is calculated 
+        # using the most robust A (sum of weights * psf^2) available.
+        
         fluxes, snrs, chi2s = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, psf.h_size_x, psf.h_size_y)
         fluxes, snrs, chi2s = np.array(fluxes), np.array(snrs), np.array(chi2s); waves = np.array([s['wave'] for s in candidates])
         
@@ -288,9 +293,19 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
         nx, ny = weight_np.shape
         can_measure_flux = np.ones(Ns, dtype=bool)
         for i in range(Ns):
+            s = candidates[i]
+            s_imin = int(np.floor(s['xc_init'] + 0.5)) - psf.h_size_x
+            s_imax = int(np.floor(s['xc_init'] + 0.5)) + psf.h_size_x + 1
+            s_jmin = int(np.floor(s['yc_init'] + 0.5)) - psf.h_size_y
+            s_jmax = int(np.floor(s['yc_init'] + 0.5)) + psf.h_size_y + 1
+            
             c_x, c_y = int(np.floor(c_xc[i] + 0.5)), int(np.floor(c_yc[i] + 0.5))
-            i_start, i_end = max(0, c_x - 2), min(nx, c_x + 3)
-            j_start, j_end = max(0, c_y - 2), min(ny, c_y + 3)
+            i_start, i_end = max(s_imin, c_x - 2), min(s_imax, c_x + 3)
+            j_start, j_end = max(s_jmin, c_y - 2), min(s_jmax, c_y + 3)
+            
+            i_start, i_end = max(0, i_start), min(nx, i_end)
+            j_start, j_end = max(0, j_start), min(ny, j_end)
+            
             window = weight_np[i_start:i_end, j_start:j_end]
             if np.sum(window == 0) > 5:
                 can_measure_flux[i] = False
@@ -361,10 +376,16 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
                     snr_per_wave[wid] = (snr_per_wave[wid] * nspots_per_wave[wid] + snrs[i]) / (nspots_per_wave[wid] + 1)
                     nspots_per_wave[wid] += 1
             
-            if nspots_per_wave:
+            sorted_ids = sorted(nspots_per_wave.keys())
+            if not sorted_ids:
+                first_pass_count = sum(status)
+                # Ensure we return something if selection fails early
+                # (Though usually we'd just skip to final)
+                # But let's make sure we handle empty sorted_ids
+                pass 
+            else:
                 max_fibers = max(nspots_per_wave.values())
                 
-                sorted_ids = sorted(nspots_per_wave.keys())
                 begin_id = 0
                 end_id = 0
                 has_found_max = False
@@ -380,63 +401,68 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
                         break
                 
             # --- Pass 2a: Remove low-SNR lines while maintaining gap constraints ---
-            while True:
-                # C++: count lines in at least 60% of fibers
-                num_lines = sum(1 for wid in sorted_ids if selected_waves.get(wid, 0) == 1 and nspots_per_wave[wid] >= max_fibers * 0.6)
-                if num_lines <= max_number_of_lines: 
-                    break
-                
-                # C++: sort selected flux by increasing order
-                # wave_vs_snr = {snr: waveid}
-                wave_vs_snr = sorted([(snr_per_wave[wid], wid) for wid in sorted_ids if selected_waves.get(wid, 0) == 1])
-                
-                waveid_to_remove = None
-                for snr, wid in wave_vs_snr:
-                    if wid <= begin_id or wid >= end_id:
-                        continue
+            if sorted_ids:
+                while True:
+                    # C++: count lines in at least 60% of fibers
+                    num_lines = sum(1 for wid in sorted_ids if selected_waves.get(wid, 0) == 1 and nspots_per_wave[wid] >= max_fibers * 0.6)
+                    if num_lines <= max_number_of_lines: 
+                        break
                     
-                    # Find previous and next selected waveids
-                    previous_selected_waveid = begin_id
-                    next_selected_waveid = end_id
+                    # C++: sort selected flux by increasing order
+                    # wave_vs_snr = {snr: waveid}
+                    wave_vs_snr = sorted([(snr_per_wave[wid], wid) for wid in sorted_ids if selected_waves.get(wid, 0) == 1])
                     
-                    # C++: search through all selected to find tightest bounds
-                    for swid in sorted_ids:
-                        if selected_waves.get(swid, 0) == 1:
-                            if swid < wid and swid > previous_selected_waveid:
-                                previous_selected_waveid = swid
-                            if swid > wid and swid < next_selected_waveid:
-                                next_selected_waveid = swid
+                    waveid_to_remove = None
+                    for snr, wid in wave_vs_snr:
+                        if wid <= begin_id or wid >= end_id:
+                            continue
+                        
+                        # Find previous and next selected waveids
+                        previous_selected_waveid = begin_id
+                        next_selected_waveid = end_id
+                        
+                        # C++: search through all selected to find tightest bounds
+                        for swid in sorted_ids:
+                            if selected_waves.get(swid, 0) == 1:
+                                if swid < wid and swid > previous_selected_waveid:
+                                    previous_selected_waveid = swid
+                                if swid > wid and swid < next_selected_waveid:
+                                    next_selected_waveid = swid
+                        
+                        dwave = (next_selected_waveid - previous_selected_waveid) / 10.0
+                        if dwave > 300.0:
+                            # C++ Logic: if(dwave > max_dwave) continue;
+                            continue
+                        
+                        waveid_to_remove = wid
+                        break
                     
-                    dwave = (next_selected_waveid - previous_selected_waveid) / 10.0
-                    if dwave > 300.0:
-                        # C++ Logic: if(dwave > max_dwave) continue;
-                        continue
-                    
-                    waveid_to_remove = wid
-                    break
-                
-                if waveid_to_remove is None: 
-                    break
-                    
-                selected_waves[waveid_to_remove] = 0
+                    if waveid_to_remove is None: 
+                        break
+                        
+                    selected_waves[waveid_to_remove] = 0
             
             # --- Pass 2b: Bring back lines that are very close to selected lines ---
             while True:
                 brought_back = False
-                # C++: nested loop over selected map
+                # C++: Nested loop over all sorted_ids (including those not yet selected)
+                # The C++ loop is: for(it = selected.begin... for(jt = selected.begin...))
+                # 'selected' is a map of waveid -> bool.
                 for wid_s in sorted_ids:
                     if selected_waves.get(wid_s, 0) == 0: continue
                     for wid_j in sorted_ids:
                         if selected_waves.get(wid_j, 0) == 1: continue
+                        # C++: if(fabs( it->first/10. - jt->first/10.) < min_dwave)
                         if abs(wid_s - wid_j) / 10.0 < 5.0:
                             selected_waves[wid_j] = 1
                             brought_back = True
                 if not brought_back: break
-
                 
+                # Apply changes to status array after each full iteration of the "bring back" loop
                 for i in range(Ns):
                     if selected_waves.get(get_id(waves[i]), 0) == 0:
                         status[i] = 0
+
         
         # CHECKPOINT 2: Final Selection
         if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
@@ -467,20 +493,93 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
     return candidates
 
 
+def _fit_one_spot_jax(image, weight, xc, yc, gh, degree, hsize_x, hsize_y):
+    import jax.numpy as jnp
+    from jax import jit
+    nx, ny = image.shape
+    ix_rel, iy_rel = jnp.meshgrid(jnp.arange(2*hsize_x+1), jnp.arange(2*hsize_y+1), indexing='ij')
+    dx = ix_rel.flatten() - hsize_x; dy = iy_rel.flatten() - hsize_y
+    
+    def fit_loop(flux, x_shift, y_shift):
+        # Simple 3-parameter fit (flux, dx, dy) for selection purposes
+        # This mimics C++ FitOneSpot's initial phase
+        im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int)
+        gix = im + dx + x_shift; giy = jm + dy + y_shift
+        valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
+        p_val = GaussHermitePSF.single_pix_value_jnp(xc + x_shift, yc + y_shift, gix, giy, gh, degree)
+        p_val = jnp.where(valid, p_val, 0.0)
+        d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
+        w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
+        w_val = jnp.where(valid, w_val, 0.0)
+        
+        A = jnp.sum(w_val * p_val**2)
+        B = jnp.sum(w_val * d_val * p_val)
+        flux_est = jnp.where(A > 0, B/A, 0.0)
+        return flux_est, A
+
+    return jit(fit_loop)(0.0, 0.0, 0.0)
+
 def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsize_x, hsize_y):
     import jax.numpy as jnp
-    from jax import vmap, jit
+    from jax import vmap, jit, grad
     nx, ny = image.shape; area = (2*hsize_x+1)*(2*hsize_y+1)
     ix_rel, iy_rel = jnp.meshgrid(jnp.arange(2*hsize_x+1), jnp.arange(2*hsize_y+1), indexing='ij')
     dx = ix_rel.flatten() - hsize_x; dy = iy_rel.flatten() - hsize_y
-    def spot_stats(xc, yc, gh):
-        im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int); gix = im + dx; giy = jm + dy
+
+    def spot_objective(params, xc_init, yc_init, gh):
+        flux, dx_s, dy_s = params
+        xc = xc_init + dx_s; yc = yc_init + dy_s
+        im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int)
+        gix = im + dx; giy = jm + dy
         valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
         p_val = GaussHermitePSF.single_pix_value_jnp(xc, yc, gix, giy, gh, degree)
-        p_val = jnp.where(valid, p_val, 0.0); d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]; w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]; w_val = jnp.where(valid, w_val, 0.0)
-        A = jnp.sum(w_val * p_val**2); B = jnp.sum(w_val * d_val * p_val); flux = jnp.where(A > 0, B/A, 0.0); snr = jnp.where(A > 0, flux / jnp.sqrt(1.0/A), -1.0); chi2 = jnp.sum(w_val * (d_val - flux * p_val)**2)
+        p_val = jnp.where(valid, p_val, 0.0)
+        d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
+        w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
+        w_val = jnp.where(valid, w_val, 0.0)
+        return jnp.sum(w_val * (d_val - flux * p_val)**2)
+
+    def fit_spot(xc, yc, gh):
+        # Initial guess: flux=1.0, dx=0, dy=0
+        # Use a few iterations of Newton-like optimization or just a simple grid search/grad descent
+        # For selection, we just need to be robust.
+        # Let's use a simple gradient descent for 5 iterations to refine (xc, yc, flux)
+        params = jnp.array([1.0, 0.0, 0.0]) 
+        
+        def step(p, xc, yc, gh):
+            g = grad(spot_objective)(p, xc, yc, gh)
+            return p - 0.1 * g # Simple fixed step
+            
+        # Loop for a few iterations to find a better centroid
+        for _ in range(5):
+            prev_p = params
+            params = step(params, xc, yc, gh)
+            # Use jnp.where or avoid if in JIT'd vmap
+            # For selection, a fixed number of iterations is safer in JAX
+        
+        # convergence check: if coordinates shifted too much in last step, consider it divergent
+        coord_shift = jnp.linalg.norm(params[1:] - prev_p[1:])
+        converged = coord_shift < 0.1
+        final_flux, final_dx, final_dy = params
+        # Calculate final S/N using the refined parameters
+        xc_f = xc + final_dx; yc_f = yc + final_dy
+        im = jnp.floor(xc_f + 0.5).astype(int); jm = jnp.floor(yc_f + 0.5).astype(int)
+        gix = im + dx; giy = jm + dy
+        valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
+        p_val = GaussHermitePSF.single_pix_value_jnp(xc_f, yc_f, gix, giy, gh, degree)
+        p_val = jnp.where(valid, p_val, 0.0)
+        d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
+        w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
+        w_val = jnp.where(valid, w_val, 0.0)
+        
+        A = jnp.sum(w_val * p_val**2)
+        B = jnp.sum(w_val * d_val * p_val)
+        flux = jnp.where(A > 0, B/A, 0.0)
+        snr = jnp.where((A > 0) & converged, flux * jnp.sqrt(A), -1.0)
+        chi2 = jnp.sum(w_val * (d_val - flux * p_val)**2)
         return flux, snr, chi2
-    return jit(vmap(spot_stats))(cand_xc, cand_yc, gh_params)
+
+    return jit(vmap(fit_spot))(cand_xc, cand_yc, gh_params)
 
 class PSF_Fitter:
     def __init__(self, psf):

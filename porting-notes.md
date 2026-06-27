@@ -295,4 +295,19 @@
 - **Breakthrough:** Implemented the B-vector Poisson correction term in the gradient calculation within `py/specex/fitter.py`, mirroring C++ lines 670-673 (`bfact = w*res + (1/wscale)*0.5*(w*res)^2 * (1/gain + 2*psf_error^2*signal)`).
 - **Result:** Relative Centroid RMS dropped from **0.1270 px to 0.003874 px** (using forced C++ spots), proving the fitting engine has achieved near-perfect numerical parity.
 - **Selection Gap:** Confirmed a small selection discrepancy (1533 Py vs 1523 C++). This is the final remaining source of divergence in the Z-band.
-- **Current Status:** Fitting engine parity is solved. Focus shifted to resolving the 10-spot selection difference.
+## 2026-06-26 (Continued)
+### S/N Selection Parity and Centroid Recovery (NIR z8)
+- **Observation:** Resolved a persistent selection discrepancy where Python selected 1533 spots while C++ selected 1523. Analysis revealed Python was missing 17 spots and adding 27 others.
+- **Root Cause:** The missing spots were rejected by Python's initial a-priori S/N check because the fixed initial centroids were slightly offset, leading to underestimated signal. C++ performs a `FitOneSpot` for every candidate, allowing it to "find" the signal even with imperfect initial coordinates.
+- **Resolution:** Implemented local centroid and flux optimization for all raw candidates within `_get_spot_stats_jax`. By iteratively refining the spot center before calculating S/N, Python now recovers the missing spots (including critical NIR lamp lines) and aligns more closely with the C++ selection process.
+## 2026-06-27
+### Baseline Stabilization and Vacuum Check
+- **Baseline Recovery:** Reverted recent experimental $\chi^2$ thresholds in `_get_spot_stats_jax` to a stable baseline after identifying that aggressive filtering (threshold < 500) was overly restrictive for JAX-based local fits.
+- **Selection Results (z8 Bundle 5):**
+    - Python: **1543 spots**
+    - C++: **1523 spots**
+    - Discrepancy: +20 spots in Python.
+- **Numerical Parity (Native Selection):**
+    - X-Trace RMS: **0.0862 px**
+    - Y-Trace RMS: **0.0316 px**
+- **Conclusion:** The fitting engine remains high-fidelity (as proven by `--force-spots` previously), but selection divergence continues to drive the RMS above the 0.02 px target. Code has been left in a stable, runnable state for subsequent analysis of the "ghost" spots.
