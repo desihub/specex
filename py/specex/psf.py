@@ -125,6 +125,7 @@ class PSF:
         self.h_size_x = 8 
         self.h_size_y = 8
         self.gain = 1.0
+        self.psf_error = 0.0
         self.fiber_min = 0; self.params_of_bundles = {}; self.fiber_traces = {}
         self.gh_psf = GaussHermitePSF(degree=degree)
     

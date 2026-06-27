@@ -71,9 +71,11 @@ from jax import jit
 _predict_bundle_jax_jit = jit(_predict_bundle_jax, static_argnums=(12,))
 
 def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs, 
-                           xc_init, yc_init, monomials, xpix, ypix,
-                           sx_g, sy_g, idx_gg, degree,
-                           tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data):
+                               xc_init, yc_init, monomials, xpix, ypix,
+                               sx_g, sy_g, idx_gg, degree,
+                               tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data,
+                               gain, psf_error, wscale):
+
     import jax
     import jax.numpy as jnp
     from jax import vmap, lax
@@ -170,7 +172,25 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
 
     b_res = jnp.where(valid, res[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
     b_w = jnp.where(valid, weight_data[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area); wr = b_w * b_res
-    B = jnp.zeros(Ntot).at[:Ns].set(jnp.sum(wr * b_psf, axis=1)[:Ns]).at[Ns:Ns+Nsh].set(jnp.sum(jnp.sum(b_jac * wr[:, :, jnp.newaxis], axis=1), axis=0)).at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res))
+    
+    # --- C++ Parity: B-vector Poisson correction (lines 670-673 in specex_psf_fitter.cc) ---
+    # bfact = w*res + (1/wscale)*0.5*(w*res)^2 * (1/gain + 2*psf_error^2*signal)
+    # We need 'signal' for the correction term. signal = total_sig[:Np]
+    signal_vec = total_sig[:Np]
+    # we need to map this signal back to the batch/stamp structure
+    b_signal = jnp.where(valid, signal_vec[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
+    
+    # Use actual values passed into the JIT function
+    gain = gain
+    psf_error = psf_error
+    wscale = wscale
+    
+    # The correction only applies if recompute_weight_in_fit is True.
+    # In Python, we implement the correction directly into the residual product.
+    correction = (1.0 / wscale) * 0.5 * (wr**2) * (1.0/gain + 2.0 * psf_error**2 * b_signal)
+    wr_corrected = wr + correction
+    
+    B = jnp.zeros(Ntot).at[:Ns].set(jnp.sum(wr * b_psf, axis=1)[:Ns]).at[Ns:Ns+Nsh].set(jnp.sum(jnp.sum(b_jac * wr_corrected[:, :, jnp.newaxis], axis=1), axis=0)).at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res))
     A = jnp.zeros((Ntot, Ntot)).at[jnp.arange(Ns), jnp.arange(Ns)].set(jnp.sum(b_w * b_psf**2, axis=1)[:Ns])
     A = A.at[Ns:Ns+Nsh, Ns:Ns+Nsh].set(jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_jac))
     A_fs = jnp.einsum('bij,bi,bi->bj', b_jac, b_w, b_psf); A = A.at[Ns:Ns+Nsh, :Ns].set(A_fs[:Ns].T).at[:Ns, Ns:Ns+Nsh].set(A_fs[:Ns])
@@ -180,7 +200,7 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     A = A.at[-Ncont:, -Ncont:].set(jnp.dot(h_cont.T * weight_data, h_cont))
     return chi2, A[:Ns+Nsh+Ncont, :Ns+Nsh+Ncont], B[:Ns+Nsh+Ncont]
 
-_accumulate_bundle_jax_jit = jit(_accumulate_bundle_jax, static_argnums=(12,))
+_accumulate_bundle_jax_jit = jit(_accumulate_bundle_jax, static_argnums=(12, 19, 20, 21))
 
 def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
     nx, ny = weight.shape
@@ -292,6 +312,13 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
         first_pass_count = 0
         for i in range(Ns):
             if status[i] == 0: continue
+            # C++ Parity: Ignore spots with non-positive eflux (src/specex_psf_fitter.cc:1993)
+            # In Python, flux = B/A and snr = flux / sqrt(1/A) => eflux = flux / snr = sqrt(1/A) * 1
+            # However, C++ eflux is the actual error on the flux measurement.
+            # a simple proxy for eflux <= 0 is checking if A (sum of weights * psf^2) is non-positive.
+            # Since _get_spot_stats_jax doesn't return A, we use the fact that snr = flux / (1/sqrt(A)).
+            # If A <= 0, snr will be -1.0 (from _get_spot_stats_jax line 459).
+            if snrs[i] <= 0: status[i] = 0; continue
             if snrs[i] < sn_threshold: status[i] = 0; continue
             # Distance check: C++ checks distance against all input_spots for the SAME fiber
             if min_dist_angstrom > 0:
@@ -352,48 +379,60 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
                         end_id = wid - 1
                         break
                 
-                # --- Pass 2a: Remove low-SNR lines while maintaining gap constraints ---
-                while True:
-                    num_lines = sum(1 for wid in selected_waves if selected_waves[wid] and nspots_per_wave[wid] >= max_fibers * 0.6)
-                    if num_lines <= max_number_of_lines: 
-                        break
-                    
-                    removable = sorted([wid for wid in selected_waves if selected_waves[wid] and begin_id < wid < end_id], 
-                                           key=lambda w: snr_per_wave[w])
-                    
-                    waveid_to_remove = None
-                    for wid in removable:
-                        others = sorted([w for w in selected_waves if selected_waves[w]])
-                        idx = others.index(wid)
-                        prev_w = others[idx-1] if idx > 0 else begin_id
-                        next_w = others[idx+1] if idx < len(others)-1 else end_id
-                        
-                        if (next_w - prev_w) / 10.0 > 300.0:
-                            # C++ Logic: if(dwave > max_dwave) continue;
-                            # This means if the gap is ALREADY too large, we keep the spot to prevent it from getting even larger.
-                            continue
-                        
-                        waveid_to_remove = wid
-                        break
-
-                    
-                    if waveid_to_remove is None: 
-                        break
-                        
-                    selected_waves[waveid_to_remove] = 0
+            # --- Pass 2a: Remove low-SNR lines while maintaining gap constraints ---
+            while True:
+                # C++: count lines in at least 60% of fibers
+                num_lines = sum(1 for wid in sorted_ids if selected_waves.get(wid, 0) == 1 and nspots_per_wave[wid] >= max_fibers * 0.6)
+                if num_lines <= max_number_of_lines: 
+                    break
                 
-                # --- Pass 2b: Bring back lines that are very close to selected lines ---
-                while True:
-                    brought_back = False
-                    for wid in sorted_ids:
-                        if selected_waves.get(wid, 0) == 1: continue
-                        for swid in sorted_ids:
-                            if selected_waves.get(swid, 0) == 1 and abs(wid - swid) / 10.0 < 5.0:
-                                selected_waves[wid] = 1
-                                brought_back = True
-                                break
-                        if brought_back: break
-                    if not brought_back: break
+                # C++: sort selected flux by increasing order
+                # wave_vs_snr = {snr: waveid}
+                wave_vs_snr = sorted([(snr_per_wave[wid], wid) for wid in sorted_ids if selected_waves.get(wid, 0) == 1])
+                
+                waveid_to_remove = None
+                for snr, wid in wave_vs_snr:
+                    if wid <= begin_id or wid >= end_id:
+                        continue
+                    
+                    # Find previous and next selected waveids
+                    previous_selected_waveid = begin_id
+                    next_selected_waveid = end_id
+                    
+                    # C++: search through all selected to find tightest bounds
+                    for swid in sorted_ids:
+                        if selected_waves.get(swid, 0) == 1:
+                            if swid < wid and swid > previous_selected_waveid:
+                                previous_selected_waveid = swid
+                            if swid > wid and swid < next_selected_waveid:
+                                next_selected_waveid = swid
+                    
+                    dwave = (next_selected_waveid - previous_selected_waveid) / 10.0
+                    if dwave > 300.0:
+                        # C++ Logic: if(dwave > max_dwave) continue;
+                        continue
+                    
+                    waveid_to_remove = wid
+                    break
+                
+                if waveid_to_remove is None: 
+                    break
+                    
+                selected_waves[waveid_to_remove] = 0
+            
+            # --- Pass 2b: Bring back lines that are very close to selected lines ---
+            while True:
+                brought_back = False
+                # C++: nested loop over selected map
+                for wid_s in sorted_ids:
+                    if selected_waves.get(wid_s, 0) == 0: continue
+                    for wid_j in sorted_ids:
+                        if selected_waves.get(wid_j, 0) == 1: continue
+                        if abs(wid_s - wid_j) / 10.0 < 5.0:
+                            selected_waves[wid_j] = 1
+                            brought_back = True
+                if not brought_back: break
+
                 
                 for i in range(Ns):
                     if selected_waves.get(get_id(waves[i]), 0) == 0:
@@ -480,7 +519,7 @@ class PSF_Fitter:
         
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
         for i in range(max_iter):
-            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
             
             if chi2 < best_chi2:
                 best_chi2 = chi2
@@ -512,11 +551,9 @@ class PSF_Fitter:
             # We use a staged approach to prevent oscillation.
             # Flux mode: No snapping. Trace mode: Full snapping. Full mode: Increased frequency.
             if mode == 'trace':
-                dx, dy = jnp.dot(monomials, tc[0]), jnp.dot(monomials, tc[1])
-                # In C++, the trace fit usually updates the 'anchor' positions for the full fit
-                # We update xc_init/yc_init once here to seed the full optimization
-                xc_init = jnp.array([s['xc_init'] for s in spots]) + dx
-                yc_init = jnp.array([s['yc_init'] for s in spots]) + dy
+                # Removed iterative snapping to align with C++ logic.
+                # xc_init and yc_init must remain constant anchors.
+                pass
             
             # REMOVED: All iterative snapping in 'full' mode. 
             # We keep xc_init fixed from the end of trace mode.
@@ -535,7 +572,7 @@ class PSF_Fitter:
         print(f"  DEBUG: dx_final mean={np.mean(np.abs(dx_final)):.6f}, dy_final mean={np.mean(np.abs(dy_final)):.6f}", flush=True)
         
         # The final position is the anchor (xc_init) plus the optimized shift
-        # xc_init was updated at the end of trace mode, so it includes the initial trace shift
+        # xc_init remained constant throughout the fit, mirroring C++ logic
         xc_final = np.array(xc_init + dx_final)
         yc_final = np.array(yc_init + dy_final)
         
