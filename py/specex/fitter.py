@@ -756,11 +756,21 @@ class PSF_Fitter:
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
             except: d_p = jnp.zeros(A.shape[0])
-            best_alpha, best_chi2 = 0.0, float(chi2)
+            # Line search. NOTE: ls_chi2 must be a separate variable from
+            # best_chi2 (the global best-state tracker above). They were
+            # previously the same variable, so after each step best_chi2 held
+            # the new params' predicted chi2 and the next iteration's
+            # top-of-loop check (accumulate-chi2 of the SAME params) passed or
+            # failed on pure float reduction-order noise between the two
+            # kernels - when it failed every iteration, best_tc/best_pc froze
+            # at their INITIAL values and the whole converged fit was
+            # silently discarded (seen as dx/dy_final == 0 with a perfectly
+            # healthy chi2 trajectory).
+            best_alpha, ls_chi2 = 0.0, float(chi2)
             if jnp.any(d_p != 0):
                 for alpha in [0.2, 0.5, 1.0]:
                     f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
-                    if c2 < best_chi2: best_alpha, best_chi2 = alpha, c2
+                    if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); cc = cc + best_alpha * d_p[-Ncont:]
@@ -779,7 +789,14 @@ class PSF_Fitter:
             
             if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
             old_chi2 = chi2
-        
+
+        # The state after the last applied step is never seen by the
+        # top-of-loop best-state check - evaluate it explicitly so a
+        # converged final state cannot lose to a stale intermediate one.
+        final_chi2 = float(_predict_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+        if final_chi2 < best_chi2:
+            best_chi2 = final_chi2; best_tc = tc.copy(); best_pc = pc.copy(); best_cc = cc.copy(); best_flux = flux.copy()
+
         # --- C++ Parity: Snap centroids to the final optimized model ---
         # Use the best coefficients found during the optimization process
         import jax.numpy as jnp

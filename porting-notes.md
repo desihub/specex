@@ -436,3 +436,73 @@ User's suggestion to directly compare final-selection xc/yc (not just flux) and 
 **Repo state:** about to commit for the first time this session (previously nothing was committed across this whole investigation). See git log for the commit message covering this session's full set of fixes.
 
 **Next session:** (1) measure wavelength-residual-vs-line-list RMS for the *native* (non-forced, full `select_bundle_spots_iterative`) pipeline, not just the forced-spots test — this is the real end-to-end number that matters. (2) Test additional bundles and full CCDs, not just z8 bundle 5. (3) Consider fixing the `write_python_psf` GH-coefficient-mapping bug found above (separate from anything affecting trace RMS). (4) Revisit the ~2.5% selection-set excess (1561 vs 1523) if it still matters once the native wavelength-residual numbers are in hand.
+
+## 2026-07-16/17 — new session (fresh interactive node)
+### Native pipeline with all fixes: absolute accuracy now matches C++; GH-coefficient write bug fixed
+
+**Native run v8** (z8 bundle 5, full `select_bundle_spots_iterative` pipeline, all committed fixes from `17dca03` including the PSF-shape warm-start — the previous native v7 predated the warm-start):
+- Interesting behavioral change: the trace warm-up loop now does real work — max centroid shift 0.2494px (was exactly 0.0000px with the cold-started shape), and the warm-up trace fit's chi2 dropped to ~90,857 (was ~267,632 in v7). With a realistic PSF shape, the housekeeping fits actually pull the trace, matching C++'s intended behavior. Selection: pass1 968, pass3 967 (first time pass3 ≠ pass1 — the re-snap now matters), final 1562.
+- **Wavelength-residual vs line list (the absolute metric): native v8 RMS = 0.56102 Å vs C++ 0.56062 Å — statistically indistinguishable** (mean offsets identical to 5 decimals: 0.50767 vs 0.50765; std 0.23877 vs 0.23787). v7 was 0.57019. The forced-spots warm-start run (v5) remains the best at 0.54479 (it inherits C++'s final refined positions as anchors), but the native pipeline now fully matches C++'s absolute accuracy end-to-end.
+- **Trace RMS vs C++: X 0.0261px, Y 0.0292px** (v7: 0.0288/0.0340). Unlike the forced case (where warm-start increased divergence from C++), for the native pipeline warm-start improved *both* absolute accuracy *and* C++ parity. Both axes now < 0.03px, approaching the 0.02px target.
+- Native converged chi2 131,076 vs forced warm-start 127,772 — the remaining gap between native and forced is small.
+
+**GH-coefficient mapping bug in `write_python_psf` fixed** (io.py): the `param_mapping` used an `i_gh + j_gh <= 6` triangular filter (27 GH terms) inconsistent with the fitter's `pc` rows, which follow the full `(deg+1)²-1` grid (48 GH terms, only (0,0) excluded — same convention as `canonical_param_names()` and `_accumulate_bundle_jax`'s inner loop). The enumerate index desynchronized from the pc rows at the first skipped term (GH-6-1), scrambling every shape coefficient written after that point. Also hardcoded degree 6. Now builds the mapping from `GHDEGX` with the full-grid convention and hard-fails on any length mismatch. **Validated** with a synthetic round-trip (pc row r = r+1, write, read back, check all 50 named params land in their exact rows — 0 mismatches; GH-0-0 stays 1.0; untouched bundles retain input-template values). Note: this bug never affected trace/wavelength metrics (XTRACE/YTRACE depend only on `trace_coeffs`) but would corrupt the PSF *shape* used by downstream spectral extraction.
+
+**Also:** `fit_bundle_task`'s GPU pinning now maps `gpu_id` within a pre-existing `CUDA_VISIBLE_DEVICES` restriction instead of clobbering it, so multiple driver instances can be pinned to disjoint GPUs from outside (needed for parallel test streams; also useful for future multi-camera scaling).
+
+**New tool:** `testing/bundle_parity_suite.py` — runs C++ (`desi_psf_fit`, instrumented build) and Python for a list of (camera, bundle) cases and tabulates: final spot counts, X/Y trace RMS (broken fibers excluded from the comparison grid), wavelength-residual RMS + mean-subtracted scatter for both pipelines (using the C++ pass-4 spot set as the common measurement set), and wall times. First z-band campaign launched: stream A = z8 bundles 0/10/18/19 (18 contains broken fibers 473/474), stream B = z0/z5/z9/z2 bundle 5, running in parallel on separate GPUs.
+
+### Fifth real bug: `gh_params()` indexed PSF shape models by the WRONG FIBER for every bundle except bundle 0
+
+Found while preparing a batched replacement for the per-spot `gh_params()` calls (performance groundwork): `load_python_psf` builds each `bundle.param_models[name]` as a list indexed by **absolute** fiber (`for fib in range(500)`), but `gh_params()` indexed it with `rel_fiber_idx = fiber - params.fiber_min`. For bundle 5, `gh_params(130, w)` therefore returned **absolute fiber 5's** Gauss-Hermite shape (bundle 0's territory), not fiber 130's — verified numerically: GHSIGX(fiber 130, 8600Å) came back 0.98252 (= fiber 5's true value) instead of 1.05921 (fiber 130's true value), a ~7% error in the core width, with all 50 shape params similarly wrong. Bundle 0 (fibers 0-24) was coincidentally unaffected (rel == abs), which is presumably why unit-style checks never caught it.
+
+Impact: every individual-spot flux fit during the selection/housekeeping phase (which gates S/N thresholds and therefore spot selection) used a neighboring-but-wrong PSF shape. The joint bundle fit was NOT affected (it fits shape freely from the warm start, and `build_warm_start_pc` indexes absolutely/correctly). This is a strong candidate for the remaining selection-set discrepancies (e.g. the 8670.33Å line whose Python flux ran 30-70% hot vs C++, pushing 9 spots over the strict SNR≥5 threshold). Fixed in `psf.py` (index by absolute `fiber`), validated by direct comparison against hand-evaluated Legendre values from the FITS table.
+
+(While validating this, a red herring worth recording: reading `COEFF` straight from fitsio and feeding slices into JAX gives garbage (e+247) because the FITS data is big-endian (`>f8`) and JAX mishandles non-native byte order — `load_python_psf`'s `.astype(np.float64)` already converts to native, so the production path is safe. Don't "simplify" that astype away.)
+
+The in-flight z-band campaign was stopped and relaunched with this fix (C++ references reused via `--skip-cpp`); z8:5 prepended to stream A to re-baseline the reference case with correct per-fiber shapes.
+
+### z-band campaign round 1 results (with gh_params fix, BEFORE the bug below was found)
+
+| case | nspots cpp/py | Xrms px | Yrms px | λRMS cpp | λRMS py | λstd cpp | λstd py |
+|---|---|---|---|---|---|---|---|
+| z8:5  | 1523/1562 | 0.031 | 0.042 | 0.5606 | **0.5456** | 0.2379 | **0.2278** |
+| z8:0  | 1524/1578 | 0.032 | **0.249** | **0.5516** | 0.6905 | 0.2410 | 0.2403 |
+| z8:10 | 1521/1542 | 0.033 | 0.036 | 0.5631 | **0.5612** | 0.2368 | 0.2377 |
+| z8:18 | 1413/1449 | 0.029 | 0.040 | 0.5561 | **0.5466** | 0.2414 | **0.2379** |
+| z8:19 | 1536/1583 | 0.043 | 0.037 | 0.5534 | **0.5461** | 0.2436 | **0.2393** |
+| z0:5  | 1534/1584 | **0.163** | 0.086 | 0.5574 | **0.5238** | 0.2410 | 0.2501 |
+| z5:5  | 1579/1631 | 0.042 | **0.161** | **0.5389** | 0.6233 | 0.2512 | **0.2383** |
+| z9:5  | 1587/1642 | 0.027 | **0.196** | **0.5493** | 0.6538 | 0.2493 | **0.2423** |
+| z2:5  | 1577/1611 | 0.048 | 0.057 | 0.5349 | **0.5140** | 0.2502 | 0.2472 |
+
+Pattern: 6 of 9 cases Python beat or matched C++ on the wavelength metric; 3 cases (z8:0, z5:5, z9:5) showed Python ~0.1-0.15Å WORSE — but with normal *scatter* and a large uniform Y-shift (~0.16-0.25px), i.e. a zero-point slide, not a bad fit shape. Also z8:5 with the gh_params fix: native λRMS 0.5456 (beats C++'s 0.5606 and matches the forced-warm-start 0.5448); trace RMS vs C++ moved out to 0.031/0.042 — same "more correct in absolute terms, further from C++'s specific answer" pattern as the warm-start.
+
+### Sixth real bug — line-search variable collision silently discarded entire converged fits (coin flip per case)
+
+The three bad cases all showed `dx_final/dy_final mean = 0.000000` from the final joint fit **despite perfectly healthy chi2 trajectories** (e.g. z5:5: 357,583 → 136,030 over 12 iterations). Root cause in `PSF_Fitter.fit()`: `best_chi2` was used BOTH as the global best-state tracker (`if chi2 < best_chi2: best_tc = tc.copy() ...` at the top of each iteration) AND as the line-search comparison variable (`best_alpha, best_chi2 = 0.0, float(chi2)` then overwritten with the accepted step's predicted chi2). Consequence: at the next iteration's top, the accumulate-kernel chi2 of the new params was compared against the predict-kernel chi2 of the *same params* — mathematically equal, so the comparison outcome was decided by floating-point reduction-order differences between the two kernels. In cases where the flip systematically landed "not less", `best_tc/best_pc/best_flux` froze at their **initial values** (tc = 0, warm-start pc, pre-fit fluxes) and the entire converged fit was thrown away — the returned "best" state was the starting point. This also affected the selection phase's trace warm-up (same function, `max_iter=5`), explaining runs that reported "max centroid shift = 0.0000px". The bug predates this session (visible in yesterday's code); with the cold-start it was mostly masked (early iterations always improved on the huge initial chi2, so the best-state lagged at most one iteration behind final — invisible); the warm start's flat chi2 trajectories exposed it fully.
+
+**Fix (fitter.py):** line search now uses its own `ls_chi2` variable, and after the loop the final parameter state is explicitly evaluated and compared against the tracked best (the state after the last applied step was previously never a candidate). **All round-1 campaign results above are tainted by this coin flip and the whole campaign is being re-run (v2) with the fix**; C++ references reused.
+
+### z-band campaign v2 — FINAL results (all six bug fixes in)
+
+| case | nspots cpp/py | Xrms px | Yrms px | λRMS cpp | λRMS py | λstd cpp | λstd py |
+|---|---|---|---|---|---|---|---|
+| z8:5  | 1523/1563 | 0.031 | 0.047 | 0.5606 | **0.5413** | 0.2379 | **0.2265** |
+| z8:0  | 1524/1581 | 0.041 | 0.043 | **0.5516** | 0.5584 | 0.2410 | **0.2349** |
+| z8:10 | 1521/1543 | 0.035 | 0.044 | 0.5631 | **0.5511** | 0.2368 | **0.2362** |
+| z8:18 | 1413/1450 | 0.029 | 0.041 | 0.5561 | **0.5458** | 0.2414 | **0.2381** |
+| z8:19 | 1536/1581 | 0.049 | 0.043 | 0.5534 | **0.5408** | 0.2436 | **0.2370** |
+| z0:5  | 1534/1583 | **0.166** | 0.105 | 0.5574 | **0.5152** | **0.2410** | 0.2530 |
+| z5:5  | 1579/1632 | 0.034 | 0.093 | 0.5389 | **0.5055** | 0.2512 | **0.2414** |
+| z9:5  | 1587/1639 | 0.034 | 0.074 | 0.5493 | **0.5252** | 0.2493 | **0.2480** |
+| z2:5  | 1577/1612 | 0.052 | 0.082 | 0.5349 | **0.4984** | 0.2502 | **0.2378** |
+
+**Headline: Python beats C++ on absolute wavelength-residual RMS in 8 of 9 cases** (only z8:0 is ~1.2% worse, within noise), **with tighter scatter in 8 of 9**. The line-search fix eliminated the previous zero-point slides entirely (z8:0 Y-trace 0.249→0.043px, z5:5 0.161→0.093px, z9:5 0.196→0.074px). Broken-fiber bundle z8:18 behaves normally. Spot counts remain ~2.5-3.5% higher in Python across the board (consistent per-wavelength-bin aggregate-SNR boundary behavior, not new). Python wall time ~9.5-10 min/bundle, dominated by the ~7.5-min selection phase (known perf target — the per-spot gh_params calls are the hot spot, batching planned).
+
+**Open items carried to next session:**
+1. **COMMIT PENDING** — the following are modified-but-uncommitted on `python-gpu-port` (on top of `17dca03`): `py/specex/fitter.py` (line-search collision fix + warm-start build already partially in 17dca03? no — `build_warm_start_pc` was committed; the NEW uncommitted deltas are the ls_chi2 fix + final-state eval), `py/specex/psf.py` (gh_params absolute-fiber fix), `py/specex/io.py` (GH write mapping fix), `py/specex/specex.py` (CUDA_VISIBLE_DEVICES mapping), `testing/bundle_parity_suite.py` (new), `porting-notes.md`. A full commit message was drafted; user deferred the commit at end of session (node released).
+2. z0:5 X-trace divergence (0.166px vs C++) — line list can't arbitrate X; both pipelines move X strongly (and differently) from the input trace. Needs an independent X metric or a dive into who fits X better.
+3. b/r band campaign (task 10) not yet started — suite is ready, just needs launching (e.g. `--cases b8:5,b0:5` / `r8:5,r5:5` in two GPU-pinned streams).
+4. Selection-phase performance (456s/bundle): batch the gh_params evaluation (grouped per fiber, array-wave calls, computed once and reused across the 4 passes) — groundwork identified, not yet implemented. Needed for the "beat 3 CPU nodes on 1 GPU node" goal (currently one bundle ≈ 9.5 min; full CCD on 4 GPUs would be ~50 min vs C++ baseline ~5 min).
+5. Full-CCD runs (20 bundles + the extra CCD-level step) after b/r spot-checks.

@@ -61,9 +61,17 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     if stagger_s > 0:
         time.sleep(stagger_s)
         
-    # STRICT ISOLATION: Set before ANY JAX imports in this process
+    # STRICT ISOLATION: Set before ANY JAX imports in this process.
+    # If the parent already restricted CUDA_VISIBLE_DEVICES, map gpu_id
+    # within that restriction instead of clobbering it, so multiple driver
+    # instances can be pinned to disjoint GPUs from the outside.
     if backend == "gpu":
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        existing = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if existing:
+            devs = existing.split(',')
+            os.environ["CUDA_VISIBLE_DEVICES"] = devs[gpu_id % len(devs)]
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
         os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     os.environ["JAX_PLATFORM_NAME"] = backend
     

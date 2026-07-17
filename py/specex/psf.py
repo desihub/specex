@@ -159,11 +159,14 @@ class PSF:
             return p
 
         params = self.params_of_bundles[bundle_id]
-        rel_fiber_idx = fiber - params.fiber_min
+        # param_models lists are indexed by ABSOLUTE fiber (load_python_psf
+        # builds them with `for fib in range(500)`) - do not use a
+        # bundle-relative index here; that returned another bundle's shape
+        # (e.g. fiber 130 got fiber 5's coefficients).
         p = []
         for name in self.canonical_param_names():
             if name in params.param_models:
-                p.append(params.param_models[name][rel_fiber_idx].value(wave))
+                p.append(params.param_models[name][fiber].value(wave))
             else:
                 # Default for GH terms not in model
                 if name == 'GHSIGX' or name == 'GHSIGY': p.append(1.1)

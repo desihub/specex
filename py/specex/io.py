@@ -90,14 +90,22 @@ def write_python_psf(filename, bundle_results, input_template, global_corr=None)
         for row in range(len(param_names)):
             psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
             if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
-        # Dynamic name mapping for GH terms (matches fitter.py)
+        # Name mapping for GH terms. Must match the fitter's pc row order
+        # exactly: the full (deg+1)^2-1 grid excluding only (0,0), same
+        # convention as PSF.canonical_param_names() and the inner loop of
+        # _accumulate_bundle_jax (fitter.py). No i+j<=deg triangular filter -
+        # that filter (present here previously) desynchronized the enumerate
+        # index from the pc rows starting at GH-6-1, scrambling all shape
+        # coefficients written after that point.
+        gh_deg = psf_hdr['GHDEGX']
         param_mapping = ['GHSIGX', 'GHSIGY']
-        for j_gh in range(7): # assuming degree 6
-            for i_gh in range(7):
+        for j_gh in range(gh_deg + 1):
+            for i_gh in range(gh_deg + 1):
                 if i_gh == 0 and j_gh == 0: continue
-                if i_gh + j_gh <= 6:
-                    param_mapping.append(f'GH-{i_gh}-{j_gh}')
-        
+                param_mapping.append(f'GH-{i_gh}-{j_gh}')
+        if len(param_mapping) != pc.shape[0]:
+            raise ValueError(f"PSF param mapping length {len(param_mapping)} != fitted coeff rows {pc.shape[0]}")
+
         for i_par, pname in enumerate(param_mapping):
             idx = name_to_idx.get(pname)
             if idx is not None:
