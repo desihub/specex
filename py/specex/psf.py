@@ -129,6 +129,26 @@ class PSF:
         self.fiber_min = 0; self.params_of_bundles = {}; self.fiber_traces = {}
         self.gh_psf = GaussHermitePSF(degree=degree)
     
+    def canonical_param_names(self):
+        """
+        Names of the parameters actually consumed by GaussHermitePSF.single_pix_value_jnp,
+        in the exact order it expects them (matches C++ GaussHermitePSF::DefaultParamNames,
+        specex_gauss_hermite_psf.cc:394-418). The (i=0,j=0) GH term is intentionally excluded:
+        it is the implicit unit-amplitude 0th order term, hardcoded as ex*ey in the PSF
+        evaluation and never stored as a fit parameter. FITS PSF tables carry an explicit
+        'GH-0-0' row (fixed at 1.0) plus non-shape bookkeeping rows (BUNDLE/STATUS/CONT) that
+        must not be fed into the parameter array.
+        """
+        degree = self.gh_psf.degree
+        names = ['GHSIGX', 'GHSIGY']
+        for j in range(degree + 1):
+            for i in range(degree + 1):
+                if i == 0 and j == 0:
+                    continue
+                names.append(f'GH-{i}-{j}')
+        names += ['TAILAMP', 'TAILCORE', 'TAILXSCA', 'TAILYSCA', 'TAILINDE']
+        return names
+
     def gh_params(self, fiber, wave):
         bundle_id = self.get_bundle_of_fiber(fiber)
         if bundle_id not in self.params_of_bundles:
@@ -137,17 +157,16 @@ class PSF:
             p[0] = 1.1 # sigma_x
             p[1] = 1.1 # sigma_y
             return p
-            
+
         params = self.params_of_bundles[bundle_id]
         rel_fiber_idx = fiber - params.fiber_min
         p = []
-        for name in params.param_names:
+        for name in self.canonical_param_names():
             if name in params.param_models:
                 p.append(params.param_models[name][rel_fiber_idx].value(wave))
             else:
                 # Default for GH terms not in model
                 if name == 'GHSIGX' or name == 'GHSIGY': p.append(1.1)
-                elif name == 'GH-0-0': p.append(1.0)
                 else: p.append(0.0)
         return np.array(p)
 

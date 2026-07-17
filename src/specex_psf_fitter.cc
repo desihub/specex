@@ -1985,8 +1985,28 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
 
 
 
+    SPECEX_INFO("C++ SPOT SELECTION minSNR = " << minimum_signal_to_noise << " MINWAVE = " << min_wave_dist << " CHI2SIG = " << chi2_nsig);
     // First selection pass based on input criteria
     SPECEX_INFO("C++ SPOT SELECTION: Starting first pass. Input spots: " << input_spots.size());
+
+    // CHECKPOINT 0
+     if(!output_filename.empty()) {
+       string cp1_filename = output_filename;
+       size_t pos = cp1_filename.find_last_of('.');
+       if(pos != string::npos) {
+         cp1_filename.erase(pos);
+         cp1_filename += ".cpp_cp0_pass" + to_string(selection_pass_count) + ".txt";
+         ofstream f(cp1_filename);
+         if(f.is_open()) {
+            for(size_t s=0; s<input_spots.size(); s++) {
+              f << input_spots[s]->fiber << "," << input_spots[s]->wavelength << "," << input_spots[s]->xc << "," << input_spots[s]->yc << "," << input_spots[s]->flux << "," << input_spots[s]->eflux << "\n";
+            }
+           f.close();
+         }
+       }
+     }
+
+
     for(size_t s=0;s<input_spots.size();s++) {
       specex::Spot_p spot = input_spots[s];
 
@@ -2025,10 +2045,9 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
          cp1_filename += ".cpp_cp1_pass" + to_string(selection_pass_count) + ".txt";
          ofstream f(cp1_filename);
          if(f.is_open()) {
-           for(size_t s=0; s<input_spots.size(); s++) {
-             if(input_spots[s]->status == 1)
-               f << input_spots[s]->fiber << "," << input_spots[s]->wavelength << "," << input_spots[s]->xc << "," << input_spots[s]->yc << "\n";
-           }
+            for(size_t s=0; s<input_spots.size(); s++) {
+              f << input_spots[s]->fiber << "," << input_spots[s]->wavelength << "," << input_spots[s]->xc << "," << input_spots[s]->yc << "," << input_spots[s]->flux << "," << input_spots[s]->eflux << "\n";
+            }
            f.close();
          }
        }
@@ -2047,6 +2066,7 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
     std::map<int,int>  nspots_per_wave;
     std::map<int,int>  snr_per_wave;
 
+    SPECEX_INFO("C++ SPOT SELECTION: Starting Second pass");
 
     for(size_t s=0;s<input_spots.size();s++) {
       specex::Spot_p spot = input_spots[s];
@@ -2072,8 +2092,8 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
 
     int max_number_of_fibers_for_spot=0;
     for(std::map<int,int>::iterator it = nspots_per_wave.begin() ; it != nspots_per_wave.end(); ++it) {
-      //double wave=it->first/10.;
-      //SPECEX_DEBUG("SPOT SELECTION " << wave << " n=" << it->second << " S/N=" << snr_per_wave[it->first]);
+      double wave=it->first/10.;
+      SPECEX_DEBUG("SPOT SELECTION " << wave << " n=" << it->second << " S/N=" << snr_per_wave[it->first]);
       max_number_of_fibers_for_spot=max(max_number_of_fibers_for_spot,it->second);
     }
     // index of spot after the first with max number of fibers
@@ -2212,7 +2232,7 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
         ofstream f(spots_filename);
         if(f.is_open()) {
           for(size_t s=0; s<selected_spots.size(); s++) {
-            f << std::fixed << std::setprecision(15) << selected_spots[s]->fiber << "," << selected_spots[s]->wavelength << "," << selected_spots[s]->xc << "," << selected_spots[s]->yc << "\n";
+            f << std::fixed << std::setprecision(7) << selected_spots[s]->fiber << "," << selected_spots[s]->wavelength << "," << selected_spots[s]->xc << "," << selected_spots[s]->yc << "\n";
           }
           f.close();
           SPECEX_INFO("  Written " << selected_spots.size() << " spots to " << spots_filename);
@@ -2256,9 +2276,9 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
         raw_filename.replace(pos, 5, ".rawspots.txt");
         ofstream f(raw_filename);
         if(f.is_open()) {
-          f << std::fixed << std::setprecision(15);
+          f << std::fixed << std::setprecision(7);
           for(size_t s=0; s<input_spots.size(); s++) {
-            f << input_spots[s]->fiber << "," << input_spots[s]->wavelength << "," << input_spots[s]->xc << "," << input_spots[s]->yc << "\n";
+            f << input_spots[s]->fiber << "," << input_spots[s]->wavelength << "," << input_spots[s]->xc << "," << input_spots[s]->yc << "," << input_spots[s]->flux << "," << input_spots[s]->eflux << "\n";
           }
           f.close();
           SPECEX_INFO("  Written " << input_spots.size() << " raw candidates to " << raw_filename);

@@ -5,7 +5,7 @@ import numpy as np
 import multiprocessing as mp
 
 from .io import load_python_psf, read_preproc, read_lamp_lines, write_python_psf, get_sparse_nz
-from .fitter import PSF_Fitter, get_bundle_spots
+from .fitter import PSF_Fitter, get_bundle_spots, select_bundle_spots_iterative
 
 # --- Original C++ Wrapper (for baseline and legacy tools) ---
 
@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None):
     """
     Isolated task for fitting a single bundle.
     """
@@ -115,15 +115,18 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             c_xc = jnp.array([s['xc_init'] for s in spots])
             c_yc = jnp.array([s['yc_init'] for s in spots])
             gh_all = jnp.array([psf.gh_params(s['fiber'], s['wave']) for s in spots])
-            fluxes, snrs, chi2s = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, psf.h_size_x, psf.h_size_y)
+            housekeeping_hsize_x = min(3, psf.h_size_x); housekeeping_hsize_y = min(3, psf.h_size_y)
+            fluxes, snrs, chi2s, efluxes = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, housekeeping_hsize_x, housekeeping_hsize_y)
             fluxes = np.array(fluxes)
             for i in range(len(spots)):
                 spots[i]['flux'] = float(fluxes[i])
         else:
-            spots = get_bundle_spots(psf, f_min, f_max, lamp_lines, 
-                                     image=image, weight=weight,
-                                     sn_threshold=sn_threshold,
-                                     broken_fibers=broken_fibers)
+            # Mirrors C++ FitEverything's housekeeping/selection phase: multi-pass
+            # reselection from the full candidate list with a trace warm-up loop.
+            spots = select_bundle_spots_iterative(psf, f_min, f_max, lamp_lines,
+                                                   image, weight, bid,
+                                                   broken_fibers=broken_fibers,
+                                                   max_number_of_lines=max_number_of_lines)
 
 
 
@@ -133,7 +136,27 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 
         fitter = PSF_Fitter(psf)
         chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50)
-        
+
+        # --- Recompute trace_coeffs as the true correction relative to the
+        # *original input* trace, fit directly to the final absolute
+        # positions (xc_final/yc_final). fitter.fit()'s own `tc` only
+        # captures the residual relative to xc_init (the anchor held fixed
+        # during the joint fit) -- if xc_init already deviates from the
+        # input trace (e.g. after selection's trace-warmup snapping, or
+        # when using --force-spots with externally supplied positions),
+        # that deviation would otherwise be silently dropped when
+        # write_python_psf() adds `tc` onto the input trace to build the
+        # output XTRACE/YTRACE.
+        from .fitter import get_bundle_monomials_jnp
+        monomials = np.array(get_bundle_monomials_jnp(psf, bid, spots))
+        x_orig = np.array([psf.x_ccd(s['fiber'], s['wave']) for s in spots])
+        y_orig = np.array([psf.y_ccd(s['fiber'], s['wave']) for s in spots])
+        res_x = np.array(xc_final) - x_orig
+        res_y = np.array(yc_final) - y_orig
+        tc_x_abs, _, _, _ = np.linalg.lstsq(monomials, res_x, rcond=None)
+        tc_y_abs, _, _, _ = np.linalg.lstsq(monomials, res_y, rcond=None)
+        tc = np.stack([tc_x_abs, tc_y_abs], axis=0)
+
         # --- C++ Parity: Update spots with refined model centroids ---
         # The C++ implementation snaps final spots to the model PSF position
         # We need to preserve the original raw values for the debug file
@@ -187,8 +210,8 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 
 
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, 
-                    first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
-                    broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None):
+                     first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
+                     broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100):
     """
     Fits a full CCD (20 bundles) using parallel processes.
     """
@@ -210,7 +233,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines))
         
         print(f"Launching {len(tasks)} workers with stagger...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -357,6 +380,7 @@ def main():
     parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
     parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
+    parser.add_argument("--max-lines", type=int, default=200, help="Maximum number of lines to keep per bundle")
     parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
     parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
     
@@ -379,6 +403,7 @@ def main():
         backend=args.backend,
         broken_fibers=args.broken_fibers,
         sn_threshold=args.sn_threshold,
+        max_number_of_lines=args.max_lines,
         h_size_y=args.h_size_y,
         force_spots_path=args.force_spots
     )
