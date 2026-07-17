@@ -67,7 +67,7 @@ def load_python_psf(filename, opts):
             psf.params_of_bundles[bid] = bundle
     return psf
 
-def write_python_psf(filename, bundle_results, input_template, global_corr=None):
+def write_python_psf(filename, bundle_results, input_template):
     import fitsio
     fin = fitsio.FITS(input_template)
     xtrace_out = fin['XTRACE'].read().astype(np.float64)
@@ -120,15 +120,19 @@ def write_python_psf(filename, bundle_results, input_template, global_corr=None)
     fout.write(xtrace_out, header=fin['XTRACE'].read_header(), extname='XTRACE')
     fout.write(ytrace_out, header=fin['YTRACE'].read_header(), extname='YTRACE')
     fout.write(psf_table, header=psf_hdr, extname='PSF')
-    
-    if global_corr is not None:
-        # global_corr should be a dict with 'WAVE', 'DWAVE', 'DWAVE_ERR' lists
-        data = np.zeros(len(global_corr['WAVE']), dtype=[('WAVE', 'f4'), ('DWAVE', 'f4'), ('DWAVE_ERR', 'f4')])
-        data['WAVE'] = global_corr['WAVE']
-        data['DWAVE'] = global_corr['DWAVE']
-        data['DWAVE_ERR'] = global_corr['DWAVE_ERR']
-        fout.write(data, extname='WAVECORR')
-        
+
+    # Pass through any other extensions from the input template unchanged
+    # (e.g. EXTOFF/INTOFF wavelength-offset tables). Real desi_compute_psf
+    # merges never modify these -- merge_psf() only touches XTRACE/YTRACE/
+    # PSF, so anything else in the input PSF file is inherited byte-for-byte
+    # from an earlier upstream calibration step (desi_compute_trace_shifts),
+    # not recomputed here.
+    known = {'XTRACE', 'YTRACE', 'PSF'}
+    for hdu in fin:
+        extname = hdu.get_extname()
+        if extname and extname not in known:
+            fout.write(hdu.read(), header=hdu.read_header(), extname=extname)
+
     fout.close()
 
 def write_psf(pyps, opts, pyio):

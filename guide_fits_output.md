@@ -29,13 +29,9 @@ The output `.fits` files produced by Specex (and our Python port) contain the fu
   - In production Specex, these are often `[500, 4]` or similar (4 coeffs per fiber).
   - In our port, we use bundle-wide 2D Legendres.
 
-### Extension 4: Wavelength Residuals
+### Extension 4: EXTOFF (external wavelength offset), when present
 - **Type**: Binary Table
-- **Purpose**: **Spot-by-Spot Calibration Diagnostics.**
-- **Fields**:
-  - `WAVE`: The reference vacuum wavelength (Angstrom) of the arc lamp emission line used for fitting.
-  - `DWAVE`: The **Wavelength Residual** ($\Delta\lambda = \lambda_{measured} - \lambda_{model}$). It represents the sub-pixel shift required to perfectly center the PSF on the measured spot relative to the smooth Legendre solution.
-  - `DWAVE_ERR`: The 1-sigma statistical uncertainty of the `DWAVE` measurement.
-
-## Interpreting the Corrections
-If `DWAVE` is consistently positive or negative in a specific region of the CCD, it indicates a "local" perturbation in the wavelength solution that the smooth degree-6 Legendre polynomial could not capture. In the DESI pipeline, these residuals are often used for high-precision checks of the spectrograph stability.
+- **Purpose**: **Inherited calibration metadata, not a PSF-fit output.**
+- **Fields**: `WAVE`, `DWAVE`, `DWAVE_ERR` -- an external-reference wavelength-offset table written by `desispec.trace_shifts.write_traces_in_psf()`, a separate downstream pipeline stage (`desi_compute_trace_shifts`) that runs *after* PSF fitting and compares extracted spectra to a reference (e.g. sky) spectrum.
+- **Provenance**: `desi_compute_psf`'s bundle merge step (`merge_psf()` in `desispec/scripts/specex.py`) only overwrites the `XTRACE`/`YTRACE`/`PSF` HDUs of the `--input-psf` template; any other extension already present in that template (like `EXTOFF`, or `INTOFF` for internal/fiber-to-fiber offsets) is carried through to the output byte-for-byte, unchanged. Neither the C++ fitter nor `merge_psf()` computes these values -- they're whatever was already baked into the input PSF file from an earlier calibration run.
+- **Port implication**: `write_python_psf` (`py/specex/io.py`) reproduces this by copying any extension present in `input_template` other than `XTRACE`/`YTRACE`/`PSF` straight into the output, with no computation. Do not try to recompute `DWAVE`/`EXTOFF` values from the fit -- that's not what C++ does either.
