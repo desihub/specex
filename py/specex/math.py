@@ -74,12 +74,19 @@ class Legendre1DPol:
 
 
     def monomials(self, x):
+        # NumPy, not JAX: this is called from plain-Python hot loops (e.g.
+        # gh_params(), once per candidate spot per selection pass) where
+        # JAX's eager-mode per-op GPU dispatch overhead (~1ms/op) dominates
+        # runtime for what's otherwise a handful of scalar flops. Nothing
+        # here needs autodiff -- the JAX-jitted fit machinery in fitter.py
+        # operates on raw jnp coefficient arrays directly and never calls
+        # this method.
         rx = 2 * (x - self.xmin) / (self.xmax - self.xmin) - 1
-        return jnp.stack([legendre_pol_jnp(i, rx) for i in range(self.deg + 1)], axis=0)
+        return np.stack([legendre_pol(i, rx) for i in range(self.deg + 1)], axis=0)
 
     def value(self, x):
         m = self.monomials(x)
-        return jnp.dot(self.coeff, m)
+        return np.dot(self.coeff, m)
 
     def derivative(self, x):
         """

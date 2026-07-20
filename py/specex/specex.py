@@ -73,6 +73,13 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         else:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
         os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    else:
+        # Hard-exclude CUDA from non-GPU workers. Without this, JAX's CUDA
+        # plugin still probes/initializes on whatever GPUs are inherited as
+        # visible even with JAX_PLATFORM_NAME=cpu, so concurrent CPU-backend
+        # workers collide with each other (and with real GPU workers) over
+        # GPU memory and crash with CUDA_ERROR_OUT_OF_MEMORY.
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["JAX_PLATFORM_NAME"] = backend
     
     try:
@@ -218,33 +225,49 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         return bid, {"error": str(e), "traceback": err_msg}
 
 
-def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file, 
+def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
-                     broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100):
+                     broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
+                     workers_per_gpu=4, cpu_workers=None):
     """
     Fits a full CCD (20 bundles) using parallel processes.
+
+    For backend="gpu", multiple worker processes are packed onto each
+    physical GPU (workers_per_gpu) since a single bundle fit doesn't
+    saturate an A100 -- benchmarked on bundle 5 (z8/00344649): 1/GPU
+    takes ~54s/bundle, 4/GPU takes ~75s/bundle (~1.4x slower) but yields
+    ~2.7x more aggregate throughput. 5/GPU reliably hits
+    RESOURCE_EXHAUSTED (peak ~8.6GB/worker x 5 exceeds the 40GB A100),
+    so 4/GPU is the validated safe ceiling. The pool size need not equal
+    the bundle count -- Pool.starmap dynamically queues remaining tasks
+    onto whichever worker frees up first.
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
     bundle_results = {}
-    
+
     print(f"--- SPECE-X Multi-Process CCD Fit ({backend.upper()}) ---")
     print(f"  Arc: {arc_file}")
     print(f"  In PSF: {in_psf_file}")
     print(f"  Out PSF: {out_psf_file}")
     if broken_fibers:
         print(f"  Broken Fibers: {broken_fibers}")
-        
+
+    if backend == "gpu":
+        n_workers = min(len(all_bundles), n_gpus * workers_per_gpu)
+    else:
+        n_workers = min(len(all_bundles), cpu_workers or n_gpus)
+
     ctx = mp.get_context('spawn')
-    with ctx.Pool(processes=min(len(all_bundles), n_gpus)) as pool:
+    with ctx.Pool(processes=n_workers) as pool:
         tasks = []
         for i, bid in enumerate(all_bundles):
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
             tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines))
-        
-        print(f"Launching {len(tasks)} workers with stagger...", flush=True)
+
+        print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
         for bid, res in chunk_results:
             if "error" in res:
@@ -284,6 +307,8 @@ def main():
     parser.add_argument("--legendre-deg-wave", type=int, default=3, help="Legendre degree for wavelength")
     parser.add_argument("--fit-continuum", action="store_true", default=True, help="Enable continuum fitting")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--workers-per-gpu", type=int, default=4, help="Concurrent bundle-fit worker processes packed onto each GPU (validated safe ceiling: 4)")
+    parser.add_argument("--cpu-workers", type=int, help="Concurrent worker processes for --backend cpu (default: --gpu count)")
     parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
     parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
@@ -312,7 +337,9 @@ def main():
         sn_threshold=args.sn_threshold,
         max_number_of_lines=args.max_lines,
         h_size_y=args.h_size_y,
-        force_spots_path=args.force_spots
+        force_spots_path=args.force_spots,
+        workers_per_gpu=args.workers_per_gpu,
+        cpu_workers=args.cpu_workers
     )
 
 if __name__ == "__main__":

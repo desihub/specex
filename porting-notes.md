@@ -519,3 +519,68 @@ Then investigated the full-CCD "extra step" flagged at the top of this session (
 **Fix implemented** (`py/specex/io.py` `write_python_psf`): removed the fabricated `global_corr`/Phase-2-computed `WAVECORR` table entirely, replaced with a generic pass-through — copy any HDU from `input_template` other than `XTRACE`/`YTRACE`/`PSF` straight into the output unchanged. Verified via a standalone unit test (fake single-bundle `bundle_results`, real input template) that the output's `EXTOFF` is byte-identical to the input's. Also removed the entire fabricated "Phase 2: Global Wavelength Refinement" block from `fit_ccd_native` (`specex.py`, ~115 lines) — it had hardcoded, wrong-band wavelengths (`[5875.6, 6402.2, 6929.5, 7438.9]` vs the real z-band `[7680.6, 8310.2, 8928.7, 9768.4]`) and arbitrary `/0.8`/`*0.05` scale factors, and — more seriously — it overwrote every bundle's real fitted `trace_coeffs` with a smoothed CCD-wide re-fit, silently discarding per-bundle fit accuracy. `write_python_psf`'s existing per-bundle slice-copy into shared `XTRACE`/`YTRACE`/`PSF` arrays already matches C++'s `merge_psf()` behavior correctly (bundles are fit independently in C++; merging is index-copy only, no cross-bundle smoothing). Updated `guide_fits_output.md`'s Extension 4 description to match (previous doc mischaracterized it as a PSF-fit output).
 
 **Next:** run the full-CCD parity test (fresh C++ output already sitting at `$SCRATCH/specex/testing/verify_dwave_cpp_z8-00344649.fits` from the verification run above, reusable as the C++ baseline) vs our fixed `fit_ccd_native`, then b/r bands, z0:5 X-trace, selection perf.
+
+### Full-CCD python test (z8/00344649, all 20 bundles, `--broken-fibers 473,474`)
+
+Ran `python -m specex.specex ... --gpu 4` (4-way GPU-pinned `multiprocessing.Pool`, `fit_ccd_native`) end-to-end against the fresh C++ baseline (`verify_dwave_cpp_z8-00344649.fits`). Command:
+```
+python -m specex.specex --input-image .../preproc-z8-00344649.fits.gz --input-psf .../shifted-input-psf-z8-00344649.fits \
+  --output-psf $SCRATCH/specex/testing/pyfit-psf-z8-00344649.fits --broken-fibers 473,474 --gpu 4
+```
+All 20 bundles fit successfully, no `FAILED`/`WARNING` lines in the log. Total wall time **5204.86s (~86.7 min)** on 4 GPUs (i.e. ~5 sequential rounds of ~4 concurrent bundles, ~17 min/round dominated by the known ~700-770s selection-phase cost per bundle). Output file has all 4 expected extensions (`XTRACE, YTRACE, PSF, EXTOFF`), matching C++.
+
+**EXTOFF pass-through confirmed end-to-end**: byte-identical to the C++ output's `EXTOFF`, not just in the earlier isolated unit test — closes out the "extra CCD-level step" investigation for real.
+
+**Trace RMS across all 500 fibers (473/474 excluded), python vs C++, evaluated at 200 points over the shared WAVEMIN/WAVEMAX (7339-9915 Å):**
+- X-trace RMS: **0.0334 px**
+- Y-trace RMS: **0.0424 px**
+- Max |dx| = 0.427 px, max |dy| = 0.449 px (isolated outlier fibers, not a systematic drift)
+
+This is consistent with the per-bundle numbers from the prior multi-camera z-band campaign (~0.03-0.08 px), confirming the full-CCD run doesn't introduce any new cross-bundle systematic (as expected, since bundles are fit fully independently and merged by index-copy only — no smoothing to go wrong). Worst-X fibers cluster in bundles {0, 8, 9, 10, 15, 19}; worst-Y fibers cluster in bundles {0, 1, 4, 6, 13, 15, 16, 19} — mostly edge bundles (0, 19) plus a scattered handful of others, no single pathological bundle.
+
+No per-bundle chi2/ndata header keys (`B{bb}RCHI2` etc.) are written by either the C++ or Python merge in this configuration, so that comparison wasn't available this round.
+
+**Conclusion: full-CCD python port is numerically sound and matches the established per-bundle accuracy profile.** Wall time (86.7 min on 4 GPUs) is well above the "beat 3 CPU nodes" performance goal — confirms the selection-phase batching (item 4 above) is the next real priority once b/r bands and z0:5 X-trace are checked off.
+
+**Next:** b/r band campaign (task 10), z0:5 X-trace divergence, then selection-phase performance work (batched `gh_params`).
+
+### Full-CCD "truth" comparison (wavelength residual vs arc lamp line list)
+
+Using the same methodology as `bundle_parity_suite.py`'s `wave_residual_stats()` (invert each pipeline's fitted `Y_vs_W` trace at C++'s final-selected spot `yc` positions, compare to the true line wavelength), extended across all 20 bundles using the pre-existing C++ `.cppspots_pass4.txt` debug files from the `verify_dwave_cpp_z8-00344649` run (no C++ re-run needed).
+
+**Python beats C++ on raw wavelength-residual RMS in 19/20 bundles, and on offset-corrected scatter (wstd) in all 20/20 bundles.** CCD-wide: C++ wrms=0.5602Å vs Python wrms=0.5497Å; C++ wstd=0.2391Å vs Python wstd=0.2339Å. Confirms the earlier single-bundle 9-case z-band campaign finding holds across the full detector, arbitrated against physical truth (not just C++ agreement).
+
+### Root-caused and fixed the selection-phase performance bottleneck (JAX eager-dispatch overhead)
+
+Investigated the ~700-770s/bundle selection cost flagged in the full-CCD run above. Root cause: `psf.gh_params(fiber, wave)` (`psf.py:152-174`) loops over 55 canonical GH-parameter names, calling `Legendre1DPol.value()` once per name per candidate spot. `Legendre1DPol.value()`/`.monomials()` (`math.py`) used JAX (`jnp.stack`/`jnp.dot`) for what's fundamentally a tiny (≤7-element) scalar dot product with no autodiff dependency anywhere downstream. Called from the plain-Python list comprehension in `fit_candidate_fluxes` (`fitter.py:423`, `gh_all = jnp.array([psf.gh_params(...) for s in candidates])`), this triggered ~93,500 individual JAX eager-mode GPU dispatch calls per `strict_select()` invocation (1700 candidates × 55 params), each incurring ~1ms of host-device kernel-launch/sync overhead — confirmed via `cProfile` on bundle 5's real candidate set: 93,500 calls to `Legendre1DPol.value()` consumed 102.1s of a 115.6s `fit_candidate_fluxes` call.
+
+**Fix:** rewrote `Legendre1DPol.monomials()`/`.value()` (`math.py`) to use plain NumPy instead of JAX. Verified bit-for-bit numerically identical to the old JAX version (`git stash`-bracketed before/after comparison, max abs diff = 0.0 across 4 representative fiber/wave test points). `Legendre2DPol`/`SparseLegendre2DPol` (unused elsewhere in the hot path, confirmed via grep — no live callers) were left untouched; the fix is scoped to the confirmed hot path only.
+
+**Result on bundle 5 (z8/00344649), single-worker, post-fix:** selection phase dropped from ~700-770s to **39.25s** (matches the isolated microbenchmark's ~18-20x). Full bundle wall time (selection + trace-warmup fit + final joint fit): **54.4s on GPU, 53.2s on CPU** — both backends produce bit-for-bit identical output (chi2=131058.013, 1563 spots), confirming correctness is backend-independent. Peak host RSS ~4.5-5.5GB/bundle, peak GPU memory ~8.65GB/bundle.
+
+### Found and fixed a second bug: CPU-backend workers weren't isolated from CUDA
+
+While benchmarking concurrent CPU-backend workers (needed for the eventual CPU+GPU hybrid pool), found that `fit_bundle_task` (`specex.py`) only cleared/pinned `CUDA_VISIBLE_DEVICES` when `backend=="gpu"` — for `backend=="cpu"`, it was left at whatever the parent process inherited (all 4 GPUs visible on this node), so JAX's CUDA plugin still initialized on those devices despite `JAX_PLATFORM_NAME=cpu`. Running 8 concurrent CPU-backend workers immediately crashed 7/8 of them with `CUDA_ERROR_OUT_OF_MEMORY` — they were silently fighting each other (and any real GPU workers) for GPU memory while doing CPU-only compute. **Fix:** explicitly set `CUDA_VISIBLE_DEVICES=""` for any non-"gpu" backend. Re-verified: 8-way and 16-way concurrent CPU runs both succeed cleanly post-fix, all producing bit-for-bit identical results to the single-worker/GPU runs.
+
+### GPU oversubscription: the real unlock, no CPU hybrid needed to beat the C++ baseline
+
+With the gh_params fix in place, a single bundle-5 fit takes 54.4s uncontended on 1 GPU — small enough that a single A100 isn't saturated by one bundle. Benchmarked concurrent GPU workers sharing physical GPUs (round-robin `gpu_id = i % 4`, all on bundle 5 as a synthetic load test):
+
+| workers/GPU | total workers | per-worker wall time | outcome |
+|---|---|---|---|
+| 1 | 4 | 54.4s | baseline |
+| 4 | 16 | 74-79s | all succeed, ~2.7x aggregate throughput vs 1/GPU |
+| 5 | 20 | 74-78s (16 of them) | **4 of 20 fail with RESOURCE_EXHAUSTED** (peak ~8.6GB/worker × 5 exceeds the 40GB A100) |
+
+**4 workers/GPU (16 total) is the validated safe ceiling** for this bundle size. Implemented in `fit_ccd_native`/`fit_bundle_task` (`specex.py`) as a new `workers_per_gpu` parameter (default 4, CLI `--workers-per-gpu`) that sizes the `multiprocessing.Pool` to `min(n_bundles, n_gpus * workers_per_gpu)` instead of `n_gpus`. Since each task still carries its own `gpu_id = i % n_gpus` and `Pool.starmap` dynamically queues tasks onto whichever worker frees up first, a 16-worker pool naturally absorbs all 20 real bundles (16 run immediately, the remaining 4 fill in as slots free) without any explicit round-management code. Also added `cpu_workers` (default = `--gpu` count) for symmetry on the CPU backend path.
+
+**Real full-CCD validation run (20 distinct bundles, `--workers-per-gpu 4`, z8/00344649):**
+```
+python -m specex.specex --input-image .../preproc-z8-00344649.fits.gz --input-psf .../shifted-input-psf-z8-00344649.fits \
+  --output-psf .../pyfit-psf-z8-00344649_v2.fits --broken-fibers 473,474 --gpu 4 --workers-per-gpu 4
+```
+**Total CCD Fit Time: 132.65s (2.2 min).** Zero `FAILED`/`WARNING` lines. All 4 expected extensions present. X/Y trace RMS vs C++ baseline: **0.0334px / 0.0424px — bit-for-bit identical to the original (pre-fix) 86.7-minute run's numbers.** Confirms the speedup is purely mechanical (parallelism + a numerically-lossless NumPy rewrite) with zero accuracy cost.
+
+**Bottom line: 5204.86s → 132.65s, a 39.2x speedup, and 2.31x faster than the C++ 3-CPU-node baseline (307s), using only the 4 on-node GPUs — no CPU+GPU hybrid pool needed to clear the performance goal.** The CPU-backend path is also fully fixed and available (bit-for-bit identical results, ~53s/bundle uncontended, scales to at least 16 concurrent workers on this 128-core node) if future work wants to layer in CPU capacity for even more throughput, e.g. when running many exposures/cameras concurrently rather than just one CCD.
+
+**Next:** b/r band campaign (task 10), z0:5 X-trace divergence, then decide whether further speedup (e.g. real CPU+GPU hybrid scheduling across multiple exposures) is worth pursuing now that the single-CCD target is cleared.
