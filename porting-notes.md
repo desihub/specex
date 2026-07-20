@@ -641,3 +641,50 @@ All 18 cases (b8 bundles 0/5/10/18/19 + b0/b5/b9/b2 bundle 5; r8 bundles 0/5/10/
 X/Y trace RMS averages ~0.10px (X) / ~0.07px (Y) across both bands — higher than z-band's typical 0.03-0.05px, though still in the range z-band's own outlier cases (e.g. z0:5 at 0.166px) reached and which the chi2 investigation above showed to be Python-more-correct rather than buggy. Spot-count divergence is larger in b/r than z: Python selects 15-25% more spots than C++ in several r8 cases (e.g. r8:0 1100→1310, r8:18 1024→1219) vs z-band's typical ~3%. Given the recurring finding that Python's extra spots consistently *improve* rather than degrade the fit (more data at equal or better chi2), this is not being treated as a bug, but is worth a future look at *why* the selection-threshold gap widens for bluer bands (likely a S/N-linear-terms-vs-photon-noise interaction at lower flux levels — b/r bands are bluer/noisier than z).
 
 **Task 10 (b/r band campaign) closed out.** Remaining open items: none blocking — both standing investigations from the last session (b/r bands, z0:5 X-trace) are now resolved. `py/specex/fitter.py`'s edge-of-CCD stamp-indexing fix is uncommitted along with this file; needs a commit next session.
+
+## 2026-07-20 (new session)
+
+### Investigated the r8-band wavelength zero-point offset — same "different but equally/more valid local optimum" pattern as z0:5, not a bug
+
+Picked r8:0 (one of the 5 cases where Python's raw wrms lost to C++) and computed per-spot wavelength residuals binned by wavelength and by fiber (using the same `wave_residual_stats` methodology, at full resolution instead of the aggregate RMS number):
+
+| wave range (Å) | n | cpp mean | py mean | diff |
+|---|---|---|---|---|
+| 5771-6156 | 250 | 0.1865 | 0.2084 | 0.0219 |
+| 6156-6541 | 250 | 0.3540 | 0.3755 | 0.0215 |
+| 6541-6926 | 106 | 0.5043 | 0.5216 | 0.0173 |
+| 6926-7312 | 198 | 0.6642 | 0.6774 | 0.0132 |
+| 7312-7697 | 271 | 0.8646 | 0.8841 | 0.0195 |
+
+| fiber range | n | cpp mean | py mean | diff |
+|---|---|---|---|---|
+| 0-5 | 218 | 0.5215 | 0.5381 | 0.0166 |
+| 5-10 | 220 | 0.5263 | 0.5480 | 0.0217 |
+| 10-15 | 218 | 0.5236 | 0.5446 | 0.0210 |
+| 15-20 | 224 | 0.5276 | 0.5483 | 0.0207 |
+| 20-25 | 220 | 0.5276 | 0.5444 | 0.0168 |
+
+**The offset (~0.017-0.022Å, i.e. ~0.04px given r8's ~2.05px/Å plate scale) is remarkably uniform across both wavelength and fiber** — a flat zero-point shift, not a wavelength-dependent curvature or a fiber-dependent trend. This rules out a trace-polynomial-degree mismatch as the explanation (that would show up as curvature, not a constant shift) and rules out anything selection-threshold-related (that would vary by fiber/S-N). Cross-checked against final joint-fit chi2 from each pipeline's log: **C++ chi2 = 138,235 (1309 spots) vs Python chi2 = 120,791 (1310 spots)** — essentially identical spot counts this time (unlike z0:5's 1534 vs 1583), so the ~12.6% lower Python chi2 can't be attributed to fitting more data. **Same conclusion as z0:5: Python converges to a slightly different point in parameter space than C++ (hence the tiny uniform zero-point shift) that fits the real pixel data measurably better, not worse.** Not a bug; matches the established "usually-better, occasionally-different" pattern for both wavelength and X-trace metrics.
+
+### Real, unfixed bug found while setting up the full-CCD b/r comparison: Python's joint-fit trace/PSF-shape wavelength-degree is hardcoded to 3, ignoring both the `--legendre-deg-wave` CLI flag and the band
+
+While preparing a *production-realistic* full-CCD b8/r8 run (using the actual `desi_compute_psf --mpi` wrapper for the C++ side, rather than bundle_parity_suite.py's hardcoded `--legendre-deg-wave 3 --fit-continuum` override), found that real production C++ (per `desispec/scripts/specex.py:224-228`) uses **`--legendre-deg-wave 3` + `--fit-continuum` only for z-band**; b/r bands get **`--legendre-deg-wave 1`, no continuum fit**. `get_bundle_monomials_jnp` (`fitter.py:52`) hardcodes `xdeg, wdeg = 1, 3` for the within-bundle joint-fit's trace/PSF-shape correction basis — this is completely disconnected from both the (also-broken) `--legendre-deg-wave` CLI argument and from any band detection. Same story for continuum: `PSF_Fitter.fit` (`fitter.py:737`) hardcodes `Ncont = 4` and always includes continuum terms in the fit/line-search regardless of band; the `--fit-continuum` CLI flag (`specex.py:308`) is parsed but **never referenced anywhere else in the file** — pure dead code, and structurally can't even be disabled (`action="store_true", default=True"` has no `--no-fit-continuum` counterpart).
+
+**Net effect: every Python run to date (including all b/r band campaign and z-band campaign results in this file) has fit degree-3 trace/shape corrections and a 4-term continuum for every band, regardless of what C++ would really do in production for non-z cameras.** This did not affect the b/r band campaign comparisons above, because `bundle_parity_suite.py` explicitly forces C++ to use `--legendre-deg-wave 3 --fit-continuum` too (an intentional match for a controlled, apples-to-apples comparison) — so those results remain valid as a Python-vs-C++ comparison, just not as a Python-vs-*real-production-defaults* comparison. It does mean today's from-scratch full-CCD run (C++ via the real `desi_compute_psf --mpi` wrapper, using its true per-band defaults) is comparing Python's structurally-fixed deg=3+continuum against C++'s real deg=1+no-continuum for b8/r8 — a genuine methodological mismatch, kept as-is for this session's *speed* comparison (degree/continuum have negligible impact on wall time) but explicitly flagged here as **not a fair accuracy comparison** and **not fixed this session** (the fix — threading a band-aware degree/continuum choice through `get_bundle_monomials_jnp`, `PSF_Fitter.fit`'s `Ncont`, and the CLI argument parsing/wiring in `specex.py` — touches the core joint-fit parameter vector shape and needs its own careful validation pass against the already-validated z-band results, not a rushed change). **Flagging as the next real bug to fix.**
+
+### Full-CCD b8/r8 speed comparison vs real C++ production defaults
+
+With the C++ side now run through the actual `desi_compute_psf --mpi` wrapper (`srun -n 20`, real per-band defaults — b/r get `--legendre-deg-wave 1`, no continuum, unlike our earlier hand-driven `desi_psf_fit` comparisons) and the Python side run through `fit_ccd_native` (`--gpu 4 --workers-per-gpu 4`, the validated-safe GPU-oversubscription config from the earlier z8 full-CCD work), both b8 and r8 completed 20/20 bundles with zero failures on each side:
+
+| camera | C++ wall time | Python wall time | ratio |
+|---|---|---|---|
+| b8 | 34.15s | 167.18s | Python ~4.9x slower |
+| r8 | 122.67s | 136.47s | Python ~1.1x slower |
+
+**Unlike z-band (where Python beat the C++ 3-CPU-node baseline by 2.3x), Python is slower than C++ for b/r on this comparison** — but the comparison isn't apples-to-apples on the C++ side either: both C++ runs here used `srun -n 20` *on this same shared interactive node* (not the dedicated 3-CPU-node batch allocation the original 307s z-band baseline used), so C++ is unusually fast here (34-123s vs the earlier 307s reference) simply because b/r bands have far fewer spots/bundle than z-band (b8/r8 have roughly half z8's per-bundle spot counts per the campaign tables above) and 20 fully-parallel MPI ranks on a mostly-idle shared node hit no contention. The C++ side is not the performance bottleneck for b/r the way it was for z — b/r bundles are intrinsically cheap for C++. Python's wall time (136-167s) is essentially unchanged from the z8 full-CCD number (132.65s) since Python's fixed per-bundle overhead (selection ~40-100s/bundle, mostly independent of band) dominates over the smaller per-band spot-count differences that help C++ more than they help Python's largely-fixed-cost pipeline.
+
+**Trace RMS (500 fibers, 473/474 excluded, 200-pt wave grid) — Python vs the real-production-default C++ baseline (deg=1/no-continuum vs Python's deg=3/continuum, so expect somewhat larger differences than the matched-degree bundle_parity_suite numbers above):**
+- b8: X-RMS = 0.127px, Y-RMS = 0.061px (max|dx|=1.04px, max|dy|=0.90px)
+- r8: X-RMS = 0.069px, Y-RMS = 0.051px (one isolated outlier fiber, #264 in bundle 10, max|dx|=2.94px; next-worst fiber is 0.76px, so this is a single bad fiber, not a systematic drift — consistent with the "isolated outlier, not systematic" pattern noted in the z8 full-CCD run)
+
+**Bottom line: for b/r bands, the current Python pipeline is competitive-to-slightly-slower than C++ (not a clear win like z-band), and the degree/continuum mismatch (previous section) muddies the accuracy comparison enough that it shouldn't be over-interpreted until task 18 is fixed.** The path to a real b/r speedup is the same lever already validated for z-band (this run already uses `--workers-per-gpu 4` oversubscription); the remaining gap is Python's largely band-independent per-bundle fixed cost (selection dominates) not shrinking the way C++'s genuinely-band-dependent cost does for the sparser b/r bundles. Next steps: fix task 18 (band-aware degree/continuum) first since it affects both correctness and possibly performance (fewer trace/shape parameters to fit = faster per-iteration linear algebra), then re-benchmark.
