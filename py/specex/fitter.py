@@ -45,11 +45,11 @@ def build_warm_start_pc(psf, bundle_id, spots, gh_deg, monomials):
         rows.append(coeff)
     return np.array(rows)
 
-def get_bundle_monomials_jnp(psf, bundle_id, spots):
+def get_bundle_monomials_jnp(psf, bundle_id, spots, wdeg=3):
     import jax.numpy as jnp
     from .math import legendre_pol_jnp
     bundle = psf.params_of_bundles[bundle_id]
-    xdeg, wdeg = 1, 3; nz = get_sparse_nz(xdeg, wdeg)
+    xdeg = 1; nz = get_sparse_nz(xdeg, wdeg)
     fmin, fmax = bundle.fiber_min, bundle.fiber_max
     wmin, wmax = psf.fiber_traces[fmin]['X_vs_W'].xmin, psf.fiber_traces[fmin]['X_vs_W'].xmax
     fiber_vals = jnp.array([s['fiber'] for s in spots]); wave_vals = jnp.array([s['wave'] for s in spots])
@@ -444,7 +444,7 @@ def _finalize_selected(psf, candidates, status):
 
 
 def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, weight, bundle_id,
-                                   broken_fibers=None, max_number_of_lines=200):
+                                   broken_fibers=None, max_number_of_lines=200, wdeg=3, fit_continuum=True):
     """
     Mirrors the housekeeping/selection phase of C++ FitEverything
     (specex_psf_fitter.cc:2493-2783): repeatedly fits individual candidate
@@ -510,12 +510,12 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
         if not selected:
             break
         fitter = PSF_Fitter(psf)
-        _, pc, tc, cc, flux_fit, xc_final, yc_final = fitter.fit(image, weight, selected, bundle_id, max_iter=5)
+        _, pc, tc, cc, flux_fit, xc_final, yc_final = fitter.fit(image, weight, selected, bundle_id, max_iter=5, wdeg=wdeg, fit_continuum=fit_continuum)
 
         max_delta = 0.0
         for s in candidates:
-            nxc = psf.x_ccd(s['fiber'], s['wave'], tc_x=tc[0])
-            nyc = psf.y_ccd(s['fiber'], s['wave'], tc_y=tc[1])
+            nxc = psf.x_ccd(s['fiber'], s['wave'], tc_x=tc[0], wdeg=wdeg)
+            nyc = psf.y_ccd(s['fiber'], s['wave'], tc_y=tc[1], wdeg=wdeg)
             max_delta = max(max_delta, ((s['xc_init'] - nxc)**2 + (s['yc_init'] - nyc)**2) ** 0.5)
             s['xc_init'] = float(nxc); s['yc_init'] = float(nyc)
         print(f"  Trace warm-up {trace_loop}: max centroid shift = {max_delta:.4f}px", flush=True)
@@ -703,7 +703,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 0.01
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20):
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
         fmin, fmax = spots[0]['fiber'], spots[-1]['fiber']
@@ -731,7 +731,7 @@ class PSF_Fitter:
             fib = fmin + f_i; w_v = self.psf.fiber_traces[fib]['Y_vs_W'].invert(rows_u.astype(float)); tw_j[f_i], tx_j[f_i] = w_v, self.psf.x_ccd(fib, w_v)
         ix_r = np.array([row_m[j] for j in ypix]); tx_g, tw_g = jnp.array(tx_j[:, ix_r]), jnp.array(tw_j[:, ix_r])
         flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
-        monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots)
+        monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
         pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, monomials))
         tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont) 
@@ -765,6 +765,13 @@ class PSF_Fitter:
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
             except: d_p = jnp.zeros(A.shape[0])
+            # Ncont stays structurally 4 regardless of fit_continuum (changing
+            # it to 0 would make every "-Ncont:"-style slice above/below turn
+            # into "-0:", which numpy/jax silently reinterpret as the whole
+            # array, not zero elements). Instead, when continuum fitting is
+            # disabled, simply never let the step move cc away from its zero
+            # init -- equivalent to not fitting a continuum at all.
+            if not fit_continuum: d_p = d_p.at[-Ncont:].set(0.0)
             # Line search. NOTE: ls_chi2 must be a separate variable from
             # best_chi2 (the global best-state tracker above). They were
             # previously the same variable, so after each step best_chi2 held

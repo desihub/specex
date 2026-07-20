@@ -76,10 +76,14 @@ def write_python_psf(filename, bundle_results, input_template):
     psf_hdr = fin['PSF'].read_header()
     param_names = [p.strip() for p in psf_table['PARAM']]
     name_to_idx = {name: i for i, name in enumerate(param_names)}
-    xdeg_b = 1; wdeg_b = 3; nz_b = get_sparse_nz(xdeg_b, wdeg_b)
+    xdeg_b = 1
     for bid, res in bundle_results.items():
         fmin, fmax = bid * 25, (bid + 1) * 25 - 1
         pc = res['psf_coeffs']; tc = res['trace_coeffs']
+        # wdeg varies by band (3 for z, 1 otherwise -- see fit_ccd_native's
+        # auto-detection); carried through bundle_results since the writer
+        # has no other way to know what basis pc/tc were fit in.
+        wdeg_b = res.get('wdeg', 3); nz_b = get_sparse_nz(xdeg_b, wdeg_b)
         rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
         poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
         for k_nz, k_lin in enumerate(nz_b):

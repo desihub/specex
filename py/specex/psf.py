@@ -173,7 +173,7 @@ class PSF:
                 else: p.append(0.0)
         return np.array(p)
 
-    def x_ccd(self, fiber, wave, tc_x=None):
+    def x_ccd(self, fiber, wave, tc_x=None, wdeg=3):
         if fiber in self.fiber_traces:
             val = self.fiber_traces[fiber]['X_vs_W'].value(wave)
             if tc_x is not None:
@@ -184,7 +184,7 @@ class PSF:
                 rf = 2 * (fiber - fmin) / (fmax - fmin) - 1
                 rw = 2 * (wave - wmin) / (wmax - wmin) - 1
                 from .math import legendre_pol_jnp
-                xdeg, wdeg = 1, 3
+                xdeg = 1
                 mx = [legendre_pol_jnp(i, rf) for i in range(xdeg + 1)]
                 mw = [legendre_pol_jnp(j, rw) for j in range(wdeg + 1)]
                 nz = []
@@ -200,7 +200,7 @@ class PSF:
                 val += np.dot(m, tc_x)
             return val
         return 0.0
-    def y_ccd(self, fiber, wave, tc_y=None):
+    def y_ccd(self, fiber, wave, tc_y=None, wdeg=3):
         if fiber in self.fiber_traces:
             val = self.fiber_traces[fiber]['Y_vs_W'].value(wave)
             if tc_y is not None:
@@ -211,7 +211,7 @@ class PSF:
                 rf = 2 * (fiber - fmin) / (fmax - fmin) - 1
                 rw = 2 * (wave - wmin) / (wmax - wmin) - 1
                 from .math import legendre_pol_jnp
-                xdeg, wdeg = 1, 3
+                xdeg = 1
                 mx = [legendre_pol_jnp(i, rf) for i in range(xdeg + 1)]
                 mw = [legendre_pol_jnp(j, rw) for j in range(wdeg + 1)]
                 nz = []
