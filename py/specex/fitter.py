@@ -714,7 +714,16 @@ class PSF_Fitter:
         nx, ny = image.shape; idx_map = np.full((nx, ny), -1, dtype=np.int32); idx_map[xpix, ypix] = np.arange(Np)
         for s_i, s in enumerate(spots):
             ix, iy = np.meshgrid(np.arange(s['stamp_imin'], s['stamp_imax']), np.arange(s['stamp_jmin'], s['stamp_jmax']), indexing='ij')
-            sx[s_i], sy[s_i] = ix.flatten(), iy.flatten(); st_idx = idx_map[ix.astype(int), iy.astype(int)].flatten(); mask = st_idx >= 0; idx_g[s_i, mask] = st_idx[mask]
+            sx[s_i], sy[s_i] = ix.flatten(), iy.flatten()
+            # Spot stamps near the CCD edge (stamp_imin/imax computed as xc_init +/- h_size_x
+            # with no clamping) can extend outside [0,nx)x[0,ny) -- clip only for the idx_map
+            # lookup and mask those pixels out (same -1-sentinel convention as in-bounds pixels
+            # that fall outside any spot's footprint), rather than indexing idx_map out of bounds.
+            in_bounds = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+            ix_c, iy_c = np.clip(ix, 0, nx - 1), np.clip(iy, 0, ny - 1)
+            st_idx = idx_map[ix_c.astype(int), iy_c.astype(int)].flatten()
+            mask = in_bounds.flatten() & (st_idx >= 0)
+            idx_g[s_i, mask] = st_idx[mask]
         print(f"  Stamp indexing took {time.time() - t0:.2f}s", flush=True)
         rows_u = np.unique(ypix); row_m = {j: i for i, j in enumerate(rows_u)}
         tx_j, tw_j = np.zeros((25, len(rows_u))), np.zeros((25, len(rows_u)))
