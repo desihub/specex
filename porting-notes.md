@@ -1337,3 +1337,81 @@ Node was killed again mid-session (unrelated to any of this work -- a fresh inte
 - The `_get_spot_stats_jax` jit-wrapper-rebuilt-every-call inefficiency (flagged last session) is still unaddressed -- independent of and additional to the padding done tonight.
 - r3/z1's smaller (or slightly negative-looking, within noise) gains are worth a closer look next time -- possibly already near their GPU-compute floor, or possibly a remaining shape dimension (Npoly/stamp_area, degree-dependent, not campaign-varying the way Ns/Np are) still forcing occasional recompiles for these specific cases. Not investigated further tonight.
 - The Np-padding change is more structurally invasive than the Ns-only change (touches `PSF_Fitter.fit()`'s core array construction, not just a leaf function) -- worth an extra close read before ever touching that code again, using this session's correctness-tracing approach (verify every `idx_gg`/`flat_idx`-gated code path, don't assume the pattern from one function transfers to another) as the template.
+
+## 2026-07-21 22:50 -- Aggregated timing table + why r3/z1 gained less from padding
+
+**Single aggregated timing table** (all 9 standing cameras, C++ + all three Python states -- baseline, cache-only warm, cache+padding warm) written to `/pscratch/sd/c/cdwarner/specex/testing/timing_summary_table.txt`:
+
+```
+camera          t_cpp_s  py_baseline   py_cache  py_cache+pad   cache Δ  pad Δ (add'l)   total Δ
+------------------------------------------------------------------------------------------------
+b5@20260401        48.9         87.7       71.9          64.6    -18.0%         -10.2%    -26.3%
+b4@20260401        50.0        119.4      108.7          92.1     -9.0%         -15.3%    -22.9%
+b2@20260401        51.4         88.1       73.1          66.7    -17.0%          -8.8%    -24.3%
+r3@20260401       114.0        114.0      104.9         103.5     -8.0%          -1.3%     -9.2%
+r5@20260401       104.1        121.9      106.4          95.1    -12.7%         -10.6%    -22.0%
+r1@20260401       106.1        106.1       94.3          92.2    -11.1%          -2.2%    -13.1%
+z1@20260401       133.9        133.9      124.7         129.9     -6.9%           4.2%     -3.0%
+z6@20260401       137.1        137.0      130.6         124.8     -4.7%          -4.4%     -8.9%
+z9@20260401       135.4        135.4      130.7         124.9     -3.5%          -4.4%     -7.8%
+------------------------------------------------------------------------------------------------
+SUM               880.9       1043.5      945.3         893.8     -9.4%          -5.4%    -14.3%
+```
+
+**Why r3 and z1 gained the least from padding specifically (the "pad Δ (add'l)" column) -- investigated directly rather than left as a guess.** Checked each camera's actual per-bundle footprint-pixel-count distribution (`Footprint generation took ... (N pixels)` lines, this afternoon's baseline logs) and computed the real padding overhead each bundle pays (real pixel count -> its power-of-2 bucket):
+
+| camera | min pixels | max pixels | mean pad overhead | worst-case pad overhead |
+|---|---|---|---|---|
+| b5 | 38,332 | 63,532 | 36.3% | 71.0% |
+| b4 | 37,933 | 57,243 | 51.2% | 72.8% |
+| b2 | 39,538 | 64,434 | 33.6% | 65.8% |
+| r3 | 92,434 | 116,376 | **26.1%** | **41.8%** |
+| r5 | 80,478 | 114,771 | 35.6% | 62.9% |
+| r1 | 92,454 | 113,358 | 28.3% | 41.8% |
+| z1 | 70,766 | 119,128 | **39.7%** | **85.2%** |
+| z6 | 74,596 | 118,938 | 43.1% | 75.7% |
+| z9 | 78,212 | 122,521 | 33.2% | 67.6% |
+
+**The mechanism confirmed: padding buckets to a single power-of-2 size per camera, so the SMALLEST bundle in that camera pays the whole camera's worst-case overhead** (up to 85.2% more pixels than it actually has, for z1's smallest bundle) **while the largest bundle pays almost nothing.** Combined with the earlier GPU-packing-headroom finding (z-band has the least spare GPU memory/compute at 5 workers/GPU, b-band the most), this explains the band pattern directly: b-band has abundant headroom to absorb that extra wasted compute for free, so the compile-time savings show through cleanly (-8.8% to -15.3% additional). z-band is already close to its GPU-compute ceiling, so the added real compute from padding partially or fully offsets the compile savings -- z1 (highest mean AND worst-case overhead of any camera, 39.7%/85.2%) is the one camera where it tips slightly negative (+4.2%, i.e. padding made it marginally *slower* than cache-alone, though still net faster than the true baseline). r3's small additional gain (-1.3%) doesn't fit the overhead-magnitude story as cleanly (its overhead is actually the *lowest* of any camera, 26.1%/41.8%) -- its bundles are simply large and uniform enough that there wasn't much shape-churn/compile-reuse benefit left for padding to capture on top of what the persistent cache already got from same-shape reuse within the camera's own 20 bundles.
+
+**Read for future work:** the current bucketing granularity (one bucket per distinct power-of-2 boundary, decided independently for whatever shapes a given run happens to produce) is coarse when a single camera's bundle-to-bundle size spread is wide (z1's 70k-119k pixel range crosses most of the way from one power-of-2 boundary to the next). A finer bucket granularity (e.g. powers of 1.4 or 1.25 instead of 2, or explicit fixed buckets tuned from real campaign data rather than pure powers of 2) would trade a few more distinct compiled shapes for less per-bundle wasted compute -- worth a follow-up experiment given z-band is both the tightest on GPU headroom and the one paying the most for the current coarse bucketing.
+
+## 2026-07-21 23:27 -- The other flagged item (`_get_spot_stats_jax` jit-wrapper hoisting) turned out to be the biggest win of the night, and exposed a real measurement bug
+
+**Implemented the hoisting fix flagged at the end of the last two sessions**: `_get_spot_stats_jax` used to build a fresh `jit(vmap(fit_spot))` closure *inside the function body* on every call, with `image`/`weight` (the full-CCD arrays) captured as closures rather than passed as real arguments. Refactored into a proper module-level `_fit_all_spots_batch`/`_fit_all_spots_batch_jit` (matching the existing pattern already used for `_accumulate_bundle_jax_jit`/`_predict_bundle_jax_jit`), with `image`/`weight` now genuine traced JIT arguments and `hsize_x`/`hsize_y`/`degree` as `static_argnums`. Also dropped the dead `spot_objective`/commented-out gradient-refinement-loop code this function was still carrying (unreachable since an earlier session removed the position-refinement step; simplified `snr = jnp.where((A>0) & converged, ...)` to `jnp.where(A>0, ...)` since `converged` was always the Python constant `True` -- purely a no-op simplification, not a behavior change).
+
+**Why this mattered more than expected**: the previous closure-based design meant JAX's compiled-artifact cache key almost certainly depended on the *specific* `image`/`weight` array content (or at least defeated straightforward shape-based reuse), not just their shape -- so even with the persistent disk cache and shape padding from earlier tonight, a bundle from a *different camera* (different image content, same CCD shape) likely still needed a fresh compile. Making `image`/`weight` real arguments lets this module-level jitted function be cached purely by `(shape, dtype)`, which is identical across every band/camera/night (same CCD geometry) -- so it now compiles once, ever, for a given housekeeping stamp size, and every subsequent bundle across the entire campaign reuses it.
+
+**Correctness re-verified** the same way as the padding work -- genuine pre/post baselines via `git stash`/`git stash pop` (no background jobs running during the stash window this time, learned from the earlier incident): b2:5 agreed to ~1e-7px (floating-point reduction-order noise from a restructured computation graph, 6+ orders of magnitude below anything physically meaningful), z9:5 (continuum-fit path) agreed to `0.0000000000px` exactly, and the full 9-camera production cold+warm run reproduced every correctness column (`nspots`/`xrms`/`yrms`/`wrms`/`wstd`) exactly against the untouched original baseline.
+
+**Production-scale result: transformative, not incremental.** Isolated single-bundle testing showed selection time drop from ~26s (cache+padding, no hoisting) to ~7-8s (add hoisting) -- and the full 9-camera cold pass was *already* faster than the previous *warm* pass without this fix, confirming cross-camera cache reuse is now real (a cold run for camera N+1 benefits from camera N's compile, not just repeat bundles of the same camera).
+
+**This also exposed a genuine bug in `full_ccd_campaign.py`'s timing measurement**, caught by noticing every camera's reported `t_py` matched `t_cpp` to the decimal in the warm-pass results table -- suspicious enough to check each Python process's own internally-printed `Total CCD Fit Time`, which turned out to be 3-4x *shorter* than what the campaign script reported. Root cause: `run_cpp_and_py_concurrent()` called `cpp_proc.wait()` first (blocking), then `py_proc.wait()` -- if Python had already finished by the time `cpp_proc.wait()` returned (now the common case), `py_proc.wait()` on an already-dead process returns instantly, and `time.time() - t0_py` measured at *that* moment reflects "however long since Python started until C++ finished," not Python's real finish time. **Fixed** by polling both processes independently (`Popen.poll()` in a loop, recording each one's own timestamp the moment its own `poll()` first returns non-`None`) instead of a strict sequential `wait()`-then-`wait()`. This is a real fix to the tooling, not just a one-off correction -- every future campaign run needed it now that Python routinely beats C++.
+
+**Corrected true timing, all 9 standing cameras** (`/pscratch/sd/c/cdwarner/specex/testing/timing_summary_table.txt`, appended):
+
+| camera | t_cpp | py, this afternoon (pre-fix) | py, now (true) | vs. C++ | vs. this afternoon |
+|---|---|---|---|---|---|
+| b5 | 45.4s | 87.7s | 31.00s | **0.68x (1.5x faster)** | 2.83x faster |
+| b4 | 47.9s | 119.4s | 33.81s | **0.71x (1.4x faster)** | 3.53x faster |
+| b2 | 52.0s | 88.1s | 30.15s | **0.58x (1.7x faster)** | 2.92x faster |
+| r3 | 110.5s | 114.0s | 34.33s | **0.31x (3.2x faster)** | 3.32x faster |
+| r5 | 96.0s | 121.9s | 38.10s | **0.40x (2.5x faster)** | 3.20x faster |
+| r1 | 96.4s | 106.1s | 31.58s | **0.33x (3.0x faster)** | 3.36x faster |
+| z1 | 135.2s | 133.9s | 37.73s | **0.28x (3.6x faster)** | 3.55x faster |
+| z6 | 124.0s | 137.0s | 32.72s | **0.26x (3.9x faster)** | 4.19x faster |
+| z9 | 128.9s | 135.4s | 30.79s | **0.24x (4.2x faster)** | 4.40x faster |
+| **sum** | 836.3s | 1043.5s | **300.21s** | **0.36x (2.8x faster)** | **3.48x faster** |
+
+**Python is now faster than C++ on every single camera** -- a complete reversal from every earlier finding this project has made (z-band "roughly breaks even", b-band "a full 2x slower"). Aggregate: Python takes 36% of C++'s wall time, 29% of this afternoon's own (already-optimized-feeling) Python time. **The band-dependent timing pattern that motivated this entire multi-session investigation is now gone**: Python's true time is nearly flat across bands (30-38s) regardless of compute weight, whereas C++'s still tracks real compute load (45-135s) -- exactly consistent with the standing theory that fixed per-worker overhead (JIT compilation, now largely eliminated) was the dominant cost for light bands, and the actual fit math was never the bottleneck.
+
+### Files
+- `py/specex/fitter.py` -- the `_fit_all_spots_batch`/`_fit_all_spots_batch_jit` hoisting.
+- `testing/full_ccd_campaign.py` -- the timing-measurement fix.
+- `/pscratch/sd/c/cdwarner/specex/testing/hoist_validation/` -- cold+warm 9-camera validation.
+- `/pscratch/sd/c/cdwarner/specex/testing/timing_summary_table.txt` -- updated with the corrected true numbers.
+- `current-status.txt` -- updated timing section.
+
+### Still open / good next-session leads (additions)
+- Given Python now beats C++ on every band, the framing of future speed work should shift from "close the gap" to "how much further can this go" -- e.g. whether the remaining ~30s/camera floor is dominated by image I/O, remaining per-worker startup cost, or genuine compute, not yet broken down at this new speed level.
+- The r3/z1 padding-overhead investigation (previous entry) was based on data from *before* this hoisting fix -- worth re-checking whether the same bands still show the smallest relative gains now that the dominant bottleneck has shifted again.

@@ -103,11 +103,33 @@ def start_py_full(case, out_fits, log_path):
 def run_cpp_and_py_concurrent(case, cpp_fits, py_fits, cpp_log, py_log):
     """C++ (CPU-only, MPI) and Python (GPU-only, mixed precision) don't
     contend for the same resources, so launch both at once instead of
-    sequentially -- roughly halves per-camera wall time vs run-then-run."""
+    sequentially -- roughly halves per-camera wall time vs run-then-run.
+
+    Poll both independently rather than cpp_proc.wait() then py_proc.wait()
+    in sequence -- now that the persistent JAX compilation cache + power-
+    of-2 shape padding (see porting-notes.md) often make Python finish
+    *before* C++, a strict wait()-then-wait() ordering silently caps t_py
+    at whatever t_cpp was: py_proc.wait() on an already-finished process
+    returns instantly, but time.time() - t0_py at that point measures "how
+    long since Python started until *C++* finished," not Python's actual
+    finish time. Confirmed this was happening: t_py in a recent run matched
+    t_cpp to the decimal in every camera, while each Python process's own
+    internally-printed "Total CCD Fit Time" was 3-4x shorter.
+    """
     cpp_proc, cpp_lf, t0_cpp = start_cpp_full(case, cpp_fits, cpp_log)
     py_proc, py_lf, t0_py = start_py_full(case, py_fits, py_log)
-    rc_cpp = cpp_proc.wait(); t_cpp = time.time() - t0_cpp; cpp_lf.close()
-    rc_py = py_proc.wait(); t_py = time.time() - t0_py; py_lf.close()
+    t_cpp = t_py = rc_cpp = rc_py = None
+    while t_cpp is None or t_py is None:
+        if t_cpp is None:
+            rc = cpp_proc.poll()
+            if rc is not None:
+                rc_cpp = rc; t_cpp = time.time() - t0_cpp; cpp_lf.close()
+        if t_py is None:
+            rc = py_proc.poll()
+            if rc is not None:
+                rc_py = rc; t_py = time.time() - t0_py; py_lf.close()
+        if t_cpp is None or t_py is None:
+            time.sleep(0.2)
     return t_cpp, rc_cpp, t_py, rc_py
 
 

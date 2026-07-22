@@ -691,16 +691,22 @@ def _fit_one_spot_jax(image, weight, xc, yc, gh, degree, hsize_x, hsize_y):
 
     return jit(fit_loop)(0.0, 0.0, 0.0)
 
-def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsize_x, hsize_y):
+def _fit_all_spots_batch(cand_xc, cand_yc, gh_params, image, weight, hsize_x, hsize_y, degree):
+    """Per-candidate closed-form flux/S/N fit (position held fixed, mirrors
+    C++ FitIndividualSpotFluxes), vmapped over the candidate batch. `image`/
+    `weight` are real traced arguments (not closures) so this module-level
+    jitted function is cached purely by (shape, dtype), same as
+    _accumulate_bundle_jax_jit/_predict_bundle_jax_jit -- letting it be
+    reused across different cameras/exposures that share the same CCD shape,
+    not just repeated calls with the identical image object.
+    """
     import jax.numpy as jnp
-    from jax import vmap, jit, grad
-    nx, ny = image.shape; area = (2*hsize_x+1)*(2*hsize_y+1)
+    from jax import vmap
+    nx, ny = image.shape
     ix_rel, iy_rel = jnp.meshgrid(jnp.arange(2*hsize_x+1), jnp.arange(2*hsize_y+1), indexing='ij')
     dx = ix_rel.flatten() - hsize_x; dy = iy_rel.flatten() - hsize_y
 
-    def spot_objective(params, xc_init, yc_init, gh):
-        flux, dx_s, dy_s = params
-        xc = xc_init + dx_s; yc = yc_init + dy_s
+    def fit_spot(xc, yc, gh):
         im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int)
         gix = im + dx; giy = jm + dy
         valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
@@ -709,50 +715,24 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
         d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
         w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
         w_val = jnp.where(valid, w_val, 0.0)
-        return jnp.sum(w_val * (d_val - flux * p_val)**2)
 
-    def fit_spot(xc, yc, gh):
-        # Initial guess: flux=1.0, dx=0, dy=0
-        params = jnp.array([1.0, 0.0, 0.0]) 
-        
-        # Removed gradient descent refinement to match C++ initial phase (fit_position=false)
-        final_flux, final_dx, final_dy = params
-        converged = True
-        
-        # Calculate final S/N using the initial parameters
-        xc_f = xc; yc_f = yc
-        im = jnp.floor(xc_f + 0.5).astype(int); jm = jnp.floor(yc_f + 0.5).astype(int)
-        gix = im + dx; giy = jm + dy
-        valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
-        p_val = GaussHermitePSF.single_pix_value_jnp(xc_f, yc_f, gix, giy, gh, degree)
-        p_val = jnp.where(valid, p_val, 0.0)
-        d_val = image[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
-        w_val = weight[jnp.clip(gix, 0, nx-1), jnp.clip(giy, 0, ny-1)]
-        w_val = jnp.where(valid, w_val, 0.0)
-        
         A = jnp.sum(w_val * p_val**2)
         B = jnp.sum(w_val * d_val * p_val)
         flux = jnp.where(A > 0, B/A, 0.0)
         # C++ parity: eflux = sqrt(cov) where cov = 1/A is the inverse-Hessian
         # diagonal for the flux parameter (specex_psf_fitter.cc:1721-1724).
         eflux = jnp.where(A > 0, 1.0 / jnp.sqrt(A), 0.0)
-        snr = jnp.where((A > 0) & converged, flux / eflux, -1.0)
+        snr = jnp.where(A > 0, flux / eflux, -1.0)
         chi2 = jnp.sum(w_val * (d_val - flux * p_val)**2)
         return flux, snr, chi2, eflux
 
-        # --- ORIGINAL REFINEMENT LOOP (Kept for future use) ---
-        # def step(p, xc, yc, gh):
-        #     g = grad(spot_objective)(p, xc, yc, gh)
-        #     return p - 0.1 * g 
-        # for _ in range(5):
-        #     prev_p = params
-        #     params = step(params, xc, yc, gh)
-        # coord_shift = jnp.linalg.norm(params[1:] - prev_p[1:])
-        # converged = coord_shift < 0.1
-        # final_flux, final_dx, final_dy = params
-        # xc_f = xc + final_dx; yc_f = yc + final_dy
+    return vmap(fit_spot)(cand_xc, cand_yc, gh_params)
 
+from jax import jit as _jit
+_fit_all_spots_batch_jit = _jit(_fit_all_spots_batch, static_argnums=(5, 6, 7))
 
+def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsize_x, hsize_y):
+    import jax.numpy as jnp
     # Pad the candidate batch to a power-of-2 bucket so JAX reuses one
     # compiled shape across bundles/cameras instead of recompiling for every
     # distinct raw-candidate count (campaign-wide these range ~1100-1800 and
@@ -768,7 +748,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
         cand_yc = jnp.pad(cand_yc, (0, n_extra))
         gh_params = jnp.pad(gh_params, ((0, n_extra), (0, 0)))
 
-    flux, snr, chi2, eflux = jit(vmap(fit_spot))(cand_xc, cand_yc, gh_params)
+    flux, snr, chi2, eflux = _fit_all_spots_batch_jit(cand_xc, cand_yc, gh_params, image, weight, hsize_x, hsize_y, degree)
     return flux[:Ns_real], snr[:Ns_real], chi2[:Ns_real], eflux[:Ns_real]
 
 class PSF_Fitter:

@@ -367,13 +367,63 @@ change from pass to pass WITHIN a bundle's own trace-warmup loop, exactly
 the code path stragglers spend the most extra time in, not just shapes
 that differ across different bundles.
 
-Remaining, smaller, not-yet-done: the _get_spot_stats_jax jit-wrapper-
-rebuilt-every-call inefficiency (flagged above, still real, independent of
-and additional to the padding work); r3 and z1 show smaller (or within-
-noise) gains worth a closer look next time -- possibly already near their
-GPU-compute floor, or possibly a remaining shape dimension (Npoly/
-stamp_area, degree-dependent) still forcing occasional recompiles for those
-specific cases, not investigated further this session.
+SECOND UPDATE (later still, same night): the _get_spot_stats_jax jit-wrapper
+hoisting flagged above was implemented too, and it was the biggest win of
+the night by far -- bigger than caching and padding combined. The old
+design didn't just rebuild the jit(vmap(...)) wrapper on every call, it also
+captured image/weight (the full-CCD arrays) as closures rather than real
+JIT arguments, which very likely defeated shape-based cache reuse ACROSS
+DIFFERENT CAMERAS (different image content, same CCD shape) even with the
+persistent cache and padding already in place. Refactored to a proper
+module-level jitted function with image/weight as genuine traced arguments
+-- now cached purely by (shape, dtype), identical for every band/camera/
+night, so it compiles once, ever, and every bundle in the whole campaign
+reuses it. Correctness re-verified the same rigorous way as the padding
+work (bit-identical to ~1e-7px floating-point-noise level on isolated
+cases, exact match on the full 9-camera production run's correctness
+columns).
+
+This also exposed a real bug in full_ccd_campaign.py's timing measurement:
+it waited on the C++ process first, then checked Python's completion time
+-- harmless when C++ was always slower, but once Python started finishing
+BEFORE C++ (now the normal case), that ordering silently capped the
+reported Python time at whatever C++'s time was, rather than reflecting
+Python's true finish time. Caught by noticing every camera's reported t_py
+matched t_cpp to the decimal; confirmed against each Python process's own
+internally-printed timer, which was 3-4x shorter. Fixed (poll both
+processes independently instead of sequential wait()-then-wait()) --
+needed for every future campaign run now that Python usually wins.
+
+TRUE final numbers, all 9 standing cameras, real production settings,
+fully warm cache + padding + hoisting, corrected timing methodology:
+
+  camera     t_cpp    py (this afternoon)   py (now, true)   vs C++       vs this afternoon
+  b5          45.4s          87.7s               31.00s      0.68x (1.5x faster)   2.83x faster
+  b4          47.9s         119.4s               33.81s      0.71x (1.4x faster)   3.53x faster
+  b2          52.0s          88.1s               30.15s      0.58x (1.7x faster)   2.92x faster
+  r3         110.5s         114.0s               34.33s      0.31x (3.2x faster)   3.32x faster
+  r5          96.0s         121.9s               38.10s      0.40x (2.5x faster)   3.20x faster
+  r1          96.4s         106.1s               31.58s      0.33x (3.0x faster)   3.36x faster
+  z1         135.2s         133.9s               37.73s      0.28x (3.6x faster)   3.55x faster
+  z6         124.0s         137.0s               32.72s      0.26x (3.9x faster)   4.19x faster
+  z9         128.9s         135.4s               30.79s      0.24x (4.2x faster)   4.40x faster
+  SUM        836.3s        1043.5s              300.21s      0.36x (2.8x faster)   3.48x faster
+
+PYTHON IS NOW FASTER THAN C++ ON EVERY SINGLE CAMERA -- a complete reversal
+from the standing "z-band roughly breaks even, b-band a full 2x slower"
+finding this whole investigation started from. Python's true time is also
+now nearly FLAT across bands (30-38s) regardless of compute weight, unlike
+C++'s (45-135s, still tracking real compute load) -- exactly the signature
+you'd expect once fixed per-worker overhead (JIT compilation) stops
+dominating: the actual fit math was apparently never the bottleneck.
+
+Remaining, smaller, not-yet-done: whether the new ~30s/camera floor is
+image I/O, remaining per-worker startup cost, or genuine compute is not yet
+broken down at this new speed level. The r3/z1 padding-overhead analysis
+above was measured *before* this hoisting fix -- worth rechecking whether
+the same bands still show the smallest relative gains now that the
+dominant bottleneck has shifted again. Not investigated further this
+session given time constraints ahead of the outage.
 
 ===============================================================================
 9. OTHER LOOSE ENDS NOT COVERED ABOVE
