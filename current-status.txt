@@ -417,13 +417,72 @@ C++'s (45-135s, still tracking real compute load) -- exactly the signature
 you'd expect once fixed per-worker overhead (JIT compilation) stops
 dominating: the actual fit math was apparently never the bottleneck.
 
-Remaining, smaller, not-yet-done: whether the new ~30s/camera floor is
-image I/O, remaining per-worker startup cost, or genuine compute is not yet
-broken down at this new speed level. The r3/z1 padding-overhead analysis
-above was measured *before* this hoisting fix -- worth rechecking whether
-the same bands still show the smallest relative gains now that the
-dominant bottleneck has shifted again. Not investigated further this
-session given time constraints ahead of the outage.
+THIRD UPDATE (correction, later still): the ~30s/camera "true" numbers
+directly above were themselves incomplete. Caught by asking "are we using
+the correct timing?" after several fresh random-CCD cases looked roughly
+tied with C++ instead of dramatically faster. Investigation: the poll-based
+fix IS active and correctly measures true wall-clock time -- but that
+honest measurement exposed a SECOND gap: "Total CCD Fit Time" (the number
+used above) only starts timing AFTER Python/JAX have finished importing
+(its timer starts inside fit_ccd_native, reached only after the whole
+module chain -- which imports jax.numpy at module level -- has already
+loaded). That's real wall-clock time any actual user experiences, just
+invisible to the internal print. Measured directly: ~5.5s fixed cost in an
+isolated uncontended run; larger and more variable (7-69s) in the
+concurrent-campaign context, not fully root-caused (likely SLURM/
+filesystem contention running C++ and Python back to back), flagged as an
+open item below.
+
+Corrected methodology: since C++'s baseline times were already solid,
+re-timed ONLY Python (sequential, one camera at a time, plain wall-clock
+bracketing around the whole process -- zero concurrency, zero measurement
+ambiguity) for the 9 standing cameras, fully warm cache:
+
+  camera   t_cpp     t_py (honest)   speedup
+  b5        48.9s        37.73s      1.30x
+  b4        50.0s        43.03s      1.16x
+  b2        51.4s        38.46s      1.34x
+  r3       114.0s        39.75s      2.87x
+  r5       104.1s        44.77s      2.33x
+  r1       106.1s        39.59s      2.68x
+  z1       133.9s        42.79s      3.13x
+  z6       137.1s        43.02s      3.19x
+  z9       135.4s        40.85s      3.31x
+  SUM      880.9s       369.99s      2.38x
+
+Correctness re-verified (trace diff vs. the untouched original baseline,
+b5/r3/z1 spanning light/medium/heavy compute): 1e-6 to 1e-8px agreement,
+floating-point noise.
+
+HONEST FINAL HEADLINE: Python is 2.38x faster than C++ in aggregate, still
+faster on every camera, but the band pattern is visible again -- b-band's
+gain shrinks to 1.16-1.34x (the fixed ~5.5s+ startup cost is a much bigger
+fraction of its short ~38-43s total) while r/z-band still show strong
+2.3-3.3x wins. This is the real, complete number -- the earlier 2.8x/3.5x
+figures silently excluded the startup gap. Both are left in this file
+rather than edited away -- the correction is the point.
+
+Separately validated generalization: 15 brand-new random cases (5/band, 5
+nights never touched by any of tonight's cache-warming), run twice. First
+pass (cold for these specific shapes): real but inconsistent speedups, some
+b-band cases even briefly SLOWER than C++. Second pass (same 15, warm):
+converged tightly to 36.6-57.8s across all bands, correctness bit-identical
+to pass 1 throughout. Confirms the speedup is real and general, not an
+artifact of only ever testing the same 9 cameras -- but also confirms it's
+genuinely a warm-cache benefit, not free on the very first encounter of a
+new shape.
+
+Remaining, smaller, not-yet-done: the 7-69s variable startup/launch gap in
+the concurrent-campaign context is not root-caused (SLURM scheduling
+jitter vs. filesystem contention vs. something else, unclear). Whether the
+~5.5s fixed JAX-import cost itself can be reduced (lazier imports, deferred
+CUDA backend probing) is a new target now that it's proportionally larger
+relative to the new, much shorter total runtime, especially for b-band.
+The r3/z1 padding-overhead analysis earlier in this file was measured
+*before* the hoisting fix -- worth rechecking whether the same bands still
+show the smallest relative gains now that the bottleneck has shifted again.
+Not investigated further this session given time constraints ahead of the
+outage.
 
 ===============================================================================
 9. OTHER LOOSE ENDS NOT COVERED ABOVE

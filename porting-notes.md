@@ -1415,3 +1415,38 @@ SUM               880.9       1043.5      945.3         893.8     -9.4%         
 ### Still open / good next-session leads (additions)
 - Given Python now beats C++ on every band, the framing of future speed work should shift from "close the gap" to "how much further can this go" -- e.g. whether the remaining ~30s/camera floor is dominated by image I/O, remaining per-worker startup cost, or genuine compute, not yet broken down at this new speed level.
 - The r3/z1 padding-overhead investigation (previous entry) was based on data from *before* this hoisting fix -- worth re-checking whether the same bands still show the smallest relative gains now that the dominant bottleneck has shifted again.
+
+## 2026-07-22 00:37 -- Correction to the "2.8x/3.5x faster" headline: a second, real gap found, honest final number is 2.4x
+
+**The "true" numbers reported at 23:27 (pulled from each Python process's own internal `Total CCD Fit Time` print) were themselves incomplete.** Caught by the user asking "are we using the correct timing?" after seeing several fresh random-CCD cases where Python looked roughly tied with C++, not dramatically faster. Investigated directly: confirmed the poll-based timing fix from the previous entry *is* active and correctly measures true external wall-clock time (process launch to exit) -- but that honest measurement itself revealed a second, separate gap: **`Total CCD Fit Time` only starts timing *after* Python/JAX have already finished importing** (its `t_start` is set inside `fit_ccd_native`, called from `main()`, itself only reached after the whole `specex.specex` module chain -- which imports `jax.numpy` at module level via `.psf` -- has already loaded). That import chain is real, unavoidable wall-clock time that any actual user waiting for the command to finish experiences, but it was invisible to the internal print.
+
+Measured directly: an isolated, uncontended single-bundle run showed **~5.5s** between external process launch and the first internal print (`--- SPECE-X Multi-Process CCD Fit (GPU) ---`) -- confirming this is real and non-trivial, though smaller than some of the gaps seen in the concurrent-campaign context (7-69s across the fresh 15-CCD run, likely additional SLURM/filesystem contention from running C++ and Python back-to-back across many cases in one script, not further root-caused given time constraints).
+
+**Corrected methodology for the final number**: per the user's suggestion, since C++'s baseline times were already solidly established earlier tonight, re-timed *only* Python (sequential, one camera at a time, plain `date +%s.%N` bracketing around the whole `python -m specex.specex` process -- no concurrency, so no measurement ambiguity of any kind) for the 9 standing cameras, with the fully warm cache from all of tonight's work:
+
+| camera | t_cpp (established) | t_py (honest, full process wall-clock) | speedup |
+|---|---|---|---|
+| b5 | 48.9s | 37.73s | 1.30x |
+| b4 | 50.0s | 43.03s | 1.16x |
+| b2 | 51.4s | 38.46s | 1.34x |
+| r3 | 114.0s | 39.75s | 2.87x |
+| r5 | 104.1s | 44.77s | 2.33x |
+| r1 | 106.1s | 39.59s | 2.68x |
+| z1 | 133.9s | 42.79s | 3.13x |
+| z6 | 137.1s | 43.02s | 3.19x |
+| z9 | 135.4s | 40.85s | 3.31x |
+| **sum** | **880.9s** | **369.99s** | **2.38x** |
+
+Correctness re-verified (trace comparison vs. this afternoon's untouched baseline for b5/r3/z1, spanning light/medium/heavy compute): agreement at the 1e-6 to 1e-8 px level, floating-point noise, not a real discrepancy.
+
+**Honest final headline: Python is 2.38x faster than C++ in aggregate, still faster on every single camera, but the per-band pattern is now visible again** -- b-band's gain shrinks to 1.16-1.34x (the fixed ~5.5s+ startup cost is a much larger fraction of b-band's short ~38-43s total than of z-band's), while r/z-band still show strong 2.3-3.3x wins. This is a real, defensible, complete number -- unlike the 23:27 entry's 2.8x/3.5x figures, which silently excluded the startup gap. Both this entry and the previous one are left in the file rather than edited away, per the standing append-only convention -- the correction is the point, not something to hide.
+
+**Separately, validated generalization on 15 brand-new random cases (5 per band, 5 different nights never touched by any of tonight's cache-warming, seed 99, excluding both earlier random sets)**, run twice: first pass (cold for these specific shapes) showed real but inconsistent speedups (some b-band cases even slightly *slower* than C++, e.g. b9 63.2s py vs 53.6s cpp) since fresh candidate/pixel shapes from new nights still need first-time compiles even with bucketing; second pass (same 15 cases, cache now warm) converged tightly to 36.6-57.8s across all three bands, correctness bit-identical to the first pass in every case. This confirms the speedup is real and general, not an artifact of only ever testing the same 9 cameras all night -- but also confirms it's genuinely a *warm-cache* benefit: the very first time any given shape is seen, real compile cost still applies.
+
+### Files
+- `/pscratch/sd/c/cdwarner/specex/testing/random_full_ccd_15_v2/` -- the fresh 15-CCD cold+warm validation.
+- `/pscratch/sd/c/cdwarner/specex/testing/standing_9cam_pyonly_verify/` -- the honest, sequential, Python-only re-timing of the 9 standing cameras.
+
+### Still open / good next-session leads (additions)
+- The 7-69s variable (not just the ~5.5s fixed baseline) startup/launch gap seen in the concurrent-campaign context is not root-caused -- worth checking whether it's SLURM srun scheduling jitter, filesystem contention from C++ and Python reading the same large preproc file concurrently, or something else.
+- Whether the ~5.5s fixed JAX-import cost itself can be reduced (e.g. lazier imports, avoiding `jax_enable_x64`/CUDA backend probing until actually needed) is a new, distinct target now that it's a proportionally larger share of the (now much shorter) total time, especially for b-band.
