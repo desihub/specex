@@ -183,10 +183,15 @@ class PSF:
                 wmin, wmax = self.fiber_traces[fmin]['X_vs_W'].xmin, self.fiber_traces[fmin]['X_vs_W'].xmax
                 rf = 2 * (fiber - fmin) / (fmax - fmin) - 1
                 rw = 2 * (wave - wmin) / (wmax - wmin) - 1
-                from .math import legendre_pol_jnp
+                # NumPy, not JAX: called from a plain-Python per-candidate hot
+                # loop (trace warm-up in select_bundle_spots_iterative) where
+                # JAX's eager-mode per-op GPU dispatch overhead (~1-2ms/op)
+                # dominates runtime for what's otherwise a handful of scalar
+                # flops -- same class of bottleneck as gh_params/monomials().
+                from .math import legendre_pol
                 xdeg = 1
-                mx = [legendre_pol_jnp(i, rf) for i in range(xdeg + 1)]
-                mw = [legendre_pol_jnp(j, rw) for j in range(wdeg + 1)]
+                mx = [legendre_pol(i, rf) for i in range(xdeg + 1)]
+                mw = [legendre_pol(j, rw) for j in range(wdeg + 1)]
                 nz = []
                 for j in range(wdeg + 1):
                     for i in range(xdeg + 1):
@@ -210,10 +215,10 @@ class PSF:
                 wmin, wmax = self.fiber_traces[fmin]['X_vs_W'].xmin, self.fiber_traces[fmin]['X_vs_W'].xmax
                 rf = 2 * (fiber - fmin) / (fmax - fmin) - 1
                 rw = 2 * (wave - wmin) / (wmax - wmin) - 1
-                from .math import legendre_pol_jnp
+                from .math import legendre_pol
                 xdeg = 1
-                mx = [legendre_pol_jnp(i, rf) for i in range(xdeg + 1)]
-                mw = [legendre_pol_jnp(j, rw) for j in range(wdeg + 1)]
+                mx = [legendre_pol(i, rf) for i in range(xdeg + 1)]
+                mw = [legendre_pol(j, rw) for j in range(wdeg + 1)]
                 nz = []
                 for j in range(wdeg + 1):
                     for i in range(xdeg + 1):

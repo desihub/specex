@@ -21,8 +21,11 @@ def parse_log_line(line):
         cam_match = re.search(r'preproc-([a-z]\d)-', res['image'])
         if cam_match:
             res['camera'] = cam_match.group(1)
-        # Extract expid
-        exp_match = re.search(r'/(\d{8})/', res['image'])
+        # Extract expid from the filename itself (preproc-{cam}-{expid}.fits.gz)
+        # rather than the path -- the path's FIRST 8-digit segment is the
+        # night, which also happens to be 8 digits and would be matched
+        # incorrectly by a naive '/(\d{8})/' path search.
+        exp_match = re.search(r'preproc-[a-z]\d+-(\d+)\.fits', res['image'])
         if exp_match:
             res['expid'] = exp_match.group(1)
 

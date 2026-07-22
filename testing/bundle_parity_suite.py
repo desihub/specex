@@ -97,16 +97,28 @@ def wave_residual_stats(fits_path, fibers, waves_true, ycs):
     return rms, float(resid.mean()), float(resid.std())
 
 
-def run_cpp(case, bundle_id, out_fits, log_path):
+def band_settings(camera):
+    """Real desi_compute_psf production defaults (desispec/scripts/specex.py:224-228):
+    degree-3 trace/shape correction + continuum fit for z-band only; degree-1,
+    no continuum for b/r. Used for both pipelines so this is a genuine
+    production-representative comparison, not the old forced deg=3+continuum
+    apples-to-apples match."""
+    return (3, True) if camera[0] == 'z' else (1, False)
+
+
+def run_cpp(case, bundle_id, out_fits, log_path, lamp_lines=None):
     fmin, fmax = bundle_id * 25, (bundle_id + 1) * 25 - 1
+    deg, cont = band_settings(case['camera'])
     cmd = ["desi_psf_fit",
            "-a", case['image'],
            "--in-psf", case['input_psf'],
-           "--lamp-lines", os.path.join(CURRENT_DIR, "py/specex/data/specex_linelist_desi.txt"),
+           "--lamp-lines", lamp_lines or os.path.join(CURRENT_DIR, "py/specex/data/specex_linelist_desi.txt"),
            "--out-psf", out_fits,
            "--first-bundle", str(bundle_id), "--last-bundle", str(bundle_id),
            "--first-fiber", str(fmin), "--last-fiber", str(fmax),
-           "--legendre-deg-wave", "3", "--fit-continuum"]
+           "--legendre-deg-wave", str(deg)]
+    if cont:
+        cmd += ["--fit-continuum"]
     if case['broken_fibers']:
         cmd += ["--broken-fibers", case['broken_fibers']]
     t0 = time.time()
@@ -115,16 +127,21 @@ def run_cpp(case, bundle_id, out_fits, log_path):
     return time.time() - t0, r.returncode
 
 
-def run_py(case, bundle_id, out_fits, log_path):
+def run_py(case, bundle_id, out_fits, log_path, lamp_lines=None):
     fmin, fmax = bundle_id * 25, (bundle_id + 1) * 25 - 1
+    deg, cont = band_settings(case['camera'])
     cmd = [sys.executable, "-m", "specex.specex",
            "-a", case['image'],
            "--in-psf", case['input_psf'],
-           "--lamp-lines", os.path.join(CURRENT_DIR, "py/specex/data/specex_linelist_desi.txt"),
+           "--lamp-lines", lamp_lines or os.path.join(CURRENT_DIR, "py/specex/data/specex_linelist_desi.txt"),
            "--out-psf", out_fits,
            "--first-bundle", str(bundle_id), "--last-bundle", str(bundle_id),
            "--first-fiber", str(fmin), "--last-fiber", str(fmax),
-           "--legendre-deg-wave", "3", "--fit-continuum", "--gpu", "1"]
+           "--legendre-deg-wave", str(deg), "--gpu", "1"]
+    if cont:
+        cmd += ["--fit-continuum"]
+    else:
+        cmd += ["--no-fit-continuum"]
     if case['broken_fibers']:
         cmd += ["--broken-fibers", case['broken_fibers']]
     t0 = time.time()
@@ -149,6 +166,7 @@ def main():
     ap.add_argument("--skip-cpp", action="store_true", help="reuse existing C++ outputs")
     ap.add_argument("--skip-py", action="store_true", help="reuse existing Python outputs")
     ap.add_argument("--results", default=None, help="results table path (default <outdir>/parity_results.txt)")
+    ap.add_argument("--lamp-lines", default=None, help="override lamp lines file for both C++ and Python (default: specex_linelist_desi.txt)")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -179,13 +197,13 @@ def main():
 
         t_cpp = rc = 0
         if not (args.skip_cpp and os.path.exists(cpp_fits)):
-            t_cpp, rc = run_cpp(case, bid, cpp_fits, os.path.join(args.outdir, f"cpp-{base}.log"))
+            t_cpp, rc = run_cpp(case, bid, cpp_fits, os.path.join(args.outdir, f"cpp-{base}.log"), lamp_lines=args.lamp_lines)
             if rc != 0:
                 print(f"{tag:<8} CPP FAILED rc={rc} (see cpp-{base}.log)", flush=True)
                 continue
         t_py = 0
         if not (args.skip_py and os.path.exists(py_fits)):
-            t_py, rc = run_py(case, bid, py_fits, os.path.join(args.outdir, f"py-{base}.log"))
+            t_py, rc = run_py(case, bid, py_fits, os.path.join(args.outdir, f"py-{base}.log"), lamp_lines=args.lamp_lines)
             if rc != 0:
                 print(f"{tag:<8} PY FAILED rc={rc} (see py-{base}.log)", flush=True)
                 continue

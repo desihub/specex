@@ -54,10 +54,11 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False):
     """
     Isolated task for fitting a single bundle.
     """
+    t_entry = time.time()
     if stagger_s > 0:
         time.sleep(stagger_s)
         
@@ -81,30 +82,41 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # GPU memory and crash with CUDA_ERROR_OUT_OF_MEMORY.
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["JAX_PLATFORM_NAME"] = backend
+    # Mixed precision (float32 Jacobian in the joint-fit accumulate step,
+    # float64 everywhere else) is the default -- see porting-notes.md
+    # "Mixed precision, tested exactly as directed" for validation (single-
+    # bundle chi2 relative error 2.4e-6, full-CCD wavelength RMS matches the
+    # float64 pipeline to 4 decimal places, 71% GPU memory cut). Pass
+    # --double-precision on the CLI to force full float64 if ever needed.
+    os.environ["SPECEX_MIXED_PRECISION"] = "0" if double_precision else "1"
     
     try:
         import jax
         import jax.numpy as jnp
-        
+        t_jax_import = time.time()
+        print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
+
         class Opts:
             def __init__(self):
                 self.arc_image_filename = arc_file
                 self.input_psf_filename = in_psf_file
         opts = Opts()
-        
+
         ddata = read_preproc(opts)
         image = ddata['image'].T
         weight = ddata['ivar'].T
-        
+
         psf = load_python_psf(in_psf_file, opts)
         if h_size_y is not None:
             psf.h_size_y = h_size_y
-        
+
         # Add output path for spot writing
         psf.output_psf_path = out_psf_file
-            
+
         lamp_lines = read_lamp_lines(lamp_lines_file)
-        
+        t_io = time.time()
+        print(f"PHASE_TIMING bundle={bid} image_psf_io={t_io - t_jax_import:.2f}s", flush=True)
+
         f_min, f_max = bid * 25, (bid + 1) * 25 - 1
         
         if force_spots_path:
@@ -144,14 +156,16 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
                                                    max_number_of_lines=max_number_of_lines,
                                                    wdeg=wdeg, fit_continuum=fit_continuum)
 
+        t_select = time.time()
+        print(f"PHASE_TIMING bundle={bid} selection={t_select - t_io:.2f}s", flush=True)
 
-
-        
         if not spots:
             return bid, {"error": "No spots found for bundle"}
 
         fitter = PSF_Fitter(psf)
         chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum)
+        t_finalfit = time.time()
+        print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
 
         # --- Recompute trace_coeffs as the true correction relative to the
         # *original input* trace, fit directly to the final absolute
@@ -207,6 +221,9 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             final_selected[i]['xc_init'] = float(xc_final[i])
             final_selected[i]['yc_init'] = float(yc_final[i])
         
+        t_postproc = time.time()
+        print(f"PHASE_TIMING bundle={bid} postproc={t_postproc - t_finalfit:.2f}s total={t_postproc - t_entry:.2f}s", flush=True)
+
         # Keep the cross-process payload minimal to avoid multiprocessing
         # pipe/pickling overhead.
         return bid, {
@@ -230,7 +247,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
-                     workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None):
+                     workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -284,7 +301,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -334,7 +351,8 @@ def main():
     parser.add_argument("--max-lines", type=int, default=200, help="Maximum number of lines to keep per bundle")
     parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
     parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
-    
+    parser.add_argument("--double-precision", action="store_true", help="Force full float64 precision for the joint-fit Jacobian (default: mixed float32/float64 -- see porting-notes.md; validated equivalent accuracy, ~71%% less GPU memory/worker)")
+
     args = parser.parse_args()
     
     if not args.lamp_lines:
@@ -360,7 +378,8 @@ def main():
         workers_per_gpu=args.workers_per_gpu,
         cpu_workers=args.cpu_workers,
         legendre_deg_wave=args.legendre_deg_wave,
-        fit_continuum=args.fit_continuum
+        fit_continuum=args.fit_continuum,
+        double_precision=args.double_precision
     )
 
 if __name__ == "__main__":

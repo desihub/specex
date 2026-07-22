@@ -1,0 +1,90 @@
+# Input files needed for local specex testing (Perlmutter down starting Wed)
+# scp these from a Perlmutter login node, e.g.:
+#   scp -r cdwarner@perlmutter.nersc.gov:<path> <local_dest>
+# or bundle with: tar cf - -T this_file.txt | ssh perlmutter.nersc.gov 'cat' > transfer.tar  (run FROM Perlmutter, redirect to local via rsync/scp instead in practice)
+
+## 1. Standard test case: night 20260401, exposure 00344649, ALL 30 cameras (b0-9, r0-9, z0-9)
+## preproc (arc) images + input PSF templates -- 60 files total, all verified present on disk
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b0-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b0-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b1-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b1-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b2-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b2-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b3-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b3-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b4-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b4-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b5-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b5-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b6-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b6-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b7-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b7-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b8-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b8-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-b9-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-b9-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r0-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r0-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r1-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r1-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r2-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r2-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r3-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r3-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r4-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r4-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r5-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r5-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r6-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r6-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r7-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r7-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r8-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r8-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-r9-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-r9-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z0-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z0-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z1-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z1-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z2-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z2-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z3-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z3-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z4-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z4-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z5-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z5-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z6-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z6-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z7-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z7-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z9-00344649.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z9-00344649.fits
+
+## 2. Random validation set (6 additional night/expid/camera cases, verified present on disk)
+## Use these to sanity-check the port isn't overfit to the one standard test case
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20220112/00118267/preproc-z3-00118267.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20220112/00118267/shifted-input-psf-z3-00118267.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20251017/00316698/preproc-r8-00316698.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20251017/00316698/shifted-input-psf-r8-00316698.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20241104/00261286/preproc-b0-00261286.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20241104/00261286/shifted-input-psf-b0-00261286.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20210927/00101934/preproc-z1-00101934.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20210927/00101934/shifted-input-psf-z1-00101934.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20230515/00180851/preproc-r9-00180851.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20230515/00180851/shifted-input-psf-r9-00180851.fits
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20230520/00181481/preproc-b6-00181481.fits.gz
+/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20230520/00181481/shifted-input-psf-b6-00181481.fits
+
+## 3. NOT included below (already git-tracked in the repo, no scp needed):
+##   - py/specex/data/specex_linelist_desi.txt  (lamp line list)
+##   - all Python source (py/specex/*.py)
+
+## 4. Only needed if you also want to run the C++ reference build locally for comparison
+## (requires the specex C++ build + DESI software stack -- likely NOT practical off Perlmutter;
+##  recommend treating C++ comparison as Perlmutter-only and doing pure-Python dev locally)

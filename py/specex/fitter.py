@@ -115,7 +115,24 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     gh_all = jnp.dot(monomials, psf_coeffs.T); dx, dy = jnp.dot(monomials, trace_coeffs[0]), jnp.dot(monomials, trace_coeffs[1])
     xc_all, yc_all = xc_init + dx, yc_init + dy
     
-    batch_size = 2000; n_pad = batch_size - Ns
+    # No padding: batch_size = Ns exactly. This used to be a flat 2000
+    # regardless of the real spot count (~600-1600 in cases seen so far).
+    # Every input to this jitted function (flux, xc_init, sx_g, ...) already
+    # has Ns baked into its shape, so a fresh XLA compile happens per
+    # distinct Ns either way -- there's no compile-cache reuse the old flat
+    # constant was protecting. Measured effect (single-GPU nvidia-smi
+    # profiling, see porting-notes.md "task 22 follow-up"): this removes the
+    # padding waste cleanly and never costs more than the old flat 2000, but
+    # it did NOT reduce the observed process-level GPU memory peak for the
+    # dominant ~1500-1600-spot bundle case even at this most-aggressive
+    # (zero-padding) setting -- so this alone does not close the 8.65GB ->
+    # <8.0GB gap needed for 5 workers/GPU. The real driver of that peak is
+    # still unidentified (likely an XLA compile-time/kernel-selection
+    # scratch allocation that only shrinks for much smaller problem sizes,
+    # not the live tensor footprint) and needs real profiler-based
+    # investigation (jax.profiler device memory profile), not more
+    # code-reading guesses.
+    batch_size = Ns; n_pad = batch_size - Ns
     gh_p = jnp.pad(gh_all, ((0, n_pad), (0, 0))); xc_p, yc_p, f_p = jnp.pad(xc_all, (0, n_pad)), jnp.pad(yc_all, (0, n_pad)), jnp.pad(flux, (0, n_pad))
     m_p = jnp.pad(monomials, ((0, n_pad), (0, 0))); sx_p = jnp.pad(sx_g, ((0, n_pad), (0, 0))); sy_p = jnp.pad(sy_g, ((0, n_pad), (0, 0)))
     idx_p = jnp.pad(idx_gg, ((0, n_pad), (0, 0)), constant_values=Np); mask_p = jnp.arange(batch_size) < Ns
@@ -182,12 +199,33 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
 
     b_psf, b_gh_basis, b_jsigx, b_jsigy, b_jx, b_jy = vmap(get_all_grads)(xc_p, yc_p, gh_p, sx_p, sy_p)
     bm = mask_p[:, jnp.newaxis]; b_psf *= bm
-    j_sx = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jsigx[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-    j_sy = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jsigy[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-    j_gh = (f_p[:, jnp.newaxis, jnp.newaxis, jnp.newaxis] * b_gh_basis[:, :, :, jnp.newaxis] * m_p[:, jnp.newaxis, jnp.newaxis, :]).reshape(batch_size, stamp_area, -1)
-    j_xc = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jx[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-    j_yc = (f_p[:, jnp.newaxis, jnp.newaxis] * b_jy[:, :, jnp.newaxis] * m_p[:, jnp.newaxis, :])
-    b_jac = jnp.concatenate([j_sx, j_sy, j_gh, j_xc, j_yc], axis=2) * bm[:, jnp.newaxis]
+
+    # --- Mixed precision (default on; set SPECEX_MIXED_PRECISION=0, or the
+    # CLI's --double-precision, to force full float64): the (batch_size,
+    # stamp_area, Nsh) Jacobian terms below are the single largest tensor in
+    # this function (b_jac and its j_sx/j_sy/j_gh/j_xc/j_yc constituents) --
+    # build them in float32 instead of the ambient float64 (jax_enable_x64,
+    # psf.py) to roughly halve their footprint and the transient scratch XLA
+    # needs to construct/contract them. Everything upstream (get_all_grads'
+    # erf/exp/Hermite-recurrence math, which is numerically delicate and not
+    # the memory driver) and everything downstream (the small Ntot x Ntot
+    # accumulated normal-equations matrix A/B and the linear solve in
+    # PSF_Fitter.fit) stays float64 -- only the wide-but-shallow per-spot
+    # per-pixel per-parameter broadcast products are narrowed. Validated:
+    # single-bundle chi2 relative error 2.4e-6, full-CCD wavelength RMS vs
+    # line-list truth matches the float64 pipeline to 4 decimals, 71% GPU
+    # memory cut (8657MiB -> 2513MiB/worker) -- see porting-notes.md.
+    _mp = os.environ.get("SPECEX_MIXED_PRECISION", "1") != "0"
+    _jdt = jnp.float32 if _mp else jnp.float64
+    f_p_j, m_p_j = f_p.astype(_jdt), m_p.astype(_jdt)
+    b_gh_basis_j = b_gh_basis.astype(_jdt); b_jsigx_j, b_jsigy_j = b_jsigx.astype(_jdt), b_jsigy.astype(_jdt)
+    b_jx_j, b_jy_j = b_jx.astype(_jdt), b_jy.astype(_jdt)
+    j_sx = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jsigx_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
+    j_sy = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jsigy_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
+    j_gh = (f_p_j[:, jnp.newaxis, jnp.newaxis, jnp.newaxis] * b_gh_basis_j[:, :, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, jnp.newaxis, :]).reshape(batch_size, stamp_area, -1)
+    j_xc = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jx_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
+    j_yc = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jy_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
+    b_jac = jnp.concatenate([j_sx, j_sy, j_gh, j_xc, j_yc], axis=2) * bm[:, jnp.newaxis].astype(_jdt)
 
     flat_idx = idx_p.flatten(); valid = flat_idx < Np
     total_sig = jnp.zeros(Np + 1).at[flat_idx].add((b_psf * f_p[:, jnp.newaxis]).flatten())
@@ -219,13 +257,19 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     correction = (1.0 / wscale) * 0.5 * (wr**2) * (1.0/gain + 2.0 * psf_error**2 * b_signal)
     wr_corrected = wr + correction
     
-    B = jnp.zeros(Ntot).at[:Ns].set(jnp.sum(wr * b_psf, axis=1)[:Ns]).at[Ns:Ns+Nsh].set(jnp.sum(jnp.sum(b_jac * wr_corrected[:, :, jnp.newaxis], axis=1), axis=0)).at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res))
+    # b_jac is (float32 if SPECEX_MIXED_PRECISION else float64) -- cast its
+    # co-operands to match so these contractions don't get silently
+    # upcast/downcast-mismatched or promoted back to float64 by JAX's
+    # type-promotion rules, then cast each (small) result back to float64
+    # before it's written into the float64 accumulated A/B.
+    wr_corrected_j, b_w_j, b_psf_j = wr_corrected.astype(_jdt), b_w.astype(_jdt), b_psf.astype(_jdt)
+    B = jnp.zeros(Ntot).at[:Ns].set(jnp.sum(wr * b_psf, axis=1)[:Ns]).at[Ns:Ns+Nsh].set(jnp.sum(jnp.sum(b_jac * wr_corrected_j[:, :, jnp.newaxis], axis=1), axis=0).astype(jnp.float64)).at[-Ncont:].set(jnp.dot(h_cont.T, weight_data * res))
     A = jnp.zeros((Ntot, Ntot)).at[jnp.arange(Ns), jnp.arange(Ns)].set(jnp.sum(b_w * b_psf**2, axis=1)[:Ns])
-    A = A.at[Ns:Ns+Nsh, Ns:Ns+Nsh].set(jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_jac))
-    A_fs = jnp.einsum('bij,bi,bi->bj', b_jac, b_w, b_psf); A = A.at[Ns:Ns+Nsh, :Ns].set(A_fs[:Ns].T).at[:Ns, Ns:Ns+Nsh].set(A_fs[:Ns])
+    A = A.at[Ns:Ns+Nsh, Ns:Ns+Nsh].set(jnp.einsum('bij,bi,bik->jk', b_jac, b_w_j, b_jac).astype(jnp.float64))
+    A_fs = jnp.einsum('bij,bi,bi->bj', b_jac, b_w_j, b_psf_j).astype(jnp.float64); A = A.at[Ns:Ns+Nsh, :Ns].set(A_fs[:Ns].T).at[:Ns, Ns:Ns+Nsh].set(A_fs[:Ns])
     h_lookup = h_cont[jnp.where(valid, flat_idx, 0)]; b_hcont = jnp.where(valid[:, jnp.newaxis], h_lookup, 0.0).reshape(batch_size, stamp_area, Ncont)
     A_fc = jnp.einsum('bi,bi,bik->bk', b_psf, b_w, b_hcont); A = A.at[:Ns, -Ncont:].set(A_fc[:Ns]).at[-Ncont:, :Ns].set(A_fc[:Ns].T)
-    A_sc = jnp.einsum('bij,bi,bik->jk', b_jac, b_w, b_hcont); A = A.at[Ns:Ns+Nsh, -Ncont:].set(A_sc).at[-Ncont:, Ns:Ns+Nsh].set(A_sc.T)
+    A_sc = jnp.einsum('bij,bi,bik->jk', b_jac, b_w_j, b_hcont.astype(_jdt)).astype(jnp.float64); A = A.at[Ns:Ns+Nsh, -Ncont:].set(A_sc).at[-Ncont:, Ns:Ns+Nsh].set(A_sc.T)
     A = A.at[-Ncont:, -Ncont:].set(jnp.dot(h_cont.T * weight_data, h_cont))
     return chi2, A[:Ns+Nsh+Ncont, :Ns+Nsh+Ncont], B[:Ns+Nsh+Ncont]
 
@@ -747,7 +791,19 @@ class PSF_Fitter:
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
         for i in range(max_iter):
             chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
-            
+
+            if i == 0 and os.environ.get("SPECEX_DEBUG_MEM"):
+                import jax
+                Nparams_dbg = pc.shape[0]; Npoly_dbg = monomials.shape[1]; stamp_area_dbg = sx_g.shape[1]
+                Nsh_dbg = (Nparams_dbg + 2) * Npoly_dbg
+                print(f"  DEBUG_MEM: Ns={flux.shape[0]} Nparams={Nparams_dbg} Npoly={Npoly_dbg} "
+                      f"stamp_area={stamp_area_dbg} Nsh={Nsh_dbg} Np(footprint)={xpix.shape[0]}", flush=True)
+                arrs = sorted(jax.live_arrays(), key=lambda a: -a.nbytes)
+                total = sum(a.nbytes for a in arrs)
+                print(f"  DEBUG_MEM: {len(arrs)} live arrays, {total/1e9:.3f} GB total", flush=True)
+                for a in arrs[:25]:
+                    print(f"  DEBUG_MEM:   shape={a.shape} dtype={a.dtype} nbytes={a.nbytes/1e6:.2f}MB", flush=True)
+
             if chi2 < best_chi2:
                 best_chi2 = chi2
                 best_tc = tc.copy()
