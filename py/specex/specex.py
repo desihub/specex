@@ -82,6 +82,18 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # GPU memory and crash with CUDA_ERROR_OUT_OF_MEMORY.
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["JAX_PLATFORM_NAME"] = backend
+    # Persistent JAX/XLA compilation cache (analogous to CuPy's .cubin disk
+    # cache) -- this driver spawns a fresh process per bundle, so without
+    # this every worker pays a full JIT-compile cost from scratch even when
+    # an identical (function, array-shape) pair was already compiled by an
+    # earlier bundle/camera in the same campaign. Validated in porting-notes.md
+    # "JAX persistent compilation cache" -- ~43% faster end-to-end wall time
+    # on a warm cache in isolated single-bundle testing, with the previously
+    # documented "final joint fit is slower in Python than C++" finding
+    # reversing once warm (Python becomes ~3.2x faster on that phase).
+    # Respects an operator-set JAX_COMPILATION_CACHE_DIR if present.
+    cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR", "/pscratch/sd/c/cdwarner/specex/jax_compilation_cache")
+    os.makedirs(cache_dir, exist_ok=True)
     # Mixed precision (float32 Jacobian in the joint-fit accumulate step,
     # float64 everywhere else) is the default -- see porting-notes.md
     # "Mixed precision, tested exactly as directed" for validation (single-
@@ -93,6 +105,16 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     try:
         import jax
         import jax.numpy as jnp
+        # NOTE: env-var-based cache config (JAX_COMPILATION_CACHE_DIR etc.)
+        # is too late here -- .psf imports jax.numpy at module level, which
+        # this multiprocessing 'spawn' worker triggers while resolving this
+        # very function *before* its body runs, so JAX's own config is
+        # already locked in by the time any os.environ write below would
+        # take effect. Use the jax.config API directly instead, which is
+        # read fresh at the point of the call.
+        jax.config.update("jax_compilation_cache_dir", cache_dir)
+        jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+        jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
         t_jax_import = time.time()
         print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
 
