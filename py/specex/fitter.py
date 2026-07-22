@@ -7,6 +7,17 @@ from .psf import GaussHermitePSF
 
 # --- Helpers ---
 
+def next_pow2_bucket(n, min_bucket=256):
+    """Smallest power of 2 >= n (floored at min_bucket), for padding
+    variable-length JAX inputs to a small, campaign-stable set of shapes so
+    the persistent JIT-compilation cache (see porting-notes.md "JAX
+    persistent compilation cache") gets reused across bundles/cameras
+    instead of triggering a fresh XLA compile per distinct array length.
+    """
+    if n <= min_bucket:
+        return min_bucket
+    return 1 << (n - 1).bit_length()
+
 def get_sparse_nz(xdeg, ydeg):
     nz = []
     for j in range(ydeg + 1):
@@ -742,7 +753,23 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
         # xc_f = xc + final_dx; yc_f = yc + final_dy
 
 
-    return jit(vmap(fit_spot))(cand_xc, cand_yc, gh_params)
+    # Pad the candidate batch to a power-of-2 bucket so JAX reuses one
+    # compiled shape across bundles/cameras instead of recompiling for every
+    # distinct raw-candidate count (campaign-wide these range ~1100-1800 and
+    # collapse into a single bucket -- see porting-notes.md "power-of-2
+    # shape bucketing"). Safe by construction: fit_spot is vmapped, so each
+    # padding row is fit fully independently and cannot influence any real
+    # candidate's result -- padding rows are simply sliced off below.
+    Ns_real = cand_xc.shape[0]
+    Ns_pad = next_pow2_bucket(Ns_real)
+    if Ns_pad > Ns_real:
+        n_extra = Ns_pad - Ns_real
+        cand_xc = jnp.pad(cand_xc, (0, n_extra))
+        cand_yc = jnp.pad(cand_yc, (0, n_extra))
+        gh_params = jnp.pad(gh_params, ((0, n_extra), (0, 0)))
+
+    flux, snr, chi2, eflux = jit(vmap(fit_spot))(cand_xc, cand_yc, gh_params)
+    return flux[:Ns_real], snr[:Ns_real], chi2[:Ns_real], eflux[:Ns_real]
 
 class PSF_Fitter:
     def __init__(self, psf):
@@ -754,7 +781,17 @@ class PSF_Fitter:
         weight = apply_dead_column_mask(self.psf, fmin, fmax, weight)
         xpix, ypix, pix_idx = get_bundle_footprint(self.psf, spots, fmin, fmax, weight)
         Np = len(xpix); area = (2*self.psf.h_size_x+1)*(2*self.psf.h_size_y+1); Ns = len(spots)
-        t0 = time.time(); sx, sy = np.zeros((Ns, area)), np.zeros((Ns, area)); idx_g = np.full((Ns, area), Np, dtype=np.int32)
+        # Pixel-footprint padding: pad the pixel dimension fed to the JIT
+        # calls below to a power-of-2 bucket (real footprints range ~33k-
+        # 125k pixels campaign-wide and collapse into 2 buckets -- see
+        # porting-notes.md "power-of-2 shape bucketing"). idx_g's
+        # out-of-footprint sentinel must equal Np_pad (not Np): the JIT
+        # functions gate "valid" as flat_idx < Np, computed internally from
+        # the padded array's own (Np_pad) length, so the sentinel has to
+        # track it exactly or genuinely-invalid entries would be
+        # misclassified as valid.
+        Np_pad = next_pow2_bucket(Np)
+        t0 = time.time(); sx, sy = np.zeros((Ns, area)), np.zeros((Ns, area)); idx_g = np.full((Ns, area), Np_pad, dtype=np.int32)
         nx, ny = image.shape; idx_map = np.full((nx, ny), -1, dtype=np.int32); idx_map[xpix, ypix] = np.arange(Np)
         for s_i, s in enumerate(spots):
             ix, iy = np.meshgrid(np.arange(s['stamp_imin'], s['stamp_imax']), np.arange(s['stamp_jmin'], s['stamp_jmax']), indexing='ij')
@@ -773,13 +810,33 @@ class PSF_Fitter:
         tx_j, tw_j = np.zeros((25, len(rows_u))), np.zeros((25, len(rows_u)))
         for f_i in range(25):
             fib = fmin + f_i; w_v = self.psf.fiber_traces[fib]['Y_vs_W'].invert(rows_u.astype(float)); tw_j[f_i], tx_j[f_i] = w_v, self.psf.x_ccd(fib, w_v)
-        ix_r = np.array([row_m[j] for j in ypix]); tx_g, tw_g = jnp.array(tx_j[:, ix_r]), jnp.array(tw_j[:, ix_r])
+        ix_r = np.array([row_m[j] for j in ypix])
+        # Extend xpix/ypix/ix_r to Np_pad by repeating pixel 0's coordinates.
+        # This reuses an already-real row, so rows_u (and tx_g/tw_g's shape)
+        # is unaffected, and no spot's idx_g ever points into the appended
+        # range (idx_map only ever maps the real xpix/ypix positions above)
+        # -- so the padding entries are only ever touched by the whole-array
+        # image_data/weight_data/chi2 terms in the JIT functions, never by
+        # any per-spot Jacobian/Hessian accumulation. w_d is forced to 0 on
+        # the padding entries below so those terms are always exactly zero
+        # regardless of what image value ends up duplicated there.
+        n_pix_extra = Np_pad - Np
+        if n_pix_extra > 0:
+            xpix_p = np.concatenate([xpix, np.full(n_pix_extra, xpix[0], dtype=xpix.dtype)])
+            ypix_p = np.concatenate([ypix, np.full(n_pix_extra, ypix[0], dtype=ypix.dtype)])
+            ix_r_p = np.concatenate([ix_r, np.full(n_pix_extra, ix_r[0], dtype=ix_r.dtype)])
+        else:
+            xpix_p, ypix_p, ix_r_p = xpix, ypix, ix_r
+        tx_g, tw_g = jnp.array(tx_j[:, ix_r_p]), jnp.array(tw_j[:, ix_r_p])
         flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
         monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
         pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, monomials))
-        tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont) 
-        img_d, w_d = jnp.array(image[xpix, ypix]), jnp.array(weight[xpix, ypix])
+        tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
+        img_d, w_d = jnp.array(image[xpix_p, ypix_p]), jnp.array(weight[xpix_p, ypix_p])
+        if n_pix_extra > 0:
+            w_d = w_d.at[Np:].set(0.0)
+        xpix_j, ypix_j = jnp.array(xpix_p), jnp.array(ypix_p)
         wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30
         
         best_chi2 = 1e30
@@ -790,7 +847,7 @@ class PSF_Fitter:
         
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
         for i in range(max_iter):
-            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
+            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
 
             if i == 0 and os.environ.get("SPECEX_DEBUG_MEM"):
                 import jax
@@ -841,7 +898,7 @@ class PSF_Fitter:
             best_alpha, ls_chi2 = 0.0, float(chi2)
             if jnp.any(d_p != 0):
                 for alpha in [0.2, 0.5, 1.0]:
-                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
                     if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
@@ -865,7 +922,7 @@ class PSF_Fitter:
         # The state after the last applied step is never seen by the
         # top-of-loop best-state check - evaluate it explicitly so a
         # converged final state cannot lose to a stale intermediate one.
-        final_chi2 = float(_predict_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, jnp.array(xpix), jnp.array(ypix), sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+        final_chi2 = float(_predict_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
         if final_chi2 < best_chi2:
             best_chi2 = final_chi2; best_tc = tc.copy(); best_pc = pc.copy(); best_cc = cc.copy(); best_flux = flux.copy()
 

@@ -1,0 +1,411 @@
+SPECEX C++ -> PYTHON/JAX PORT: CURRENT STATUS
+Written 2026-07-21, ahead of a ~2-week Perlmutter maintenance outage.
+Full detail and evidence trail for everything below lives in porting-notes.md
+(append-only, chronological, grep it by topic keyword for the raw session logs).
+Standing test case throughout: night 20260401, expid 00344649, unless noted.
+
+===============================================================================
+1. BOTTOM LINE
+===============================================================================
+The Python/JAX port is numerically sound, matches or beats C++ on correctness
+in aggregate (54-case random-night campaign: essentially at parity, band-
+dependent, no one-sided winner), and is committed on branch python-gpu-port
+(GitHub desihub/specex, pushed through commit d707ccb; one further commit,
+f034f72, is local-only as of this writing -- see section 8).
+
+The two open threads with the most remaining uncertainty are:
+  - The exact cause of small, non-blocking flux/spot-selection differences
+    between the two pipelines (section 2) -- characterized, not fully
+    root-caused, never observed to hurt the fit.
+  - A genuine, unexplained ~1.83x pixel-footprint discrepancy on one specific
+    problem exposure (r2@20250109) that forced-spot injection only partly
+    closes (section 4) -- this is the sharpest real open correctness question
+    right now.
+
+===============================================================================
+2. INITIAL SPOTS: POSITIONS MATCH EXACTLY, FLUX ESTIMATES DIFFER SLIGHTLY
+===============================================================================
+Candidate spot POSITIONS (xc, yc) are bit-identical between C++ and Python at
+generation time, for every line checked, every fiber -- expected, since both
+evaluate the same input (pre-fit) trace at the same labeled wavelength before
+any correction happens, but directly confirmed rather than assumed.
+
+Candidate FLUX estimates from the individual-spot housekeeping fit differ by
+~1-2% at the median (after fixing 4 real bugs in 2026-07-16's session: an
+inverted eflux formula, an uncapped housekeeping stamp size, dead selection
+code, and a Gauss-Hermite parameter misalignment -- all fixed and committed
+long ago). That 1-2% median is fine. The interesting residual is a SMALL SET
+OF SPECIFIC LINES (6 identified: 7440.9469, 7490.9335, 7516.721, 9354.8,
+9356.787, 8670.325 A) where Python's flux runs a nearly-constant, additive
+amount HIGHER than C++'s -- same absolute offset across all 25 fibers in a
+bundle regardless of how bright that fiber's line is. This is why Python's
+raw/pass-1 selection includes a handful of extra lines C++ doesn't select:
+those extra lines cross the SNR threshold in Python's flux estimate but not
+in C++'s.
+
+WHY (investigated across two sessions, 2026-07-20 and 2026-07-21):
+  - For the worst case (8670.325 A, +28 flux offset), we found the real cause
+    directly in the raw pixels: this line's fitted position sits in the wing
+    of a genuinely bright (~10,140 count) nearby source -- almost certainly
+    light bleeding in from a neighboring fiber's trace at a nearby
+    wavelength. Neither pipeline's individual-spot flux fit does local
+    background subtraction (small 7x7px housekeeping-capped stamp, no DC/
+    continuum term), so how much of that neighbor's wing lands in the stamp
+    -- and how it's weighted -- gets absorbed straight into the flux number.
+    This plausibly explains the largest offset.
+  - BUT: a clean control line (7516.721 A, isolated, no bright neighbor,
+    true peak pixel only 11.3 counts) shows the same ~+10 constant offset.
+    So "coincidental bright neighbor" is not the whole story -- there is a
+    second, smaller, still-unidentified difference in the two individual-
+    flux-fit implementations.
+  - We do NOT think this is a missing feature on the Python side. Specifically
+    ruled out, by reading the C++ source directly: (a) C++'s
+    Mask::WaveIntervals "mis-understood/shadowed line" masking mechanism
+    exists in the code (specex_mask.cc) but is never populated anywhere in
+    this build -- it's dead/vestigial, a no-op, not a real feature we're
+    missing; (b) continuum subtraction is explicitly OFF for this pass on
+    both sides (#ifdef-guarded off in C++, no continuum term in Python at
+    this stage); (c) Poisson/signal-dependent weighting is off on both sides
+    at this stage too; (d) candidate positions are bit-identical (so it's
+    not a geometry mismatch). So if you're asked "why not implement the same
+    C++ logic that handles a line in a bright line's shadow" -- the honest
+    answer is there IS no such C++ logic active in this build to port; the
+    masking hook that would do that is dead code on the C++ side too. The
+    remaining explanation is a genuine, still-uncharacterized numerical
+    difference in the two flux estimators, not a missing port.
+  - Status: real, partially explained, NOT blocking. Every downstream check
+    (chi2, wavelength-residual RMS) shows Python's extra spots from these
+    lines help or are neutral to the final fit -- never hurt it. Next
+    concrete step if ever revisited: dump both pipelines' actual (pixel,
+    weight, model) stamp arrays side by side for the clean 7516.721 control
+    case to find exactly which pixels/weights differ.
+
+===============================================================================
+3. FINAL SPOTS: CLOSE, NOT IDENTICAL, SAME ROOT CAUSE
+===============================================================================
+End-to-end selected-spot-SET agreement (not just count) typically runs
+97-99% direct overlap with C++'s final selection, with Python selecting a
+handful to a few dozen extra spots per bundle (e.g. one well-documented case:
+1561 Python vs 1523 C++ target, 1520/1523 C++ spots present, 41 extra). The
+extras trace back to the same handful of specific lines from section 2, plus
+some genuine boundary-SNR noise (spots sitting right at the S/N=3 cutoff can
+flip either way from tiny flux differences -- expected, not a bug). One
+extra subtlety confirmed directly from C++ source: C++'s final coverage-
+limiting selection step operates on PER-WAVELENGTH-BIN S/N averaged across
+all fibers, not per-spot S/N, so an individual spot can clear the raw
+threshold and still not get selected -- already correctly ported into
+Python's select_spots_cpp().
+
+===============================================================================
+4. INJECTING C++'S EXACT SPOTS STILL GIVES A DIFFERENT RESULT -- IS IT JUST A
+   DIFFERENT (BUT VALID) OPTIMUM? -- ANSWER DEPENDS ON WHICH CASE.
+===============================================================================
+Two genuinely different situations here, with different levels of proof:
+
+(a) The b/r degree-1 "problem bundle" pattern (b8:19, r8:3, and others) --
+    PROVEN to be a different-but-valid optimum, not a bug:
+    Under the real production b/r settings (Legendre degree=1, no continuum
+    -- much less freedom than z-band's degree=3+continuum), individual
+    bundles split roughly 50/50 into "good" (X-trace RMS vs C++ ~0.03-0.09px)
+    and "bad" (~0.17-0.55px) agreement with C++, not a uniform degradation.
+    Direct chi2 cross-check on real pixel data (both pipelines fit
+    independently, both restricted to the same single isolated bundle, same
+    real spot set from their own selection) showed: Python's chi2 against
+    the actual pixel data is LOWER than C++'s by 5-12% in EVERY case tested,
+    regardless of whether that bundle is "good" or "bad" by the X-RMS
+    metric. A "bad" bundle is not a worse fit -- it's a fit that agrees less
+    with C++'s specific answer while still describing the real data better.
+    Mechanism: degree-1 has only 2 free trace coefficients per bundle vs
+    degree-3's 4 -- far fewer constraints pin down the solution, so a small
+    chi2 improvement can correspond to a large swing in trace position. This
+    is closed out as "not a bug" -- both pipelines are solving a genuinely
+    under-constrained problem and landing on different-but-comparably-valid
+    answers.
+
+(b) The r2@20250109 / r2@20241208 Y-trace anomaly (worst correctness cases
+    in tonight's 54-case aggregate, ~0.18-0.24px yrms in EVERY bundle of
+    those two specific exposures, vs ~0.05-0.10px typical) -- NOT proven
+    to be the same story, still genuinely open:
+    Tested directly by injecting C++'s exact final spot list (identical
+    fiber/wave/xc/yc) into Python via the existing --force-spots mechanism,
+    bundle 0 of r2@20250109. Result: yrms dropped from 0.1775px (Python's
+    own spot selection) to 0.1380px (forced C++ spots) -- spot selection
+    explains only ~22% of the gap. The remaining ~78% (0.138px, still 1.4-
+    2.8x the typical clean-case scatter) must come from the fit itself,
+    since both pipelines now see literally the same spots and the same
+    image data. Ruled out: float32-vs-float64 precision (bit-identical
+    result, 0.1380px both ways -- not a mixed-precision artifact).
+    UNLIKE case (a), we could NOT do a clean apples-to-apples chi2 cross-
+    check here to confirm "different but valid": Python's reported fit
+    footprint for this bundle is 66,506 pixels; C++'s reported footprint
+    for the SAME bundle, SAME forced spot list, is 121,360 pixels -- a real,
+    unexplained ~1.83x discrepancy. Since the two chi2 values are computed
+    over different-sized pixel sets, their raw magnitudes (73,324 Python vs
+    148,485 C++) are not directly comparable the way they were in case (a),
+    so we cannot yet say whether Python's fit is "better, just different"
+    or genuinely worse here. Two live hypotheses, neither confirmed: either
+    C++'s printed footprint count is measured before its own weight/mask
+    cut (a reporting-only mismatch), or this exposure has a real masked/
+    bad-pixel region the two pipelines handle differently in a way that
+    actually changes which pixels constrain the fit (a real, physically
+    meaningful cause). THIS IS THE SHARPEST OPEN CORRECTNESS QUESTION RIGHT
+    NOW. Concrete next step: dump each pipeline's actual pixel mask (not
+    just the count) for this bundle and diff them directly -- not yet done.
+
+So: "is it just a different least-squares engine landing on a different
+valid point" -- demonstrated true for the degree-1 problem-bundle pattern,
+genuinely still unknown for the r2 anomaly specifically.
+
+===============================================================================
+5. "OUR PROBLEM BUNDLE(S)" -- THE B/R DEGREE-1 INSTABILITY, AND HOW IT
+   CONNECTS TO TONIGHT'S SPEED WORK
+===============================================================================
+The degree-1 (b/r band) trace fit is measurably more sensitive to per-bundle
+initial conditions than z-band's degree-3 fit (section 4a). Tonight this
+same underlying sensitivity was found to ALSO be the direct mechanical cause
+of a separate-looking timing problem: a small number of bundles per camera
+(9/20 for b4, 1/20 for r5, in the standing test case) take ~1.8x longer to
+run than their camera's median, gating the whole 20-bundle wave's wall time
+("straggler" bundles).
+
+Root cause, nailed down precisely tonight: both C++ and Python have an
+identical algorithmic construct -- a trace-warmup loop that repeats up to 5
+times, breaking early once the fitted trace's centroid shift drops below
+0.5px. (Earlier tonight we incorrectly believed C++ didn't have this loop at
+all; corrected after rereading the source -- it does, gated by a flag that's
+true in production.) On a known Python straggler bundle (b4, bundle 10),
+C++ ALSO needed 2 iterations instead of 1 (max centroid shift = 0.508px,
+just over the break threshold) -- so the underlying "this bundle is harder
+to converge" property is REAL and SHARED by both pipelines, not a Python-
+only defect. The difference is cost: C++'s extra iteration cost ~7.5% more
+wall time (cheap matrix solve, no compile tax). Python's SAME bundle didn't
+even converge within the 5-iteration budget (plateaued at ~0.58px across all
+5 iterations) and, absent caching, paid a full JIT-recompilation tax on each
+of those wasted iterations -- turning a cheap 7.5% C++ penalty into Python's
+observed ~1.8x wall-time penalty.
+
+Practical upshot: the persistent-compilation-cache fix (section 8) mostly
+defuses this in practice -- the same straggler bundle dropped from 96.5s to
+58.5s once the cache was warm, without touching the convergence logic at
+all, and 58.5s is already cheaper than an UNCACHED "normal" bundle. A
+literal "call the trace-fit exactly once" experiment (temporarily testing
+range(1) instead of range(5) on this same bundle) gave IDENTICAL trace
+accuracy vs C++ to 4 decimal places, since this bundle's shift metric was
+plateaued anyway -- suggesting a real, low-risk optimization opportunity
+(early-exit on plateau rather than always spending the full budget), but
+only tested on this one bundle so far, not yet safe to ship broadly.
+
+===============================================================================
+6. THE ~0.5A SYSTEMATIC WAVELENGTH OFFSET: AIR VS VACUUM
+===============================================================================
+Both pipelines show a near-identical ~0.5A mean offset (not a Python-vs-C++
+discrepancy -- present in both, common cause) when comparing fitted spot
+positions against the line list's reference wavelengths, plus a smaller
+wavelength-dependent trend. A real experimental test (generating a vacuum-
+converted line list and using it to score the same already-fitted, already-
+converged spot positions -- NOT changing what was fitted, just what it's
+compared against) confirmed: air-vs-vacuum wavelength convention is the
+dominant driver. Using vacuum reference values, the RESIDUAL SCATTER around
+the trend drops ~3.4x (aggregate 0.234A -> per-wavelength-bin scatter down
+to 0.012-0.022A), and the wavelength-dependent trend slope shrinks ~3.5x
+(3.79e-4 A/A air -> 1.09e-4 A/A vacuum). This is strong evidence the
+underlying trace/wavelength solution really is vacuum-based physically, and
+the ~0.5A offset is a labeling-convention mismatch, not a fitting error.
+
+A residual ~1.9A near-constant offset remains even after the vacuum
+correction, smaller and not yet investigated -- plausibly a zero-point
+difference between this specific NIST-sourced line list and whatever exact
+lines/values the upstream desi_compute_trace_shifts calibration used, or a
+difference in the exact air-refractivity formula assumed. Not blocking; a
+~10x smaller residual than what we started with.
+
+WHY IT SOMETIMES "JUST BALKS" WHEN ACTUALLY RE-FITTING WITH A VACUUM LINE
+LIST (not just re-scoring, but using vacuum labels as --lamp-lines for a
+genuine re-fit): this conflates two different questions -- "is vacuum the
+right physical answer" (yes, per above) vs "does swapping the candidate-
+generation line list to vacuum labels hurt convergence" (yes, sometimes,
+separately). The INPUT PSF template (used to generate each candidate's
+initial xc/yc guess before any fit happens) was itself built/shifted under
+the AIR-label convention. Swap the line list to vacuum without also
+rebuilding that input template, and candidate generation starts from a
+systematically-wrong initial guess for some lines -- occasionally bad enough
+to break the fitter outright. Tested directly on 6 real bundles (2 per band)
+with a genuine vacuum re-fit on both pipelines: scatter improved in every
+case that didn't diverge, but Python crashed outright on one z-band case
+(a runaway 179px position divergence triggering a real 29.6 GiB CUDA OOM)
+and C++ crashed on a different r-band case (Brent line-search failure,
+negative-flux warnings beforehand) -- so a bad initial guess is capable of
+breaking EITHER pipeline's numerics, not a Python-specific fragility.
+
+PROPOSED SOLUTION (not yet implemented): this needs two separate pieces, not
+one. (1) Rebuild the input PSF template itself under the vacuum convention
+before ever switching the production line list -- a naive line-list-only
+swap is unsafe as demonstrated. (2) Independently, add a divergence guard /
+iteration-budget cap to the fitter so that if a bundle's fit does start
+running away numerically (the 179px case), it aborts gracefully with a
+clear error rather than continuing until XLA's allocator fails on a garbage-
+sized tensor -- this would make the failure mode safe/debuggable regardless
+of what causes a bad initial guess, not just the vacuum-label case
+specifically. Good context to raise with your supervisor: the real fix, if
+pursued, is "rebuild the template," not "swap one file."
+
+===============================================================================
+7. CORRECTNESS: WHY Z BEATS R BEATS B
+===============================================================================
+Confirmed numerically (54-case aggregate, offset-corrected wavelength
+scatter wstd_py averaged per band): b=0.318A, r=0.260A, z=0.251A -- z best,
+b worst, r in between, consistently. Cause: real per-bundle SELECTED (S/N-
+clearing) spot counts differ 2-3x by band -- b-band ~480-760 spots/bundle,
+z-band ~1500-1600/bundle -- even though the RAW line-list density across the
+three bands' wavelength windows is comparable (not a 2-3x difference in
+available lines). The blue/red calibration lines (Cd/Hg/Ar transitions) are
+intrinsically fainter and/or the CCD has lower QE in the blue, so fewer of
+the available lines clear the S/N threshold. Fewer real constraining spots
+per bundle means a less-constrained, noisier fit -- straightforwardly
+explains the correctness ordering. Not a Python-specific issue; this is a
+property of the input data each band actually has to work with.
+
+===============================================================================
+8. TIMING: WHY Z BEATS R BEATS B (RELATIVE TO C++), PROGRESS MADE TONIGHT,
+   AND WHAT'S LEFT
+===============================================================================
+Earlier framing (this afternoon): Python's speed relative to C++ tracks band
+WEIGHT, not a flat speedup -- z-band (heaviest per-bundle compute) is where
+Python's GPU parallelism roughly breaks even with C++'s 20-rank MPI; b-band
+(lightest compute) is where Python ran a full 2x SLOWER than C++ on average.
+Working theory at the time: a roughly constant per-worker fixed cost (process
+spawn, JAX/XLA JIT compilation, CUDA context init) dominates for b-band's
+cheap fits and gets amortized away for z-band's expensive ones.
+
+TONIGHT: that fixed cost was precisely identified and substantially fixed.
+  - Root cause confirmed via timestamped C++ (--debug flag) and Python logs
+    on the identical single bundle: Python's per-bundle time is dominated
+    by repeated JAX/XLA RECOMPILATION, not floating-point math. Once a given
+    (compiled function, array shape) pair has been seen once, further calls
+    complete in ~0.02-0.03s -- two to three orders of magnitude faster than
+    the first hit (which costs 1.4-9s depending on the function/shape).
+    Recompilation recurs multiple times within a single bundle's own
+    pipeline because different passes (raw candidate fit vs. selected-spot
+    joint fit vs. final joint fit) use different array shapes, and JAX
+    compiles fresh per distinct shape.
+  - Fix: JAX has a persistent, on-disk compilation cache (same idea as
+    CuPy's .cubin cache) -- it was simply never turned on anywhere in this
+    codebase. Wired it into fit_bundle_task() properly (first attempt used
+    an environment variable set too late in the process's import order to
+    actually take effect -- found and fixed via a minimal repro; the real
+    fix configures the cache through the jax.config API immediately after
+    `import jax`, which is read fresh at call time). Correctness re-verified
+    bit-identical (nspots/xrms/yrms/wrms/wstd) against the untouched
+    baseline -- this is a pure timing change, zero risk to results.
+  - CAVEAT, and this directly matches your own read of the numbers: the win
+    IS ~40-58% in isolated, single-worker-per-GPU testing (one bundle, one
+    GPU, no contention) -- but only ~9.4% in REAL production settings
+    (--gpu 4 --workers-per-gpu 5, validated end-to-end on all 9 standing
+    cameras, cold-cache-then-warm-cache, real full-CCD runs). This is
+    expected, not a partial failure of the fix: with 5 concurrent workers
+    sharing one A100, once compile time is removed, GPU COMPUTE CONTENTION
+    among those 5 workers becomes the binding constraint instead -- caching
+    can't buy back time genuinely spent waiting for a shared GPU's compute
+    cycles. This tracks each band's own GPU memory/compute headroom (from
+    an earlier packing-sweep session): b-band has the most spare headroom
+    at 5 workers/GPU and shows the biggest real-world gain (-17 to -18%);
+    z-band has the least headroom (already the most GPU-bound band) and
+    shows the smallest (-3.5 to -6.9%). The straggler cameras (b4, r5,
+    section 5) still show a clear win even under full contention (-9.0%,
+    -12.7%).
+  - Net: still a real, free, zero-risk, already-committed win (~9.4% at
+    full production concurrency, larger for lighter bands), but the bigger
+    lever for real production throughput is now GPU compute contention
+    itself, not compilation -- which is exactly where the power-of-2 shape-
+    bucketing work (starting tonight, see below) is aimed, plus reducing
+    each worker's actual compute footprint.
+
+UPDATE (later the same outage-eve night): power-of-2 shape bucketing was
+implemented and validated. Both shape dimensions identified above (spot
+count AND pixel-footprint count) are now padded to power-of-2 buckets before
+the JIT calls in fitter.py -- candidate arrays via a straightforward,
+provably-safe change (fit_candidate_fluxes' inner fit is vmapped/embarrassingly
+parallel, so padding rows cannot affect real rows' results by construction);
+the pixel-footprint arrays via a more careful change requiring a full read of
+_accumulate_bundle_jax's ~180 lines to get the out-of-footprint sentinel
+value and weight-zeroing right (the function's "valid" gate depends on the
+padded array's own length, not a fixed constant, so the sentinel had to be
+computed as Np_pad, not left at the old Np -- this was the one place where
+just "trusting the existing masking pattern" would have been wrong; had to
+trace every idx_gg-gated code path by hand instead).
+
+Correctness: re-verified bit-identical (max abs trace diff 0.0000000000px)
+on 3 different test cases including one that exercises 5 full trace-warmup
+iterations with a different padded shape at each pass, one that exercises
+the continuum-fit code path not touched by the other cases, and the full
+9-camera production-scale cold+warm run (every correctness column --
+nspots/xrms/yrms/wrms/wstd -- exactly matches the untouched original
+baseline). Zero risk to results; this is purely a shape/timing change.
+
+REAL RESULT, same 9-camera production-scale (--gpu 4 --workers-per-gpu 5)
+methodology as the cache-only test above:
+
+  camera            baseline   cache-only warm   cache+padding warm
+  b5                   87.7s            71.9s              64.6s (-26.3%)
+  b4 (straggler)       119.4s          108.7s              92.1s (-22.9%)
+  b2                   88.1s            73.1s              66.7s (-24.3%)
+  r3                   114.0s          104.9s             103.5s (-9.2%)
+  r5 (straggler)       121.9s          106.4s              95.1s (-22.0%)
+  r1                   106.1s           94.3s              92.2s (-13.1%)
+  z1                   133.9s          124.7s             129.9s (-3.0%)
+  z6                   137.0s          130.6s             124.8s (-8.9%)
+  z9                   135.4s          130.7s             124.9s (-7.8%)
+  SUM                 1043.5s          945.3s (-9.4%)     893.8s (-14.3%)
+
+So: real additional win on top of caching alone (-9.4% -> -14.3%
+aggregate), same band-dependent pattern as before (b-band gains most, most
+GPU headroom; z-band gains least, already GPU-compute-bound) but now more
+pronounced. Notably, the two STRAGGLER cameras show the single largest
+improvement of any camera relative to their cache-only numbers (b4: -9.0%
+-> -22.9%; r5: -12.7% -> -22.0%) -- padding stabilizes the shapes that
+change from pass to pass WITHIN a bundle's own trace-warmup loop, exactly
+the code path stragglers spend the most extra time in, not just shapes
+that differ across different bundles.
+
+Remaining, smaller, not-yet-done: the _get_spot_stats_jax jit-wrapper-
+rebuilt-every-call inefficiency (flagged above, still real, independent of
+and additional to the padding work); r3 and z1 show smaller (or within-
+noise) gains worth a closer look next time -- possibly already near their
+GPU-compute floor, or possibly a remaining shape dimension (Npoly/
+stamp_area, degree-dependent) still forcing occasional recompiles for those
+specific cases, not investigated further this session.
+
+===============================================================================
+9. OTHER LOOSE ENDS NOT COVERED ABOVE
+===============================================================================
+  - git: branch python-gpu-port pushed through commit d707ccb. One further
+    commit (f034f72, the persistent-cache ship + production validation) is
+    committed locally but not yet pushed as of this writing.
+  - z0:5 X-trace divergence (0.166px vs C++, an older single-bundle finding):
+    same "different but valid, not a bug" pattern as the degree-1 cases in
+    section 4a -- closed out, not urgent.
+  - Task 23 "problem cases" (missing amp A, overlapping-trace QA failure):
+    2 of 5 originally-flagged hard cases were actually testable (the other 3
+    are upstream preprocessing failures, data simply doesn't exist on disk)
+    -- Python matched or beat C++ on both real cases tested (avoided the
+    overlap failure outright; degraded gracefully rather than crashing on
+    the missing-amp case, modulo a known gap: Python doesn't yet replicate
+    desispec's amp-aware fiber-range truncation, a wrapper-layer feature one
+    level above the fitter itself, not needed unless the Python CLI needs to
+    be a full drop-in replacement for desi_compute_psf --mpi someday).
+  - Local (non-Perlmutter) setup: fully scoped for the outage -- code is on
+    GitHub (no manual transfer needed), no C++ build required for pure-
+    Python work, plain `pip install jax` (CPU backend, already validated
+    bit-identical to GPU output) works on a machine without an NVIDIA GPU,
+    must pass --backend cpu explicitly. All required test-data files listed
+    in transfer_filelist.txt (118 files / 59 unique exposure pairs) plus
+    tonight's not_in_git_manifest.txt for scratch-only analysis outputs.
+  - GPU memory packing sweep (separate finding from tonight, still relevant
+    context for planning a future 30-CCD-at-once run): a full 20-bundle CCD
+    fits on a single A100 under mixed precision for all three bands, but
+    with very different headroom -- b-band ~10 GiB spare even at 20
+    bundles/GPU, z-band only ~624 MiB spare (98.5% of the card). z-band is
+    the tight constraint for any future "pack more work per GPU" plan, and
+    is also -- consistently -- the band that benefits least from the
+    compilation-cache fix, for the same underlying reason (already GPU-
+    compute-bound, not compile-bound).

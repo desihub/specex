@@ -1288,3 +1288,52 @@ Read through the actual jitted numerical core to size up the work before startin
 - **Separate, smaller, easy-to-fix inefficiency spotted while reading this code, unrelated to padding**: `_get_spot_stats_jax` (used by `fit_candidate_fluxes`, the individual-candidate-flux-fit function that dominates the selection phase) constructs a fresh `jit(vmap(fit_spot))` closure *inside the function body* on every call (`fitter.py:744`), rather than a module-level pre-built jitted function like `_accumulate_bundle_jax_jit`/`_predict_bundle_jax_jit` already are. This means even JAX's normal *in-process* dispatch-cache shortcut (not just the persistent disk cache) can't kick in across repeated calls within a single bundle's own pipeline -- worth hoisting to module scope independent of the padding work.
 
 All raw result files remain on `/pscratch/sd/c/cdwarner/specex/testing/` under `full_ccd_rerun_mixedprec/`, `random_full_ccd_15/`, `random_full_ccd_30/`, `vacuum_bundle_test/`, `gpu_scaling/` (+ `gpu_scaling_smoketest/`), plus the consolidated `all_input_files_manifest.txt`.
+
+## 2026-07-21 22:32 -- Power-of-2 shape bucketing implemented and validated (both dimensions), on top of last night's compilation cache
+
+Node was killed again mid-session (unrelated to any of this work -- a fresh interactive allocation, job 56301160, picked up cleanly; all git history was intact since commits persist independent of node state). This is very likely the last working window before the ~2-week Perlmutter maintenance outage, so the goal tonight was to actually implement the power-of-2 padding scoped at the end of the last session, not just plan it further.
+
+**Implemented padding for both shape dimensions identified in the scoping notes above, in two separate, independently-tested pieces:**
+
+**1. Candidate-array padding (`_get_spot_stats_jax` / `fit_candidate_fluxes`, `fitter.py`).** Added a `next_pow2_bucket(n, min_bucket=256)` helper and pad `cand_xc`/`cand_yc`/`gh_params` up to that bucket size immediately before the `jit(vmap(fit_spot))` call, slicing the real `Ns_real` entries back off the result afterward. **Safe by construction, not just by testing**: `fit_spot` is `vmap`-ed, so every padding row is evaluated fully independently of every other row -- there is no mechanism by which a padding candidate's (fabricated, often nonsensical) inputs could influence a real candidate's flux/snr/chi2/eflux output. This is the dominant cost center identified two sessions ago (selection-phase `fit_candidate_fluxes` calls), and its shape space is exactly as concentrated as predicted: raw candidate counts range ~1100-1800 across an entire 30-CCD campaign and collapse into a single power-of-2 bucket (2048).
+
+**2. Pixel-footprint padding (`_accumulate_bundle_jax`/`_predict_bundle_jax`'s `xpix`/`ypix`/`img_d`/`w_d`/`tx_g`/`tw_g` inputs, called from `PSF_Fitter.fit()`).** This one is NOT embarrassingly parallel like (1) -- these functions build a shared `Ntot x Ntot` Hessian/gradient across all spots and pixels, so padding had to be done carefully, by actually reading through the full ~180-line `_accumulate_bundle_jax` rather than assuming the existing "trash slot" pattern would just work:
+  - The function's `valid = flat_idx < Np` gate is computed from `Np = xpix.shape[0]`, i.e. from the padded array's own length once padding is added -- so `idx_g`'s out-of-footprint sentinel value has to equal `Np_pad`, not the original `Np`, or genuinely-invalid stamp entries would be silently misclassified as valid. Fixed by computing `Np_pad = next_pow2_bucket(Np)` *before* building `idx_g` and using `Np_pad` as its fill value throughout.
+  - Padding pixels are appended by repeating pixel 0's real `(x,y)` coordinate (not a new/fake position) -- this keeps `rows_u` (and therefore `tx_g`/`tw_g`'s shape, a third quantity that depends on the pixel footprint) completely unaffected by padding, since it's just a duplicate of an already-counted row, not a new one.
+  - `idx_map` (the coordinate -> real-pixel-index lookup used to build every spot's stamp indices) is built *only* from the real, unpadded `xpix`/`ypix` -- so no spot's stamp can ever reference a padding-pixel index by construction. Traced this through the whole function: every place that touches per-stamp accumulated quantities (`b_res`, `b_w`, `wr`, `b_jac`, the `A`/`B` matrix blocks) is gated through `idx_gg`/`flat_idx`, which never points into the padding range -- so the padding pixels are *only* ever touched by the whole-array `chi2`/`res`/continuum terms, and those are explicitly multiplied by `weight_data`, which is forced to exactly `0.0` on every padding entry. Two independent safety mechanisms (never-referenced by any real computation path, and explicitly zero-weighted where it is referenced) rather than relying on either one alone.
+  - Same payoff as candidate counts: footprint pixel counts range ~33k-125k across a 30-CCD campaign and collapse into just 2 power-of-2 buckets (65536, 131072).
+
+**Correctness validation (before trusting this for a moment): bit-identical trace output on every test case tried**, each compared against a genuine pre-padding baseline generated via `git stash`/`git stash pop` around the *exact same code* (not a different run, same file reverted and restored):
+  - b2:5 (b-band, no continuum) -- xrms/yrms max abs diff: **0.0000000000px**.
+  - z9:5 (z-band, **with** continuum fitting -- exercises the `h_cont`/`striped_cont` continuum code paths not touched by case 1) -- **0.0000000000px**.
+  - b4:10 (the known straggler bundle from two sessions ago, exercises all 5 trace-warmup iterations with a genuinely different `Ns`/`Np` at each pass) -- **0.0000000000px**, and the per-iteration `Trace warm-up N: max centroid shift` values matched the known-good sequence (0.5844/0.5831/0.5819/0.5806/0.5794px) exactly.
+  - Also re-verified nspots counts identical in every case, and the candidate-padding-only test additionally showed individual spot centroid values agreeing to ~13 significant figures (ULP-level floating-point reduction-order noise only, as expected from vmap/XLA kernel-selection differences at a different padded shape -- not a real discrepancy).
+  - **One operational lesson learned the hard way**: `mp.get_context('spawn')` workers re-import `fitter.py` fresh from disk on every process spawn, so running `git stash` while an unrelated background validation campaign was still executing corrupted that campaign's results (some bundles ran pre-padding code, some post- depending on timing). Killed and cleanly restarted that campaign once all `git stash` operations were done -- lesson: never touch a file on disk via git while any background job that re-imports it is still running, even for an "unrelated" quick baseline check.
+
+**Production-scale validation: all 9 standing cameras, real `--gpu 4 --workers-per-gpu 5` settings, cold-then-warm, cache and padding both active. Correctness re-confirmed bit-identical against the original (pre-cache, pre-padding) baseline in both passes** (`nspots_cpp`/`nspots_py`/`xrms_px`/`yrms_px`/`wrms_cpp_A`/`wrms_py_A`/`wstd_cpp_A`/`wstd_py_A` -- every column, every camera, exact match):
+
+| camera | baseline (no cache, no padding) | cache-only warm (last session) | cache+padding warm (tonight) | vs. baseline |
+|---|---|---|---|---|
+| b5 | 87.7s | 71.9s | 64.6s | **-26.3%** |
+| b4 (straggler) | 119.4s | 108.7s | 92.1s | **-22.9%** |
+| b2 | 88.1s | 73.1s | 66.7s | **-24.3%** |
+| r3 | 114.0s | 104.9s | 103.5s | -9.2% |
+| r5 (straggler) | 121.9s | 106.4s | 95.1s | **-22.0%** |
+| r1 | 106.1s | 94.3s | 92.2s | -13.1% |
+| z1 | 133.9s | 124.7s | 129.9s | -3.0% |
+| z6 | 137.0s | 130.6s | 124.8s | -8.9% |
+| z9 | 135.4s | 130.7s | 124.9s | -7.8% |
+| **sum** | **1043.5s** | 945.3s (-9.4%) | **893.8s** | **-14.3%** |
+
+**Real, meaningful improvement on top of caching alone (-9.4% -> -14.3% aggregate), with the same band pattern as before, now more pronounced.** b-band gets the biggest additional lift (-26.3%/-22.9%/-24.3%, up from -18/-9/-17% cache-only) since it has the most GPU headroom for the newly-freed-up compute to actually get used; z-band (already GPU-compute-bound per the earlier packing sweep) gets the smallest (-3.0% to -8.9%). **Notably, the two straggler cameras (b4, r5) show the single largest gains of any camera relative to their cache-only numbers** (b4: -9.0% -> -22.9%; r5: -12.7% -> -22.0%) -- consistent with the mechanism: padding stabilizes the shapes that change from pass to pass *within* a bundle's own trace-warmup loop (not just across different bundles), which is exactly the code path stragglers spend the most extra time in.
+
+### Files
+- `py/specex/fitter.py` -- both padding implementations, plus `next_pow2_bucket()` helper. Committed.
+- `/pscratch/sd/c/cdwarner/specex/testing/padding_test/` -- the per-case correctness validation (baseline vs. padded FITS pairs, logs).
+- `/pscratch/sd/c/cdwarner/specex/testing/padding_validation/` -- the production-scale cold/warm 9-camera validation.
+- `current-status.txt` (repo root) -- a comprehensive status writeup covering correctness open items, the air/vacuum offset, band-dependent correctness and timing, and this session's speed work, written for reference during the outage. Updated to reflect tonight's padding results.
+
+### Still open / good next-session leads (additions)
+- The `_get_spot_stats_jax` jit-wrapper-rebuilt-every-call inefficiency (flagged last session) is still unaddressed -- independent of and additional to the padding done tonight.
+- r3/z1's smaller (or slightly negative-looking, within noise) gains are worth a closer look next time -- possibly already near their GPU-compute floor, or possibly a remaining shape dimension (Npoly/stamp_area, degree-dependent, not campaign-varying the way Ns/Np are) still forcing occasional recompiles for these specific cases. Not investigated further tonight.
+- The Np-padding change is more structurally invasive than the Ns-only change (touches `PSF_Fitter.fit()`'s core array construction, not just a leaf function) -- worth an extra close read before ever touching that code again, using this session's correctness-tracing approach (verify every `idx_gg`/`flat_idx`-gated code path, don't assume the pattern from one function transfers to another) as the template.
