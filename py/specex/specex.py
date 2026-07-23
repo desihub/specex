@@ -81,6 +81,22 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # workers collide with each other (and with real GPU workers) over
         # GPU memory and crash with CUDA_ERROR_OUT_OF_MEMORY.
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        # With no devices visible, the CUDA plugin's own version-check probe
+        # (cuInit via cuda_device_count()) fails with CUDA_ERROR_NO_DEVICE --
+        # harmless (JAX falls back to CPU regardless) but logged as an ERROR
+        # with a full traceback. This is JAX's own supported switch to skip
+        # that probe outright instead of just hiding its output.
+        os.environ["JAX_SKIP_CUDA_CONSTRAINTS_CHECK"] = "1"
+        # JAX_PLATFORM_NAME (set below) is deprecated and, on this JAX
+        # version, no longer consulted by backend selection at all -- only
+        # JAX_PLATFORMS (plural) is. Without restricting to it, skipping the
+        # constraints check above lets the CUDA plugin register successfully,
+        # and JAX then genuinely tries to initialize 'cuda' as a real backend
+        # (it's highest-priority), which fails hard with a real GPU present
+        # but hidden by CUDA_VISIBLE_DEVICES="" -- turning the harmless log
+        # noise into a fatal crash instead. Set via jax.config below, not
+        # os.environ here -- see the jax_compilation_cache_dir note below for
+        # why an os.environ write in this function body is already too late.
     os.environ["JAX_PLATFORM_NAME"] = backend
     # Persistent JAX/XLA compilation cache (analogous to CuPy's .cubin disk
     # cache) -- this driver spawns a fresh process per bundle, so without
@@ -92,7 +108,8 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     # documented "final joint fit is slower in Python than C++" finding
     # reversing once warm (Python becomes ~3.2x faster on that phase).
     # Respects an operator-set JAX_COMPILATION_CACHE_DIR if present.
-    cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR", "/pscratch/sd/c/cdwarner/specex/jax_compilation_cache")
+    default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
+    cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     # Mixed precision (float32 Jacobian in the joint-fit accumulate step,
     # float64 everywhere else) is the default -- see porting-notes.md
@@ -115,6 +132,8 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         jax.config.update("jax_compilation_cache_dir", cache_dir)
         jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
         jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+        if backend != "gpu":
+            jax.config.update("jax_platforms", "cpu")
         t_jax_import = time.time()
         print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
 

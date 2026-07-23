@@ -69,6 +69,10 @@ endif()
 if(NOT MKL_FOUND)
 
 	# if MKL BLAS and mkl.h not both found, use available BLAS/LAPACK
+	# (unset BLA_VENDOR first -- otherwise this stays pinned to the failed
+	# Intel10_64lp search above and never does the generic search this
+	# comment promises)
+	unset(BLA_VENDOR)
 	set(BLAS_FOUND FALSE)
 	find_package (BLAS)
 	find_package (LAPACK)
@@ -86,21 +90,37 @@ if(NOT BLAS_FOUND)
        message (FATAL_ERROR "BLAS not found, CMake will exit.")
 endif()
 
+# specex_lapack.c calls the LAPACKE C interface (LAPACKE_dposv etc), which
+# lives in a separate library from plain BLAS/LAPACK on most non-MKL builds
+# (e.g. Debian/Ubuntu's liblapacke, distinct from libopenblas/liblapack).
+# MKL bundles its own C interface (mkl_lapacke.h), so only search here if
+# we're not using MKL.
+if(NOT MKL_FOUND)
+	find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h)
+	find_library(LAPACKE_LIBRARIES NAMES lapacke)
+	if(NOT LAPACKE_LIBRARIES OR NOT LAPACKE_INCLUDE_DIR)
+		message (FATAL_ERROR "LAPACKE not found (required unless building against MKL) -- install liblapacke-dev or equivalent.")
+	endif()
+endif()
+
 message ("MKL found: ${MKL_FOUND}")
 message ("MKL include: ${MKL_INCLUDE}")
 message ("BLAS libraries: ${BLAS_LIBRARIES}")
 message ("LAPACK libraries: ${LAPACK_LIBRARIES}")
+message ("LAPACKE include: ${LAPACKE_INCLUDE_DIR}")
+message ("LAPACKE libraries: ${LAPACKE_LIBRARIES}")
 
 target_include_directories(_libspecex
 	PUBLIC
 	src
 	${MKL_INCLUDE}
+	${LAPACKE_INCLUDE_DIR}
 	)
 
 target_link_directories(_libspecex
 	PUBLIC)
 
-target_link_libraries(_libspecex PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
+target_link_libraries(_libspecex PUBLIC ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES} ${LAPACKE_LIBRARIES})
 target_link_libraries(_libspecex PRIVATE OpenMP::OpenMP_CXX)
 
 set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS})
