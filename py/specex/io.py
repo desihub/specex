@@ -87,14 +87,28 @@ def write_python_psf(filename, bundle_results, input_template):
         # wdeg when not set -- see porting-notes.md's r2@20250109
         # investigation for why pc and tc can now differ here).
         wdeg_b = res.get('wdeg', 3); nz_b = get_sparse_nz(xdeg_b, wdeg_b)
-        trace_wdeg_b = res.get('trace_wdeg', wdeg_b); nz_trace_b = get_sparse_nz(xdeg_b, trace_wdeg_b)
         rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
         poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
-        for k_nz, k_lin in enumerate(nz_trace_b):
-            i_p, j_p = k_lin % 2, k_lin // 2
-            if j_p < xtrace_out.shape[1]:
-                xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
-                ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
+        trace_per_fiber_deg = res.get('trace_per_fiber_deg')
+        if trace_per_fiber_deg is not None:
+            # Stage 1 of the full per-fiber redesign (see porting-notes.md):
+            # tc[0]/tc[1] are (n_fibers*(deg+1),) block-diagonal-by-fiber
+            # coefficient vectors, not a shared basis -- reshape to
+            # (n_fibers, deg+1) and add each fiber's own coefficients
+            # straight into its own XTRACE/YTRACE row, no fiber-position
+            # broadcast basis (poly_f) involved at all.
+            n_fibers = fmax - fmin + 1; n_coefs = trace_per_fiber_deg + 1
+            tc_x_pf = tc[0].reshape(n_fibers, n_coefs); tc_y_pf = tc[1].reshape(n_fibers, n_coefs)
+            n_write = min(n_coefs, xtrace_out.shape[1])
+            xtrace_out[fmin:fmax+1, :n_write] += tc_x_pf[:, :n_write]
+            ytrace_out[fmin:fmax+1, :n_write] += tc_y_pf[:, :n_write]
+        else:
+            trace_wdeg_b = res.get('trace_wdeg', wdeg_b); nz_trace_b = get_sparse_nz(xdeg_b, trace_wdeg_b)
+            for k_nz, k_lin in enumerate(nz_trace_b):
+                i_p, j_p = k_lin % 2, k_lin // 2
+                if j_p < xtrace_out.shape[1]:
+                    xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
+                    ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
         for row in range(len(param_names)):
             psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
             if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0

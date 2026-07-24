@@ -1752,3 +1752,51 @@ With the trace_wdeg work landed and the convergence bug fixed, spent time design
 - Implement stage 1 above and run the bundle-0 forced-spots sharpest-test to see if per-fiber independence is worth its cost at all before investing further.
 - `io.py`'s `write_python_psf` write-back logic needs a real per-fiber (not broadcast) path for a block-diagonal `tc` -- flagged above, not yet designed in detail.
 - Decide on trace-degree default for the per-fiber basis (native input degree, 6, to match C++ exactly, is the obvious first choice) and whether/when to expose it as a CLI override the way `--trace-legendre-deg-wave-x/-y` already are for the shared-basis case.
+
+## 2026-07-24 (continued, part 6) -- Stage 1 implemented: block-diagonal per-fiber trace fit, and it's a clean sweep with near-zero cost
+
+Built exactly what was planned above. `get_bundle_block_diagonal_trace_monomials(psf, bundle_id, spots, trace_deg)` (`fitter.py`) builds a `(Ns_spots, n_fibers*(trace_deg+1))` matrix -- each spot's row is zero everywhere except the `(trace_deg+1)` columns belonging to its own fiber, built vectorized via a one-hot-fiber-indicator times the wavelength-Legendre-monomial matrix (no Python loop over spots or fibers). `PSF_Fitter.fit()` gained a `trace_per_fiber_deg` parameter (default `None` = off); when set, it swaps in this matrix in place of the shared low-degree one and skips the X/Y freeze-masking entirely (both axes get the full per-fiber basis) -- no changes needed to `_predict_bundle_jax`/`_accumulate_bundle_jax` at all, exactly as planned. `specex.py`'s post-fit recompute got a parallel branch (plain per-axis `lstsq` against the same block-diagonal matrix, no prefix/padding bookkeeping needed since both axes share one full-width basis). `io.py`'s `write_python_psf` got the real per-fiber write-back path that was flagged as still-undesigned: reshape `tc[0]/tc[1]` to `(n_fibers, trace_deg+1)` and add each fiber's own coefficients directly into its own `XTRACE`/`YTRACE` row -- no fiber-position broadcast basis involved at all (simpler than the shared-basis write-back, not harder). New CLI: `--trace-per-fiber-deg` (default off).
+
+**Sharpest test (forced-spots, `r2@20250109` bundle 0, identical 1326 C++ spots forced into both pipelines) -- dramatic:**
+
+| config | xrms | yrms |
+|---|---|---|
+| shared basis, `x=1,y=2` (current default) | 0.0730 | 0.0548 |
+| **per-fiber, degree 6** | **0.0619** | **0.0176** |
+
+yrms drops to 0.0176px -- roughly 3x better than the best any shared-basis config reached on this test, and about as close to zero as anything seen in this entire investigation. xrms is *also* slightly better than the current default, not worse. This is exactly the predicted signature of a correct implementation: with the same exact spots forced into both pipelines, Python's per-fiber fit and C++'s per-fiber fit are now doing essentially the same unregularized problem, and they converge to nearly the same answer.
+
+**Real production path (own spot selection, not forced) -- held up across all 9 bundles from the standing validation set, zero regressions:**
+
+| exposure | bundle | xrms (default) | yrms (default) | xrms (per-fiber deg 6) | yrms (per-fiber deg 6) |
+|---|---|---|---|---|---|
+| r2@20250109 | 0 | 0.0730 | 0.0548 | 0.0619 | 0.0175 |
+| r2@20250109 | 8 | 0.1092 | 0.0853 | 0.1015 | 0.0381 |
+| r2@20250109 | 16 | 0.2180 | 0.0788 | 0.2217 | 0.0670 |
+| r2@20201221 (control) | 0 | 0.0548 | 0.0542 | 0.0348 | 0.0279 |
+| r2@20201221 (control) | 8 | 0.0854 | 0.1065 | 0.0431 | 0.0658 |
+| r2@20201221 (control) | 16 | 0.1878 | 0.0914 | 0.1783 | 0.0672 |
+
+yrms improves substantially everywhere, including the *clean control exposure that never needed fixing* -- a genuinely better trace model helps even where the shared-basis approach was already adequate. xrms improves or stays flat everywhere **except bundle 16**, which stays elevated (0.2180 -> 0.2217 on `r2@20250109`, 0.1878 -> 0.1783 on the control, i.e. roughly unchanged either way) **regardless of trace parametrization** -- strong new evidence bundle 16's X issue (fibers 400-424, flagged as a cross-exposure outlier two entries ago) is a real, independent problem (bad pixel region, dead columns, something else) and not an artifact of any trace-fitting approach tried so far, shared-basis or per-fiber. z-band (`z8`/00344649 bundle 5, with continuum fitting on) also ran clean with `--trace-per-fiber-deg 6`: no errors, chi2 129461.90 -- lower than the standard config's 131058.16 on this bundle.
+
+**Cost: negligible, not the ~35x/~341-parameter concern flagged in the plan.** Measured directly (not estimated) on the bundle-0 forced-spots case, isolated single-bundle GPU run:
+
+| | wall time | peak GPU memory (`nvidia-smi`, whole-process) | internal tensor footprint (`jax.live_arrays()`) |
+|---|---|---|---|
+| shared basis (`x=1,y=2`) | 14.16s | 10965 MiB | 0.081 GB |
+| per-fiber, degree 6 | 14.33s | 10951 MiB | 0.093 GB |
+
+Statistically indistinguishable wall time; peak GPU memory is actually *lower* for the per-fiber run (within noise -- both essentially identical, dominated by fixed JAX/XLA/CUDA context overhead at this problem scale, not by the trace tensor sizes). The internal tensor footprint did grow as predicted (`A` matrix `1540x1540`/19MB -> `1880x1880`/28MB, `Ntot` +340 as expected from Nsh going from 210 to 550) but the absolute numbers are tiny either way -- the earlier concern about `j_xc`/`j_yc` growing ~35x turned out not to matter in practice: XLA fuses/frees those intermediates within the single compiled `_accumulate_bundle_jax_jit` call rather than keeping them all resident simultaneously, so they never show up as persistent "live" memory the way the estimate assumed. **This was a case where the plan's own advice to measure rather than estimate mattered** -- the a priori concern was the single biggest reason to expect stage 1 might not be viable, and it wasn't real.
+
+**No conditioning/regularization problems observed** -- all runs converged cleanly with the existing flat `1e-8 * eye` damping, no NaNs, no solver exceptions, across 12 bundles (9 from the standing set + z8 sanity + 2 forced-spots comparisons) spanning three exposures and both bands. Not stress-tested on a bundle with unusually sparse per-fiber spot coverage (e.g. near broken/dead-column-heavy fibers) -- the standing test bundles used tonight didn't happen to include one.
+
+### Files
+- `py/specex/fitter.py` -- new `get_bundle_block_diagonal_trace_monomials()`; `PSF_Fitter.fit()` gained `trace_per_fiber_deg` (default `None`), branching trace_monomials construction and skipping freeze-masking when set.
+- `py/specex/specex.py` -- `fit_bundle_task`/`fit_ccd_native` gained `trace_per_fiber_deg` (default `None`, opt-in); post-fit recompute branches to a plain per-axis lstsq against the block-diagonal matrix; `bundle_results` carries `trace_per_fiber_deg` for the writer; new `--trace-per-fiber-deg` CLI flag.
+- `py/specex/io.py` -- `write_python_psf` gained the real per-fiber write-back path (reshape-and-add-per-fiber, no broadcast basis), selected via the new `trace_per_fiber_deg` key.
+
+### Still open / good next-session leads (additions)
+- **Given tonight's results, promoting `trace_per_fiber_deg=6` to the default (at least for b/r bands) looks like a strong candidate** -- pending a broader validation pass (more bundles/exposures, multi-worker GPU packing at real campaign scale to confirm the negligible single-bundle memory cost holds up when 4-5 workers share a GPU, and a case with genuinely sparse per-fiber spot coverage to stress-test the unregularized 7-parameter-per-fiber fit).
+- Bundle 16's persistent X anomaly, now confirmed independent of trace parametrization entirely (present under shared-basis *and* per-fiber-independent trace fits, across all three tested exposures), is a clean, well-isolated remaining mystery worth its own dedicated investigation -- footprint/mask/dead-column handling for that specific fiber range is the natural next place to look.
+- Stress-test with deliberately sparse per-fiber coverage (a bundle with a broken/dead-column-affected fiber, or an artificially reduced spot count) before trusting the unregularized 7-parameter-per-fiber fit at full production scale -- C++'s own answer (don't regularize) worked fine everywhere tested tonight, but tonight's bundles were all reasonably well-populated.
+- The full multi-worker/campaign-scale wall-time and GPU memory validation (`gpu_bundle_scaling_test.py`-style sweep) that this project's earlier entries always ran before shipping a change of this kind hasn't been done yet for this feature.

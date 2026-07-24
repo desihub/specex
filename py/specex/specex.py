@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None):
     """
     Isolated task for fitting a single bundle.
     """
@@ -214,7 +214,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             return bid, {"error": "No spots found for bundle"}
 
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg)
         t_finalfit = time.time()
         print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
 
@@ -228,30 +228,40 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # that deviation would otherwise be silently dropped when
         # write_python_psf() adds `tc` onto the input trace to build the
         # output XTRACE/YTRACE.
-        from .fitter import get_bundle_monomials_jnp, get_sparse_nz
-        # trace_wdeg_x/trace_wdeg_y (not wdeg) -- this recompute rebuilds tc
-        # from scratch against the absolute final positions, so it must use
-        # the same basis PSF_Fitter.fit() actually optimized trace_coeffs
-        # in, not the (possibly different) PSF-shape basis. x and y can
-        # have different degrees (see fitter.py's freeze-mask comment for
-        # why): build one shared design matrix at the higher of the two
-        # degrees, lstsq each axis against only its own leading-column
-        # prefix (get_sparse_nz(1, d) is a strict prefix of any higher
-        # degree's), then zero-pad the shorter one back up to the shared
-        # width so tc stays a plain (2, N) array like every other caller
-        # (write_python_psf included) expects.
-        trace_wdeg_shared_abs = max(trace_wdeg_x, trace_wdeg_y)
-        trace_monomials_abs = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=trace_wdeg_shared_abs))
-        npoly_x_abs = len(get_sparse_nz(1, trace_wdeg_x)); npoly_y_abs = len(get_sparse_nz(1, trace_wdeg_y))
+        from .fitter import get_bundle_monomials_jnp, get_sparse_nz, get_bundle_block_diagonal_trace_monomials
         x_orig = np.array([psf.x_ccd(s['fiber'], s['wave']) for s in spots])
         y_orig = np.array([psf.y_ccd(s['fiber'], s['wave']) for s in spots])
         res_x = np.array(xc_final) - x_orig
         res_y = np.array(yc_final) - y_orig
-        tc_x_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_x_abs], res_x, rcond=None)
-        tc_y_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_y_abs], res_y, rcond=None)
-        npoly_shared_abs = trace_monomials_abs.shape[1]
-        tc_x_abs = np.zeros(npoly_shared_abs); tc_x_abs[:npoly_x_abs] = tc_x_fit
-        tc_y_abs = np.zeros(npoly_shared_abs); tc_y_abs[:npoly_y_abs] = tc_y_fit
+        if trace_per_fiber_deg is not None:
+            # Block-diagonal by fiber (stage 1 of the full per-fiber
+            # redesign) -- both axes already share the exact same
+            # full-width basis (no freeze-masking, unlike the shared-basis
+            # path below), so this is a plain lstsq per axis, no
+            # prefix/padding bookkeeping needed.
+            trace_monomials_abs = np.array(get_bundle_block_diagonal_trace_monomials(psf, bid, spots, trace_per_fiber_deg))
+            tc_x_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_x, rcond=None)
+            tc_y_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_y, rcond=None)
+        else:
+            # trace_wdeg_x/trace_wdeg_y (not wdeg) -- this recompute rebuilds tc
+            # from scratch against the absolute final positions, so it must use
+            # the same basis PSF_Fitter.fit() actually optimized trace_coeffs
+            # in, not the (possibly different) PSF-shape basis. x and y can
+            # have different degrees (see fitter.py's freeze-mask comment for
+            # why): build one shared design matrix at the higher of the two
+            # degrees, lstsq each axis against only its own leading-column
+            # prefix (get_sparse_nz(1, d) is a strict prefix of any higher
+            # degree's), then zero-pad the shorter one back up to the shared
+            # width so tc stays a plain (2, N) array like every other caller
+            # (write_python_psf included) expects.
+            trace_wdeg_shared_abs = max(trace_wdeg_x, trace_wdeg_y)
+            trace_monomials_abs = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=trace_wdeg_shared_abs))
+            npoly_x_abs = len(get_sparse_nz(1, trace_wdeg_x)); npoly_y_abs = len(get_sparse_nz(1, trace_wdeg_y))
+            tc_x_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_x_abs], res_x, rcond=None)
+            tc_y_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_y_abs], res_y, rcond=None)
+            npoly_shared_abs = trace_monomials_abs.shape[1]
+            tc_x_abs = np.zeros(npoly_shared_abs); tc_x_abs[:npoly_x_abs] = tc_x_fit
+            tc_y_abs = np.zeros(npoly_shared_abs); tc_y_abs[:npoly_y_abs] = tc_y_fit
         tc = np.stack([tc_x_abs, tc_y_abs], axis=0)
 
         # --- C++ Parity: Update spots with refined model centroids ---
@@ -305,7 +315,13 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             # the shorter axis's unused trailing columns are exact zeros,
             # so using the wider of the two here is required for correct
             # reconstruction, not just for the wider axis's own sake.
-            'trace_wdeg': trace_wdeg_shared_abs,
+            # Meaningless (ignored by write_python_psf) when
+            # trace_per_fiber_deg is set instead.
+            'trace_wdeg': None if trace_per_fiber_deg is not None else trace_wdeg_shared_abs,
+            # Stage 1 of the full per-fiber redesign (see porting-notes.md):
+            # tells write_python_psf to use the per-fiber (not
+            # broadcast-across-fibers) write-back path.
+            'trace_per_fiber_deg': trace_per_fiber_deg,
             'chi2': float(chi2),
             's_fiber': np.array([s['fiber'] for s in final_selected]),
             's_wave': np.array([s['wave'] for s in final_selected]),
@@ -322,7 +338,8 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
                      workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
-                     trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None):
+                     trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
+                     trace_per_fiber_deg=None):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -365,6 +382,18 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     correction (this parameter split) isolates the extra freedom to Y
     only. z-band was not part of that validation, so its trace correction
     stays coupled to its own wdeg (3) on both axes unless overridden.
+
+    trace_per_fiber_deg (default None = off) is stage 1 of the full
+    per-fiber-independent trace redesign (see porting-notes.md): when
+    set to an integer degree (6, matching the input PSF's own native
+    trace degree, is the natural first thing to try), it replaces the
+    shared low-degree trace_legendre_deg_wave_x/y basis entirely with a
+    block-diagonal-by-fiber one -- each of the bundle's 25 fibers gets
+    its own independent (trace_per_fiber_deg+1)-term wavelength basis
+    with zero cross-fiber sharing, matching C++'s per-fiber trace
+    parameter count. Experimental/opt-in -- not validated at production
+    scale yet, and real GPU memory/wall-time cost has not been measured
+    beyond the single bundle-0 forced-spots test in porting-notes.md.
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
@@ -409,7 +438,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -452,6 +481,7 @@ def main():
     parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, both axes at once (independent of --legendre-deg-wave's PSF-shape degree). Overridden per-axis by --trace-legendre-deg-wave-x/-y if either is also given. Default: auto per axis -- see those flags' help.")
     parser.add_argument("--trace-legendre-deg-wave-x", type=int, default=None, help="Legendre degree for the trace-position X basis only (default: auto -- same as --legendre-deg-wave, i.e. unchanged from the pre-decoupling behavior; X was found not to need the extra curvature Y does -- see porting-notes.md's r2@20250109 investigation)")
     parser.add_argument("--trace-legendre-deg-wave-y", type=int, default=None, help="Legendre degree for the trace-position Y basis only (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; validated against the real C++ engine -- see porting-notes.md's r2@20250109 investigation)")
+    parser.add_argument("--trace-per-fiber-deg", type=int, default=None, help="EXPERIMENTAL (stage 1 of the full per-fiber trace redesign, see porting-notes.md): replaces the shared trace basis with a block-diagonal-by-fiber one at this wavelength degree (6 matches the input PSF's own native trace degree, and C++'s per-fiber parameter count). Overrides --trace-legendre-deg-wave-x/-y entirely when set. Default: off (None).")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=4, help="Concurrent bundle-fit worker processes packed onto each GPU (validated safe ceiling: 4)")
@@ -492,6 +522,7 @@ def main():
         trace_legendre_deg_wave=args.trace_legendre_deg_wave,
         trace_legendre_deg_wave_x=args.trace_legendre_deg_wave_x,
         trace_legendre_deg_wave_y=args.trace_legendre_deg_wave_y,
+        trace_per_fiber_deg=args.trace_per_fiber_deg,
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision
     )

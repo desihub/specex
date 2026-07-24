@@ -70,6 +70,38 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots, wdeg=3):
     for k in nz: i, j = k % (xdeg + 1), k // (xdeg + 1); m.append(mx[i] * mw[j])
     return jnp.stack(m, axis=1)
 
+def get_bundle_block_diagonal_trace_monomials(psf, bundle_id, spots, trace_deg):
+    """
+    Per-fiber-independent trace design matrix (stage 1 of the full
+    per-fiber trace redesign, see porting-notes.md) -- block-diagonal by
+    fiber, each of the bundle's fibers getting its own (trace_deg+1)
+    wavelength-Legendre columns with zero cross-fiber sharing, mirroring
+    C++'s per-fiber independent Y_vs_W/X_vs_W refit (specex_psf_fitter.cc:
+    1213-1238) exactly in the DOF sense. Expressed as a *correction* on
+    top of xc_init/yc_init (already-close anchors from spot
+    selection/--force-spots) rather than replacing the trace outright, so
+    no changes are needed to PSF_Fitter.fit()'s anchor+correction
+    architecture, jax jit kernel signatures, or the line-search/step
+    logic -- this is a drop-in replacement for get_bundle_monomials_jnp's
+    output, just built from a different (structurally sparse, densely
+    stored) basis. One shared matrix serves both X and Y trace_coeffs
+    (same wavelength basis, different coefficient values), same
+    convention as the shared-basis path.
+    """
+    import jax.numpy as jnp
+    from .math import legendre_pol_jnp
+    bundle = psf.params_of_bundles[bundle_id]
+    fmin, fmax = bundle.fiber_min, bundle.fiber_max
+    n_fibers = fmax - fmin + 1
+    wmin, wmax = psf.fiber_traces[fmin]['X_vs_W'].xmin, psf.fiber_traces[fmin]['X_vs_W'].xmax
+    fiber_vals = jnp.array([s['fiber'] for s in spots]); wave_vals = jnp.array([s['wave'] for s in spots])
+    local_fiber = (fiber_vals - fmin).astype(jnp.int32)
+    rw = 2 * (wave_vals - wmin) / (wmax - wmin) - 1
+    wave_mono = jnp.stack([legendre_pol_jnp(k, rw) for k in range(trace_deg + 1)], axis=1)  # (Ns, trace_deg+1)
+    onehot = (jnp.arange(n_fibers)[jnp.newaxis, :] == local_fiber[:, jnp.newaxis]).astype(wave_mono.dtype)  # (Ns, n_fibers)
+    block = onehot[:, :, jnp.newaxis] * wave_mono[:, jnp.newaxis, :]  # (Ns, n_fibers, trace_deg+1)
+    return block.reshape(block.shape[0], n_fibers * (trace_deg + 1))
+
 # --- Global JIT Kernels (Standardized signatures) ---
 
 def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
@@ -766,7 +798,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 0.01
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None):
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
         # trace_wdeg (a shared X/Y default) falls back to wdeg -- see
@@ -844,20 +876,33 @@ class PSF_Fitter:
         tx_g, tw_g = jnp.array(tx_j[:, ix_r_p]), jnp.array(tw_j[:, ix_r_p])
         flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
         psf_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
-        # Single shared trace_monomials sized at max(trace_wdeg_x,
-        # trace_wdeg_y): get_sparse_nz(1, d)'s output is a strict prefix of
-        # get_sparse_nz(1, d+1)'s (each higher wdeg only ever *appends*
-        # terms), so a lower-degree axis's basis is exactly the leading
-        # columns of this shared matrix. tc's unused trailing columns for
-        # whichever axis has the smaller degree are frozen at zero (see
-        # the "freeze" step below, right after each Newton step is
-        # computed) instead of building a second differently-sized
-        # monomials array -- avoids threading a third matrix through the
-        # JIT kernels for what's structurally just a masked subset of the
-        # one already there.
-        trace_wdeg_shared = max(trace_wdeg_x, trace_wdeg_y)
-        trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg_shared)
-        Npoly_trace_x = len(get_sparse_nz(1, trace_wdeg_x)); Npoly_trace_y = len(get_sparse_nz(1, trace_wdeg_y))
+        # trace_per_fiber_deg (stage 1 of the full per-fiber redesign, see
+        # porting-notes.md) swaps the shared low-degree basis for a
+        # block-diagonal-by-fiber one -- each fiber gets its own
+        # (trace_per_fiber_deg+1) wavelength columns with zero cross-fiber
+        # sharing, matching C++'s per-fiber independent trace refit's
+        # degrees of freedom. When set, it takes over entirely from
+        # trace_wdeg_x/trace_wdeg_y (no freeze-masking -- both axes get
+        # the full per-fiber basis).
+        if trace_per_fiber_deg is not None:
+            trace_monomials = get_bundle_block_diagonal_trace_monomials(self.psf, bundle_id, spots, trace_per_fiber_deg)
+            Npoly_trace_x = Npoly_trace_y = trace_monomials.shape[1]
+        else:
+            # Single shared trace_monomials sized at max(trace_wdeg_x,
+            # trace_wdeg_y): get_sparse_nz(1, d)'s output is a strict
+            # prefix of get_sparse_nz(1, d+1)'s (each higher wdeg only
+            # ever *appends* terms), so a lower-degree axis's basis is
+            # exactly the leading columns of this shared matrix. tc's
+            # unused trailing columns for whichever axis has the smaller
+            # degree are frozen at zero (see the "freeze" step below,
+            # right after each Newton step is computed) instead of
+            # building a second differently-sized monomials array --
+            # avoids threading a third matrix through the JIT kernels for
+            # what's structurally just a masked subset of the one already
+            # there.
+            trace_wdeg_shared = max(trace_wdeg_x, trace_wdeg_y)
+            trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg_shared)
+            Npoly_trace_x = len(get_sparse_nz(1, trace_wdeg_x)); Npoly_trace_y = len(get_sparse_nz(1, trace_wdeg_y))
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
         pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, psf_monomials))
         tc = jnp.zeros((2, trace_monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
