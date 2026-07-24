@@ -1553,3 +1553,32 @@ Before committing to the per-fiber trace redesign, tried the obvious cheap alter
 - **Next concrete experiment, cheaper than the full per-fiber redesign:** decouple trace's wavelength degree from the PSF-shape wavelength degree -- give `PSF_Fitter.fit()` a second, independently-sized `monomials` array (its own `wdeg`) for `trace_coeffs` only, leaving `psf_coeffs` on the current production `wdeg` (1 for b/r, 3 for z). Requires splitting `_predict_bundle_jax`/`_accumulate_bundle_jax`'s single shared `Npoly`/`monomials` argument into two, and reworking the parameter-vector packing/step logic that currently assumes one shared size. If this closes the Y gap without touching X (since a bigger trace-only basis, still bundle-wide/shared-across-fibers but no longer sharing parameters with PSF shape, shouldn't reopen the same degeneracy), that's a much smaller change than full per-fiber independence and worth trying first.
 - Still need a real multi-bundle/multi-exposure validation once Perlmutter access returns -- everything in tonight's wdeg experiment and the previous entry's diagnosis rests on a single bundle (r2@20250109, bundle 0).
 - The full per-fiber-independent trace redesign (previous entry) remains the "if the decoupled-wdeg experiment isn't enough" fallback.
+
+## 2026-07-24 -- Decoupled trace_wdeg implemented: clean win, closes yrms without touching xrms at all
+
+Implemented the decoupling experiment flagged above rather than raising the shared `wdeg`. `PSF_Fitter.fit()` now takes a separate `trace_wdeg` parameter (defaults to `wdeg`, i.e. old behavior, when not given) and builds two independent `get_bundle_monomials_jnp(...)` design matrices -- `psf_monomials` (still `wdeg`, unchanged) and `trace_monomials` (`trace_wdeg`) -- used respectively for `psf_coeffs`/GH-shape terms and `trace_coeffs`/position terms throughout the whole optimization, not just a final bookkeeping step. Threaded end-to-end: `_predict_bundle_jax`/`_accumulate_bundle_jax` (module-level JIT kernels) now take both matrices as separate args (`Nsh = Nparams*Npoly_psf + 2*Npoly_trace`, `j_xc`/`j_yc` Jacobian blocks now built from `trace_monomials` while `j_sx`/`j_sy`/`j_gh` stay on `psf_monomials`); `PSF_Fitter.fit()`'s step-unpacking/reshape logic now uses `Npoly_psf`/`Npoly_trace` separately; `specex.py`'s post-fit absolute-trace-coefficient recompute (the lstsq against `xc_final`/`yc_final`) now uses `trace_wdeg`-sized monomials, not `wdeg`; `bundle_results` carries a new `'trace_wdeg'` key; `io.py`'s `write_python_psf` now computes a separate `nz_trace_b` (from `trace_wdeg_b = res.get('trace_wdeg', wdeg_b)`) for indexing into `tc`, instead of reusing `pc`'s `nz_b`. New CLI flag `--trace-legendre-deg-wave` (default `None` = same as `--legendre-deg-wave`, no behavior change unless passed).
+
+**Verification, same forced-spots r2@20250109 bundle-0 case as the last two entries, PSF-shape `wdeg` held fixed at the real b/r production value (1), only `trace_wdeg` varied:**
+
+| trace_wdeg (wdeg=1 fixed) | xrms (px) | yrms (px) |
+|---|---|---|
+| 1 (old behavior) | 0.0662 | 0.1383 |
+| 2 | 0.0642 | **0.0537** |
+| 3 | 0.0643 | 0.0535 |
+| 4 | 0.0651 | 0.0537 |
+
+**Clean win, not a tradeoff.** yrms drops to ~0.054px at trace_wdeg=2 -- *better* than any point on the previous (coupled) sweep ever reached, including wdeg=4's 0.0593px -- while xrms stays flat at ~0.064-0.065px, statistically indistinguishable from the trace_wdeg=1 baseline (compare to the coupled sweep's wdeg=2, which wrecked xrms to 0.2972px for barely any yrms gain). Confirms the diagnosis from the previous two entries exactly: the earlier xrms damage was really coming from sharing the design matrix with the PSF-shape fit, not from giving trace more freedom per se. chi2 is essentially unchanged across trace_wdeg (124747.98 -> 124744.71), so this isn't overfitting the extra freedom away, either.
+
+**No regression:** re-ran the standing z8/00344649 bundle-5 case with defaults unchanged (`trace_wdeg` not passed) -- chi2 = 131058.1597, bit-identical to every prior run of this case in this file.
+
+**Not yet validated beyond one bundle** -- same caveat as the last two entries: no local `desi_psf_fit`, no cached C++ reference for any other bundle of this exposure. *However*, found tonight that this repo already ships a working pybind11 binding to the real C++ engine (`_libspecex`, already built locally) via `specex.specex.run_specex()` -- it's not wired into the CLI's `main()` (only the JAX driver is), and it currently fails on import (`from .qa import specex_psf_qa` inside `run_specex`, which unconditionally imports `desispec` even though the QA call itself is commented out and never executed) but the actual fit call (`pyft.fit_psf(...)`) looks intact. If that import is fixed (or `desispec` is installed locally), this could unblock real local multi-bundle C++ validation without building a separate `desi_psf_fit` binary -- flagged to the user as a parallel, likely-faster path than a from-scratch build.
+
+### Files
+- `py/specex/fitter.py` -- `_predict_bundle_jax`/`_accumulate_bundle_jax` split `monomials` into `psf_monomials`/`trace_monomials`; `PSF_Fitter.fit()` gained `trace_wdeg` parameter and uses it throughout.
+- `py/specex/specex.py` -- `fit_bundle_task`/`fit_ccd_native` gained `trace_wdeg`/`trace_legendre_deg_wave` (default `None` = same as `wdeg`/`legendre_deg_wave`); post-fit trace-coefficient recompute now uses `trace_wdeg`; new `--trace-legendre-deg-wave` CLI flag.
+- `py/specex/io.py` -- `write_python_psf` computes `nz_trace_b` separately from `nz_b` for indexing `tc`.
+
+### Still open / good next-session leads (additions)
+- **Multi-bundle/multi-exposure validation still needed** before changing any production default -- everything above is one bundle. Either fix `run_specex()`'s `desispec` import (seems like a small, contained fix) to get local C++ validation, or wait for Perlmutter.
+- If validation holds up, worth deciding a new production default for `trace_wdeg` (trace_wdeg=2 already captured nearly all the benefit in this one test; z-band's existing `wdeg=3` for PSF-shape could stay separate from whatever trace default is chosen).
+- The full per-fiber-independent trace redesign remains on the table if decoupled-shared-wdeg turns out insufficient on a wider sample (e.g. exposures needing more than quadratic trace curvature), but tonight's result makes that look less urgent than it did two entries ago.

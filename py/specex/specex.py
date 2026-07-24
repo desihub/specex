@@ -54,11 +54,16 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None):
     """
     Isolated task for fitting a single bundle.
     """
     t_entry = time.time()
+    # trace_wdeg defaults to wdeg (old behavior) -- see fitter.py's
+    # PSF_Fitter.fit() docstring/comment and porting-notes.md's
+    # r2@20250109 investigation for why this is a separate knob rather
+    # than always reusing wdeg (the PSF-shape correction's degree).
+    trace_wdeg = wdeg if trace_wdeg is None else trace_wdeg
     if stagger_s > 0:
         time.sleep(stagger_s)
         
@@ -204,7 +209,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             return bid, {"error": "No spots found for bundle"}
 
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg)
         t_finalfit = time.time()
         print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
 
@@ -219,13 +224,17 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # write_python_psf() adds `tc` onto the input trace to build the
         # output XTRACE/YTRACE.
         from .fitter import get_bundle_monomials_jnp
-        monomials = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=wdeg))
+        # trace_wdeg (not wdeg) -- this recompute rebuilds tc from scratch
+        # against the absolute final positions, so it must use the same
+        # basis PSF_Fitter.fit() actually optimized trace_coeffs in, not
+        # the (possibly different) PSF-shape basis.
+        trace_monomials_abs = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=trace_wdeg))
         x_orig = np.array([psf.x_ccd(s['fiber'], s['wave']) for s in spots])
         y_orig = np.array([psf.y_ccd(s['fiber'], s['wave']) for s in spots])
         res_x = np.array(xc_final) - x_orig
         res_y = np.array(yc_final) - y_orig
-        tc_x_abs, _, _, _ = np.linalg.lstsq(monomials, res_x, rcond=None)
-        tc_y_abs, _, _, _ = np.linalg.lstsq(monomials, res_y, rcond=None)
+        tc_x_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_x, rcond=None)
+        tc_y_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_y, rcond=None)
         tc = np.stack([tc_x_abs, tc_y_abs], axis=0)
 
         # --- C++ Parity: Update spots with refined model centroids ---
@@ -273,6 +282,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             'trace_coeffs': np.array(tc),
             'continuum_coeffs': np.array(cc),
             'wdeg': wdeg,
+            'trace_wdeg': trace_wdeg,
             'chi2': float(chi2),
             's_fiber': np.array([s['fiber'] for s in final_selected]),
             's_wave': np.array([s['wave'] for s in final_selected]),
@@ -288,7 +298,8 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
-                     workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False):
+                     workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
+                     trace_legendre_deg_wave=None):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -308,6 +319,16 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     continuum for z-band, degree 1 + no continuum otherwise. Pass either
     explicitly to override (matching desi_psf_fit's own CLI override
     behavior) for controlled A/B comparisons.
+
+    trace_legendre_deg_wave independently overrides the wavelength degree
+    of the trace-position correction only, leaving legendre_deg_wave's
+    value governing just the PSF-shape (Gauss-Hermite) correction.
+    Defaults to None, meaning "same as legendre_deg_wave" (old behavior,
+    one shared basis) -- see porting-notes.md's r2@20250109 investigation
+    for why these were decoupled: raising the *shared* wdeg to give the
+    trace fit more wavelength curvature also handed the PSF-shape fit the
+    same extra freedom, which opened a trace-position/PSF-asymmetry
+    degeneracy and made xrms worse even as it fixed yrms.
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
@@ -326,7 +347,8 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     print(f"  Arc: {arc_file}")
     print(f"  In PSF: {in_psf_file}")
     print(f"  Out PSF: {out_psf_file}")
-    print(f"  legendre-deg-wave: {legendre_deg_wave}  fit-continuum: {fit_continuum}")
+    trace_legendre_deg_wave_eff = legendre_deg_wave if trace_legendre_deg_wave is None else trace_legendre_deg_wave
+    print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: {trace_legendre_deg_wave_eff}  fit-continuum: {fit_continuum}")
     if broken_fibers:
         print(f"  Broken Fibers: {broken_fibers}")
 
@@ -342,7 +364,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, trace_legendre_deg_wave_eff))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -381,7 +403,8 @@ def main():
     parser.add_argument("--last-bundle", type=int, default=19)
     parser.add_argument("--first-fiber", type=int, help="First fiber to fit")
     parser.add_argument("--last-fiber", type=int, help="Last fiber to fit")
-    parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace/PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header)")
+    parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header). Also the trace-position basis's default degree unless --trace-legendre-deg-wave overrides it separately.")
+    parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, independent of --legendre-deg-wave's PSF-shape degree (default: same as --legendre-deg-wave -- see porting-notes.md's r2@20250109 investigation for why these were decoupled)")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=4, help="Concurrent bundle-fit worker processes packed onto each GPU (validated safe ceiling: 4)")
@@ -419,6 +442,7 @@ def main():
         workers_per_gpu=args.workers_per_gpu,
         cpu_workers=args.cpu_workers,
         legendre_deg_wave=args.legendre_deg_wave,
+        trace_legendre_deg_wave=args.trace_legendre_deg_wave,
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision
     )

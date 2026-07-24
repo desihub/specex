@@ -82,11 +82,15 @@ def write_python_psf(filename, bundle_results, input_template):
         pc = res['psf_coeffs']; tc = res['trace_coeffs']
         # wdeg varies by band (3 for z, 1 otherwise -- see fit_ccd_native's
         # auto-detection); carried through bundle_results since the writer
-        # has no other way to know what basis pc/tc were fit in.
+        # has no other way to know what basis pc/tc were fit in. trace_wdeg
+        # is a separate, independently-sized basis for tc (defaults to
+        # wdeg when not set -- see porting-notes.md's r2@20250109
+        # investigation for why pc and tc can now differ here).
         wdeg_b = res.get('wdeg', 3); nz_b = get_sparse_nz(xdeg_b, wdeg_b)
+        trace_wdeg_b = res.get('trace_wdeg', wdeg_b); nz_trace_b = get_sparse_nz(xdeg_b, trace_wdeg_b)
         rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
         poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
-        for k_nz, k_lin in enumerate(nz_b):
+        for k_nz, k_lin in enumerate(nz_trace_b):
             i_p, j_p = k_lin % 2, k_lin // 2
             if j_p < xtrace_out.shape[1]:
                 xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]

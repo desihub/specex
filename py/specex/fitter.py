@@ -73,16 +73,16 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots, wdeg=3):
 # --- Global JIT Kernels (Standardized signatures) ---
 
 def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
-                        xc_init, yc_init, monomials, xpix, ypix,
+                        xc_init, yc_init, psf_monomials, trace_monomials, xpix, ypix,
                         sx_g, sy_g, idx_gg, degree,
                         tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data):
     import jax.numpy as jnp
     from jax import vmap
     from .math import legendre_pol_jnp
-    
-    Ns = flux.shape[0]; Npoly = monomials.shape[1]; Np = xpix.shape[0]
-    gh_all = jnp.dot(monomials, psf_coeffs.T)
-    dx, dy = jnp.dot(monomials, trace_coeffs[0]), jnp.dot(monomials, trace_coeffs[1])
+
+    Ns = flux.shape[0]; Np = xpix.shape[0]
+    gh_all = jnp.dot(psf_monomials, psf_coeffs.T)
+    dx, dy = jnp.dot(trace_monomials, trace_coeffs[0]), jnp.dot(trace_monomials, trace_coeffs[1])
     xc_all, yc_all = xc_init + dx, yc_init + dy
     
     def spot_sig(i):
@@ -108,10 +108,10 @@ def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     return jnp.sum(weight_data * (image_data - total_sig)**2)
 
 from jax import jit
-_predict_bundle_jax_jit = jit(_predict_bundle_jax, static_argnums=(12,))
+_predict_bundle_jax_jit = jit(_predict_bundle_jax, static_argnums=(13,))
 
-def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs, 
-                               xc_init, yc_init, monomials, xpix, ypix,
+def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
+                               xc_init, yc_init, psf_monomials, trace_monomials, xpix, ypix,
                                sx_g, sy_g, idx_gg, degree,
                                tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data,
                                gain, psf_error, wscale):
@@ -119,11 +119,22 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     import jax
     import jax.numpy as jnp
     from jax import vmap, lax
-    
-    Ns = flux.shape[0]; Npoly = monomials.shape[1]; Np = xpix.shape[0]; Ncont = continuum_coeffs.shape[0]
-    Nparams = psf_coeffs.shape[0]; Nsh = (Nparams + 2) * Npoly; Ntot = Ns + Nsh + Ncont; stamp_area = sx_g.shape[1]
-    
-    gh_all = jnp.dot(monomials, psf_coeffs.T); dx, dy = jnp.dot(monomials, trace_coeffs[0]), jnp.dot(monomials, trace_coeffs[1])
+
+    # psf_monomials and trace_monomials are deliberately separate design
+    # matrices (possibly different wavelength degree/Npoly) -- see
+    # PSF_Fitter.fit()'s trace_wdeg parameter and porting-notes.md "trace
+    # correction basis" entries. Before this split they were one shared
+    # array, which coupled the PSF-shape and trace-position fits through a
+    # shared basis in a way C++ never does (its trace fit is a fully
+    # independent per-fiber polynomial refit) -- raising the shared wdeg to
+    # fix trace's missing wavelength curvature also handed the PSF-shape
+    # terms more freedom at the same time, opening a trace-position/
+    # PSF-asymmetry degeneracy that inflated xrms.
+    Ns = flux.shape[0]; Npoly_psf = psf_monomials.shape[1]; Npoly_trace = trace_monomials.shape[1]
+    Np = xpix.shape[0]; Ncont = continuum_coeffs.shape[0]
+    Nparams = psf_coeffs.shape[0]; Nsh = Nparams * Npoly_psf + 2 * Npoly_trace; Ntot = Ns + Nsh + Ncont; stamp_area = sx_g.shape[1]
+
+    gh_all = jnp.dot(psf_monomials, psf_coeffs.T); dx, dy = jnp.dot(trace_monomials, trace_coeffs[0]), jnp.dot(trace_monomials, trace_coeffs[1])
     xc_all, yc_all = xc_init + dx, yc_init + dy
     
     # No padding: batch_size = Ns exactly. This used to be a flat 2000
@@ -145,7 +156,8 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     # code-reading guesses.
     batch_size = Ns; n_pad = batch_size - Ns
     gh_p = jnp.pad(gh_all, ((0, n_pad), (0, 0))); xc_p, yc_p, f_p = jnp.pad(xc_all, (0, n_pad)), jnp.pad(yc_all, (0, n_pad)), jnp.pad(flux, (0, n_pad))
-    m_p = jnp.pad(monomials, ((0, n_pad), (0, 0))); sx_p = jnp.pad(sx_g, ((0, n_pad), (0, 0))); sy_p = jnp.pad(sy_g, ((0, n_pad), (0, 0)))
+    m_p = jnp.pad(psf_monomials, ((0, n_pad), (0, 0))); m_trace_p = jnp.pad(trace_monomials, ((0, n_pad), (0, 0)))
+    sx_p = jnp.pad(sx_g, ((0, n_pad), (0, 0))); sy_p = jnp.pad(sy_g, ((0, n_pad), (0, 0)))
     idx_p = jnp.pad(idx_gg, ((0, n_pad), (0, 0)), constant_values=Np); mask_p = jnp.arange(batch_size) < Ns
 
     def get_all_grads(xi, yi, gi, si_x, si_y):
@@ -228,14 +240,14 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     # memory cut (8657MiB -> 2513MiB/worker) -- see porting-notes.md.
     _mp = os.environ.get("SPECEX_MIXED_PRECISION", "1") != "0"
     _jdt = jnp.float32 if _mp else jnp.float64
-    f_p_j, m_p_j = f_p.astype(_jdt), m_p.astype(_jdt)
+    f_p_j, m_p_j, m_trace_p_j = f_p.astype(_jdt), m_p.astype(_jdt), m_trace_p.astype(_jdt)
     b_gh_basis_j = b_gh_basis.astype(_jdt); b_jsigx_j, b_jsigy_j = b_jsigx.astype(_jdt), b_jsigy.astype(_jdt)
     b_jx_j, b_jy_j = b_jx.astype(_jdt), b_jy.astype(_jdt)
     j_sx = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jsigx_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
     j_sy = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jsigy_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
     j_gh = (f_p_j[:, jnp.newaxis, jnp.newaxis, jnp.newaxis] * b_gh_basis_j[:, :, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, jnp.newaxis, :]).reshape(batch_size, stamp_area, -1)
-    j_xc = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jx_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
-    j_yc = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jy_j[:, :, jnp.newaxis] * m_p_j[:, jnp.newaxis, :])
+    j_xc = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jx_j[:, :, jnp.newaxis] * m_trace_p_j[:, jnp.newaxis, :])
+    j_yc = (f_p_j[:, jnp.newaxis, jnp.newaxis] * b_jy_j[:, :, jnp.newaxis] * m_trace_p_j[:, jnp.newaxis, :])
     b_jac = jnp.concatenate([j_sx, j_sy, j_gh, j_xc, j_yc], axis=2) * bm[:, jnp.newaxis].astype(_jdt)
 
     flat_idx = idx_p.flatten(); valid = flat_idx < Np
@@ -284,7 +296,7 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     A = A.at[-Ncont:, -Ncont:].set(jnp.dot(h_cont.T * weight_data, h_cont))
     return chi2, A[:Ns+Nsh+Ncont, :Ns+Nsh+Ncont], B[:Ns+Nsh+Ncont]
 
-_accumulate_bundle_jax_jit = jit(_accumulate_bundle_jax, static_argnums=(12, 19, 20, 21))
+_accumulate_bundle_jax_jit = jit(_accumulate_bundle_jax, static_argnums=(13, 20, 21, 22))
 
 def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
     nx, ny = weight.shape
@@ -754,9 +766,16 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 0.01
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True):
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
+        # trace_wdeg defaults to wdeg (old behavior: one shared basis) --
+        # see porting-notes.md's r2@20250109 investigation. Explicitly
+        # decoupled from wdeg so the trace-position correction can be given
+        # more wavelength degrees of freedom without also handing the
+        # PSF-shape (Gauss-Hermite) correction the same extra freedom, which
+        # was found to open a trace-position/PSF-asymmetry degeneracy.
+        trace_wdeg = wdeg if trace_wdeg is None else trace_wdeg
         # min()/max() over all spots, not spots[0]/spots[-1] -- the incoming
         # list is only reliably fiber-sorted when it comes from this
         # process's own select_bundle_spots_iterative(); a --force-spots
@@ -821,10 +840,11 @@ class PSF_Fitter:
             xpix_p, ypix_p, ix_r_p = xpix, ypix, ix_r
         tx_g, tw_g = jnp.array(tx_j[:, ix_r_p]), jnp.array(tw_j[:, ix_r_p])
         flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
-        monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
+        psf_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
+        trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg)
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
-        pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, monomials))
-        tc = jnp.zeros((2, monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
+        pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, psf_monomials))
+        tc = jnp.zeros((2, trace_monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
         img_d, w_d = jnp.array(image[xpix_p, ypix_p]), jnp.array(weight[xpix_p, ypix_p])
         if n_pix_extra > 0:
             w_d = w_d.at[Np:].set(0.0)
@@ -839,13 +859,13 @@ class PSF_Fitter:
         
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
         for i in range(max_iter):
-            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
+            chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
 
             if i == 0 and os.environ.get("SPECEX_DEBUG_MEM"):
                 import jax
-                Nparams_dbg = pc.shape[0]; Npoly_dbg = monomials.shape[1]; stamp_area_dbg = sx_g.shape[1]
-                Nsh_dbg = (Nparams_dbg + 2) * Npoly_dbg
-                print(f"  DEBUG_MEM: Ns={flux.shape[0]} Nparams={Nparams_dbg} Npoly={Npoly_dbg} "
+                Nparams_dbg = pc.shape[0]; Npoly_psf_dbg = psf_monomials.shape[1]; Npoly_trace_dbg = trace_monomials.shape[1]; stamp_area_dbg = sx_g.shape[1]
+                Nsh_dbg = Nparams_dbg * Npoly_psf_dbg + 2 * Npoly_trace_dbg
+                print(f"  DEBUG_MEM: Ns={flux.shape[0]} Nparams={Nparams_dbg} Npoly_psf={Npoly_psf_dbg} Npoly_trace={Npoly_trace_dbg} "
                       f"stamp_area={stamp_area_dbg} Nsh={Nsh_dbg} Np(footprint)={xpix.shape[0]}", flush=True)
                 arrs = sorted(jax.live_arrays(), key=lambda a: -a.nbytes)
                 total = sum(a.nbytes for a in arrs)
@@ -862,9 +882,9 @@ class PSF_Fitter:
                 
             mode = 'flux' if i < 2 else 'trace' if i < 5 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]", flush=True)
-            Npoly = monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly
+            Npoly_psf = psf_monomials.shape[1]; Npoly_trace = trace_monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly_psf
             if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
-            elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
+            elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly_trace), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             else: idx = jnp.arange(A.shape[0])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
@@ -890,11 +910,11 @@ class PSF_Fitter:
             best_alpha, ls_chi2 = 0.0, float(chi2)
             if jnp.any(d_p != 0):
                 for alpha in [0.2, 0.5, 1.0]:
-                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
                     if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
-            flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly].reshape(2, Npoly); cc = cc + best_alpha * d_p[-Ncont:]
+            flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
             
             # --- Iterative Snapping: Update xc_init/yc_init to the current model prediction ---
             # We use a staged approach to prevent oscillation.
@@ -914,15 +934,15 @@ class PSF_Fitter:
         # The state after the last applied step is never seen by the
         # top-of-loop best-state check - evaluate it explicitly so a
         # converged final state cannot lose to a stale intermediate one.
-        final_chi2 = float(_predict_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+        final_chi2 = float(_predict_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
         if final_chi2 < best_chi2:
             best_chi2 = final_chi2; best_tc = tc.copy(); best_pc = pc.copy(); best_cc = cc.copy(); best_flux = flux.copy()
 
         # --- C++ Parity: Snap centroids to the final optimized model ---
         # Use the best coefficients found during the optimization process
         import jax.numpy as jnp
-        dx_final = jnp.dot(monomials, best_tc[0])
-        dy_final = jnp.dot(monomials, best_tc[1])
+        dx_final = jnp.dot(trace_monomials, best_tc[0])
+        dy_final = jnp.dot(trace_monomials, best_tc[1])
         
         # DEBUG: Check if the shifts are actually non-zero
         print(f"  DEBUG: dx_final mean={np.mean(np.abs(dx_final)):.6f}, dy_final mean={np.mean(np.abs(dy_final)):.6f}", flush=True)
