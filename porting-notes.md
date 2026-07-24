@@ -1582,3 +1582,23 @@ Implemented the decoupling experiment flagged above rather than raising the shar
 - **Multi-bundle/multi-exposure validation still needed** before changing any production default -- everything above is one bundle. Either fix `run_specex()`'s `desispec` import (seems like a small, contained fix) to get local C++ validation, or wait for Perlmutter.
 - If validation holds up, worth deciding a new production default for `trace_wdeg` (trace_wdeg=2 already captured nearly all the benefit in this one test; z-band's existing `wdeg=3` for PSF-shape could stay separate from whatever trace default is chosen).
 - The full per-fiber-independent trace redesign remains on the table if decoupled-shared-wdeg turns out insufficient on a wider sample (e.g. exposures needing more than quadratic trace curvature), but tonight's result makes that look less urgent than it did two entries ago.
+
+## 2026-07-24 (continued) -- run_specex() unblocked: real local C++ validation is now possible, no separate desi_psf_fit build needed
+
+User independently cloned `desihub/desispec` to `../desispec` (sibling of this repo) and asked what it takes to get it working, closing the loop on last entry's `run_specex()` finding. Turned out to be entirely a local-environment setup gap, not a code bug:
+
+1. **The clone was on a 4-year-stale `master` branch** (`07416b6`, Feb 2022) -- `desispec`'s actual active branch is `main` (current HEAD `e7752e3`, Jul 2026; `master` isn't advanced anymore, all real development + release tags like `0.71.6` live on `main`). Checked out `main`.
+2. **Missing Python dependencies** in `specex_env` for `desispec`'s own `setup.cfg` `install_requires` (`desispec/io/__init__.py` eagerly imports basically every io submodule, so even a single narrow `from desispec.io.xytraceset import ...` transitively needs the *whole* dependency list, not just what `xytraceset.py` itself imports): `pytz`, `requests`, `numba`, `healpy`, `speclite`, `sqlalchemy`, `desiutil`, `desitarget`, `desimodel` -- all real PyPI packages (DESI publishes these directly), `pip install`ed cleanly. **Side effect worth flagging: this pulled in numpy 2.2.6, upgrading from the previously-pinned 1.26.4** (`desitarget`'s own dependency resolution forced it). Verified immediately after: `_libspecex` import, `specex.specex` import, and a full rerun of the standing z8/00344649 bundle-5 regression case (chi2 = 131058.1597, bit-identical) -- **no regression from the numpy upgrade.** Worth remembering if anything numpy-2.x-sensitive breaks later, since this is the point it changed.
+3. **`pip install -e` the local `../desispec` clone** (editable, so it tracks the user's checkout directly, matching how this repo itself is used) -- `desispec-0.71.6.dev10155`.
+4. **`$DESIMODEL` (the separate large calibration-data directory some `desimodel` functions need at runtime) was never set up, and turned out not to matter** -- nothing in the actual PSF-fitting/QA import path calls into it, confirmed by the full run below completing with zero warnings.
+
+**Result: `specex.specex.run_specex()` -- the pybind11 binding to the real C++ engine, already built in this repo -- now runs end-to-end locally.** Verified on the standing z8/00344649 bundle-5 case (`--first-fiber 125 --last-fiber 149 --legendre-deg-wave 3 --fit-continuum --broken-fibers 473,474`): completed cleanly, `RETVAL: 0`, wrote a valid 3-HDU output PSF FITS (XTRACE/YTRACE/PSF), final `chi2/ndf = 137677/114976 = 1.19744` -- a sane reduced-chi2, no errors or NaNs. No code changes were needed in `specex.py` itself -- the `from .qa import specex_psf_qa` import that failed two entries ago now succeeds on its own once `desispec` actually resolves.
+
+**This directly unblocks the standing "not yet validated beyond one bundle" caveat on the `trace_wdeg` decoupling work** -- multi-bundle/multi-exposure C++ comparison is now possible on this local machine, no Perlmutter or separate `desi_psf_fit` binary needed. Natural next step before locking in `trace_wdeg=2` as a production default.
+
+### Files
+- No specex code changes -- environment-only (`../desispec` checkout + `specex_env` package installs).
+
+### Still open / good next-session leads (additions)
+- **Use `run_specex()` to properly validate `trace_wdeg=2`** across several more bundles of `r2@20250109` (and ideally `r2@20241208`, the other flagged exposure) before changing the production default -- this was blocked last entry, isn't anymore.
+- Worth a `LOCAL_SETUP.md` note (flagged a few entries ago for the BLAS/LAPACKE prerequisites) now growing a second section: the `desispec` dependency list and the `main`-not-`master` branch gotcha, so a future fresh machine doesn't have to rediscover both independently.
