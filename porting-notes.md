@@ -1827,3 +1827,81 @@ The two exposures independently flagged, several sessions ago and for an entirel
 ### Still open / good next-session leads (additions)
 - Not really actionable as a "fix" -- if it matters in practice, worth checking whether `desi_compute_trace_shifts` (the upstream calibration stage that produces the "shifted-input-psf" files) has its own per-region diagnostics that would confirm this read independently, but that's a different pipeline stage, out of scope for specex itself.
 - Worth remembering camera r2's fiber range 400-424 (~78-82% across the CCD in X) specifically the next time an exposure is flagged as needing an unusual shift -- this is now the second exposure pair independently showing a signature there, perhaps worth a quick check on any *other* r2 exposure that turns up needing a large shift in the future.
+
+## 2026-07-24 (continued, part 8) -- Re-validated timing (no regression) and re-ran correctness across b/r/z bands for the first time, using real C++ ground truth -- and found a new, much larger X anomaly that per-fiber and forced-spots both fail to explain
+
+With this session's algorithm changes landed (X/Y decoupling, the convergence fix, per-fiber redesign) and the machine now on a single local 3060 (not Perlmutter, timings not comparable to older entries), two things were asked: (1) confirm no wall-time regression from the refactoring itself, and (2) redo the correctness validation "for various CCDs and bundles" now that Python is structurally closer to C++.
+
+**1. Timing: no regression, isolated JAX compile caches used to avoid a real methodological trap.** A naive before/after (same shared `~/.cache/specex/jax_compilation_cache`) made the *old* code look 2x slower than new (39.6s vs 20.1s on `r2@20250109` bundle 0) -- purely because whichever version ran second reused kernels this whole marathon session had already warmed in that shared cache, not a real code effect. Redone with `JAX_COMPILATION_CACHE_DIR` pointed at separate, fresh directories per version (a `git worktree` at `4085391`, the last commit before this session's algorithm work, symlinking in the unchanged `_libspecex.so` since zero C++ files changed all session), each case run twice (cold, then warm):
+
+| case | old cold | new cold | old warm | new warm |
+|---|---|---|---|---|
+| r2@20250109 b0 (default) | 45.4s | 45.5s | 20.2s | 20.8s |
+| r2@20250109 b16 (default) | 43.1s | 43.7s | 19.9s | 20.4s |
+| z8@20260401 b5 (continuum, deg3) | 45.8s (recheck)* | 44.7s | 21.5s | 22.5s |
+
+*First z8/old cold run measured 64.85s, a real-looking outlier -- rechecked with a fresh cache dir and got 45.84s, confirming it was background system load on this shared interactive machine, not a code effect (worth remembering: this machine is noisier than a dedicated batch node, treat any single cold-start outlier with suspicion until rechecked).
+
+**No measurable slowdown anywhere**, despite bundle 16 now running 25 iterations instead of 11 post-convergence-fix (the fix makes `full` mode actually run to completion instead of stopping after one step, as documented two entries ago) -- per-iteration cost is negligible next to fixed JIT/dispatch overhead at single-bundle scale. **Per-fiber-deg6 overhead, extended beyond the single bundle-0 case measured when it was built:** bundle 16 warm 21.5s (vs 20.4s default), z8-continuum warm 22.3s (vs 22.5s default) -- both still negligible, confirming the near-zero-cost finding holds beyond the one bundle it was originally measured on.
+
+**2. Correctness: built a local (non-Perlmutter) multi-CCD parity tool** (`run_matrix.py` + `run_cpp2.py`, scratchpad only, not committed -- same convention as `run_cpp.py` from two entries ago), reusing `bundle_parity_suite.py`'s trace-RMS/wavelength-truth methodology but pointed at hardcoded local `/net/flash` paths and `run_specex()` directly (no `desi_psf_fit` binary needed). Ran all **3 locally-cached exposures' full band set** (`r2`/`b6`/`z2` @ 20201221 control, `r2`/`b3`/`z1` @ 20241208 flagged, `r2`/`b0`/`z8` @ 20250109 flagged) x bundles {0,8,16} = **27 cases**, C++ vs Python-default vs Python-`trace-per-fiber-deg 6`, plus wavelength-vs-line-list truth for all three. **First time b-band has been tested at all in this entire investigation**, and first broad z-band test beyond the single standing z8/00344649 bundle-5 case.
+
+Full table (`xrms`/`yrms` in px, `wrms` in Å against the true line-list wavelength, `def`=current default x=1,y=2 shared basis, `pf6`=`trace-per-fiber-deg 6`):
+
+| case | xrms_def | yrms_def | xrms_pf6 | yrms_pf6 | wrms_cpp | wrms_def | wrms_pf6 |
+|---|---|---|---|---|---|---|---|
+| r2@20201221_control:0 | 0.0548 | 0.0542 | 0.0348 | 0.0279 | 0.5946 | 0.6028 | 0.6038 |
+| r2@20201221_control:8 | 0.0854 | 0.1065 | 0.0431 | 0.0658 | 0.5963 | 0.5779 | 0.5829 |
+| r2@20201221_control:16 | 0.1878 | 0.0914 | 0.1783 | 0.0672 | 0.5976 | 0.5714 | 0.5734 |
+| b6@20201221_control:0 | 0.0335 | 0.0445 | 0.0855 | 0.0493 | 0.6364 | 0.6171 | 0.6067 |
+| b6@20201221_control:8 | 0.1997 | 0.1643 | 0.1533 | 0.1459 | 0.6712 | 0.6026 | 0.6082 |
+| b6@20201221_control:16 | **0.3182** | 0.1816 | 0.2861 | 0.1202 | 0.6605 | 0.5687 | 0.5825 |
+| z2@20201221_control:0 | 0.0243 | 0.0421 | 0.0185 | 0.0341 | 0.5486 | 0.5415 | 0.5397 |
+| z2@20201221_control:8 | 0.0391 | 0.0390 | 0.0359 | 0.0355 | 0.5514 | 0.5355 | 0.5345 |
+| z2@20201221_control:16 | 0.0270 | 0.0543 | 0.0224 | 0.0508 | 0.5499 | 0.5234 | 0.5232 |
+| r2@20241208_flagged:0 | 0.0755 | 0.0622 | 0.0712 | 0.0237 | 0.5953 | 0.5972 | 0.5989 |
+| r2@20241208_flagged:8 | 0.1500 | 0.0838 | 0.1384 | 0.0435 | 0.5750 | 0.5763 | 0.5763 |
+| r2@20241208_flagged:16 | 0.2141 | 0.0792 | 0.2103 | 0.0617 | 0.5820 | 0.5611 | 0.5602 |
+| b3@20241208_flagged:0 | **0.6840** | 0.0523 | **0.6824** | 0.0354 | 0.5911 | 0.5807 | 0.5832 |
+| b3@20241208_flagged:8 | 0.1958 | 0.0825 | 0.1953 | 0.0741 | 0.5918 | 0.5484 | 0.5490 |
+| b3@20241208_flagged:16 | 0.2003 | 0.0753 | 0.0950 | 0.0688 | 0.6261 | 0.5890 | 0.5888 |
+| z1@20241208_flagged:0 | 0.0546 | 0.0615 | 0.0507 | 0.0577 | 0.5018 | 0.4830 | 0.4846 |
+| z1@20241208_flagged:8 | 0.0354 | 0.0834 | 0.0230 | 0.0767 | 0.5555 | 0.5171 | 0.5198 |
+| z1@20241208_flagged:16 | 0.0793 | 0.0422 | 0.0858 | 0.0317 | 0.5543 | 0.5434 | 0.5471 |
+| r2@20250109_flagged:0 | 0.0730 | 0.0548 | 0.0619 | 0.0175 | 0.5728 | 0.5733 | 0.5749 |
+| r2@20250109_flagged:8 | 0.1092 | 0.0853 | 0.1015 | 0.0381 | 0.5752 | 0.5695 | 0.5716 |
+| r2@20250109_flagged:16 | 0.2180 | 0.0788 | 0.2217 | 0.0670 | 0.5781 | 0.5559 | 0.5551 |
+| b0@20250109_flagged:0 | **0.2185** | 0.0782 | 0.2425 | 0.0764 | 0.6024 | 0.5759 | 0.5773 |
+| b0@20250109_flagged:8 | 0.1235 | 0.1049 | 0.1336 | 0.1046 | 0.6372 | 0.5908 | 0.5913 |
+| b0@20250109_flagged:16 | 0.1541 | 0.0715 | 0.1615 | 0.0676 | 0.5958 | 0.5687 | 0.5700 |
+| z8@20250109_flagged:0 | 0.0309 | 0.0407 | 0.0417 | 0.0374 | 0.5557 | 0.5557 | 0.5547 |
+| z8@20250109_flagged:8 | 0.0328 | 0.0523 | 0.0252 | 0.0586 | 0.5682 | 0.5449 | 0.5414 |
+| z8@20250109_flagged:16 | 0.0282 | 0.0463 | 0.0230 | 0.0466 | 0.5642 | 0.5417 | 0.5415 |
+
+**Aggregate by band (mean xrms/yrms, all 9 cases each):**
+
+| band | xrms (def) | xrms (pf6) | yrms (def) | yrms (pf6) |
+|---|---|---|---|---|
+| r | 0.1298 | 0.1179 | 0.0774 | 0.0458 |
+| b | 0.2364 | 0.2261 | 0.0950 | 0.0825 |
+| z | 0.0391 | 0.0362 | 0.0513 | 0.0477 |
+
+`trace-per-fiber-deg 6` improves or holds both xrms and yrms on average in **every** band, extending the r2/z8-only result from two entries ago -- good news, and the wavelength-truth column (`wrms`, ~0.5-0.6Å throughout, no outliers even on the worst xrms cases) confirms Y-trace/wavelength calibration is fine everywhere; whatever's driving the worst X numbers below is purely an X/trace-model story, not a wavelength-solution problem.
+
+**z-band is uniformly excellent** (xrms 0.02-0.09px across all 9 cases) -- the existing untouched `wdeg=3` shared-basis default for z was never actually a risk. **b-band's baseline is real, and structurally worse than r/z even excluding the worst outlier** (mean xrms 0.18px over the other 8 cases) -- and it produced the single largest X-disagreement seen in this entire investigation.
+
+**3. New finding: `b3@20241208_flagged` bundle 0 (fibers 0-24), xrms=0.684px -- a qualitatively different anomaly from bundle 16's, not yet explained.** Per-fiber X-residual breakdown shows this is **not** a smooth trend like bundle 16's -- every one of the 25 fibers shows nearly the *same* offset (0.641 to 0.688px, a tight band), i.e. a near-uniform whole-bundle X shift, not a gradient. Three checks:
+- **Not a spot-selection artifact:** forcing C++'s own final spot list (`--force-spots` on the exact `cppspots_pass4.txt`) into the per-fiber-deg6 Python fit left the shift essentially unchanged (0.6814px vs 0.6824px unforced) -- ruling out "bad candidate spots" as the driver, the same diagnostic used successfully on the very first r2@20250109 anomaly several entries ago.
+- **Comparing both pipelines against the *input* PSF trace directly** (not just each other) shows which one moved: C++ shifts only +0.06 to +0.09px off the input (a normal small correction), while Python shifts **-0.57 to -0.58px** off the same input -- Python is doing something unusual here, not just "disagreeing with C++ by chance."
+- **Python's own chi2/pixel is actually *lower* (better) than C++'s** for this bundle (forced-spots run: 75521/59828 = 1.264, vs C++'s reported 83517.7/63111 = 1.323) -- the same "possibly more correct, not less" ambiguity flagged for bundle 16 three entries ago, but at 3-4x the magnitude and with a fundamentally different (uniform-shift, not gradient) shape, so it isn't obviously the same mechanism.
+- Checking two other elevated-xrms cases in the table for the same signature: **`b0@20250109_flagged` bundle 0 (xrms 0.2185) and `b6@20201221_control` bundle 16 (xrms 0.3182) both also show the uniform-shift pattern** (means -0.226px and -0.198px respectively, each with a swing under 0.08px across the bundle -- i.e. mostly shift, not gradient), while `b3@20241208_flagged` bundle 16 (xrms 0.2003) shows the *other*, already-understood gradient pattern (swing 0.157px, mean near zero) -- **both anomaly types are present across the b-band sample, not just one.**
+
+**Not root-caused tonight** -- the leading hypothesis is a real degenerate direction in the joint Hessian specific to b-band's PSF-shape response (an asymmetric Gauss-Hermite shape term trading off against a pure X-shift, resolved differently by C++'s per-fiber-unregularized parametrization vs Python's smoother one), given the size and cross-fiber uniformity, but this is speculation pending an actual eigenvalue/covariance check -- not confirmed. This is new territory: b-band was never tested before tonight, so there's no prior baseline to compare against the way bundle 16's r2 anomaly had one.
+
+### Files
+- No specex code changes -- timing used an unmodified `git worktree` at `4085391` (removed after use) plus isolated `JAX_COMPILATION_CACHE_DIR`s; correctness used a new scratchpad-only `run_matrix.py`/`run_cpp2.py` (not committed, same convention as `run_cpp.py`), no `bundle_parity_suite.py` changes.
+
+### Still open / good next-session leads (additions)
+- **The b-band uniform-shift anomaly (up to 0.68px, two distinct sub-cases: pure-shift and gradient) is the single largest unresolved discrepancy found in this whole investigation and deserves its own dedicated chase** -- natural next steps: check whether it's specific to asymmetric PSF-shape (GH) parameters correlating with X-shift (inspect the Hessian/covariance directly rather than inferring from chi2 alone), check whether it appears on any *other* b-band bundle/exposure not yet tested (only 3 exposures x 3 bundles sampled), and check whether C++'s own per-fiber-unregularized fit shows any hint of the same degeneracy under different starting conditions.
+- Only 3 of 20 bundles per camera were sampled (0, 8, 16) -- the two new anomaly instances both landed on bundle 0, worth deliberately sampling a few more first/early bundles specifically (1, 2, 3) to see if this is a "low bundle number" pattern or coincidence.
+- The full multi-worker GPU-packing validation and sparse-per-fiber-coverage stress test for the per-fiber redesign, flagged two entries ago, are still not done.
