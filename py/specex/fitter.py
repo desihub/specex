@@ -766,16 +766,19 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 0.01
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None):
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
-        # trace_wdeg defaults to wdeg (old behavior: one shared basis) --
-        # see porting-notes.md's r2@20250109 investigation. Explicitly
-        # decoupled from wdeg so the trace-position correction can be given
-        # more wavelength degrees of freedom without also handing the
-        # PSF-shape (Gauss-Hermite) correction the same extra freedom, which
-        # was found to open a trace-position/PSF-asymmetry degeneracy.
+        # trace_wdeg (a shared X/Y default) falls back to wdeg -- see
+        # porting-notes.md's r2@20250109 investigation. trace_wdeg_x/
+        # trace_wdeg_y independently override it per axis, falling back to
+        # trace_wdeg in turn -- added after finding X didn't need (and was
+        # mildly destabilized by) the same extra wavelength curvature that
+        # closed the Y gap: giving X unused extra freedom let its own
+        # (mostly noise-driven) high-order coefficients drift.
         trace_wdeg = wdeg if trace_wdeg is None else trace_wdeg
+        trace_wdeg_x = trace_wdeg if trace_wdeg_x is None else trace_wdeg_x
+        trace_wdeg_y = trace_wdeg if trace_wdeg_y is None else trace_wdeg_y
         # min()/max() over all spots, not spots[0]/spots[-1] -- the incoming
         # list is only reliably fiber-sorted when it comes from this
         # process's own select_bundle_spots_iterative(); a --force-spots
@@ -841,7 +844,20 @@ class PSF_Fitter:
         tx_g, tw_g = jnp.array(tx_j[:, ix_r_p]), jnp.array(tw_j[:, ix_r_p])
         flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
         psf_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
-        trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg)
+        # Single shared trace_monomials sized at max(trace_wdeg_x,
+        # trace_wdeg_y): get_sparse_nz(1, d)'s output is a strict prefix of
+        # get_sparse_nz(1, d+1)'s (each higher wdeg only ever *appends*
+        # terms), so a lower-degree axis's basis is exactly the leading
+        # columns of this shared matrix. tc's unused trailing columns for
+        # whichever axis has the smaller degree are frozen at zero (see
+        # the "freeze" step below, right after each Newton step is
+        # computed) instead of building a second differently-sized
+        # monomials array -- avoids threading a third matrix through the
+        # JIT kernels for what's structurally just a masked subset of the
+        # one already there.
+        trace_wdeg_shared = max(trace_wdeg_x, trace_wdeg_y)
+        trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg_shared)
+        Npoly_trace_x = len(get_sparse_nz(1, trace_wdeg_x)); Npoly_trace_y = len(get_sparse_nz(1, trace_wdeg_y))
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
         pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, psf_monomials))
         tc = jnp.zeros((2, trace_monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
@@ -890,6 +906,17 @@ class PSF_Fitter:
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
             except: d_p = jnp.zeros(A.shape[0])
+            # Freeze tc's trailing columns for whichever trace axis has the
+            # smaller degree (see trace_monomials' construction above) --
+            # tc starts at exactly zero and never gets a nonzero step in
+            # these entries, so it stays exactly zero for the rest of the
+            # fit, equivalent to that axis never having had those extra
+            # basis columns at all.
+            if Npoly_trace_x < Npoly_trace or Npoly_trace_y < Npoly_trace:
+                trace_start = Ns_l + n_psf_tot
+                d_trace = d_p[trace_start:trace_start + 2 * Npoly_trace].reshape(2, Npoly_trace)
+                d_trace = d_trace.at[0, Npoly_trace_x:].set(0.0).at[1, Npoly_trace_y:].set(0.0)
+                d_p = d_p.at[trace_start:trace_start + 2 * Npoly_trace].set(d_trace.flatten())
             # Ncont stays structurally 4 regardless of fit_continuum (changing
             # it to 0 would make every "-Ncont:"-style slice above/below turn
             # into "-0:", which numpy/jax silently reinterpret as the whole

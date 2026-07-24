@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None):
     """
     Isolated task for fitting a single bundle.
     """
@@ -63,7 +63,12 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     # PSF_Fitter.fit() docstring/comment and porting-notes.md's
     # r2@20250109 investigation for why this is a separate knob rather
     # than always reusing wdeg (the PSF-shape correction's degree).
+    # trace_wdeg_x/trace_wdeg_y further override it per axis -- added
+    # after finding X didn't need (and was mildly destabilized by) the
+    # same extra curvature that fixed Y.
     trace_wdeg = wdeg if trace_wdeg is None else trace_wdeg
+    trace_wdeg_x = trace_wdeg if trace_wdeg_x is None else trace_wdeg_x
+    trace_wdeg_y = trace_wdeg if trace_wdeg_y is None else trace_wdeg_y
     if stagger_s > 0:
         time.sleep(stagger_s)
         
@@ -209,7 +214,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             return bid, {"error": "No spots found for bundle"}
 
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y)
         t_finalfit = time.time()
         print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
 
@@ -223,18 +228,30 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # that deviation would otherwise be silently dropped when
         # write_python_psf() adds `tc` onto the input trace to build the
         # output XTRACE/YTRACE.
-        from .fitter import get_bundle_monomials_jnp
-        # trace_wdeg (not wdeg) -- this recompute rebuilds tc from scratch
-        # against the absolute final positions, so it must use the same
-        # basis PSF_Fitter.fit() actually optimized trace_coeffs in, not
-        # the (possibly different) PSF-shape basis.
-        trace_monomials_abs = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=trace_wdeg))
+        from .fitter import get_bundle_monomials_jnp, get_sparse_nz
+        # trace_wdeg_x/trace_wdeg_y (not wdeg) -- this recompute rebuilds tc
+        # from scratch against the absolute final positions, so it must use
+        # the same basis PSF_Fitter.fit() actually optimized trace_coeffs
+        # in, not the (possibly different) PSF-shape basis. x and y can
+        # have different degrees (see fitter.py's freeze-mask comment for
+        # why): build one shared design matrix at the higher of the two
+        # degrees, lstsq each axis against only its own leading-column
+        # prefix (get_sparse_nz(1, d) is a strict prefix of any higher
+        # degree's), then zero-pad the shorter one back up to the shared
+        # width so tc stays a plain (2, N) array like every other caller
+        # (write_python_psf included) expects.
+        trace_wdeg_shared_abs = max(trace_wdeg_x, trace_wdeg_y)
+        trace_monomials_abs = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=trace_wdeg_shared_abs))
+        npoly_x_abs = len(get_sparse_nz(1, trace_wdeg_x)); npoly_y_abs = len(get_sparse_nz(1, trace_wdeg_y))
         x_orig = np.array([psf.x_ccd(s['fiber'], s['wave']) for s in spots])
         y_orig = np.array([psf.y_ccd(s['fiber'], s['wave']) for s in spots])
         res_x = np.array(xc_final) - x_orig
         res_y = np.array(yc_final) - y_orig
-        tc_x_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_x, rcond=None)
-        tc_y_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_y, rcond=None)
+        tc_x_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_x_abs], res_x, rcond=None)
+        tc_y_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_y_abs], res_y, rcond=None)
+        npoly_shared_abs = trace_monomials_abs.shape[1]
+        tc_x_abs = np.zeros(npoly_shared_abs); tc_x_abs[:npoly_x_abs] = tc_x_fit
+        tc_y_abs = np.zeros(npoly_shared_abs); tc_y_abs[:npoly_y_abs] = tc_y_fit
         tc = np.stack([tc_x_abs, tc_y_abs], axis=0)
 
         # --- C++ Parity: Update spots with refined model centroids ---
@@ -282,7 +299,13 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             'trace_coeffs': np.array(tc),
             'continuum_coeffs': np.array(cc),
             'wdeg': wdeg,
-            'trace_wdeg': trace_wdeg,
+            # The actual width tc was built at (max(trace_wdeg_x,
+            # trace_wdeg_y), not the shared-default trace_wdeg convenience
+            # value above) -- write_python_psf indexes tc with this, and
+            # the shorter axis's unused trailing columns are exact zeros,
+            # so using the wider of the two here is required for correct
+            # reconstruction, not just for the wider axis's own sake.
+            'trace_wdeg': trace_wdeg_shared_abs,
             'chi2': float(chi2),
             's_fiber': np.array([s['fiber'] for s in final_selected]),
             's_wave': np.array([s['wave'] for s in final_selected]),
@@ -299,7 +322,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
                      workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
-                     trace_legendre_deg_wave=None):
+                     trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -320,27 +343,34 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     explicitly to override (matching desi_psf_fit's own CLI override
     behavior) for controlled A/B comparisons.
 
-    trace_legendre_deg_wave independently sets the wavelength degree of
-    the trace-position correction, leaving legendre_deg_wave's value
-    governing just the PSF-shape (Gauss-Hermite) correction. Defaults to
-    None, which auto-selects 2 for b/r bands and legendre_deg_wave's own
-    value (3) for z-band -- see porting-notes.md's r2@20250109
-    investigation: raising the *shared* wdeg to give the trace fit more
-    wavelength curvature also handed the PSF-shape fit the same extra
-    freedom, opening a trace-position/PSF-asymmetry degeneracy that made
-    xrms worse even as it fixed yrms; decoupling them and validating
+    trace_legendre_deg_wave_x/trace_legendre_deg_wave_y independently set
+    the wavelength degree of the trace-position correction per axis,
+    leaving legendre_deg_wave's value governing just the PSF-shape
+    (Gauss-Hermite) correction. trace_legendre_deg_wave (no suffix), if
+    given, sets *both* axes at once as a convenience override; otherwise
+    each axis defaults independently: X to legendre_deg_wave's own value
+    (1 for b/r, 3 for z -- i.e. unchanged from the pre-decoupling
+    behavior), Y to 2 for b/r bands and legendre_deg_wave's value (3) for
+    z-band. See porting-notes.md's r2@20250109 investigation: raising the
+    *shared* wdeg to give the trace fit more wavelength curvature also
+    handed the PSF-shape fit the same extra freedom, opening a
+    trace-position/PSF-asymmetry degeneracy that made xrms worse even as
+    it fixed yrms; decoupling trace from PSF-shape and validating
     trace_wdeg=2 against the real C++ engine (run_specex()) on 6 bundles
-    across both flagged exposures plus 3 on a clean control exposure
-    found a clean win (yrms cut ~68% on the flagged exposures, xrms
-    unchanged within noise on all of them) -- promoted to the b/r default
-    on that basis. z-band was not part of that validation, so its trace
-    correction stays coupled to its own wdeg (3) unless overridden.
+    across both flagged exposures plus 3 on a clean control exposure found
+    a clean win on Y (yrms cut ~68%) but a smaller, real xrms cost on 2 of
+    those 6 bundles. Root-caused to X sharing the same raised degree as Y
+    even though X's own true residual (checked against C++) is well
+    described by degree 1 already -- decoupling X and Y within the trace
+    correction (this parameter split) isolates the extra freedom to Y
+    only. z-band was not part of that validation, so its trace correction
+    stays coupled to its own wdeg (3) on both axes unless overridden.
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
     bundle_results = {}
 
-    if legendre_deg_wave is None or fit_continuum is None or trace_legendre_deg_wave is None:
+    if legendre_deg_wave is None or fit_continuum is None or trace_legendre_deg_wave_x is None or trace_legendre_deg_wave_y is None:
         import fitsio
         cam = fitsio.read_header(arc_file, ext=0)['CAMERA'].strip().lower()
         band = cam[0]
@@ -348,24 +378,22 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             legendre_deg_wave = 3 if band == 'z' else 1
         if fit_continuum is None:
             fit_continuum = (band == 'z')
-        if trace_legendre_deg_wave is None:
+        if trace_legendre_deg_wave_x is None:
+            trace_legendre_deg_wave_x = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else legendre_deg_wave
+        if trace_legendre_deg_wave_y is None:
             # b/r default: 2, not 1 -- validated against the real C++ engine
             # (run_specex(), now working locally -- see porting-notes.md)
             # across 6 bundles on both flagged exposures (r2@20250109,
             # r2@20241208): mean yrms 0.2182px -> 0.0686px (68% cut, into
-            # normal-case territory), mean xrms 0.1080px -> 0.1128px (~4%,
-            # noise-level), plus 3 bundles on a clean control exposure
-            # (r2@20201221) showing zero effect either direction. z-band
-            # kept coupled to its own wdeg (3) -- not part of this
-            # validation, no evidence its own trace/PSF-shape coupling
-            # needs decoupling the way b/r's did.
-            trace_legendre_deg_wave = 2 if band != 'z' else legendre_deg_wave
+            # normal-case territory). z-band kept coupled to its own wdeg
+            # (3) -- not part of this validation.
+            trace_legendre_deg_wave_y = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else (2 if band != 'z' else legendre_deg_wave)
 
     print(f"--- SPECE-X Multi-Process CCD Fit ({backend.upper()}) ---")
     print(f"  Arc: {arc_file}")
     print(f"  In PSF: {in_psf_file}")
     print(f"  Out PSF: {out_psf_file}")
-    print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: {trace_legendre_deg_wave}  fit-continuum: {fit_continuum}")
+    print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: x={trace_legendre_deg_wave_x} y={trace_legendre_deg_wave_y}  fit-continuum: {fit_continuum}")
     if broken_fibers:
         print(f"  Broken Fibers: {broken_fibers}")
 
@@ -381,7 +409,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, trace_legendre_deg_wave))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -421,7 +449,9 @@ def main():
     parser.add_argument("--first-fiber", type=int, help="First fiber to fit")
     parser.add_argument("--last-fiber", type=int, help="Last fiber to fit")
     parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header).")
-    parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, independent of --legendre-deg-wave's PSF-shape degree (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; see porting-notes.md's r2@20250109 investigation for why these were decoupled and validated at 2)")
+    parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, both axes at once (independent of --legendre-deg-wave's PSF-shape degree). Overridden per-axis by --trace-legendre-deg-wave-x/-y if either is also given. Default: auto per axis -- see those flags' help.")
+    parser.add_argument("--trace-legendre-deg-wave-x", type=int, default=None, help="Legendre degree for the trace-position X basis only (default: auto -- same as --legendre-deg-wave, i.e. unchanged from the pre-decoupling behavior; X was found not to need the extra curvature Y does -- see porting-notes.md's r2@20250109 investigation)")
+    parser.add_argument("--trace-legendre-deg-wave-y", type=int, default=None, help="Legendre degree for the trace-position Y basis only (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; validated against the real C++ engine -- see porting-notes.md's r2@20250109 investigation)")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=4, help="Concurrent bundle-fit worker processes packed onto each GPU (validated safe ceiling: 4)")
@@ -460,6 +490,8 @@ def main():
         cpu_workers=args.cpu_workers,
         legendre_deg_wave=args.legendre_deg_wave,
         trace_legendre_deg_wave=args.trace_legendre_deg_wave,
+        trace_legendre_deg_wave_x=args.trace_legendre_deg_wave_x,
+        trace_legendre_deg_wave_y=args.trace_legendre_deg_wave_y,
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision
     )
