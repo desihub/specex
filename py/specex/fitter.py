@@ -865,7 +865,7 @@ class PSF_Fitter:
         if n_pix_extra > 0:
             w_d = w_d.at[Np:].set(0.0)
         xpix_j, ypix_j = jnp.array(xpix_p), jnp.array(ypix_p)
-        wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30
+        wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30; prev_mode = None
         
         best_chi2 = 1e30
         best_tc = tc.copy()
@@ -955,8 +955,23 @@ class PSF_Fitter:
             # We keep xc_init fixed from the end of trace mode.
             # tc will now naturally accumulate the total shift from this anchor.
             
-            if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
-            old_chi2 = chi2
+            # prev_mode == 'full' (not just mode == 'full') -- old_chi2 is
+            # whatever the PREVIOUS iteration measured *before its own
+            # step*, so at the very first full-mode iteration old_chi2 is
+            # actually trace-mode's pre-step chi2, and this check would be
+            # judging trace-mode's last step's improvement, not the
+            # just-applied full-mode step's (which unlocks PSF-shape
+            # parameters for the first time and deserves its own iteration
+            # to be judged on). If trace mode had already nearly stalled by
+            # the time full mode starts -- common, since 'trace' mode's own
+            # 3 iterations are often enough to mostly converge trace given
+            # how few parameters it has -- this let the loop declare
+            # "converged" after a single, barely-evaluated full-mode step.
+            # Confirmed: r2@20250109 bundle 16 stopped after 6 iterations at
+            # a *worse* chi2 than trace_wdeg=1's 13-iteration result: see
+            # porting-notes.md.
+            if mode == 'full' and prev_mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
+            old_chi2 = chi2; prev_mode = mode
 
         # The state after the last applied step is never seen by the
         # top-of-loop best-state check - evaluate it explicitly so a

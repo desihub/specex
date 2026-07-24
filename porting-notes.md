@@ -1672,3 +1672,51 @@ Followed up on the two xrms regressions from the previous entry. Three questions
 - **The `chi2_precision` convergence check firing while chi2 is still clearly improving** (bundle 16's coupled `trace_wdeg=2` run, 6 iterations, chi2 *worse* than the degree-1 baseline) is a real, pre-existing robustness gap worth its own investigation -- unrelated to trace_wdeg specifically, but this session is the first time it was caught red-handed skewing a comparison.
 - Worth checking whether other "worse xrms" bundles from the 9-bundle sweep (not just #16) also show early-stop/under-convergence in their `trace_wdeg=1` or `trace_wdeg=2` runs -- would strengthen (or weaken) the "Python may be more correct, not less" read.
 - The full per-fiber-independent trace redesign remains the structural fix for the ~39x DOF gap with C++, if a future case needs tighter per-fiber X/Y agreement than the current shared-bundle-wide basis can give.
+
+## 2026-07-24 (continued, part 4) -- The convergence bug, root-caused and fixed; corrected (larger) xrms picture; degree-3 doesn't change the story
+
+Chased the convergence anomaly flagged at the end of the previous entry, then re-ran the full validation honestly with the fix in place.
+
+**1. Root cause, found by tracing the exact break condition line by line.** `fitter.py`'s main iteration loop: `if mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break`, followed by `old_chi2 = chi2`. `chi2` at the top of iteration *i* is always the value measured *before* iteration *i*'s own step is applied (i.e., it reflects the state left over from iteration *i-1*'s step). `old_chi2` is whatever `chi2` was at iteration *i-1*'s own top-of-loop. So this check is really asking "did iteration *i-1*'s step improve things" -- **except at the exact `trace` -> `full` mode boundary (`i==5`), where iteration *i-1* (4) was still in `trace` mode.** If `trace` mode had already nearly stalled by its last iteration (common -- it only has 3 iterations and few parameters to move), that near-zero improvement gets attributed to the *newly-started* `full` mode, which just unlocked every PSF-shape parameter for the very first time and has had exactly one, often-tiny (line-search-limited or `best_alpha=0.1`-fallback) step applied to it. The loop declares convergence and exits after a single, barely-evaluated full-mode step.
+
+**Directly confirmed on `r2@20250109` bundle 16, `trace_wdeg=2` (both axes):** stopped at iteration 5 (6 total), final chi2 **148032.38** -- worse than the plain `trace_wdeg=1` baseline's fully-converged 141771.02 (13 iterations). This is exactly the run that produced last entry's "clean win, xrms basically unchanged" table row -- now understood to be an artifact of stopping before `full` mode had done anything.
+
+**Fix:** track `prev_mode` across iterations; only fire the break when `mode == prev_mode == 'full'` (i.e., only once there have been at least two consecutive `full`-mode iterations to compare against each other, never letting a mode transition's stale `old_chi2` be mistaken for the new mode's own progress). One line changed plus the tracking variable.
+
+**Verified:** the same bundle-16/`trace_wdeg=2` case now runs 17 full iterations and reaches chi2 **120388.48** -- matching (fractionally *better* than) the independently-converged X/Y-split run from the previous entry (120594.32), as it should if both are genuinely finding close to the same optimum. Standing z8/00344649 bundle-5 regression case: **iteration trajectory and final chi2 (131058.1597) bit-identical** to every prior run -- this bundle's `trace`-mode phase never stalled at the boundary, so the bug never fired for it and the fix is a no-op there. Good confirmation the fix is targeted, not a blanket behavior change.
+
+**2. Re-ran the full 9-bundle validation from two entries ago with the fix in place -- the yrms win holds, but the xrms cost is real and larger than first reported, concentrated in one bundle per exposure.**
+
+| exposure | bundle | xrms (trace_wdeg=1) | yrms (trace_wdeg=1) | xrms (default: x=1,y=2) | yrms (default) |
+|---|---|---|---|---|---|
+| r2@20250109 | 0 | 0.0643 | 0.1775 | 0.0730 | 0.0548 |
+| r2@20250109 | 8 | 0.0878 | 0.2315 | 0.1092 | 0.0853 |
+| r2@20250109 | 16 | 0.1614 | 0.2391 | **0.2180** | 0.0788 |
+| r2@20241208 | 0 | 0.0678 | 0.1975 | 0.0755 | 0.0622 |
+| r2@20241208 | 8 | 0.0793 | 0.2378 | 0.1500 | 0.0838 |
+| r2@20241208 | 16 | 0.1876 | 0.2255 | **0.2141** | 0.0792 |
+| r2@20201221 (control) | 0 | 0.0540 | 0.0542 | 0.0548 | 0.0542 |
+| r2@20201221 (control) | 8 | 0.0885 | 0.1029 | 0.0854 | 0.1065 |
+| r2@20201221 (control) | 16 | 0.1878 | 0.0889 | 0.1878 | 0.0914 |
+
+**Flagged exposures: mean yrms 0.2181 -> 0.0740 (still a 66% cut). Mean xrms 0.1080 -> 0.1400 (~30%, not the ~4% reported two entries ago)** -- that earlier "noise-level" xrms number was itself partly an artifact of some of those 9 runs being under-converged before the fix (not just bundle 16, though it's the most dramatic case). **Clean control exposure: still no meaningful change either direction** (mean xrms 0.1101 -> 0.1093, mean yrms 0.0820 -> 0.0840) -- this remains the strongest evidence `trace_wdeg_y=2` isn't costing anything on cases that don't need it. **New pattern visible only now that both exposures are honestly converged: bundle 16 is the single largest xrms outlier in *both* flagged exposures** (0.218, 0.214) -- same physical fiber range (400-424) in both cases, hinting this specific region of camera r2 may be intrinsically harder to fit in X regardless of exposure, rather than the anomaly being purely exposure-specific. Not investigated further tonight.
+
+Per the previous entry's chi2-vs-truth argument, this larger xrms gap doesn't overturn the "possibly more correct, not less" read -- if anything it's now resting on honestly-converged numbers instead of some fraction of them being noise from premature stopping.
+
+**3. Tried degree 3 (both axes) as requested -- doesn't change the qualitative picture, mild diminishing returns.** Same three `r2@20250109` bundles, `trace_wdeg=3` both axes vs the new `x=1,y=2` default:
+
+| bundle | xrms (x=1,y=2) | yrms (x=1,y=2) | xrms (both=3) | yrms (both=3) |
+|---|---|---|---|---|
+| 0 | 0.0730 | 0.0548 | 0.0664 | 0.0536 |
+| 8 | 0.1092 | 0.0853 | 0.1063 | 0.0763 |
+| 16 | 0.2180 | 0.0788 | 0.2276 | 0.0773 |
+
+Small further yrms gains on bundles 0/8, essentially flat (slightly worse) on 16 -- consistent with the single-bundle forced-spots sweep from three entries ago (wdeg=3/4 diminishing returns past wdeg=2). Bundle 8 needed the full `max_iter=50` budget to plateau (chi2 still inching down by ~0.05/iteration at the cap, effectively converged for practical purposes but technically iteration-limited, not `chi2_precision`-limited). Degree 3 doesn't rescue bundle 16's X discrepancy either -- reinforces that whatever's happening there isn't a matter of trace wavelength degree at all.
+
+### Files
+- `py/specex/fitter.py` -- `PSF_Fitter.fit()`: added `prev_mode` tracking; the `full`-mode convergence break now requires two consecutive `full`-mode iterations before it can fire.
+
+### Still open / good next-session leads (additions)
+- **Bundle 16 (fibers 400-424) is now the clear, reproducible xrms outlier in both flagged exposures, converged honestly in both** -- worth a dedicated look (is it a bad/noisy region of the CCD, a fiber-trace-model edge effect, dead columns, something else) independent of the trace_wdeg work.
+- The `if best_alpha == 0 and i > 5: break` stagnation guard a few lines above the fixed check uses the same kind of hardcoded-iteration-count coupling to the mode schedule (`i > 5` assumes `full` mode starts at exactly 5) -- not shown to be buggy tonight, but worth a skeptical look given the sibling check nearby just turned out to be wrong.
+- Given the corrected (larger) xrms cost, worth eventually getting a real ground-truth check for X specifically (not just the chi2 proxy) if one becomes available -- e.g. comparing against an independent flat-field/through-slit calibration of fiber positions, if DESI has one, rather than relying solely on reduced chi2 as the truth stand-in.
