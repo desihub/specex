@@ -757,7 +757,19 @@ class PSF_Fitter:
     def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
-        fmin, fmax = spots[0]['fiber'], spots[-1]['fiber']
+        # min()/max() over all spots, not spots[0]/spots[-1] -- the incoming
+        # list is only reliably fiber-sorted when it comes from this
+        # process's own select_bundle_spots_iterative(); a --force-spots
+        # file (e.g. C++'s pass4 spot dump) is ordered by selection pass,
+        # not by fiber, so spots[0]/[-1] silently narrowed the inferred
+        # bundle range (e.g. [10,24] instead of the true [0,24]). That
+        # narrowed range then clips get_bundle_footprint's trace envelope,
+        # dropping the excluded fibers' own pixels from the fit entirely --
+        # root cause of the r2@20250109 footprint-size anomaly in
+        # porting-notes.md (Python: 66506 px vs C++: 121360 px for the same
+        # forced spot list; fixed here gives 113242, matching C++ to ~7%,
+        # the residual being get_bundle_footprint's own missing x-margin).
+        fmin, fmax = min(s['fiber'] for s in spots), max(s['fiber'] for s in spots)
         weight = apply_dead_column_mask(self.psf, fmin, fmax, weight)
         xpix, ypix, pix_idx = get_bundle_footprint(self.psf, spots, fmin, fmax, weight)
         Np = len(xpix); area = (2*self.psf.h_size_x+1)*(2*self.psf.h_size_y+1); Ns = len(spots)
