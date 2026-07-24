@@ -1602,3 +1602,33 @@ User independently cloned `desihub/desispec` to `../desispec` (sibling of this r
 ### Still open / good next-session leads (additions)
 - **Use `run_specex()` to properly validate `trace_wdeg=2`** across several more bundles of `r2@20250109` (and ideally `r2@20241208`, the other flagged exposure) before changing the production default -- this was blocked last entry, isn't anymore.
 - Worth a `LOCAL_SETUP.md` note (flagged a few entries ago for the BLAS/LAPACKE prerequisites) now growing a second section: the `desispec` dependency list and the `main`-not-`master` branch gotcha, so a future fresh machine doesn't have to rediscover both independently.
+
+## 2026-07-24 (continued, part 2) -- trace_wdeg=2 validated on 9 bundles against the real C++ engine, promoted to the b/r production default
+
+With `run_specex()` unblocked, ran the validation the previous entry called for: real `--legendre-deg-wave 1` (b/r production settings), **own spot selection** (not forced -- the real production code path, not the isolated diagnostic setup used for all prior `trace_wdeg` numbers), 3 bundles each (0, 8, 16) x 3 exposures -- both exposures flagged in the original aggregate table (`r2@20250109`, `r2@20241208`) plus one confirmed-clean control (`r2@20201221`) -- compared against a real `run_specex()` C++ reference for every one of the 9 bundles, at `trace_wdeg=1` (old) vs `trace_wdeg=2`:
+
+| exposure | bundle | xrms (tw1) | yrms (tw1) | xrms (tw2) | yrms (tw2) |
+|---|---|---|---|---|---|
+| r2@20250109 | 0 | 0.0643 | 0.1775 | 0.0645 | 0.0547 |
+| r2@20250109 | 8 | 0.0878 | 0.2315 | 0.1092 | 0.0835 |
+| r2@20250109 | 16 | 0.1614 | 0.2391 | 0.0575 | 0.0483 |
+| r2@20241208 | 0 | 0.0678 | 0.1975 | 0.0796 | 0.0623 |
+| r2@20241208 | 8 | 0.0793 | 0.2378 | 0.1504 | 0.0838 |
+| r2@20241208 | 16 | 0.1876 | 0.2255 | 0.2156 | 0.0792 |
+| r2@20201221 (control) | 0 | 0.0540 | 0.0542 | 0.0539 | 0.0542 |
+| r2@20201221 (control) | 8 | 0.0885 | 0.1029 | 0.0841 | 0.1030 |
+| r2@20201221 (control) | 16 | 0.1878 | 0.0889 | 0.1877 | 0.0914 |
+
+**Flagged exposures (6 bundles): mean yrms 0.2182px -> 0.0686px (68% cut, lands in the same range as ordinary clean cases). Mean xrms 0.1080px -> 0.1128px (~4%, noise-level).** yrms improves in all 6/6 bundles, substantially every time -- this generalizes cleanly beyond the single bundle-0/forced-spots case from the last two entries. **Clean control exposure (3 bundles): essentially zero change either direction** (yrms 0.0820px -> 0.0829px, xrms 0.1101px -> 0.1086px) -- confirms `trace_wdeg=2` doesn't cost anything on cases that didn't need it.
+
+**Honest caveat, not present in the single-bundle forced-spots result:** 2 of the 6 flagged-exposure bundles show a real, non-trivial xrms increase at the per-bundle level -- `r2@20241208` bundle 8 (0.0793 -> 0.1504, ~1.9x) and bundle 16 (0.1876 -> 0.2156, already-elevated baseline getting worse). Nowhere near the coupled-wdeg sweep's catastrophic 0.297px (part 2 of this investigation), but not the "xrms untouched" picture the first (forced-spots, bundle-0-only) test suggested either -- own-selection introduces its own spot-choice noise on top of the trace-basis effect, and bundle 16 in particular already had an elevated xrms baseline (0.1876px) even at `trace_wdeg=1`, suggesting a separate, unrelated per-bundle issue rather than something `trace_wdeg` caused. Net effect across the aggregate is small and positive; not perfectly free on every individual bundle.
+
+**Promoted to the b/r production default**, given the aggregate result, the zero-cost control-exposure result, and the user's explicit steer toward `trace_wdeg=2` (favoring it over 3/4 specifically to avoid overfitting more parameters than the data supports). `fit_ccd_native`'s auto-detection now also resolves `trace_legendre_deg_wave` when left at its default `None`: **2 for b/r bands, same as `legendre_deg_wave` (3) for z-band** (z-band was not part of this validation, so its trace correction stays coupled to its own wdeg unless a future session validates decoupling it too). Verified: standing z8/00344649 bundle-5 case unaffected (`trace-legendre-deg-wave: 3`, chi2 bit-identical to every prior run); a completely bare `python -m specex.specex` invocation (no wdeg flags at all) on r2@20250109 bundle 0 now auto-picks `trace-legendre-deg-wave: 2` and reproduces the sweep's own-selection numbers exactly (xrms=0.0645, yrms=0.0547).
+
+### Files
+- `py/specex/specex.py` -- `fit_ccd_native`'s band-detection block now also resolves `trace_legendre_deg_wave` (2 for b/r, same as `legendre_deg_wave` for z) when left `None`; updated docstrings/CLI help.
+
+### Still open / good next-session leads (additions)
+- The two per-bundle xrms regressions above (`r2@20241208` bundles 8 and 16) are worth a closer look on their own -- particularly bundle 16, whose xrms was already elevated at the old `trace_wdeg=1` baseline, hinting at a pre-existing issue independent of this work.
+- z-band's trace/PSF-shape coupling was never tested -- if a z-band analog of this yrms anomaly ever turns up, the same decoupling experiment (now cheap to run, `--trace-legendre-deg-wave` already exists as a CLI override) is the natural first thing to try.
+- The full per-fiber-independent trace redesign (flagged two entries ago) is even less urgent now given two independent validations (single-bundle forced-spots, and this 9-bundle own-selection sweep) both show `trace_wdeg=2` closing the bulk of the gap with a bounded, already-shipped change.

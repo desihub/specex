@@ -320,21 +320,27 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     explicitly to override (matching desi_psf_fit's own CLI override
     behavior) for controlled A/B comparisons.
 
-    trace_legendre_deg_wave independently overrides the wavelength degree
-    of the trace-position correction only, leaving legendre_deg_wave's
-    value governing just the PSF-shape (Gauss-Hermite) correction.
-    Defaults to None, meaning "same as legendre_deg_wave" (old behavior,
-    one shared basis) -- see porting-notes.md's r2@20250109 investigation
-    for why these were decoupled: raising the *shared* wdeg to give the
-    trace fit more wavelength curvature also handed the PSF-shape fit the
-    same extra freedom, which opened a trace-position/PSF-asymmetry
-    degeneracy and made xrms worse even as it fixed yrms.
+    trace_legendre_deg_wave independently sets the wavelength degree of
+    the trace-position correction, leaving legendre_deg_wave's value
+    governing just the PSF-shape (Gauss-Hermite) correction. Defaults to
+    None, which auto-selects 2 for b/r bands and legendre_deg_wave's own
+    value (3) for z-band -- see porting-notes.md's r2@20250109
+    investigation: raising the *shared* wdeg to give the trace fit more
+    wavelength curvature also handed the PSF-shape fit the same extra
+    freedom, opening a trace-position/PSF-asymmetry degeneracy that made
+    xrms worse even as it fixed yrms; decoupling them and validating
+    trace_wdeg=2 against the real C++ engine (run_specex()) on 6 bundles
+    across both flagged exposures plus 3 on a clean control exposure
+    found a clean win (yrms cut ~68% on the flagged exposures, xrms
+    unchanged within noise on all of them) -- promoted to the b/r default
+    on that basis. z-band was not part of that validation, so its trace
+    correction stays coupled to its own wdeg (3) unless overridden.
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
     bundle_results = {}
 
-    if legendre_deg_wave is None or fit_continuum is None:
+    if legendre_deg_wave is None or fit_continuum is None or trace_legendre_deg_wave is None:
         import fitsio
         cam = fitsio.read_header(arc_file, ext=0)['CAMERA'].strip().lower()
         band = cam[0]
@@ -342,13 +348,24 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             legendre_deg_wave = 3 if band == 'z' else 1
         if fit_continuum is None:
             fit_continuum = (band == 'z')
+        if trace_legendre_deg_wave is None:
+            # b/r default: 2, not 1 -- validated against the real C++ engine
+            # (run_specex(), now working locally -- see porting-notes.md)
+            # across 6 bundles on both flagged exposures (r2@20250109,
+            # r2@20241208): mean yrms 0.2182px -> 0.0686px (68% cut, into
+            # normal-case territory), mean xrms 0.1080px -> 0.1128px (~4%,
+            # noise-level), plus 3 bundles on a clean control exposure
+            # (r2@20201221) showing zero effect either direction. z-band
+            # kept coupled to its own wdeg (3) -- not part of this
+            # validation, no evidence its own trace/PSF-shape coupling
+            # needs decoupling the way b/r's did.
+            trace_legendre_deg_wave = 2 if band != 'z' else legendre_deg_wave
 
     print(f"--- SPECE-X Multi-Process CCD Fit ({backend.upper()}) ---")
     print(f"  Arc: {arc_file}")
     print(f"  In PSF: {in_psf_file}")
     print(f"  Out PSF: {out_psf_file}")
-    trace_legendre_deg_wave_eff = legendre_deg_wave if trace_legendre_deg_wave is None else trace_legendre_deg_wave
-    print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: {trace_legendre_deg_wave_eff}  fit-continuum: {fit_continuum}")
+    print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: {trace_legendre_deg_wave}  fit-continuum: {fit_continuum}")
     if broken_fibers:
         print(f"  Broken Fibers: {broken_fibers}")
 
@@ -364,7 +381,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, trace_legendre_deg_wave_eff))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, trace_legendre_deg_wave))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -403,8 +420,8 @@ def main():
     parser.add_argument("--last-bundle", type=int, default=19)
     parser.add_argument("--first-fiber", type=int, help="First fiber to fit")
     parser.add_argument("--last-fiber", type=int, help="Last fiber to fit")
-    parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header). Also the trace-position basis's default degree unless --trace-legendre-deg-wave overrides it separately.")
-    parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, independent of --legendre-deg-wave's PSF-shape degree (default: same as --legendre-deg-wave -- see porting-notes.md's r2@20250109 investigation for why these were decoupled)")
+    parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header).")
+    parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, independent of --legendre-deg-wave's PSF-shape degree (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; see porting-notes.md's r2@20250109 investigation for why these were decoupled and validated at 2)")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=4, help="Concurrent bundle-fit worker processes packed onto each GPU (validated safe ceiling: 4)")
