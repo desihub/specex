@@ -109,6 +109,19 @@ def write_python_psf(filename, bundle_results, input_template):
                 if j_p < xtrace_out.shape[1]:
                     xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
                     ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
+        # Zero the trace row for any fiber with zero selected spots, matching
+        # C++'s own output for such a fiber (specex_psf_proc.cc:49,58 --
+        # Trace::resize(0) empties that fiber's coeff array, so it's never
+        # copied into the zero-initialized output buffer). Without this,
+        # Python instead writes a smoothed/interpolated position inherited
+        # from neighboring fibers -- plausible-looking but never actually
+        # constrained by any real data for that fiber, unlike C++'s
+        # unambiguous all-zero "don't trust this" signal. Overridden last so
+        # it wins regardless of which branch above ran.
+        for fib in res.get('zero_spot_fibers', []):
+            if fmin <= fib <= fmax:
+                xtrace_out[fib, :] = 0.0
+                ytrace_out[fib, :] = 0.0
         for row in range(len(param_names)):
             psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
             if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0

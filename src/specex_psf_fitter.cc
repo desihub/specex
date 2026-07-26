@@ -18,6 +18,8 @@
 #include "specex_psf.h"
 #include "specex_unbst.h"
 #include <iomanip>
+#include <fstream>
+#include <cstdlib>
 
 #define SIDE_BAND_WEIGHT_SCALE 10.
 
@@ -1419,6 +1421,44 @@ bool specex::PSF_Fitter::FitSeveralSpots(vector<specex::Spot_p>& spots, double *
     unbls::vector_double& B = B_of_band[0];
 
     unbls::matrix_double As=A;
+    unbls::vector_double Bs=B;
+
+    if(fit_trace && fit_psf) {
+      const char* dump_path = getenv("SPECEX_DEBUG_DUMP_A_CPP");
+      if(dump_path) {
+        std::ofstream ofs(dump_path, std::ios::binary);
+        int n = (int)nparTot;
+        ofs.write((char*)&n, sizeof(int));
+        for(size_t ii=0; ii<As.size1(); ii++)
+          for(size_t jj=0; jj<As.size2(); jj++) {
+            double v = As(ii,jj);
+            ofs.write((char*)&v, sizeof(double));
+          }
+        for(size_t ii=0; ii<Bs.size(); ii++) {
+          double v = Bs[ii];
+          ofs.write((char*)&v, sizeof(double));
+        }
+        ofs.close();
+        std::ofstream ofs_meta(std::string(dump_path)+".meta.txt");
+        ofs_meta << "nparTot " << nparTot << "\n";
+        ofs_meta << "index_of_spots_parameters " << index_of_spots_parameters << "\n";
+        int off=0;
+        for(size_t p=0;p<psf_params->FitParPolXW.size();p++) {
+          ofs_meta << "psfparam " << off << " " << psf_params->FitParPolXW[p]->coeff.size() << " " << psf_params->FitParPolXW[p]->name << "\n";
+          off += psf_params->FitParPolXW[p]->coeff.size();
+        }
+        for(std::map<int,int>::const_iterator it=tmp_trace_x_parameter.begin(); it!=tmp_trace_x_parameter.end(); ++it) {
+          ofs_meta << "trace_x fiber=" << it->first << " index=" << it->second
+                    << " size=" << psf->FiberTraces[it->first].X_vs_W.coeff.size() << "\n";
+        }
+        for(std::map<int,int>::const_iterator it=tmp_trace_y_parameter.begin(); it!=tmp_trace_y_parameter.end(); ++it) {
+          ofs_meta << "trace_y fiber=" << it->first << " index=" << it->second
+                    << " size=" << psf->FiberTraces[it->first].Y_vs_W.coeff.size() << "\n";
+        }
+        ofs_meta.close();
+        SPECEX_INFO("SPECEX_DEBUG_DUMP_A_CPP: wrote " << dump_path << " (loop=" << loop << ")");
+      }
+    }
 
     int status = cholesky_solve(A,B);
 

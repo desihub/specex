@@ -213,6 +213,21 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         if not spots:
             return bid, {"error": "No spots found for bundle"}
 
+        # A fiber with zero surviving spots in the final selection is
+        # genuinely unconstrained -- C++ detects exactly this condition
+        # (specex_psf_fitter.cc:2594-2596, "No selected spot for fiber",
+        # trace.mask=3) and excludes that fiber from the trace fit
+        # entirely, which (specex_psf_proc.cc:49,58 -- coeff2d starts
+        # zero-initialized and the fiber's now-empty coeff array never
+        # gets copied in) leaves its XTRACE/YTRACE output row as literal
+        # zero. Matched here rather than left to silently interpolate a
+        # plausible-looking but never-actually-validated position from
+        # neighboring fibers (see porting-notes.md's b3@20241208 bundle-2
+        # fiber-65 writeup) -- downstream consumers presumably rely on
+        # this all-zero convention to recognize an untrustworthy fiber.
+        spot_fibers_present = {s['fiber'] for s in spots}
+        zero_spot_fibers = [fib for fib in range(f_min, f_max + 1) if fib not in spot_fibers_present]
+
         fitter = PSF_Fitter(psf)
         chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg)
         t_finalfit = time.time()
@@ -322,6 +337,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             # tells write_python_psf to use the per-fiber (not
             # broadcast-across-fibers) write-back path.
             'trace_per_fiber_deg': trace_per_fiber_deg,
+            'zero_spot_fibers': zero_spot_fibers,
             'chi2': float(chi2),
             's_fiber': np.array([s['fiber'] for s in final_selected]),
             's_wave': np.array([s['wave'] for s in final_selected]),

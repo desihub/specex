@@ -518,3 +518,80 @@ outage.
     is also -- consistently -- the band that benefits least from the
     compilation-cache fix, for the same underlying reason (already GPU-
     compute-bound, not compile-bound).
+
+===============================================================================
+10. LOCAL (HOMER) WORK SINCE THE PERLMUTTER OUTAGE (2026-07-23 onward)
+===============================================================================
+Perlmutter's 2-week maintenance outage moved work to a personal machine
+("homer", single RTX 3060). Full detail/evidence in porting-notes.md's
+2026-07-23 through 2026-07-25 entries; this section is just the arc.
+
+BUILD/ENVIRONMENT (2026-07-23): homer failed to build the C++ extension at
+all -- two real, pre-existing CMakeLists.txt bugs (a BLA_VENDOR search that
+never actually fell back to generic BLAS, and LAPACKE never being linked)
+that Perlmutter's MKL-based environment had always silently masked, plus a
+hardcoded-Perlmutter-path fix in env_setup.sh. None touched fit correctness
+(re-verified bit-identical against the standing test case). Also unblocked
+run_specex() as a direct pybind11 call, so real local C++ ground-truth
+comparisons are possible without a separate desi_psf_fit binary.
+
+X/Y TRACE DECOUPLING (2026-07-23 to 07-24): chased what looked like one
+footprint bug (real, fixed, but not the actual cause) down to the real
+driver -- Python's shared trace-correction basis was far lower-order than
+C++'s, closing Y but not X. Fix: decoupled trace_wdeg_x/trace_wdeg_y so each
+axis gets its own degree instead of one shared value; validated on 9 bundles
+against real C++, promoted to the b/r production default. Also found and
+fixed a real convergence bug at the trace->full mode transition (the fit was
+silently discarding a converged result under specific conditions), which
+corrected (enlarged) the xrms picture but reflected reality more accurately.
+
+PER-FIBER TRACE REDESIGN (2026-07-24): designed, then implemented stage 1 of,
+a full per-fiber-independent trace fit (--trace-per-fiber-deg, block-
+diagonal-by-fiber basis, opt-in) to more closely match C++'s per-fiber
+parametrization. Near-zero timing cost. Improves or holds both xrms and yrms
+on average in every band once tested broadly (see below).
+
+BROADER VALIDATION, NEW ANOMALY FOUND (2026-07-24, part 8): re-validated
+timing showed no regression from any of the above (isolated-JAX-cache
+methodology, since a shared compile cache had been silently making
+before/after comparisons meaningless). Broadened correctness testing beyond
+the single standing r2/z8 case to a 27-case matrix across all three bands
+(b/r/z) x 3 exposures x bundles {0,8,16} for the first time -- found z-band
+uniformly excellent, but a new, much larger unexplained b-band X-trace
+anomaly (up to 0.68px, the single largest discrepancy in the whole project).
+
+B-BAND ANOMALY ROOT-CAUSED AND FIXED (2026-07-25): traced to a genuine
+trace-position / PSF-shape degeneracy (a GH-1-0-family antisymmetric shape
+term is nearly mathematically equivalent to a position shift). Confirmed
+directly by dumping both engines' Gauss-Newton Hessians: Python's joint
+"full" mode solves trace and PSF shape together and can drift far along this
+near-flat direction over many iterations; C++ structurally never can,
+because its equivalent joint-fit code path is dead (permanently commented
+out) -- C++ always fits trace and shape in separate, alternating stages.
+Fixed by damping the specific degenerate GH rows back toward their warm-
+start value every iteration, bounding drift regardless of iteration count.
+Validated on the full 27-case matrix: zero regressions, xrms improved 18%
+(r), 46% (b), 18% (z) on average; the worst case in the whole project
+(0.68px) dropped to 0.14px.
+
+Two smaller findings from the same investigation:
+  - The long-standing ~0.5-0.6A wavelength-vs-truth "scatter" figure was
+    mostly a validation artifact, not a real limitation: re-scoring against
+    vacuum-converted (rather than air) truth wavelengths -- no refit needed
+    -- drops it ~3x in every band (e.g. b-band 0.32A -> 0.11A), confirming
+    the air/vacuum line-list mismatch identified back on Perlmutter is the
+    dominant driver of both the offset and most of the scatter.
+  - A separate, unrelated bug: a fiber with zero surviving spots produced a
+    spuriously huge (~600px) apparent disagreement against C++ in one
+    bundle. Root cause was a comparison-script blind spot, not a real
+    Python defect -- C++ writes a literal all-zero placeholder for such a
+    fiber (an implicit consequence of resizing its trace to zero
+    coefficients before the FITS write), while Python was writing a
+    plausible but never-actually-validated interpolated value. Fixed to
+    match C++'s zero-write convention.
+
+STATUS AS OF THIS WRITING: both fixes implemented and validated on the
+original 27-case matrix; a fresh validation pass against new, previously-
+untouched random nights/bundles is in progress (both correctness and
+timing) before committing. Nothing from this section is committed to git
+yet -- current HEAD (63bf6f5) predates all of it.

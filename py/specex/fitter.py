@@ -795,6 +795,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
     flux, snr, chi2, eflux = _fit_all_spots_batch_jit(cand_xc, cand_yc, gh_params, image, weight, hsize_x, hsize_y, degree)
     return flux[:Ns_real], snr[:Ns_real], chi2[:Ns_real], eflux[:Ns_real]
 
+
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 0.01
@@ -905,6 +906,25 @@ class PSF_Fitter:
             Npoly_trace_x = len(get_sparse_nz(1, trace_wdeg_x)); Npoly_trace_y = len(get_sparse_nz(1, trace_wdeg_y))
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
         pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, psf_monomials))
+        # pc0/asym_gh_rows support the anti-drift correction below: a
+        # near-null Hessian direction mixes the trace correction with the
+        # GH-i-0/GH-0-j ("pure x"/"pure y", i.e. antisymmetric-in-one-axis)
+        # shape terms (see porting-notes.md's b-band anomaly writeup --
+        # correlation of -0.93 between the leading trace_x coefficient and
+        # GH-1-0). C++ never encounters this at all (it never solves trace
+        # and PSF shape jointly), so there's nothing to port structurally;
+        # instead we damp those specific rows back toward their warm-start
+        # value every 'full'-mode iteration below, which bounds how far
+        # this degenerate combination can drift over many iterations
+        # without constraining any well-determined shape parameter.
+        pc0 = pc
+        _r = 2; _gh_row_of = {}
+        for _j in range(gh_deg + 1):
+            for _i in range(gh_deg + 1):
+                if _i == 0 and _j == 0: continue
+                _gh_row_of[(_i, _j)] = _r; _r += 1
+        asym_gh_rows = jnp.array([_gh_row_of[(_i, 0)] for _i in range(1, gh_deg + 1)] +
+                                  [_gh_row_of[(0, _j)] for _j in range(1, gh_deg + 1)], dtype=jnp.int32)
         tc = jnp.zeros((2, trace_monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
         img_d, w_d = jnp.array(image[xpix_p, ypix_p]), jnp.array(weight[xpix_p, ypix_p])
         if n_pix_extra > 0:
@@ -944,6 +964,10 @@ class PSF_Fitter:
             mode = 'flux' if i < 2 else 'trace' if i < 5 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]", flush=True)
             Npoly_psf = psf_monomials.shape[1]; Npoly_trace = trace_monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly_psf
+            if mode == 'full' and os.environ.get("SPECEX_DEBUG_DUMP_A"):
+                np.savez(os.environ["SPECEX_DEBUG_DUMP_A"], A=np.array(A), B=np.array(B),
+                         Ns_l=Ns_l, n_gh=n_gh, Npoly_psf=Npoly_psf, Npoly_trace=Npoly_trace,
+                         Ncont=Ncont, iter=i, chi2=float(chi2))
             if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly_trace), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             else: idx = jnp.arange(A.shape[0])
@@ -969,6 +993,26 @@ class PSF_Fitter:
             # disabled, simply never let the step move cc away from its zero
             # init -- equivalent to not fitting a continuum at all.
             if not fit_continuum: d_p = d_p.at[-Ncont:].set(0.0)
+            # Cap the trace-position step implied by this iteration's raw
+            # Newton step at 0.5px, mirroring C++'s own per-iteration trace
+            # step limiter (specex_psf_fitter.cc:1516-1533, "don't want a
+            # step larger than N pix for all spots"). Without this, a step
+            # along the near-degenerate trace/asymmetric-GH-shape direction
+            # (see porting-notes.md's b-band anomaly writeup) can move the
+            # trace by >0.5px in a single 'full'-mode iteration -- something
+            # C++ never risks, since it never solves trace and PSF shape
+            # jointly in the first place. Scaling the *entire* step (not
+            # just the trace block) matches C++ exactly, which scales its
+            # whole solved parameter vector uniformly when this triggers.
+            if mode in ('trace', 'full'):
+                trace_start = Ns_l + n_psf_tot
+                d_trace_step = d_p[trace_start:trace_start + 2 * Npoly_trace].reshape(2, Npoly_trace)
+                dx_spots = trace_monomials @ d_trace_step[0]
+                dy_spots = trace_monomials @ d_trace_step[1]
+                max_dist = jnp.max(jnp.sqrt(dx_spots ** 2 + dy_spots ** 2))
+                max_trace_step = 0.5
+                trace_scale = jnp.where(max_dist > max_trace_step, max_trace_step / max_dist, 1.0)
+                d_p = d_p * trace_scale
             # Line search. NOTE: ls_chi2 must be a separate variable from
             # best_chi2 (the global best-state tracker above). They were
             # previously the same variable, so after each step best_chi2 held
@@ -987,7 +1031,20 @@ class PSF_Fitter:
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
-            
+            # Anti-drift damping for the trace/GH degenerate direction (see
+            # pc0/asym_gh_rows setup above): the per-iteration trace-step cap
+            # doesn't help here because each individual 'full'-mode step
+            # along this near-flat direction is small -- it's the *sum* over
+            # up to 50 iterations (chi2 keeps inching down the whole way,
+            # never triggering the chi2_precision break) that reaches
+            # 0.5-0.7px. Pull just the antisymmetric-in-x/y GH rows back
+            # toward their warm-start value by 10% every full-mode
+            # iteration; bounds their total drift to a geometric-series
+            # limit instead of letting it grow with iteration count, at
+            # near-zero cost to genuinely well-determined shape terms.
+            if mode == 'full':
+                pc = pc.at[asym_gh_rows].set(pc0[asym_gh_rows] + 0.9 * (pc[asym_gh_rows] - pc0[asym_gh_rows]))
+
             # --- Iterative Snapping: Update xc_init/yc_init to the current model prediction ---
             # We use a staged approach to prevent oscillation.
             # Flux mode: No snapping. Trace mode: Full snapping. Full mode: Increased frequency.
