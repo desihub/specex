@@ -213,7 +213,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         if not spots:
             return bid, {"error": "No spots found for bundle"}
 
-        # A fiber with zero surviving spots in the final selection is
+        # A fiber with (near-)zero surviving spots in the final selection is
         # genuinely unconstrained -- C++ detects exactly this condition
         # (specex_psf_fitter.cc:2594-2596, "No selected spot for fiber",
         # trace.mask=3) and excludes that fiber from the trace fit
@@ -225,8 +225,21 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # neighboring fibers (see porting-notes.md's b3@20241208 bundle-2
         # fiber-65 writeup) -- downstream consumers presumably rely on
         # this all-zero convention to recognize an untrustworthy fiber.
-        spot_fibers_present = {s['fiber'] for s in spots}
-        zero_spot_fibers = [fib for fib in range(f_min, f_max + 1) if fib not in spot_fibers_present]
+        # Threshold is <2, not strictly 0: C++'s own selection runs an
+        # earlier, stricter pass specifically for trace-fitting (not
+        # replicated here, which only has one, broader, final pass), so a
+        # fiber can have literally 0 spots by C++'s count while Python's
+        # broader pass finds exactly 1 -- seen directly on z3@20260401
+        # bundle 14/fiber 368 (a single spot at the very top wavelength
+        # edge). A single spot can't independently validate any
+        # wavelength-dependent trace behavior regardless of which pass
+        # found it -- it's the same "too thin to trust" case C++ zeros,
+        # just not always caught by an exact spot-count match to C++'s own
+        # (unreplicated) selection stages.
+        spot_fiber_counts = {}
+        for s in spots:
+            spot_fiber_counts[s['fiber']] = spot_fiber_counts.get(s['fiber'], 0) + 1
+        zero_spot_fibers = [fib for fib in range(f_min, f_max + 1) if spot_fiber_counts.get(fib, 0) < 2]
 
         fitter = PSF_Fitter(psf)
         chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg)
