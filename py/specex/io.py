@@ -72,6 +72,8 @@ def write_python_psf(filename, bundle_results, input_template):
     fin = fitsio.FITS(input_template)
     xtrace_out = fin['XTRACE'].read().astype(np.float64)
     ytrace_out = fin['YTRACE'].read().astype(np.float64)
+    xtrace_input_orig = xtrace_out.copy()
+    ytrace_input_orig = ytrace_out.copy()
     psf_table = fin['PSF'].read()
     psf_hdr = fin['PSF'].read_header()
     param_names = [p.strip() for p in psf_table['PARAM']]
@@ -122,6 +124,20 @@ def write_python_psf(filename, bundle_results, input_template):
             if fmin <= fib <= fmax:
                 xtrace_out[fib, :] = 0.0
                 ytrace_out[fib, :] = 0.0
+        # An explicitly-listed --broken-fibers fiber is excluded from the
+        # fit entirely and must be left completely untouched at the input
+        # template's own value -- confirmed C++'s real behavior (bit-for-
+        # bit identical to the input PSF, not zeroed) is different from
+        # the dynamically-discovered zero-spot case just above. The
+        # correction broadcast above is applied uniformly across the whole
+        # bundle's fiber range regardless, so undo it here for exactly
+        # these fibers rather than excluding them from the broadcast
+        # itself (simpler, and the broadcast is a no-op to undo since
+        # xtrace_input_orig is the pristine pre-any-bundle value).
+        for fib in res.get('explicitly_broken_fibers', []):
+            if fmin <= fib <= fmax:
+                xtrace_out[fib, :] = xtrace_input_orig[fib, :]
+                ytrace_out[fib, :] = ytrace_input_orig[fib, :]
         for row in range(len(param_names)):
             psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
             if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0

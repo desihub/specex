@@ -236,10 +236,27 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # found it -- it's the same "too thin to trust" case C++ zeros,
         # just not always caught by an exact spot-count match to C++'s own
         # (unreplicated) selection stages.
+        # Explicitly-listed --broken-fibers are a *different* case from a
+        # dynamically-discovered zero-spot fiber, and C++ treats them
+        # differently too: a broken fiber is simply excluded from the fit
+        # entirely and its XTRACE/YTRACE row is left completely untouched
+        # at the *input* template's value (confirmed bit-for-bit identical
+        # to the input PSF, both for z8@20260401 fibers 473/474 and
+        # z3@20260401 fiber 368 -- see porting-notes.md) -- it is NOT
+        # zeroed the way a dynamically-discovered zero-spot fiber is
+        # (that's the mask=3/resize(0) case above). Excluding a fiber from
+        # candidate generation naturally drops its spot count to 0, which
+        # would otherwise wrongly pull it into the zeroing set below; skip
+        # it here so it's left alone and inherits the input value exactly
+        # like C++ does.
+        explicitly_broken = set()
+        if broken_fibers:
+            explicitly_broken = {int(f) for f in str(broken_fibers).split(",") if f.strip()}
         spot_fiber_counts = {}
         for s in spots:
             spot_fiber_counts[s['fiber']] = spot_fiber_counts.get(s['fiber'], 0) + 1
-        zero_spot_fibers = [fib for fib in range(f_min, f_max + 1) if spot_fiber_counts.get(fib, 0) < 2]
+        zero_spot_fibers = [fib for fib in range(f_min, f_max + 1)
+                             if spot_fiber_counts.get(fib, 0) < 2 and fib not in explicitly_broken]
 
         fitter = PSF_Fitter(psf)
         chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg)
@@ -351,6 +368,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             # broadcast-across-fibers) write-back path.
             'trace_per_fiber_deg': trace_per_fiber_deg,
             'zero_spot_fibers': zero_spot_fibers,
+            'explicitly_broken_fibers': sorted(explicitly_broken),
             'chi2': float(chi2),
             's_fiber': np.array([s['fiber'] for s in final_selected]),
             's_wave': np.array([s['wave'] for s in final_selected]),
