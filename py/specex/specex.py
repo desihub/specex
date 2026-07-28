@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None):
     """
     Isolated task for fitting a single bundle.
     """
@@ -107,6 +107,28 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # noise into a fatal crash instead. Set via jax.config below, not
         # os.environ here -- see the jax_compilation_cache_dir note below for
         # why an os.environ write in this function body is already too late.
+        #
+        # Thread-count limiting -- must also happen before any JAX import.
+        # Without this, JAX's CPU/XLA backend (and whatever BLAS it
+        # delegates to) defaults to claiming *all* available hardware
+        # threads per process. With N concurrent CPU workers each
+        # independently trying to grab every thread, the result is severe
+        # intra-node oversubscription/thrashing among the workers
+        # themselves -- confirmed directly as the root cause of a real
+        # Perlmutter hybrid-allocation pilot going ~3x below its own
+        # achievable per-worker throughput while also slowing a concurrent
+        # GPU job by 1.56x (see porting-notes.md, 2026-07-21). Scale each
+        # worker's thread budget to roughly (available cores / worker
+        # count) so N workers collectively stay within the node's real
+        # core count instead of each claiming all of them.
+        if cpu_threads_per_worker is not None:
+            n_threads_str = str(max(1, int(cpu_threads_per_worker)))
+            for _env_key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+                os.environ[_env_key] = n_threads_str
+            os.environ["XLA_FLAGS"] = (
+                os.environ.get("XLA_FLAGS", "")
+                + f" --xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={n_threads_str}"
+            ).strip()
     os.environ["JAX_PLATFORM_NAME"] = backend
     # Persistent JAX/XLA compilation cache (analogous to CuPy's .cubin disk
     # cache) -- this driver spawns a fresh process per bundle, so without
@@ -475,8 +497,19 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
 
     if backend == "gpu":
         n_workers = min(len(all_bundles), n_gpus * workers_per_gpu)
+        cpu_threads_per_worker = None
     else:
         n_workers = min(len(all_bundles), cpu_workers or n_gpus)
+        # See fit_bundle_task's thread-limiting comment for why this exists
+        # at all: without it, every CPU worker independently claims all
+        # available cores, and N concurrent workers thrash each other.
+        # Scaling to (real core count / worker count) keeps the pool's
+        # aggregate thread demand within the node's actual budget. Floor
+        # of 1 thread/worker (an oversubscribed-but-not-zero fallback) if
+        # there happen to be more workers than cores.
+        available_cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+        cpu_threads_per_worker = max(1, available_cores // n_workers)
+        print(f"  CPU thread budget: {available_cores} cores / {n_workers} workers = {cpu_threads_per_worker} threads/worker", flush=True)
 
     ctx = mp.get_context('spawn')
     with ctx.Pool(processes=n_workers) as pool:
@@ -485,7 +518,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
