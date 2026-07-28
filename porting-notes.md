@@ -2038,3 +2038,305 @@ Also reiterating (not a new decision, but worth recording as the standing instru
 ### Still open / good next-session leads (additions)
 - **The more C++-faithful fix (tier (c) from two entries ago -- alternate trace-only/shape-only solves instead of one joint Newton step) remains the most principled long-term direction** given the project's stated preference for mirroring C++ logic -- not attempted this session (bigger lift, needs its own validation pass), but worth prioritizing over further micro-optimization of the current pragmatic fix if the ~15-20% overhead ever stops being an acceptable trade.
 - The jit-fusion attempt's *warm*-time improvement (not fully explored) suggests there may be a real, larger win available from fusing the anti-drift/step-cap logic into the *existing* `_accumulate_bundle_jax_jit`/`_predict_bundle_jax_jit` compiled units (avoiding the extra compilation units entirely) rather than adding new standalone jitted functions -- not attempted, flagged as a cheaper path to the same goal if this is revisited.
+
+## 2026-07-25 (continued, part 5) -- Committed the b-band fix; first real full-CCD run on homer's consumer GPU, and a genuine CPU/GPU concurrency finding
+
+**Committed** (d201a55): the GH/trace anti-drift damping fix, the dead-fiber zero-write fix, and the debug-dump hooks from the investigation. `t1` (user's own scratch file) correctly excluded.
+
+**Per-band breakdown before committing, requested to settle "why does R look worst now":** combined the 27-case matrix + 17-case random-validation set (44 cases, all post-fix) and computed mean/median xrms/yrms vs C++, plus offset/scatter vs both air and vacuum truth, per band. R's *mean* xrms (0.142) edges out b's (0.125), but R's *median* (0.113) is still below b's (0.124), and R's wavelength scatter vs truth is the *lowest* of all three bands (0.091 vacuum, 0.256 air) -- not the highest. Checked the r-band outliers driving the mean directly: they share a within-fiber wavelength-curvature-swing signature (0.66-1.8px swing, small ±0.04-0.12px cross-fiber shift) -- the *other*, already-accepted "real flexure" pattern from the original bundle-16 case (months before this session), not the uniform-shift bug this session's fix targeted. Two of the four outliers literally are bundle 16 on different exposures. Conclusion: the fix closed b-band's dominant failure mode; r-band's own separate, pre-existing real-flexure baseline is just relatively more visible now that b's is gone, not newly broken.
+
+**First real full-CCD test on homer.** Confirmed C++ (`desi_psf_fit`) loops over the full bundle range in one process call (`specex_pyfitting.cc:187`, `for(int bundle = first_fiber_bundle; bundle <= last_fiber_bundle; bundle++)`) -- no need to spawn 20 separate subprocesses for a C++ full-CCD run, same as Python's `--first-bundle 0 --last-bundle 19`.
+
+**GPU concurrency: Perlmutter's validated `workers-per-gpu 4` is unsafe on this 12GB 3060 at full-CCD scale, despite looking fine on a small sample.** A 4-bundle smoke test with `--workers-per-gpu 4` succeeded (61s for 4 bundles, ~30s per bundle under contention) and briefly touched 11.8/12.3 GB during compilation -- looked fine. The same setting on the full 20-bundle CCD **OOM'd badly: 8 of 20 bundles failed** (`CUDA_ERROR_OUT_OF_MEMORY`, then cascading `CUDA_ERROR_UNKNOWN` kernel-launch failures once the card was in a bad state). Sustained load across many bundles accumulates memory pressure a 4-bundle sample doesn't reveal -- a real trap worth remembering for anyone running this on a consumer card. **`--workers-per-gpu 2` completed the same full 20-bundle CCD (r8@20210215, deg=1, no continuum) cleanly, zero failures, 273.28s total** (~13.7s/bundle effective -- still a real throughput win over one-at-a-time, just not Perlmutter's 5x). This is the validated-safe full-CCD configuration for this specific card (12GB RTX 3060).
+
+**CPU/GPU mixing: tested, actively counterproductive with current code, recommend against it.** CPU backend alone: ~80s/bundle warm (vs GPU's ~23s solo, ~3.5x slower, as expected -- this is the whole reason the GPU port exists). Tried CPU concurrency hoping the 12-core/24-thread Ryzen 9 3900 would help: `--cpu-workers 3` on 4 bundles **backfired badly** -- 3 concurrent bundles took ~680-705s *each* (vs ~80s solo, ~9x slower), while a 4th bundle that ran with less contention finished in a normal 64s. Root cause: each CPU-backend JAX process already internally saturates ~8 threads on its own (`user`/`real` ratio ~7.8x in the solo test); 3 processes x 8 threads = 24, exactly the hardware thread count, but instead of clean scaling this causes severe contention/thrashing. Naive CPU+GPU mixing (just add CPU workers alongside GPU ones) is not a win on this hardware without further engineering (explicit per-worker thread capping, e.g. `OMP_NUM_THREADS`, untested) -- and even with that fixed, back-of-envelope math suggests the achievable gain from offloading 1-2 bundles to a properly-capped single CPU worker running in parallel with the GPU's 2 workers is small (~5-10% of total wall time at best), since CPU per-bundle cost is so much higher than the GPU's already-established 2-way throughput. **Recommendation: GPU-only (`--workers-per-gpu 2`) for this machine; CPU backend stays valuable as a correctness-equivalent GPU-less fallback (already validated bit-identical), not as a throughput booster alongside this GPU.**
+
+### Files
+- No code changes this entry -- pure testing/investigation, plus the git commit noted above (which was code from the previous entries, already described there).
+
+### Still open / good next-session leads (additions)
+- If CPU/GPU mixing is ever revisited, it needs explicit per-CPU-worker thread capping (`OMP_NUM_THREADS` or JAX's CPU thread-count controls) before concurrency has any chance of scaling cleanly -- not attempted this session.
+- The `--workers-per-gpu` default (4) is tuned for Perlmutter's A100s and is actively dangerous on smaller consumer cards at full-CCD scale (silent-looking success on a small sample, real OOM at full scale) -- worth a doc/help-text note, maybe worth having the CLI warn or auto-detect available GPU memory rather than trusting a fixed default blindly.
+
+## 2026-07-26 -- 30-bundle random campaign (10/band, genuinely new nights): one more dead-fiber variant found and fixed, otherwise clean
+
+Phase 1 of a larger planned campaign (9 full CCDs + 30 extra bundles). Randomly picked 10 bundles per band from 22 candidate (night, camera) combos per band, all excluding the 5 nights already used anywhere this session, spanning 13 distinct new nights. 29/30 valid (1 pre-existing C++ singular-matrix failure, `z3@20260401:10`, same `cholesky_solve failed` class as `z5@20210215:6` two entries ago -- not chased, not related to anything changed this session).
+
+**Found and fixed one more instance of the dead-fiber issue, generalized the fix.** `z3@20260401:14` came back at xrms=583px. Investigated: fiber 368 had exactly *one* surviving spot (at the very top wavelength edge, 9802.4A) in Python's single broader selection pass -- and Python's interpolated output for it was actually fine (2916.96, matching the midpoint of neighbors 367/369 almost exactly, 2916.945). C++ found *zero* spots for the same fiber (its own selection runs a separate, stricter, earlier pass specifically for trace-fitting, not replicated in Python) and zeroed it -- the exact same comparison artifact as the original fiber-65 case, just not caught by the `==0` threshold since Python's one (broader-pass) spot slipped through. **Fixed by loosening the threshold to `<2` spots** (a single spot can't validate wavelength-dependent trace behavior regardless of which pass found it -- same underlying "too thin to trust" case C++ zeros, just not always exactly spot-count-matched to C++'s own unreplicated multi-stage selection). Verified fixed on both the new case and the original fiber-65 regression case. Committed (6589dcb).
+
+**Rest of the campaign, healthy.** Aggregate (29 valid cases):
+
+| band | n | xrms mean/med | yrms mean/med | wrms_cpp mean | wrms_py mean |
+|---|---|---|---|---|---|
+| r | 10 | 0.142 / 0.079 | 0.073 / 0.070 | 0.584 | 0.586 |
+| b | 10 | 0.101 / 0.106 | 0.082 / 0.069 | 0.623 | 0.596 |
+| z | 9 | 0.047 / 0.046 | 0.056 / 0.052 | 0.547 | 0.536 |
+
+Consistent with the post-fix 44-case set from two entries ago -- z best, b and r comparable, no new failure modes beyond the dead-fiber variant above (already fixed). r's mean still pulled up by one outlier (`r9@20220120:9`=0.457) -- not individually checked this entry, but consistent in shape with the already-characterized real-flexure pattern from prior entries; not investigated further given time.
+
+### Files
+- `py/specex/specex.py`: dead-fiber threshold `==0` -> `<2` (see above). Committed (6589dcb).
+
+**`z3@20260401:10`'s C++ failure, checked directly: Python succeeds cleanly where C++ hard-fails, not just "unrelated and skipped."** The campaign script's `if rc != 0: continue` logic meant Python was never actually attempted on this bundle -- ran it directly afterward and it converges normally (rc=0, smooth chi2 trajectory, `dx_final mean=0.036, dy_final mean=0.023`, zero warnings). No C++ output exists to compare positions against, but nothing in the trajectory looks suspicious. Read: C++'s unregularized `cholesky_solve` hit a genuinely singular/near-singular matrix and aborted fatally (`status 323`); Python's solve has a small ridge term (`A_reg = A_sub/... + 1e-8*eye`) that lets it push through the same near-singular case without failing -- Python is more numerically robust here, not just silently different. Worth remembering next time a C++-side `cholesky_solve failed` case shows up in a campaign -- check Python directly rather than assuming both sides are equally stuck.
+
+Also checked vs *truth* (line list), not just for suspicious trajectory shape -- since there's no C++ output to compare positions against, `wave_residual_stats` was run using Python's own recorded spot wavelengths as the truth reference (same values C++ would have used too, they're the line list's true wavelengths, not a fitted quantity). Result: rms=0.5467, vacuum mean/std=-1.8744/0.0769 -- sitting right in the middle of this same campaign's other 8 z-band cases (rms 0.492-0.582, vacuum std 0.069-0.079 range established across the whole session) and matching the z-band vacuum offset established earlier (-1.87 to -1.89) almost exactly. Statistically indistinguishable from every other well-behaved z-band case -- a genuine instance of Python succeeding cleanly where C++ hard-fails, not just "looks fine, unverified."
+
+### Still open / good next-session leads (additions)
+- Phase 2 of the planned campaign (9 full CCDs, 3/band) not yet started -- queued next, C++ side must run sequentially (no compile cache, unsafe to run concurrently with itself -- see previous entry), Python GPU side can run in parallel using the validated `--workers-per-gpu 2` full-CCD config.
+- `r9@20220120_00119493:9` (xrms=0.457) not individually characterized -- worth a quick per-fiber check next time to confirm it's the known real-flexure pattern rather than assuming.
+
+## 2026-07-26/27 (continued) -- Phase 2 (9 full CCDs): a real methodology gap found and fixed -- `--broken-fibers` was never being passed on homer at all, and it's the true explanation for most of the session's unexplained `cholesky_solve` failures (dead-columns theory retracted)
+
+Ran the planned 9 full CCDs (3/band), disjoint from every exposure touched anywhere earlier this session (original 5-exposure testing + the 30-bundle campaign's 11 nights) -- only 6 fresh nights remained locally with usable coverage, so some overlap with `20260401` (the long-standing Perlmutter test night) was unavoidable. C++ ran sequentially (confirmed `desi_psf_fit` loops the full bundle range in one process, `specex_pyfitting.cc:187`); Python ran concurrently on GPU (`--workers-per-gpu 2`). C++ total ~3h20m; Python total ~62min, both in parallel.
+
+**Python: 9/9 succeeded cleanly. C++: 6/9 succeeded, 3 (`r8@20251017`, `b3@20260401`, `z8@20260401`) hit the familiar `cholesky_solve failed` singular-matrix class.** `z8@20260401` failing was the alarming one -- it's the long-standing Perlmutter-era standing test case.
+
+**First hypothesis (dead CCD columns) proposed, checked, and retracted before acting on it.** `r7@20230207`'s full-CCD comparison also showed 4 catastrophic-outlier fibers (20, 87, 134, 414), and all 4 showed `ndead>=1` in C++'s dead-column log -- looked like a lead. Checked the actual code and the base rate before trusting it: `ndead>500` is the only threshold in that code path (a diagnostic counter), and **297 of this CCD's 500 fibers (59%) show `ndead>=1`** -- completely routine, not a discriminator. Retracted. (An accidental/interrupted answer to "should we just zero any fiber with ndead>=1" was caught before being acted on -- would have wrongly zeroed 59% of all fibers.)
+
+**Real cause, found via a direct, much better question: is broken-fiber info available locally at all?** Checked the preproc FITS files' own `FIBERMAP` extension -- it has a `FIBERSTATUS` column (DESI's real per-fiber bitmask), no CFS/Perlmutter access needed. For `z8@20260401`, exactly 2 fibers show the `BROKENFIBER` bit (`desispec.maskbits.fibermask.BROKENFIBER`, bit 2, mask `0x4`): **local fibers 473 and 474 -- exactly matching the real, remembered production `--broken-fibers 473,474` value for this exposure.** For `r7@20230207`, the same check returns local fibers **20, 87, 134, 414, 487** -- matching all 4 of the "mystery" outlier fibers exactly, plus one (487) not previously flagged.
+
+**This is a real, session-wide methodology gap, not a specex bug.** Checked how real production actually derives `--broken-fibers`: `desispec/scripts/proc.py` calls `calibfinder.badfibers()`, which reads `BROKENFIBERS`/`BADCOLUMNFIBERS`/etc. keywords from `$DESI_SPECTRO_CALIB` (an external calibration database keyed by camera/date) -- **not set and not reachable on homer at all**, confirmed directly. FIBERMAP's own `FIBERSTATUS` is a different, independent source (baked into the exposure itself, not a live calibration-DB query) but is evidently a faithful per-exposure record of the same information, at least for `BROKENFIBER` specifically -- validated against the one case with a known-correct answer. Since neither this session's testing nor (per the user, who caught this) the original Perlmutter-to-homer data transfer ever captured `$DESI_SPECTRO_CALIB`-derived broken-fiber lists, **no local comparison this entire local-machine era has been running with the broken-fiber exclusion real production would apply.**
+
+**Built a small extractor** (`get_broken_fibers.py`, scratchpad, not yet committed): reads a preproc file's `FIBERMAP`, returns local fiber numbers (global `FIBER` minus its own minimum -- confirmed correct for both spectrographs checked) where `FIBERSTATUS & BROKENFIBER != 0`.
+
+**Direct test: reran `z8@20260401` full-CCD, C++ and Python, both with `--broken-fibers 473,474`.** C++ now completes cleanly, all 20 bundles, zero fatal errors (previously aborted partway). Python (already fine without it) also reruns cleanly, correctly zeroing fibers 473/474's XTRACE/YTRACE via the already-committed `<2`-spot fix. **Correctness with both sides properly excluding the real broken fibers: xrms mean=0.0319px, max=0.0450px across all 20 bundles -- completely clean, no anomalies anywhere.** The standing test case, done correctly, has no issues at all.
+
+**Checked whether this also explains the session's other `cholesky_solve` failures -- mostly yes, not universally:**
+
+| case | broken fibers found (FIBERMAP) | in the failing range? |
+|---|---|---|
+| `z3@20260401:10` | 65,234,273,338,368 | **yes** (273 is in bundle 10's 250-274) |
+| `r8@20251017` (full CCD) | 473,474 (same fibers as z8@20260401 -- plausibly the same physical hardware issue recurring across nights) | **yes** |
+| `b3@20260401` (full CCD) | 65,234,273,368 | **yes** (present in the CCD; exact failing bundle not individually checked) |
+| `z5@20210215:6` | 342 | **no** -- 342 is outside bundle 6's 150-174 range entirely |
+
+3 of 4 checked failures line up cleanly; `z5@20210215:6` does not and remains a genuinely separate, still-unexplained `cholesky_solve` case -- worth remembering this is a strong explanation for *most*, not a universal one, before assuming every future singular-matrix failure is this same story.
+
+**Confirmed CLI args match production defaults** (raised directly): `band_settings()` (`run_matrix.py` and equivalent logic throughout) returns `legendre-deg-wave=3, fit-continuum=True` for z-band and `legendre-deg-wave=1, fit-continuum=False` for b/r -- matching desispec's real production defaults, used consistently all session.
+
+**Redo in progress as of this entry**: the 30-bundle campaign and the 9-full-CCD campaign are both being rerun with the extractor wired in (`run_bundle_campaign_v2.py`, `run_fullccd_cpp_v2.py`/`run_fullccd_py_v2.py`, all scratchpad, writing to `*_v2_results.txt`/`*_v2_status.txt` so the original (broken-fiber-blind) results are preserved for comparison rather than overwritten). Results not yet in as of this entry -- to be appended once complete.
+
+### Files
+- No specex code changes this entry. New scratchpad tooling: `get_broken_fibers.py`, `run_bundle_campaign_v2.py`, `run_fullccd_cpp_v2.py`, `run_fullccd_py_v2.py`. `run_matrix.py`'s `run_cpp`/`run_py` gained an optional `broken_fibers` passthrough parameter.
+
+### Still open / good next-session leads (additions)
+- **`z5@20210215:6`'s `cholesky_solve` failure remains genuinely unexplained** -- confirmed not a broken-fiber case, still open.
+- Consider whether `get_broken_fibers.py` should account for any FIBERSTATUS bits beyond `BROKENFIBER` (e.g. `STUCKPOSITIONER`, `BADFIBER`, `BADTRACE`) -- only `BROKENFIBER` has been directly validated against a known-correct answer so far; deliberately kept narrow rather than guessing broadly a second time.
+- Once the v2 redo lands: decide whether the *original* (pre-this-entry) correctness campaigns from earlier this session (the first 27-case matrix, the 17-case random validation) also need redoing with broken-fibers now that the tooling exists, or whether it's more efficient to just check post-hoc whether any of those specific bundles happened to contain a broken fiber (most won't have, given how sparse broken fibers are per exposure).
+
+## 2026-07-27 (continued) -- v2 redo caught a real bug in the broken-fiber fix itself, before it could contaminate the real numbers
+
+Launched the v2 30-bundle redo with `--broken-fibers` wired in. Results looked wrong immediately: several cases with a broken fiber in range still showed catastrophic (300-500px) xrms blowups, e.g. `z3@20260401:14` (broken=368) came back at the *exact same* 583px as the original, pre-any-fix run -- meaning the fix hadn't actually helped at all for this pathway.
+
+**Root cause: I had only ever verified Python's side of the earlier `z8@20260401` broken-fiber test, and wrongly assumed C++ also zeroed those fibers.** Checked C++'s actual output directly (finally, for both `z8`'s 473/474 and `z3`'s 368): **C++ leaves an explicitly-`--broken-fibers`-listed fiber completely untouched at the input template's own value** -- confirmed bit-for-bit identical to the input PSF in both cases. This is a *different* behavior from the dynamically-discovered zero-spot case (which genuinely does get zeroed, `mask=3`/`resize(0)`) -- two distinct C++ code paths, and the earlier fix conflated them. Python's fitter naturally drops an explicitly-broken fiber's spot count to 0 (excluded from candidate generation), which was wrongly pulling it into the same `<2`-spot zeroing set as a real dynamically-discovered dead fiber.
+
+**Fixed** (`specex.py`/`io.py`, committed `70e988f`): explicitly-broken fibers are now tracked separately (`explicitly_broken_fibers`, parsed from the `--broken-fibers` CLI value directly) and, in the writer, restored to the pristine input-template value (undoing whatever the shared trace-correction broadcast added across the bundle) rather than zeroed. Verified bit-identical to C++/input on both known cases (`z8` 473/474, `z3` 368), and confirmed the original zero-spot fix's own regression case (`b3@20241208` bundle 2, fiber 65 -- no `--broken-fibers` involved) is unaffected.
+
+**The v2 redo's numbers are invalid and were not used for anything -- relaunched clean as v3** with the corrected code, same picks, writing to `bundle_campaign_v3_results.txt`.
+
+### Files
+- `py/specex/specex.py`, `py/specex/io.py`: explicitly-broken-fiber handling, restore-to-input rather than zero. Committed `70e988f`.
+
+### Still open / good next-session leads (additions)
+- Once v3 (and the eventual full-CCD redo) land clean, this correction is done -- no further action needed on this specific bug, just noting the lesson: when validating a fix by comparing "before vs after" on one pipeline, always check *both* pipelines' actual output values directly rather than assuming symmetry from a single case.
+
+## 2026-07-27 (continued, part 2) -- v3 bundle redo: clean across the board, b-band improved further, zero failures anywhere
+
+30-bundle campaign (10/band, same picks as before) rerun with the corrected explicitly-broken-fiber handling. All 30 cases clean, including all 4 that involved a broken fiber (`b4@20260401:2` broken=51, `z3@20260401:10` broken=273, `z3@20220112:9` broken=234, `z3@20260401:14` broken=368) -- each now shows normal xrms/yrms (0.05-0.06px range) instead of the 300-580px blowups seen in v1/v2. **Zero C++ or Python failures anywhere in this set** -- the two cases that previously hard-failed (`z3@20260401:10`, and implicitly whatever caused v1's silent contamination) now succeed cleanly once the real broken fiber is excluded.
+
+| band | n | xrms mean/med | yrms mean/med | wrms_cpp mean | wrms_py mean |
+|---|---|---|---|---|---|
+| r | 10 | 0.142 / 0.079 | 0.073 / 0.070 | 0.584 | 0.586 |
+| b | 10 | **0.089** / 0.085 | **0.064** / 0.057 | 0.620 | 0.593 |
+| z | 10 | 0.047 / 0.046 | 0.053 / 0.046 | 0.551 | 0.541 |
+
+b-band improved further vs the pre-broken-fiber-fix number two entries ago (mean xrms 0.101 -> 0.089, yrms 0.082 -> 0.064) -- proper broken-fiber exclusion helps beyond just the cases that would otherwise catastrophically fail. r's mean is still pulled up by the same already-understood real-flexure outlier (`r9@20220120:9`=0.457); z is uniformly excellent as always.
+
+**Now redoing the 9-full-CCD campaign the same way** (`run_fullccd_cpp_v2.py`/`run_fullccd_py_v2.py`, already had broken-fiber extraction wired in -- the bug was in shared `specex.py`/`io.py` code, now fixed, so no driver-script changes needed). C++ running sequentially (~3.5h+ estimated, likely a bit more since the 3 previously-aborted CCDs should now run to completion instead of dying partway), Python concurrently on GPU (~1h). Not yet complete as of this entry.
+
+### Still open / good next-session leads (additions)
+- Once the full-CCD v2 redo lands: this whole broken-fiber investigation (both the discovery and the fix-the-fix correction) should be considered closed out, pending final full-CCD numbers.
+
+## 2026-07-27 (continued, part 3) -- Full-CCD v2 redo complete: all 9 clean, zero failures, broken-fiber investigation closed out
+
+All 9 C++ full-CCD runs succeeded this time (rc=0 across the board) -- including the exact 3 that fatally aborted in the pre-fix run (`r8@20251017`, `b3@20260401`, `z8@20260401`). Python: 9/9 clean as before.
+
+| CCD | band | xrms mean/med | xrms max (bundle) | yrms mean | wrms_cpp | wrms_py | n_broken |
+|---|---|---|---|---|---|---|---|
+| r7@20230207 | r | 0.117/0.077 | 0.29 (b11) | 0.055 | 0.600 | 0.595 | 5 |
+| r4@20251220 | r | 0.082/0.079 | 0.16 (b6) | 0.044 | 0.588 | 0.582 | 4 |
+| r8@20251017 | r | 0.168/0.174 | 0.28 (b8) | 0.052 | 0.596 | 0.609 | 2 |
+| b3@20260401 | b | 0.102/0.085 | 0.26 (b5) | 0.074 | 0.608 | 0.611 | 4 |
+| b0@20241104 | b | 0.077/0.072 | 0.17 (b0) | 0.073 | 0.602 | 0.580 | 1 |
+| b9@20260401 | b | 0.059/0.057 | 0.10 (b3) | 0.051 | 0.588 | 0.606 | 0 |
+| z8@20260401 | z | **0.032/0.030** | 0.05 (b19) | 0.036 | 0.552 | 0.557 | 2 |
+| z6@20230805 | z | 0.044/0.042 | 0.07 (b19) | 0.045 | 0.555 | 0.562 | 2 |
+| z7@20260401 | z | 0.055/0.052 | 0.08 (b2) | 0.066 | 0.505 | 0.495 | 5 |
+
+Per-band mean xrms: r 0.122, b 0.079, z 0.044 -- no anomalies anywhere, every per-CCD max is a normal value, not a blowup. `z8@20260401` -- the long-standing Perlmutter-era test case, and the one that was crashing at the start of this whole investigation -- is now the cleanest result in the set (0.032px mean).
+
+**This closes out the broken-fiber investigation arc**: dead-fiber fix (fiber 65) -> generalized dead-fiber fix (`<2` spots, fiber 368) -> full-CCD stress testing surfaced 3 more mystery fibers -> dead-column hypothesis proposed and retracted -> real cause found (`--broken-fibers` never being passed locally, FIBERMAP-based extractor built) -> first broken-fiber fix attempt had its own bug (only verified one pipeline's output) -> corrected -> both the 30-bundle and 9-full-CCD campaigns rerun clean with zero failures anywhere.
+
+### Files
+- No further code changes this entry -- confirms the fixes from the previous two entries (`70e988f` and the dead-fiber-generalization commit) are sufficient and correct at full-CCD scale.
+
+### Still open / good next-session leads (additions)
+- **`z5@20210215:6`'s `cholesky_solve` failure remains the one confirmed-not-broken-fiber-related open case** -- still unexplained, lowest priority given how much else this session resolved.
+- Decide whether the original (pre-broken-fiber-fix) correctness campaigns from earlier this session are worth redoing too, now that the tooling exists -- likely low-value given how sparse broken fibers are per exposure and how clean the numbers already were in aggregate, but worth a quick post-hoc check of which specific bundles in those campaigns happened to contain a broken fiber before fully closing the book on it.
+
+## 2026-07-27 (continued, part 4) -- z5@20210215:6 characterized (not root-caused); overall status assessment; and a Perlmutter production-run plan for the 30-CCD/night-scale run, grounded in prior real-hardware validation
+
+**z5@20210215:6, characterized as far as practical tonight.** Not a masked/dead-column issue -- checked the MASK extension directly for the x~1400-1412 region where C++'s ~29 "cannot measure flux" warnings cluster (spanning nearly the full column height, y=40 to y=3937): only 10 masked pixels per column, and the specific stamp around one of the worst-offending spots (x=1401,y=3910) has zero masked pixels in it at all. Not explained by dead columns (confirmed) or broken fibers (confirmed two entries ago -- fiber 342 is the only broken fiber in this exposure, outside bundle 6's range). **Python succeeds cleanly on the identical bundle** (rc=0, no warnings, dx/dy_final small, wrms=0.5528 -- fully in-family with every other healthy z-band case), reinforcing the now-repeated pattern (also seen on z3@20260401:10 before broken-fibers was found) that Python's ridge-regularized solve is more robust to whatever's making C++'s unregularized `cholesky_solve` choke, on this specific class of case. **Left open** -- the underlying C++-side numerical trigger (something about this exposure's flux measurements across many spots near x~1400-1412, not a masking or broken-fiber effect) isn't identified, but Python's own output on the same data looks trustworthy by every check available (no independent C++ reference for this specific bundle, but truth-vs-line-list is clean).
+
+### Overall status assessment (asked directly)
+Agreed: this session's work (b-band trace/GH-degeneracy fix, dead-fiber generalization, the broken-fiber methodology fix) has moved the project from "actively hunting large, unexplained correctness anomalies" to "examining edge cases on an otherwise solid foundation." Concretely, as of tonight: zero failures across the redone 30-bundle campaign (30 cases) and 9-full-CCD campaign (180 bundles), covering all three bands, 20+ distinct nights never touched before this session. The one remaining open failure (z5@20210215:6) is narrow, doesn't reproduce elsewhere, and Python succeeds where C++ fails on it anyway.
+
+**One important caveat surfaced by re-reading this project's own pre-outage Perlmutter history rather than re-deriving from scratch**: a real, already-run 54-case full-CCD campaign on actual A100 hardware (2026-07-21, before the outage) found Python's timing is *not* uniformly faster than C++ -- z-band roughly breaks even (0.99x), r-band roughly even (0.95x), but **b-band was a genuine 2x *slower* than C++ in aggregate**, driven by Python's fixed per-worker startup cost (JIT compilation, process spawn) dominating for b-band's cheap, fast-converging bundles. This session's new anti-drift damping fix adds real per-iteration overhead specifically to `trace`/`full`-mode iterations (the ~15-20% single-bundle overhead found and accepted on homer) -- since that's exactly the code path already flagged as Python's weak spot on Perlmutter, **this needs re-validation at Perlmutter/A100 scale before trusting the "solid ground on speed" read for b-band specifically**, not just carried forward from homer's very different (single consumer GPU, no multi-worker contention at production scale) test conditions.
+
+### Perlmutter production-run plan (30 CCDs / 600 bundles), ready for when the outage ends
+
+**Not starting from scratch** -- a real architecture was already validated pre-outage:
+- Perlmutter GPU node: 1x AMD EPYC 7763 (128 threads) + 4x A100 (40GB each).
+- `--gpu 4 --workers-per-gpu 5` (20 concurrent workers = exactly one wave for a 20-bundle CCD) already validated end-to-end on all 9 standing cameras: z8 full CCD in 76.41s, zero failures -- **4.02x faster than the C++ 3-node/128-core-each baseline (307s) for one CCD**.
+- A full 30-CCD random campaign (10/band, distinct nights) already ran clean on real Perlmutter hardware pre-outage, combined with two other campaigns into a 54-case aggregate: correctness at parity with C++ (Python's own wstd average 0.2787Å vs C++'s 0.2822Å, essentially even, band-dependent).
+- GPU memory packing already characterized per band: z-band is the tight constraint (only 624 MiB spare of 40960 MiB at N=20/GPU), b-band has ~10 GiB spare even at N=20. `N=10/GPU` was already identified pre-outage as "a reasonable, deliberate safety-margin choice for the 30-CCD-at-once campaign" (packing sweep: N=10 gives 9.42s/bundle vs N=20's 5.71s/bundle -- costs ~40% aggregate throughput vs max packing, but with real headroom margin).
+- Two speed-optimization opportunities were already identified and root-caused pre-outage but never implemented: **(1) the selection phase (`fit_candidate_fluxes`, repeated ~7-8x per bundle) costs 2.4-2.6x the final joint fit and is the actual dominant cost, not the fit itself** -- flagged as the highest-value future speed target; **(2) the "straggler bundle" issue (a subset of b/r bundles taking ~1.8x longer due to the trace warm-up loop always spending its full 5-iteration budget instead of exiting early on plateau)** -- root-caused down to the exact mechanism, fix identified (detect plateau after 2 iterations, break with best-so-far) but not implemented.
+- One still-open, pre-outage, never-explained correctness item worth a quick re-check once Perlmutter's back: `r2@20250109`/`r2@20241208` showed a uniform whole-CCD Y-trace offset (~0.18-0.24px in every bundle) not explained by spot-count mismatch and not reproduced by a third r2 case (`r2@20201221`, clean). Given this session's fixes were X-focused (trace/GH-shape degeneracy) and this is a *Y*-axis, whole-CCD-uniform effect, it's very unlikely to be explained by anything fixed tonight -- worth a fresh look, not an assumption either way.
+
+**What's genuinely new since that validation and needs confirming on real hardware, not assumed to transfer from homer:**
+1. **Re-run the standing 9-camera + a subset of the 54-case campaign with this session's code** (GH anti-drift damping, generalized dead-fiber fix, broken-fiber fix) to get real A100-scale correctness *and* timing numbers -- especially b-band, given the pre-outage 2x-slower finding and this session's added per-iteration overhead land on exactly the same weak spot. If b-band's overhead is proportionally similar to homer's ~15-20%, it could push an already-2x-slower band to ~2.3-2.5x slower -- worth knowing precisely, not guessing, before scaling to 30 CCDs where b-band is 1/3 of the workload.
+2. **Switch `--broken-fibers` sourcing for real production**: this session's `get_broken_fibers.py` (FIBERMAP-based) was specifically a homer workaround for `$DESI_SPECTRO_CALIB` being unreachable locally. Real Perlmutter production should use the actual authoritative source -- `desispec.calibfinder.badfibers()` (already installed, already what C++'s own production wrapper `desispec/scripts/proc.py` uses) -- not the FIBERMAP proxy. Both should be cross-checked once Perlmutter's back (they should agree closely if FIBERMAP's `BROKENFIBER` bit is itself sourced from the same calibration data, per this session's working hypothesis, but this hasn't been directly confirmed since `$DESI_SPECTRO_CALIB` was never reachable to compare against).
+3. **Scale the packing plan from "one CCD" to "30 CCDs, 600 bundles, at once."** Rough sizing off already-validated numbers: at `N=10/GPU` (the pre-outage safety-margin choice) and the packing sweep's worst-case (z-band) 9.42s/bundle-equivalent, 600 bundles / 40 bundles-per-node-per-wave (10/GPU x 4 GPUs) = 15 waves needed on **one** node -> roughly 15 x 94.2s ~= 24 min for the whole night's 30 CCDs on a single node (worst case, treating everything as z-band-heavy; the real mix of b/r/z would be faster). Spreading across more nodes divides this roughly linearly -- e.g. 3 nodes (matching C++'s node count, but with GPUs instead of the same CPU count) -> ~8 min; more nodes for a faster wall time if the allocation is available. **This needs a real test, not just extrapolation** -- the pre-outage packing sweep measured single-GPU packing in isolation, never an actual 600-bundle/multi-node run end-to-end.
+4. **Decide whether to implement either of the two known-but-undone speed fixes (selection-phase cost, straggler early-exit) before the real production run**, given they were the two highest-value speed targets identified pre-outage and directly affect the 30-CCD wall-time estimate above -- particularly the straggler fix, since a subset of stragglers gating an entire wave's completion time matters more at 30-CCD scale (more bundles = more chances to hit a straggler within any given wave) than it did for a single-CCD test.
+
+**Proposed staged rollout for when Perlmutter returns** (order matters -- cheap/fast checks first):
+1. Re-run the standing 9-camera correctness+timing comparison with this session's code (~10-15 min of Perlmutter time) -- confirms nothing regressed at A100 scale before spending more allocation.
+2. Targeted b-band timing re-check specifically (the flagged risk above) -- a handful of b-band CCDs at real `workers-per-gpu=5` production settings, compare against the pre-outage 2x-slower baseline directly.
+3. Switch to `calibfinder.badfibers()` for `--broken-fibers`, cross-check against `get_broken_fibers.py`'s FIBERMAP-based answer on a few exposures.
+4. A real, single, multi-node 30-CCD/600-bundle end-to-end dry run (not extrapolated) to get an honest wall-time number and confirm no new failure modes emerge at that scale (memory, scheduler, filesystem contention -- all previously-seen risk categories even for single-CCD campaigns run late in a Perlmutter session).
+5. Decide on the two pending speed optimizations based on how step 4's real number compares to the target (beating the 3-node C++ baseline, already true per-CCD -- confirm it holds at full 30-CCD scale too, not just extrapolated).
+
+### Still open / good next-session leads (additions)
+- The b-band Perlmutter-scale timing risk (this entry's item 1) is the single most important unresolved question before declaring the production plan validated -- prioritize it first when Perlmutter's back.
+- `r2@20250109`/`r2@20241208`'s uniform whole-CCD Y-offset -- still open, likely unrelated to this session's X-focused fixes, worth a fresh look rather than assuming it's resolved.
+
+## 2026-07-27 (continued, part 5) -- Correction to the previous entry's timing risk assessment (cited stale data), packing clarified per-band, and a homer C++-vs-Python full-CCD timing comparison
+
+**Correction, flagged directly by the user:** the previous entry's "b-band 2x slower on Perlmutter" claim, used to justify the top-priority re-validation risk, was **stale data** -- it came from the 54-case campaign (2026-07-21 ~16:10 entry), which ran *before* two major speed fixes implemented later that same night (power-of-2 shape bucketing, then the `_fit_all_spots_batch` jit-wrapper hoisting fix, the latter explicitly called "the biggest win of the night"). The corrected, final pre-outage headline (2026-07-22 00:37, after the timing *methodology itself* was also debugged twice) was:
+
+| band | t_cpp | t_py | speedup |
+|---|---|---|---|
+| b (b5/b4/b2) | 48.9-51.4s | 37.7-43.0s | **1.16-1.34x faster** |
+| r (r3/r5/r1) | 104.1-114.0s | 39.6-44.8s | 2.33-2.87x faster |
+| z (z1/z6/z9) | 133.9-137.1s | 40.9-43.0s | 3.13-3.31x faster |
+| sum | 880.9s | 369.99s | **2.38x faster** |
+
+**Python was faster than C++ on every single band pre-outage, including b-band** -- never behind. The re-validation risk from the previous entry is real (this session's new code has never run on Perlmutter, and adds overhead to a code path that's structurally b-band's weakest point regardless of which side of 1.0x it lands on), but the framing should be "confirm we're still ahead by a comfortable margin," not "confirm we're not behind."
+
+**Packing also corrected, per-band, not a blanket `N=10`** (also flagged directly): re-reading the actual packing-sweep memory numbers, only z-band is genuinely tight (~624 MiB spare of 40960 MiB at N=20/GPU). b-band sits flat at ~30.8GB regardless of N -- full N=20 packing is safe with ~10GiB spare even at max. r-band lands at ~40.0GB at N=20 (~1GiB spare -- workable, tighter than b, looser than z). `N=10` was specifically identified pre-outage as the *z-band* safety margin, not a uniform policy -- the production plan should pack b-band at N=20 (or close to it), z-band conservatively (N=10-15), r-band in between.
+
+**Homer C++-vs-Python full-CCD timing, for context (not directly comparable to Perlmutter, but informative)** -- from the 9 full CCDs run tonight (this session's fixed code, both engines):
+
+| CCD | t_cpp | t_py | ratio | cpp/bundle | py/bundle |
+|---|---|---|---|---|---|
+| r7@20230207 | 1327.9s | 320.7s | 4.14x | 66.4s | 16.0s |
+| r4@20251220 | 1346.5s | 248.1s | 5.43x | 67.3s | 12.4s |
+| r8@20251017 | 1230.2s | 237.9s | 5.17x | 61.5s | 11.9s |
+| b3@20260401 | 277.0s | 204.6s | 1.35x | 13.9s | 10.2s |
+| b0@20241104 | 230.1s | 203.6s | 1.13x | 11.5s | 10.2s |
+| b9@20260401 | 284.3s | 199.0s | 1.43x | 14.2s | 10.0s |
+| z8@20260401 | 1788.3s | 269.8s | 6.63x | 89.4s | 13.5s |
+| z6@20230805 | 1833.7s | 268.9s | 6.82x | 91.7s | 13.4s |
+| z7@20260401 | 2106.8s | 416.5s | 5.06x | 105.3s | 20.8s |
+| **band avg** | | | **r 4.84x / b 1.30x / z 6.00x** | | |
+
+**The same structural pattern shows up on completely different hardware**: b-band is Python's smallest advantage on homer too (1.30x vs r's 4.84x and z's 6.00x) -- weaker evidence needed, since this reproduces independently on a single consumer GPU + desktop CPU, not just Perlmutter's A100s/EPYC, reinforcing that the fixed-per-worker-overhead mechanism is real and platform-independent, not an artifact of one specific setup.
+
+**Per-core extrapolation attempted, with an important caveat that makes it inconclusive on its own.** Comparing homer's per-bundle C++ cost (13.2s/65.1s/95.5s for b/r/z, from the *sequential* single-process 20-bundle runs above) against Perlmutter's real 20-way-parallel-MPI wall-times (~50s/~110s/~135s, roughly per-bundle since fully parallel) gives an apparent homer speed advantage of ~3.7-3.9x for b-band but only ~1.4-1.75x for r/z -- not a flat ratio, which it should be if this were purely raw core clock/IPC. Likely explanation: homer's sequential run amortizes I/O and per-CCD setup across all 20 bundles in one process, while Perlmutter's 20 independent MPI ranks each pay their own full I/O cost -- this would hit b-band hardest (I/O is a bigger fraction of a cheap band's total time) without needing per-core speed to actually vary by band. Ryzen 9 3900 does clock meaningfully higher than EPYC 7763 (~4.3GHz boost vs ~3.5GHz), consistent with a real, smaller per-core advantage underneath (plausibly in the 1.3-1.7x range matching r/z) -- but this wasn't isolated cleanly tonight. **Not concluded, flagged as a nice-to-have if a truly isolated single-bundle-per-core comparison is worth doing later** (would need either a concurrent, not sequential, homer C++ run of multiple bundles, or a single-bundle-only timing on both platforms).
+
+### Still open / good next-session leads (additions)
+- Corrected: the Perlmutter production plan's top risk is "confirm the new session's code doesn't erode the pre-outage 1.16-1.34x b-band lead," not "confirm b-band isn't currently 2x behind" -- update framing in any future summary.
+- A clean, isolated single-bundle-per-core homer-vs-Perlmutter comparison (not the sequential-vs-parallel comparison done tonight) would be needed to make a real per-core hardware speed claim -- not done, low priority.
+
+## 2026-07-27 (continued, part 6) -- Homer CPU-backend timing (6 bundles), and the Perlmutter 30-CCD production plan finalized
+
+**CPU-backend Python timing, 6 bundles (2/band, reusing bundles already tested via GPU+C++ this session for direct comparison), warm shared cache:**
+
+| case | t_cpu | t_gpu | t_cpp | cpu vs cpp | cpu vs gpu |
+|---|---|---|---|---|---|
+| r9@20220120:9 | 68.5s | 20.5s | 94.5s | 0.72x (cpu faster) | 3.34x slower |
+| r1@20260401:10 | 99.8s | 22.3s | 57.6s | 1.73x slower | 4.48x slower |
+| **r avg** | 84.2s | 21.4s | 76.1s | **1.11x (~even)** | |
+| b6@20230520:14 | 84.1s | 19.9s | 16.4s | 5.13x slower | 4.23x slower |
+| b4@20260401:2 | 74.9s | 19.5s | 19.8s | 3.78x slower | 3.84x slower |
+| **b avg** | 79.5s | 19.7s | 18.1s | **4.39x slower** | |
+| z3@20260401:10 | 90.7s | 22.6s | 98.0s | 0.93x (~even) | 4.01x slower |
+| z1@20210927:14 | 156.2s | 26.2s | 112.3s | 1.39x slower | 5.96x slower |
+| **z avg** | 123.5s | 24.4s | 105.2s | **1.17x (~even)** | |
+
+CPU-backend Python is roughly on par with C++ for r/z bands but meaningfully worse for b-band (~4.4x slower) -- same fixed-per-worker-overhead pattern as everywhere else in this project, more pronounced here since CPU lacks GPU throughput to compensate. Refines the "CPU-supplemental capacity on Perlmutter" idea from the previous entry: a reasonable lever for r/z-band CCDs specifically, weak for b-band -- not a uniform win if pursued.
+
+**Perlmutter 30-CCD production plan, finalized (architecture decision):**
+- **Option A (single node, sequential CCD queue)**: simplest, ~40-60 min for 30 CCDs on one node, zero new engineering.
+- **Option B (multi-node, parallel CCD queue) -- recommended**: N nodes each running their own sequential CCD subset (~30/N CCDs), concurrently. Wall time scales ~linearly with N (e.g. N=3 matching C++'s node count -> ~15-20 min; N=6 -> ~7-10 min). Needs only a thin band-balanced CCD-to-node assignment script on top of the already-validated single-node architecture.
+- **Option C (true cross-node bundle-level scatter)**: best possible load-balancing, needs real cross-node orchestration (MPI4py/Dask/shared queue) -- flagged as a future enhancement, not part of the first production run given the added complexity for a likely-marginal gain over B.
+
+**Open question for sizing node count**: the "307s" C++ baseline cited throughout this project's history was specifically a *single-CCD* timing on the 3-node/384-core allocation, not confirmed to be the real observed wall-clock for a full 30-CCD/night production run. Asked the user directly for the real observed number -- not yet answered as of this entry. Needed before committing to a specific node count for Option B.
+
+### Files
+- New scratchpad tooling only (`cpu_timing_check/run_cpu_timing.py`), not committed.
+
+### Still open / good next-session leads (additions)
+- Get the real C++ full-30-CCD-night production wall-time from the user to size Option B's node count concretely.
+- If CPU-supplemental capacity is pursued later, restrict it to r/z-band CCDs specifically given the b-band finding above.
+
+## 2026-07-27 (continued, part 7) -- Broken-fiber calibfinder-first fallback, packing math corrected, and the CPU thread-oversubscription fix implemented and validated
+
+**Broken-fiber sourcing, corrected per direct request: try `desispec.calibfinder.badfibers()` first, fall back to FIBERMAP.** `get_broken_fibers.py` restructured: `get_broken_fibers(preproc_path)` now tries the real authoritative source first (matches real production's exact key restriction, `["BROKENFIBERS", "BADCOLUMNFIBERS"]`, per `desispec/scripts/proc.py`), falling back to the FIBERMAP-based extraction only on failure. Verified end to end on homer: `calibfinder.badfibers()` cleanly raises `KeyError` (confirmed exact message: "Need environment variable DESI_SPECTRO_CALIB"), caught, falls through to FIBERMAP, same correct results as before (473,474 for z8@20260401; 20,87,134,414,487 for r7@20230207). The calibfinder path itself is untested end-to-end (impossible without `$DESI_SPECTRO_CALIB`) -- validate for real on Perlmutter, ideally cross-checking against the FIBERMAP answer on a few exposures as a sanity check.
+
+**Packing math corrected -- two different, previously-conflated datasets clarified:**
+1. **Validated production setting**: `--gpu 4 --workers-per-gpu 5` = 5 bundles/GPU, spread across all 4 GPUs, used *identically* for every band. This produced the corrected final numbers (b/r/z all ~37-45s). The near-equal runtimes across bands come from fixed per-worker overhead dominating at this concurrency, not from different per-GPU bundle counts -- there's no "20 for b, 10 for r/z" production setting that was ever run.
+2. **The packing sweep** (separate, single-GPU-in-isolation stress test, other 3 GPUs idle): found N=20 bundles (one whole CCD) fits on *one* GPU with per-band headroom margins (b: huge, r: ~1GB spare, z: ~624MB spare), at real single-GPU wall times of 94.9s (b), 148.9s (r), 114.1s (z) -- all *slower* per-CCD than the 4-GPU-spread approach, since now one GPU's compute has to do all 20 bundles' worth of work alone.
+
+**Worked out the actual throughput tradeoff between these two regimes** (four-GPU-spread vs. one-GPU-per-CCD packing, four CCDs running concurrently on one node's four GPUs): extrapolating packing-sweep numbers to "4 GPUs simultaneously, each packed with a different CCD" gives a real *aggregate throughput* advantage -- 1.70x for b-band, 1.13x for r, 1.47x for z (vs. running one CCD across all 4 GPUs at a time). **This is a genuine extrapolation, not validated** -- the packing sweep only ever tested one GPU with the other three idle; four GPUs on one node simultaneously each fully loaded introduces untested contention (PCIe/NVLink bandwidth, 4x as many concurrent worker processes -- 80 vs 20 -- competing for host-side CPU dispatch and RAM bandwidth). Flagged as a real, promising "Phase 1.5" enhancement to test after the simpler baseline, not assumed to hold.
+
+**CPU-supplemental capacity: found it's not safe to test yet without a fix, implemented and validated the fix.** A real pre-outage Perlmutter hybrid-allocation pilot (`porting-notes.md`, 2026-07-21, "Real pilot of the proposed hybrid allocation") had already tested GPU+CPU running concurrently on one node and found it a **net negative**: the GPU path ran 1.56x slower with a CPU pool alongside it, and the CPU pool itself ran ~3x below its own achievable throughput. Root cause already diagnosed then (no per-worker thread limiting anywhere in the CPU-backend code, so N concurrent CPU workers each try to claim every hardware thread) but never fixed. This exactly matches the mechanism behind this session's own independent finding (homer, earlier this session: 3 CPU workers backfiring to ~9x slower than solo).
+
+**Implemented the fix** (`specex.py`, committed `d05171a`): `fit_ccd_native` computes a per-worker thread budget (`available_cores // n_workers`, floor 1) for `--backend cpu`, threaded into `fit_bundle_task`, which sets `OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS`/`MKL_NUM_THREADS`/`NUMEXPR_NUM_THREADS` plus XLA's own `intra_op_parallelism_threads` before any JAX import (same timing constraint as the existing `CUDA_VISIBLE_DEVICES` isolation).
+
+**Validated directly on homer, reproducing this session's own earlier CPU-concurrency failure case exactly**: the same 3-worker/4-bundle test that took 871.14s total pre-fix (individual bundles 680-705s under contention) now takes **225.27s total**, contended bundles at **103-106s** -- a **3.87x wall-time improvement**. Correctness bit-identical (`dx_final mean=0.115700, dy_final mean=0.046664` -- exactly the same values before and after the fix, confirming this is purely a performance change, no numerics touched). This significantly derisks the CPU-supplemental production idea -- it's now a "worth testing on Perlmutter" lever rather than a "known net negative, do not use" one.
+
+### Perlmutter staged testing plan, updated
+1. **Phase 1 (GPU-only, band-balanced multi-node queue)** -- the already-validated `--gpu 4 --workers-per-gpu 5` baseline, driven by a thin band-balanced CCD-to-node assignment script across N nodes (Option B). Zero new risk, matches everything already confirmed pre-outage plus this session's fixes.
+2. **Phase 1.5 (GPU packing enhancement)** -- test whether 4 GPUs on one node, each independently packed with a full CCD (one-GPU-per-CCD instead of spread-across-4), actually delivers the extrapolated 1.13-1.70x throughput gain once real multi-GPU-simultaneous contention is measured, not assumed.
+3. **Phase 2 (CPU-supplemental capacity)** -- now unblocked by the thread-pinning fix above. Re-run the exact pre-outage hybrid pilot (GPU CCD + concurrent CPU-backend pool on the same node) with the fix in place to confirm it no longer regresses the GPU path and the CPU pool now approaches its real achievable throughput, before folding it into the production plan.
+
+### Files
+- `py/specex/specex.py`: CPU thread-count limiting. Committed `d05171a`.
+- `get_broken_fibers.py` (scratchpad): calibfinder-first, FIBERMAP-fallback chain. Not committed (scratchpad tooling; the underlying specex CLI flag it feeds, `--broken-fibers`, is unchanged).
+
+### Still open / good next-session leads (additions)
+- Still waiting on the user for the real observed C++ full-30-CCD-night wall-time to size Phase 1's node count concretely.
+- Phase 1.5 (GPU packing) and Phase 2 (CPU-supplemental, now unblocked) are both real, promising, and both still need dedicated Perlmutter validation runs -- neither should be assumed to hold from extrapolation/homer testing alone.
+
+## 2026-07-28 -- Plan confirmed with user, GPU+CPU hybrid contention re-tested (homer scale) with the thread-pinning fix, and the session's final homer test
+
+**Plan clarification from the user, worth recording precisely**: 5 bundles/GPU (the validated single-CCD-at-a-time production setting) is specifically for *maximum speed on one CCD*. When running many CCDs at once (the actual 30-CCD/night scenario), the plan is to deliberately push packing further per GPU (Phase 1.5) to trade a bit of single-CCD latency for a lot more aggregate node throughput -- not a contradiction with the validated 5/GPU number, a different regime for a different goal.
+
+**Final homer test: re-ran the original pre-outage GPU+CPU hybrid contention pilot, at homer's scale, with this session's thread-pinning fix in place.** The pre-outage version (unpinned) found real, meaningful mutual contention (GPU 1.56x slower, CPU pool 3x below potential). Repeated the same structure on homer -- one GPU job (4 z-band bundles, `--gpu 1 --workers-per-gpu 2`) and one CPU job (4 r-band bundles, `--backend cpu --cpu-workers 4`) launched simultaneously, each also run solo for a clean baseline:
+
+| | solo | concurrent | slowdown |
+|---|---|---|---|
+| GPU (4 bundles) | 52.83s | 61.99s | 1.17x |
+| CPU (4 bundles, 4 workers) | 186.88s | 189.79s | **1.02x (negligible)** |
+
+**A dramatic improvement over the unpinned pre-outage result** -- CPU-side contention from a concurrent GPU job is now essentially gone (1.02x vs the old 3x), and the GPU path only sees a modest 17% hit (vs the old 1.56x) plausibly from remaining host-side dispatch/RAM-bandwidth sharing between the two backends' worker processes. Strong positive signal for Phase 2 -- real multi-node, full-scale Perlmutter validation is still needed (this is homer's much smaller contention surface, 1 GPU + 12 cores vs Perlmutter's 4 GPUs + 128 cores per node), but the underlying fix is clearly doing its job, not just helping the CPU-only case tested two entries ago.
+
+**This closes out homer-side testing for this investigation** -- no further tests identified as valuable without real Perlmutter hardware. Everything from this session (b-band degeneracy fix, dead-fiber fix, broken-fiber fix + calibfinder-first sourcing, CPU thread-pinning fix, the full production plan) is committed except the two documentation files, committed alongside this entry.
+
+### Files
+- `porting-notes.md`, `current-status.txt`: this entry and the full production plan writeup, committed.
+
+### Still open / good next-session leads (additions)
+- Still waiting on the user for (1) the real observed C++ full-30-CCD-night wall-time, (2) the actual command syntax used for the real 3-node C++ production run -- both needed to finalize Phase 1's exact node count and confirm the driver script's interface matches what operations actually expects.
+- Phase 1.5 and Phase 2 both need real Perlmutter-scale validation before being trusted in production, despite today's encouraging homer-scale signal for Phase 2.
