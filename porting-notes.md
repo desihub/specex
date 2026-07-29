@@ -2364,3 +2364,19 @@ CPU-backend Python is roughly on par with C++ for r/z bands but meaningfully wor
 ### Still open / good next-session leads (additions)
 - Test the actual remaining wrms-gap hypothesis: replicate C++'s separate, stricter SN>=5 trace-specific selection pass (vs Python's current single broader-threshold pass) on this branch.
 - Decide whether to eventually merge this architecture change into `python-gpu-port` once the wrms regression is understood and closed, or keep it as a documented alternative if the wrms cost turns out to be structural.
+
+## 2026-07-29 (continued) -- Sigma-only pre-fit stage: implemented, tested, negative result, reverted
+
+**Read C++'s real `scheduled_fit_of_sigmas` stage (`specex_psf_fitter.cc:2745-2803`) to pin down the "unreplicated stricter selection pass" precisely.** It's not just a stricter threshold applied to the same fit -- it's a whole extra fit *stage*, between the trace fit and the final joint shape+flux fit, that (a) re-selects with the STRICT thresholds (SNR>=5, dwave>=4A) rather than the LOOSE ones (SNR>=3, dwave>=0) used everywhere else in Python, and (b) fits *only* the Gaussian width terms (GHSIGX/GHSIGY -- RADIUS/SIGMA don't apply to GaussHermitePSF) with flux floating, iterating with its own re-selection and convergence check, before the loose reselection hands its result to the final full-shape+flux fit as a warm start. Python's `fit()` had no equivalent -- it went from 'trace' mode straight to 'full' mode (all GH terms) using only the loose list.
+
+**Implemented as a warm-start-only addition** (not a hard constraint, to stay low-risk): `fit()` gained `sigma_only`/`sigma_pc0` kwargs -- `sigma_only=True` restricts 'full'-mode's idx to flux + the first two pc rows (GHSIGX/GHSIGY) and skips 'trace' mode entirely (matching `fit_trace=false` throughout that C++ stage); `sigma_pc0` overrides the GHSIGX/GHSIGY warm-start rows before the main fit runs. `select_bundle_spots_iterative` calls a small (`max_iter=10`) sigma-only sub-fit on the Pass-3 strict-selected list right after it's computed, and threads the resulting GHSIGX/GHSIGY coefficients into the real final joint fit's warm start via `specex.py`.
+
+**Result: no benefit, cleanly negative.** Same 9-case batch, isolated to the change: aggregate xrms 0.979x, yrms 0.983x, wrms 1.000x vs the pre-change baseline -- essentially flat, one case (`r9@20220120:17`) improved meaningfully (xrms 0.100->0.093, yrms 0.083->0.071) but that's a single outlier, not a systematic pattern. The wrms gap this was meant to close didn't move at all in aggregate. Real cost: the extra sigma sub-fit stretches the selection phase ~35-40% (b3-00 sanity case: 6.40s -> 8.88s). Reverted cleanly (`git checkout -- py/specex/fitter.py py/specex/specex.py`, matching HEAD exactly) rather than committed -- pure cost, no benefit.
+
+**Both of this branch's tested hypotheses for the wrms gap are now ruled out** (trace iteration budget, and the missing sigma-only strict-selection stage). The gap's real cause is still open. Given the effort already invested in isolating C++'s exact stage-by-stage architecture without closing it, the next productive step is probably direct numerical comparison (dump C++'s and Python's actual GHSIGX/GHSIGY/GH-coefficient values on a shared case) rather than another blind architecture-matching guess.
+
+### Files
+- `py/specex/fitter.py`, `py/specex/specex.py`: sigma-only stage implemented and tested, then reverted via `git checkout`. Net change to the branch: none (still at commit `2ad1ee5`'s state).
+
+### Still open / good next-session leads (additions)
+- The wrms gap's cause remains unidentified after ruling out both trace-iteration-budget and missing-sigma-stage hypotheses. Next: compare actual fitted PSF-shape coefficients (not just xrms/yrms/wrms summary stats) between Python and C++ on a shared case to find where they diverge, rather than guessing at more architecture-matching changes.
