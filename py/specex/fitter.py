@@ -970,7 +970,18 @@ class PSF_Fitter:
                          Ncont=Ncont, iter=i, chi2=float(chi2))
             if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly_trace), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
-            else: idx = jnp.arange(A.shape[0])
+            # EXPERIMENT (branch experiment/cpp-alternating-solve): 'full'
+            # mode excludes trace entirely instead of solving trace+shape
+            # jointly -- matches C++'s real structure exactly (it never
+            # solves trace and PSF shape together at all; trace is finalized
+            # in its own stage and never revisited -- see porting-notes.md's
+            # b-band degeneracy investigation). Trace is fit only during
+            # 'trace' mode (i=2..4) and stays frozen for the remainder of
+            # the fit, same as C++ freezing it after its own TRACE stage.
+            # Testing whether this closes the baseline (non-anomalous)
+            # xrms/yrms residual, or whether that residual is coming from
+            # generic solver/convergence differences instead.
+            else: idx = jnp.concatenate([jnp.arange(Ns_l + n_psf_tot), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
@@ -996,15 +1007,13 @@ class PSF_Fitter:
             # Cap the trace-position step implied by this iteration's raw
             # Newton step at 0.5px, mirroring C++'s own per-iteration trace
             # step limiter (specex_psf_fitter.cc:1516-1533, "don't want a
-            # step larger than N pix for all spots"). Without this, a step
-            # along the near-degenerate trace/asymmetric-GH-shape direction
-            # (see porting-notes.md's b-band anomaly writeup) can move the
-            # trace by >0.5px in a single 'full'-mode iteration -- something
-            # C++ never risks, since it never solves trace and PSF shape
-            # jointly in the first place. Scaling the *entire* step (not
-            # just the trace block) matches C++ exactly, which scales its
-            # whole solved parameter vector uniformly when this triggers.
-            if mode in ('trace', 'full'):
+            # step larger than N pix for all spots"). EXPERIMENT (branch
+            # experiment/cpp-alternating-solve): restricted to 'trace' mode
+            # only -- 'full' mode's d_p now has zero trace entries by
+            # construction (trace excluded from idx above), so this was
+            # already a guaranteed no-op there; narrowed for clarity, not a
+            # behavior change from that.
+            if mode == 'trace':
                 trace_start = Ns_l + n_psf_tot
                 d_trace_step = d_p[trace_start:trace_start + 2 * Npoly_trace].reshape(2, Npoly_trace)
                 dx_spots = trace_monomials @ d_trace_step[0]
@@ -1031,19 +1040,18 @@ class PSF_Fitter:
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
-            # Anti-drift damping for the trace/GH degenerate direction (see
-            # pc0/asym_gh_rows setup above): the per-iteration trace-step cap
-            # doesn't help here because each individual 'full'-mode step
-            # along this near-flat direction is small -- it's the *sum* over
-            # up to 50 iterations (chi2 keeps inching down the whole way,
-            # never triggering the chi2_precision break) that reaches
-            # 0.5-0.7px. Pull just the antisymmetric-in-x/y GH rows back
-            # toward their warm-start value by 10% every full-mode
-            # iteration; bounds their total drift to a geometric-series
-            # limit instead of letting it grow with iteration count, at
-            # near-zero cost to genuinely well-determined shape terms.
-            if mode == 'full':
-                pc = pc.at[asym_gh_rows].set(pc0[asym_gh_rows] + 0.9 * (pc[asym_gh_rows] - pc0[asym_gh_rows]))
+            # Anti-drift damping for the trace/GH degenerate direction --
+            # DISABLED on this branch (experiment/cpp-alternating-solve).
+            # The degeneracy this guards against requires trace and the
+            # antisymmetric GH-shape rows to be free *simultaneously*;
+            # since 'full' mode no longer includes trace in idx at all,
+            # that direction is structurally unreachable here, matching
+            # C++ exactly, and damping would just be inert dead weight.
+            # Left commented (not deleted) so a diff against the main
+            # branch stays easy to read. See main branch / porting-notes.md
+            # for the live version of this fix.
+            # if mode == 'full':
+            #     pc = pc.at[asym_gh_rows].set(pc0[asym_gh_rows] + 0.9 * (pc[asym_gh_rows] - pc0[asym_gh_rows]))
 
             # --- Iterative Snapping: Update xc_init/yc_init to the current model prediction ---
             # We use a staged approach to prevent oscillation.
