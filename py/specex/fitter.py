@@ -975,7 +975,28 @@ class PSF_Fitter:
                 best_cc = cc.copy()
                 best_flux = flux.copy()
                 
-            mode = 'flux' if i < 2 else 'trace' if i < 5 else 'full'
+            # 'sigma' mode (i=5..7, before 'full'): matches C++'s
+            # scheduled_fit_of_sigmas stage exactly -- GHSIGX/GHSIGY (pc
+            # rows 0-1) are fit alone (with flux), then PERMANENTLY
+            # EXCLUDED from 'full' mode's idx below. This is a genuine
+            # freeze, not just a warm-start: C++'s FitParPolXW for its own
+            # main PSF-fit stage (specex_psf_fitter.cc:2870-2880) explicitly
+            # filters out GHSIGX/GHSIGY/GHNSIG/tail terms by name, so they
+            # are *never* free at the same time as the higher-order GH
+            # terms in any single least-squares solve. A prior attempt
+            # (see porting-notes.md, same date) only warm-started
+            # GHSIGX/GHSIGY from a separate strict-selected pre-fit but
+            # then let 'full' mode re-solve them jointly with everything
+            # else anyway -- a coefficient-level comparison against cached
+            # C++ output (also this date) showed why that couldn't work:
+            # GHSIGX/GHSIGY and GH-2-0/GH-0-2 are a classic near-degenerate
+            # pair (width vs. 2nd-order shape term), and Python's joint
+            # solve was resolving that degeneracy differently from C++ in
+            # every single one of 9 test cases (GH-2-0 larger in Python in
+            # all 9; GHSIGX smaller in 8/9) regardless of warm start --
+            # only *structurally excluding* sigma from the joint solve, not
+            # just seeding it well, can match C++ here.
+            mode = 'flux' if i < 2 else 'trace' if i < 5 else 'sigma' if i < 8 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]", flush=True)
             Npoly_psf = psf_monomials.shape[1]; Npoly_trace = trace_monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly_psf
             if mode == 'full' and os.environ.get("SPECEX_DEBUG_DUMP_A"):
@@ -984,6 +1005,7 @@ class PSF_Fitter:
                          Ncont=Ncont, iter=i, chi2=float(chi2))
             if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly_trace), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
+            elif mode == 'sigma': idx = jnp.concatenate([jnp.arange(Ns_l + 2*Npoly_psf), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             # EXPERIMENT (branch experiment/cpp-alternating-solve): 'full'
             # mode excludes trace entirely instead of solving trace+shape
             # jointly -- matches C++'s real structure exactly (it never
@@ -992,10 +1014,9 @@ class PSF_Fitter:
             # b-band degeneracy investigation). Trace is fit only during
             # 'trace' mode (i=2..4) and stays frozen for the remainder of
             # the fit, same as C++ freezing it after its own TRACE stage.
-            # Testing whether this closes the baseline (non-anomalous)
-            # xrms/yrms residual, or whether that residual is coming from
-            # generic solver/convergence differences instead.
-            else: idx = jnp.concatenate([jnp.arange(Ns_l + n_psf_tot), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
+            # Also excludes GHSIGX/GHSIGY (pc rows 0-1, frozen after 'sigma'
+            # mode above) for the same reason.
+            else: idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + 2*Npoly_psf, Ns_l + n_psf_tot), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
