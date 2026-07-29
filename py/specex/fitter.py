@@ -931,7 +931,21 @@ class PSF_Fitter:
             w_d = w_d.at[Np:].set(0.0)
         xpix_j, ypix_j = jnp.array(xpix_p), jnp.array(ypix_p)
         wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30; prev_mode = None
-        
+        # REVERTED (branch experiment/cpp-alternating-solve): tried making
+        # trace mode's exit convergence-based instead of a fixed 3
+        # iterations (up to a 20-iteration cap), hypothesizing trace was
+        # under-converged and that was causing the ~3% wrms (truth
+        # comparison) regression seen after excluding trace from 'full'
+        # mode. Result on a 9-case check: xrms/yrms/wrms were unchanged to
+        # 3-4 decimal places from the fixed-3 version, case by case --
+        # trace was already fully converged in 3 iterations for every case
+        # tested, so the extra iterations (typically 8-11, one case ~20)
+        # bought nothing. Cost ~1.5x more wall time for zero benefit.
+        # Reverted cleanly; the wrms gap is not an iteration-budget problem
+        # -- see porting-notes.md for the next hypothesis to test instead
+        # (the unreplicated stricter-SNR trace-specific selection pass
+        # C++ uses, not iteration count).
+
         best_chi2 = 1e30
         best_tc = tc.copy()
         best_pc = pc.copy()
