@@ -294,23 +294,25 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
 
     b_res = jnp.where(valid, res[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
     b_w = jnp.where(valid, weight_data[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area); wr = b_w * b_res
-    
-    # --- C++ Parity: B-vector Poisson correction (lines 670-673 in specex_psf_fitter.cc) ---
-    # bfact = w*res + (1/wscale)*0.5*(w*res)^2 * (1/gain + 2*psf_error^2*signal)
-    # We need 'signal' for the correction term. signal = total_sig[:Np]
-    signal_vec = total_sig[:Np]
-    # we need to map this signal back to the batch/stamp structure
-    b_signal = jnp.where(valid, signal_vec[jnp.where(valid, flat_idx, 0)], 0.0).reshape(batch_size, stamp_area)
-    
-    # Use actual values passed into the JIT function
-    gain = gain
-    psf_error = psf_error
-    wscale = wscale
-    
-    # The correction only applies if recompute_weight_in_fit is True.
-    # In Python, we implement the correction directly into the residual product.
-    correction = (1.0 / wscale) * 0.5 * (wr**2) * (1.0/gain + 2.0 * psf_error**2 * b_signal)
-    wr_corrected = wr + correction
+
+    # No B-vector Poisson/signal-dependent correction here (specex_psf_fitter.cc:670-673's
+    # `bfact += (1/wscale)*0.5*(w*res)^2*(1/gain+2*psf_error^2*signal)`).
+    # That C++ line is gated by `recompute_weight_in_fit`, which is
+    # declared `false` in the PSF_Fitter constructor
+    # (specex_psf_fitter.h:151) and is never once assigned `true` anywhere
+    # else in the C++ codebase (confirmed by grepping the whole source
+    # tree) -- structurally unreachable dead code in the real reference
+    # implementation, not just "off by default." An earlier version of
+    # this port applied the correction unconditionally, every mode, every
+    # iteration, for this whole project -- a real, if narrow, C++/Python
+    # mismatch. Tested disabling it across a 15-bundle sample
+    # (2026-07-30, porting-notes.md): mean xrms 0.0428->0.0420, mean yrms
+    # 0.0466->0.0458 -- a real, modest improvement concentrated in the 2
+    # cases with the largest residual*signal product (the disabled term
+    # scaled with (w*res)^2 * signal, so bundles with small residuals were
+    # unaffected regardless of trace difficulty), no regression anywhere
+    # in the sample.
+    wr_corrected = wr
     
     # b_jac is (float32 if SPECEX_MIXED_PRECISION else float64) -- cast its
     # co-operands to match so these contractions don't get silently
@@ -1072,6 +1074,8 @@ class PSF_Fitter:
                 for alpha in [0.2, 0.5, 1.0]:
                     f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
                     if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
+            if os.environ.get("SPECEX_DEBUG_ALPHA"):
+                print(f"  ALPHA_DEBUG iter={i} mode={mode} best_alpha={float(best_alpha)} ls_chi2={float(ls_chi2)}", flush=True)
             if best_alpha == 0 and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
