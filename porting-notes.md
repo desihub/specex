@@ -2626,3 +2626,33 @@ User asked to re-check the earlier-session (pre-compaction) single-case force-sp
 **One more hypothesis, same session: mixed precision.** Python defaults to float32 for the Jacobian in the joint-fit accumulate step (validated as equivalent accuracy in general, `--double-precision` available to force full float64). Reasoned that a near-degenerate Hessian (established property of the hard bundles) could plausibly be more sensitive to float32 rounding than a well-conditioned one. Tested directly on r9@20220120:17 with `--double-precision`: **xrms/yrms identical to 4 decimals** (0.0945/0.0709 both ways), `dx_final`/`dy_final` debug metrics matching to 6 decimals. Ruled out.
 
 **Seven hypotheses tested this session total (regularization, convergence precision, per-fiber trace basis, early flux clamping, envelope margin, mixed precision, plus the re-confirmed force-spots check): one real fix (signal-weight correction, ~2% aggregate improvement), everything else either inert or (per-fiber trace) actively harmful when tested.** This is now a fairly exhaustive sweep of implementation-detail-level explanations. The evidence continues to converge on the same conclusion: hard bundles are measurably more sensitive to *every* kind of small perturbation tried (spot list, weighting, footprint extent, precision) in a way easy bundles are not -- consistent with a genuinely flatter/more degenerate optimization landscape on those specific bundles, not a discoverable bug in either pipeline. Closing the gap further would likely require reproducing C++'s exact numerical trajectory bit-for-bit (a much larger undertaking, and not guaranteed to succeed given floating-point non-associativity between different math libraries) rather than another isolated fix.
+
+## 2026-07-30 (continued, part 4) -- The real lever: Python's shared trace basis was too low-order. Substantial, validated improvement found (not yet made the default)
+
+User's framing, precisely correct: Python's shared 2D (fiber, wave) trace correction basis for b/r bands uses only ~10-14 free parameters across a 25-fiber bundle (`trace_wdeg_x=1, trace_wdeg_y=2` defaults), vastly fewer degrees of freedom than C++'s per-fiber-independent trace fit (~350 free parameters, established earlier this session) -- distinct from the earlier-tested (and harmful) full per-fiber-independence experiment, this tests whether the *shared* basis itself is simply too inflexible.
+
+**Swept `--trace-legendre-deg-wave-x/-y` on the hardest case (r9@20220120:17) from the current x=1,y=2 default up to x=6,y=6.** Non-monotonic at first (x=2,y=3 was slightly worse) but then a clear, substantial, plateauing improvement: by x=5,y=6, xrms 0.0945->0.0697 (-26%), yrms 0.0709->0.0577 (-19%); x=6,y=6 gave no further gain (plateau reached).
+
+**But the effect is real yet uneven case-to-case**: the *other* hard case (b7@20210410:4) barely moved across the *entire* degree range tested (2,3 through 6,6 all land within 0.0997-0.1006 xrms, 0.0740-0.0748 yrms -- under 1% change). Trace-degree insufficiency is a real, fixable contributor for some hard bundles, not a universal explanation for bundle "hardness" in general -- b7@20210410:4's difficulty must come from something else this lever doesn't address.
+
+**Validated x=5,y=6 (applied to all three bands, including bumping z-band's own default of x=3,y=3) across the full 15-bundle set:**
+
+| | mean xrms | mean yrms |
+|---|---|---|
+| r+b bands (10 cases) | -6.6% | **-16.5%** |
+| z band (5 cases) | -3.1% | -9.9% |
+| **all 15** | **-5.9%** | **-15.0%** |
+
+Individual cases range from flat (b7@20210410:4: -0.1%/-0.8%; r9@20260401:8: -0.3%/-0.8%) to dramatic (b6@20230520:14: yrms -50%; z4@20230207:10: yrms -38%; b6@20230805:19: yrms -35%; r5@20230805:4: yrms -30%) to a handful of small regressions (z1@20260401:2: +0.3%/+1.1%; z3@20260401:10 :+3.1%/+0.4%; z3@20241105:18: yrms +16.9% despite xrms improving -6.9%) -- but the z-band aggregate is still net positive despite these individual regressions, driven by the larger wins on z4@20230207:10 and z3@20220112:9.
+
+**No timing regression found**: warm-cache check on r5@20230805:4 at x=5,y=6 gave 16.54-16.90s, at or below the previously-established baseline (~19-22s) for that same case.
+
+**This is the largest, most broadly-validated improvement found this session -- substantially bigger than the signal-weight fix (~2%) and not concentrated in one or two cases.** Not yet made the permanent default (would mean changing `specex.py`'s auto-detected `trace_legendre_deg_wave_x/y` values, a production-relevant change) -- flagged to the user for confirmation before committing, and/or further tuning (the exact x=5,y=6 point was found by a coarse sweep on one case, not independently optimized; z-band's mixed per-case pattern in particular might benefit from its own, separately-tuned value rather than reusing r/b's).
+
+### Files
+- `hard_vs_easy/run_tracedeg_15.py` (scratchpad, not committed): the 15-bundle trace-degree validation driver, reusable for testing other degree combinations.
+
+### Still open / good next-session leads (additions)
+- Decide on and commit a permanent default trace degree change (pending user confirmation) -- x=5,y=6 uniformly is the simplest option validated so far, but band-specific tuning (especially for z, whose per-case pattern was more mixed) might do better with a bit more sweeping.
+- Investigate why b7@20210410:4 specifically doesn't respond to trace-degree increases at all, unlike every other hard case tested -- its "hardness" mechanism must be different from the ones this lever addresses.
+- Re-run the full 15-bundle wrms decomposition (not just xrms/yrms) with the new degree to see whether the genuine-disagreement Angstrom numbers from the earlier campaign also improve proportionally.
