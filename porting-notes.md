@@ -2605,3 +2605,20 @@ User asked, correctly, why xrms/yrms (0.04-0.05px average) didn't seem to line u
 
 ### Still open / good next-session leads (additions)
 - Six discrete mismatch hypotheses have now been checked directly against C++'s actual source and tested empirically. Further progress on the remaining gap likely needs a different kind of evidence than "find one more mismatched constant" -- e.g. directly instrumenting both engines' per-iteration parameter trajectories on the same hard bundle side-by-side (not just comparing final answers) to see exactly where the two paths first diverge, rather than continuing to audit isolated code-path differences one at a time.
+
+## 2026-07-30 (continued, part 3) -- Re-ran the force-spots test at the current (post-fix) pipeline state, across 5 bundles spanning hard/easy: confirms spot selection is a minor, difficulty-dependent contributor, not the primary driver
+
+User asked to re-check the earlier-session (pre-compaction) single-case force-spots finding now that several real fixes have landed, using `--force-spots <cppspots_pass4.txt>` against the cached C++ truth for 5 bundles from the 15-bundle campaign (2 hard, 1 easy, 2 typical/good).
+
+| case | difficulty | xrms unforced | xrms forced | yrms unforced | yrms forced |
+|---|---|---|---|---|---|
+| r9@20220120:17 | HARD | 0.0945 | 0.0914 (-3.3%) | 0.0709 | 0.0694 (-2.1%) |
+| b7@20210410:4 | HARD | 0.1006 | 0.0972 (-3.4%) | 0.0750 | 0.0740 (-1.3%) |
+| b1@20240220:9 | EASY | 0.0212 | 0.0210 (-0.9%) | 0.0161 | 0.0160 (-0.6%) |
+| z1@20260401:2 | TYPICAL | 0.0285 | 0.0290 (+1.8%) | 0.0337 | 0.0335 (-0.6%) |
+| r9@20231030:18 | GOOD-xrms | 0.0379 | 0.0379 (0%) | 0.0537 | 0.0542 (+0.9%) |
+
+**Clean, difficulty-dependent pattern**: on easy/typical/good bundles, forcing C++'s exact spot list changes nothing beyond noise (some deltas even go the "wrong" way). On the two hard bundles specifically, there's a real, modest improvement (1-3%). Two conclusions follow: (1) spot selection is *not* the primary driver -- even with identical spots, the hard bundles are still at 0.091-0.097 (4-5x over the 0.02px target), essentially unchanged from before forcing; Python's own spot counts were already very close to C++'s (1410/1414, 640/631), so there wasn't much room for spot identity to matter broadly. (2) Hard bundles *are* measurably more sensitive to it -- the same magnitude of input perturbation that's pure noise on an easy bundle becomes a real, directional effect on a hard one. This is the same signature seen with every other perturbation tested this session (weighting scheme, footprint extent): hard bundles sit in a flatter, more degenerate part of the optimization landscape, so small input changes nudge the two independent solvers further apart than they would on a well-constrained bundle. Not a usable production lever (no C++ spots to force at Perlmutter), but a clean confirmation that closes off spot selection as a path to the remaining gap.
+
+### Files
+- `force_spots_v2/run_force_subset.py` (scratchpad, not committed): the 5-case force-spots comparison driver.
