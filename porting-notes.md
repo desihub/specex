@@ -2493,3 +2493,29 @@ CPU-backend Python is roughly on par with C++ for r/z bands but meaningfully wor
 - The "wrms gap" investigation is closed -- no further architecture changes should be motivated by wrms alone; it was never a real signal. Future correctness work on this branch should lean on xrms/yrms (already domain-artifact-free, since `trace_rms()` never touches `pass4`) as the trustworthy metric.
 - If absolute wavelength-calibration accuracy (vs. true physical line wavelengths, not just cross-pipeline agreement) is ever needed, it requires a genuinely independent centroid measurement -- not available in any current cached data.
 - Whether to fix `wave_residual_stats`'s methodology going forward (e.g. by using each fiber's native domain, or avoiding `pass4` as a truth source entirely) is a separate decision from this finding -- flagging but not doing it here, since xrms/yrms already serve as the reliable metric.
+
+## 2026-07-29/30 -- 15-bundle campaign (5 per band) confirms the wrms-decomposition finding at scale
+
+User asked to broaden the 2-case decomposition to 15 bundles (5 each of r/b/z) for a result solid enough to report externally. Reused the `bundle_campaign_v3_results.txt` picks (same cases as many earlier campaigns this project). All 15 re-run fully fresh this time (both C++, with the native-domain dump, and Python at the current committed branch state) rather than mixing in old cached outputs, for full internal consistency.
+
+**Aggregate results (mean across n=5 per band):**
+
+| band | n | xrms (px) | yrms (px) | Python-vs-C++ (A) | domain-refit artifact (A) |
+|---|---|---|---|---|---|
+| r | 5 | 0.0590 | 0.0676 | 0.0142 | 0.5835 |
+| b | 5 | 0.0450 | 0.0405 | 0.0147 | 0.6270 |
+| z | 5 | 0.0243 | 0.0317 | 0.0097 | 0.5488 |
+| **all** | **15** | **0.0428** | **0.0466** | **0.0128** | **0.5864** |
+
+Full per-case results in `wrms_campaign/campaign_results.txt` (scratchpad). Range across all 15: xrms 0.018-0.101px, yrms 0.016-0.083px, Python-vs-C++ wavelength-equivalent 0.0065-0.0206A, domain-refit artifact 0.536-0.640A.
+
+**Confirms the 2-case finding holds at scale, not a fluke of the two cases originally checked**: the domain-refit artifact (0.549-0.627A depending on band) is 40-90x larger than the genuine Python-vs-C++ disagreement (0.0097-0.0147A depending on band) in every single band. The artifact's magnitude is fairly stable across bands (0.55-0.63A); the genuine disagreement is consistently small everywhere, with z-band tightest (0.0097A) and b-band loosest (0.0147A) -- both still tiny in absolute terms.
+
+**Operational note, worth remembering for future large batches on this machine (homer)**: this is a shared, non-dedicated workstation GPU (confirmed via `nvidia-smi` -- the user's own desktop session, browser, etc. hold real GPU memory concurrently). A single long-running Python driver process that launches many sequential GPU subprocesses was observed to accumulate a stuck ~9GB allocation over the course of the campaign (confirmed reproducibly: `nvidia-smi --query-compute-apps` attributed it to the driver's own PID, stable and unchanging across multiple failed retries, and it was only released when that parent process was killed outright -- restarting the *subprocess* alone did not free it). Fix used here: restructure the batch driver to run one case per short-lived process invocation (outer shell loop spawning a fresh `python run_campaign.py <tag>` each time) rather than one long-lived loop -- this avoided the accumulation for the remaining cases. Not fully root-caused (plausibly a JAX/XLA or CUDA-driver-side allocator quirk specific to many sequential subprocess launches under one parent), but the workaround is simple and worth reusing for any future multi-case GPU batch on this machine.
+
+### Files
+- `src/specex_psf_fitter.cc`: debug instrumentation added, tested across 15 cases, reverted (`git checkout`) -- no permanent C++ changes.
+- `wrms_campaign/run_campaign.py`, `wrms_campaign/campaign_results.txt`, `wrms_campaign/drive_remaining.sh` (scratchpad, not committed): the 15-bundle driver and its results, reusable for any future broader validation.
+
+### Still open / good next-session leads (additions)
+- The stuck-GPU-memory issue on long-running multi-case batches is worked around, not root-caused -- if it recurs and matters (e.g. for a real Perlmutter multi-CCD run, a different machine/environment), worth a real investigation rather than continuing to rely on the one-process-per-case workaround.
