@@ -2519,3 +2519,19 @@ Full per-case results in `wrms_campaign/campaign_results.txt` (scratchpad). Rang
 
 ### Still open / good next-session leads (additions)
 - The stuck-GPU-memory issue on long-running multi-case batches is worked around, not root-caused -- if it recurs and matters (e.g. for a real Perlmutter multi-CCD run, a different machine/environment), worth a real investigation rather than continuing to rely on the one-process-per-case workaround.
+
+## 2026-07-30 -- Correction: the "Python-vs-C++ (A)" column above was biased low by ~2x; xrms is not comparable to it at all
+
+User asked, correctly, why xrms/yrms (0.04-0.05px average) didn't seem to line up with the ~0.013A "genuine disagreement" number, and specifically noted two mismatched examples spanning different bands. Both turned out to be real methodological issues in how that column was built, not in the underlying data:
+
+1. **`xrms` measures a different physical quantity entirely** -- the fiber's cross-dispersion (X) position on the CCD, unrelated to the wavelength solution (which lives entirely in `Y_vs_W`/the Y direction). It was never meaningful to compare xrms against a wavelength-equivalent number. Only `yrms` should be.
+
+2. **The original "Python-vs-C++ (A)" column sampled only at real, selected calibration-line wavelengths** (from `cppspots_pass4.txt`), not the uniform 100-point grid `trace_rms()` (the source of xrms/yrms) actually uses. Real calibration lines are not spread evenly across a band's wavelength range, and the low-degree trace polynomial fit is generally less well-constrained (more prone to small cross-pipeline divergence) in sparsely-covered regions, often near the domain edges. Checked directly across all 15 cases: line-only sampling understates the uniform-grid disagreement by 0.9-4.2x (mean 2.08x).
+
+**Recomputed the Python-vs-C++ column on the identical uniform grid `xrms`/`yrms` use, correctly unit-converted via each grid point's own local dispersion.** Once done consistently, correlation with yrms is near-perfect: r=0.996, b=0.999, z=0.995 within band (0.986 with all three bands mixed, since each band has its own Angstrom-per-pixel scale). **Corrected band means: r=0.0349A, b=0.0239A, z=0.0194A, all=0.0261A** (roughly 2x the originally-reported 0.0097-0.0147A/0.0128A -- the core conclusion is unchanged, only the precise magnitude of the "genuine disagreement" side of the comparison). Still ~22x smaller than the 0.55-0.63A domain-refit artifact -- the headline finding (artifact dominates, genuine disagreement is small) holds, just with a corrected, more defensible number for the small side.
+
+### Files
+- `wrms_campaign/check_sampling.py`, `wrms_campaign/corrected_decompose.py` (scratchpad, not committed): the line-only-vs-uniform-grid comparison and the corrected uniform-grid decomposition. Note `corrected_decompose.py`'s own `artifact_A` recomputation has an unresolved bug (returns an identical value across all 15 cases, clearly wrong) -- not used for anything reported; the original `run_campaign.py`'s artifact numbers (already in the table above) are unaffected and remain correct.
+
+### Still open / good next-session leads (additions)
+- If this decomposition methodology gets reused again, build the "Python-vs-C++" and "artifact" columns from the same uniform-grid script from the start (not the line-only one) to avoid re-deriving this correction.
