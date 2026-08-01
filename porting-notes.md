@@ -2654,5 +2654,90 @@ Individual cases range from flat (b7@20210410:4: -0.1%/-0.8%; r9@20260401:8: -0.
 
 ### Still open / good next-session leads (additions)
 - Decide on and commit a permanent default trace degree change (pending user confirmation) -- x=5,y=6 uniformly is the simplest option validated so far, but band-specific tuning (especially for z, whose per-case pattern was more mixed) might do better with a bit more sweeping.
-- Investigate why b7@20210410:4 specifically doesn't respond to trace-degree increases at all, unlike every other hard case tested -- its "hardness" mechanism must be different from the ones this lever addresses.
+- ~~Investigate why b7@20210410:4 specifically doesn't respond to trace-degree increases at all~~ -- explained below (part 5): it was hitting the same premature-break bug as everything else, unrelated to trace degree.
 - Re-run the full 15-bundle wrms decomposition (not just xrms/yrms) with the new degree to see whether the genuine-disagreement Angstrom numbers from the earlier campaign also improve proportionally.
+
+## 2026-07-30 (continued, part 5) -- Found and fixed a real bug: ~half of all bundles were exiting the fit mid-`'sigma'` mode, never reaching `'full'` mode at all
+
+User asked to (a) re-verify C++ genuinely does per-fiber-independent trace fitting (confirmed: `trace_prior_deg`, the only mechanism that would couple fibers, defaults to 0/off and is never passed by `run_cpp2.py`), (b) understand why the earlier `--trace-per-fiber-deg` experiment regressed (root cause: the fixed 3-iteration `'trace'`-mode budget is enough to converge the ~10-14-parameter shared basis but not the ~350-parameter per-fiber one, which is left under-converged when trace freezes permanently -- an implementation gap, not evidence against the per-fiber approach itself; not fixed, not requested), and (c) expand the 15-bundle trace-degree validation to 30 bundles, testing the more conservative x=3,y=3 (matching z's existing default) instead of x=5,y=6.
+
+**The 30-bundle x=3,y=3 result came back as a wash**: mean xrms/yrms change ~0% across the 20 r/b cases, only 6-7/20 cases improving on either axis, several regressing. Investigating the noise turned up a real bug, not overfitting.
+
+**The bug** (`fitter.py`, the final-fit line-search): `if best_alpha == 0 and i > 5: break` -- fires whenever none of the three tried step sizes (0.2/0.5/1.0) improves chi2, for any iteration past i=5, *regardless of which mode is active*. But the mode schedule (`flux(i<2) -> trace(i<5) -> sigma(i<8) -> full`) changes which parameters are free every few iterations; a line-search failure in `'sigma'` mode's subspace (flux + GH-width terms) says nothing about whether `'full'` mode's subspace (the higher-order GH shape terms, still sitting untouched at their initial values) has room to improve. The break doesn't distinguish "genuinely converged" from "this mode's 3-point step grid happened to fail right at a mode transition."
+
+**Prevalence, checked directly against every cached log from both the 15- and 30-bundle campaigns**: 15 of 30 base-degree fits stopped cold at iteration 6-7, still in `'sigma'` mode, and never reached `'full'` mode at all -- meaning the higher-order GH shape terms were never fit for half of all bundles tested this session. Confirmed mechanistically with `SPECEX_DEBUG_ALPHA` on b6@20230520:14: `best_alpha=0.0` at i=7 in `'sigma'` mode, breaking one iteration before `'full'` mode would have started at i=8. z-band was essentially unaffected (its higher default trace degree apparently keeps the Newton trajectory away from this cliff); the bug is concentrated in r/b.
+
+**Smoking gun for the noisy 30-bundle numbers**: `r0@20260401_00344649:2` -- baseline (x=1,y=2) happened to reach `'full'` mode and converged to chi2=241508 over 13 iterations. The x=3,y=3 bumped run hit the exact same break at i=7 in `'sigma'` mode and stopped at chi2=280388 (apparently a huge regression). This wasn't measuring whether the higher trace degree helps; it was measuring which run got lucky with a 3-point step-size grid. **Also fully explains b7@20210410:4's total non-response to trace-degree changes noted in part 4** -- it's in the stuck-at-sigma-mode group under every degree setting tested, so its shape terms never get touched regardless of trace degree.
+
+**Fix applied** (`fitter.py`, restricts the early-exit to the terminal mode only):
+```python
+if best_alpha == 0 and mode == 'full' and i > 5: break
+```
+**Validated on the three flagged cases**: b6@20230520:14 now proceeds into `'full'` mode and chi2 drops from 67507 -> 65620 (-2.8%, real signal from the previously-untouched shape terms). b7@20210410:4 now reaches `'full'` mode too (64980 -> 64965, one convergence step, small but real). r0@20260401:2's x=3,y=3 run now reaches `'full'` mode and lands at chi2=241284 -- essentially matching (marginally beating) baseline's 241508, resolving the apparent "regression" entirely.
+
+Re-running the full 30-bundle campaign (baseline vs x=3,y=3 for r/b) with the fix in place for a clean, trustworthy comparison -- results pending, to be appended.
+
+**This bears directly on the standing "is Python converging to a universally lower chi2 than C++" question**: any such comparison done before this fix is unreliable for roughly half the bundles, since Python's reported terminal chi2 there reflected a fit that silently gave up before optimizing the full parameter set, not a genuine converged-vs-converged comparison against C++.
+
+### Files
+- `py/specex/fitter.py`: the one-line fix (`mode == 'full'` guard added to the early-exit condition), with an explanatory comment.
+- `campaign30/run_campaign30.py`, `/tmp/drive_campaign30.sh` (scratchpad): 30-bundle campaign driver, re-used for both the pre-fix and post-fix runs.
+
+### Still open / good next-session leads (additions)
+- ~~Get the post-fix 30-bundle results and redo the x=3,y=3 vs x=5,y=6 decision with trustworthy numbers.~~ -- done, part 6 below.
+- ~~Re-answer the C++-vs-Python chi2 comparison question with post-fix data.~~ -- done, part 6 below.
+- ~~Consider whether the same mode-blind early-exit pattern exists anywhere else~~ -- checked: the trace warm-up loop (`specex.py`'s `trace_loop`, `fitter.py:606-624`) calls `fit()` with `max_iter=5`, so `i` never exceeds 4 and the `i > 5` guard can never fire there regardless of mode; that call site was never affected.
+
+## 2026-07-30/31 (continued, part 6) -- Post-fix chi2/trace-degree conclusions, and a real, systematic, unmodeled PSF asymmetry found via a new independent (non-trace-model) centroid check
+
+### Chi2 comparison, redone cleanly post-fix
+
+Re-ran the 30-bundle campaign with the line-search fix in place: all 30/30 base-degree fits now reach `'full'` mode (vs 15/30 before). Confirmed the fix leaves xrms/yrms completely unchanged (diffed pre-/post-fix results: identical to the 4th decimal in 29/30 cases, one case differed by 0.0001-0.0005px, float noise) -- expected, since trace freezes at the end of `'trace'` mode, before `'sigma'`/`'full'` (what the fix touches) ever run. The fix is a pure PSF-shape/chi2 fix, orthogonal to trace/position accuracy.
+
+**Python's terminal chi2 is lower than C++'s in 29/29 valid cases** (one C++ log was corrupted, excluded) -- mean -6.0%, median -4.4%, range -1.3% to -23.8%. Robust, not a fluke: C++'s own chi2/ndf ratios sit at 1.15-2.07 (persistently above the ~1.0 a converged fit against correctly-estimated noise should show), and C++ has *more* total free parameters than Python here (per-fiber-independent trace, ~350 params, vs Python's shared low-order trace basis, ~14-20 params) -- so this isn't Python winning via a more flexible model. Caveat: this reflects PSF-shape/flux fit quality, not trace/position accuracy -- xrms/yrms is the right metric for the latter, and is unaffected by any of this.
+
+### Trace-degree decision: keep defaults unchanged
+
+Validated x=5,y=6 (the aggressive setting from part 4) on the full, honest 30-random-bundle set (not just the original 15) with the fix in place: mean xrms -3.6%, mean yrms -7.1% (r+b: -4.2%/-8.7%; z: -2.4%/-3.9%) -- real and positive, but roughly half the effect size the original 15-bundle sample suggested (that sample was favorably biased toward the cases that benefit most). User's call: not worth it -- "0.98px" (an unrelated finding, see below) aside, a ~7-9% yrms improvement is small potatoes against the 0.02px goal, and not worth the risk of a production default change for this session. **Decision: leave `specex.py`'s trace-degree auto-detect defaults untouched** (x=1,y=2 for r/b, x=3,y=3 for z) -- no code change needed. `--trace-legendre-deg-wave-x`/`-y` already exist as CLI overrides (used throughout this session's testing) for anyone who wants to try a higher degree on a specific run.
+
+### A full status-quo snapshot at current (unchanged) defaults, 30 random bundles, current code
+
+| | r | b | z | all |
+|---|---|---|---|---|
+| mean t_cpp / t_py (single-bundle harness, same methodology both sides) | 99.8s / 35.3s | 34.7s / 28.2s | 120.9s / 38.2s | 85.1s / 33.9s (2.51x) |
+| mean xrms / yrms (px) | 0.0512 / 0.0571 | 0.0403 / 0.0345 | 0.0247 / 0.0317 | 0.0387 / 0.0411 |
+| mean wrms, cpp vs py (A, dominated by the pre-existing domain-refit artifact -- relative comparison only) | -- | -- | -- | 0.5851 / 0.5850 (essentially tied) |
+
+Single-bundle timing understates Python's real advantage for r/z (established full-CCD homer baseline: 4.1-6.8x, vs 2.98-3.27x here) since C++'s CCD-wide setup cost doesn't amortize over just one bundle; b-band's 1.38x here matches the full-CCD number well.
+
+### A new, real, systematic finding: neither pipeline's PSF model captures a real, wavelength-dependent Y-direction flux asymmetry present in the raw data
+
+Built a genuinely independent centroid check (not derived from any trace model -- the thing `wave_residual_stats()`/pass4 could never provide, see the 2026-07-29 "wrms gap resolved" entries) to finally get a real vs-truth number for each pipeline separately. Two iterations:
+1. Naive flux-weighted moment (first version had a real bug -- window wider than the ~7.3px fiber spacing, contaminating X with neighboring fibers; fixed by narrowing to hx=3, matching existing `min(3, psf.h_size_x)` precedent in `fitter.py`).
+2. Rigorous version (per user's request after the naive check showed a suspicious ~1px effect): a proper pixel-integrated 2D Gaussian PSF fit (same erf-based pixel-integration math as `fitter.py`'s real forward model), weighted nonlinear least squares, position free per spot.
+
+**Both versions agree closely with each other** (ruling out naive-centroid bias) and both show a real, reproducible disagreement against both pipelines' fitted traces: growing smoothly from ~0.1-0.2A to ~0.8-0.9A (equivalently, ~0.3-1.9px) across a band, present in ~98-100% of individual lines checked, always in the same direction (independent centroid reads *higher* Y than either pipeline's trace), essentially identical for C++ and Python (e.g. 0.0887A vs 0.1007A at one end, 0.8638A vs 0.8024A at the other) -- a shared blind spot, not a disagreement between the ports.
+
+**Hypotheses tested and killed, in order:**
+- Air/vacuum line-list mismatch -- already known not to apply (linelist is vacuum); also directly ruled out here since converting the pixel bias to A via local dispersion does *not* flatten it (a fixed-offset mislabeling would flatten; it doesn't, it still grows ~4.7x across the band).
+- Simple pixel-indexing/off-by-one bug -- the per-line residual table (fiber 112, all 41 lines) is smooth and continuous (0.157px to 1.766px, monotonic, no jumps or clustering near round numbers), which an indexing bug (a constant offset) wouldn't produce.
+- File staleness / fiber-index offset in `load_traces()` -- checked directly: XTRACE is (500,7) with FIBERMIN=0 in both files, row index = absolute fiber number, no bug.
+- Legendre `value()`/`invert()` bug -- this is the same code every xrms/yrms/wrms number in this whole project has used for weeks; a bug there would already be visible everywhere, not just here.
+- Blending with a catalogued neighbor line -- checked directly (nearest selected neighbor for the worst-offending fiber is 8.27A away, ~17px, well outside the measurement window).
+- Missing `TAILAMP` term in my Gaussian-only model -- checked: `TAILAMP=0` in the actual fitted output at every wavelength (the tail component isn't active in either pipeline's real fit at all, so "missing" it can't be the mechanism).
+- GH-shape mismatch (real, growing antisymmetric terms `GH-0-1`/`GH-1-1` exist and grow with wavelength) -- directly simulated: rendered a noise-free synthetic stamp using the *actual* fitted GH parameters at a known position, ran the same plain-Gaussian fit on it. Recovered the true position to within 0.001-0.013px -- two orders of magnitude too small, and the wrong sign of wavelength trend (simulated bias shrinks with wavelength; the real one grows). Not the mechanism.
+
+**What's actually there, confirmed directly**: rendered each pipeline's own fitted PSF model at its own claimed position, subtracted from the real preproc image. There's real, unmodeled flux left over -- a second, PSF-shaped excess, offset toward higher Y, with more integrated flux in some cases than the fitted line's own peak. Checked systematically across 3 fibers (~40 lines each): 98-100% of all lines show this same one-sided excess. This is present directly in the preproc image (the same file both pipelines fit against) -- not an artifact of any comparison or downstream processing.
+
+**Best-supported explanation (not confirmed further, out of scope for this port)**: a real, asymmetric PSF wing/tail that neither pipeline's model captures, since `TAILAMP` (the parameter that exists in the model for exactly this) is fit to zero in both. Plausible physical driver: red-wavelength charge diffusion (a well-known CCD effect, redder photons penetrate deeper into silicon before absorption, producing wider/more extended, sometimes asymmetric PSF wings) -- consistent with `GHSIGY` independently growing 1.05->1.20 across the same band. Not confirmed to that specific level; would need real CCD/instrument-physics investigation, not more pipeline comparison, to pin down.
+
+**Why this doesn't change anything about port correctness**: both pipelines are affected identically (a shared PSF-model blind spot, not a fitting disagreement between the two ports), consistent with the already-established ~0.01-0.02A mutual agreement being the right number for "do the two ports agree with each other." DESI's own group has independently validated the C++ fits as scientifically good; this finding is about the PSF model's own completeness (a `TAILAMP`-shaped gap), not about whether this Python port matches C++ -- it does, closely, even on this axis.
+
+### Files
+- `independent_centroid/measure_truth.py`, `independent_centroid/gauss_fit.py`, `independent_centroid/run_check.py` (scratchpad, not committed): the independent centroid tooling built this entry -- reusable for any future truth-reference work, or for actually characterizing the tail/asymmetry finding if that's ever prioritized.
+- No production code changes this entry beyond the already-covered line-search fix (part 5).
+
+### Still open / good next-session leads (additions)
+- The line-search fix (`fitter.py`) is validated and ready to commit -- not yet committed, pending explicit go-ahead.
+- The real PSF-asymmetry/tail finding is uninvestigated beyond "it's real and systematic" -- if ever prioritized, next steps would be: check whether it correlates with known CCD readout direction (would support charge-transfer/diffusion), test on b/z bands too (only r-band checked so far), and consider whether enabling/fitting the existing (currently zero) `TAILAMP`/`TAILCORE`/etc. parameters in the real fit closes the gap.
+- 30-CCD production runs resume Monday when Perlmutter is back -- this session's work (line-search fix, trace-degree default confirmation) should carry forward into that validation.

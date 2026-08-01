@@ -1076,7 +1076,17 @@ class PSF_Fitter:
                     if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
             if os.environ.get("SPECEX_DEBUG_ALPHA"):
                 print(f"  ALPHA_DEBUG iter={i} mode={mode} best_alpha={float(best_alpha)} ls_chi2={float(ls_chi2)}", flush=True)
-            if best_alpha == 0 and i > 5: break
+            # A line-search failure (no tried alpha improves chi2) only means
+            # "no progress in THIS mode's active parameter subset" -- flux/
+            # trace/sigma/full each free a different subset (see idx above),
+            # so a failure in e.g. 'sigma' mode says nothing about whether
+            # 'full' mode's still-untouched higher-order GH shape terms have
+            # room to improve. Restricting the early-exit to 'full' mode
+            # (the terminal stage, where nothing new unlocks afterward) keeps
+            # the "genuinely converged, stop" behavior while fixing a real
+            # bug where ~half of all bundles were exiting mid-'sigma' mode
+            # and never fitting the higher-order shape terms at all.
+            if best_alpha == 0 and mode == 'full' and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
             flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
             # Anti-drift damping for the trace/GH degenerate direction --
