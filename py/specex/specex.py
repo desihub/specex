@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid'):
     """
     Isolated task for fitting a single bundle.
     """
@@ -281,7 +281,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
                              if spot_fiber_counts.get(fib, 0) < 2 and fib not in explicitly_broken]
 
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search)
         t_finalfit = time.time()
         print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
 
@@ -408,7 +408,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
                      workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
-                     trace_per_fiber_deg=None):
+                     trace_per_fiber_deg=None, line_search='grid'):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -463,6 +463,17 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     parameter count. Experimental/opt-in -- not validated at production
     scale yet, and real GPU memory/wall-time cost has not been measured
     beyond the single bundle-0 forced-spots test in porting-notes.md.
+
+    line_search (default 'grid') selects the final joint fit's per-
+    iteration step-size search: 'grid' is the long-standing coarse
+    3-point [0.2,0.5,1.0] search; 'brent' is a continuous but NOT
+    C++-faithful search (wrong bracket/tolerance, kept for reference,
+    tested negative); 'cpp' is a faithful replica of C++'s actual
+    algorithm (specex_psf_fitter.cc/specex_brent.cc -- mode-dependent
+    skip logic plus a direct Numerical Recipes brent() port). Both
+    'brent' and 'cpp' were tested on 2 hard + 2 normal bundles and found
+    to produce no meaningful xrms/yrms change vs 'grid' -- see
+    porting-notes.md. Experimental/opt-in, not the default.
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
@@ -518,7 +529,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker, line_search))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -573,6 +584,7 @@ def main():
     parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
     parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
     parser.add_argument("--double-precision", action="store_true", help="Force full float64 precision for the joint-fit Jacobian (default: mixed float32/float64 -- see porting-notes.md; validated equivalent accuracy, ~71%% less GPU memory/worker)")
+    parser.add_argument("--line-search", type=str, default="grid", choices=["grid", "brent", "cpp"], help="EXPERIMENTAL: the final joint fit's per-iteration step-size search. 'grid' (default): the long-standing coarse 3-point [0.2,0.5,1.0] search. 'brent': a continuous but NOT C++-faithful search, kept for reference. 'cpp': a faithful replica of C++'s actual algorithm (mode-dependent skip logic + a direct Numerical Recipes brent() port, see specex_psf_fitter.cc/specex_brent.cc). Both 'brent' and 'cpp' tested negative (no xrms/yrms change on 2 hard + 2 normal bundles) -- see porting-notes.md.")
 
     args = parser.parse_args()
     
@@ -604,7 +616,8 @@ def main():
         trace_legendre_deg_wave_y=args.trace_legendre_deg_wave_y,
         trace_per_fiber_deg=args.trace_per_fiber_deg,
         fit_continuum=args.fit_continuum,
-        double_precision=args.double_precision
+        double_precision=args.double_precision,
+        line_search=args.line_search
     )
 
 if __name__ == "__main__":

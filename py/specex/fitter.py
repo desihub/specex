@@ -7,6 +7,58 @@ from .psf import GaussHermitePSF
 
 # --- Helpers ---
 
+def _cpp_brent(f, ax, bx, cx, tol, itmax=100):
+    """Direct line-by-line port of specex_brent.cc's brent() (itself a
+    near-verbatim copy of Numerical Recipes' brent()), used by
+    SPECEX_CPP_LINESEARCH for a genuinely faithful replica of C++'s line
+    search. Not scipy's minimize_scalar(method='brent') -- that raises on a
+    "loose" (non-strictly-bracketing) triple, which C++'s raw NR
+    implementation tolerates by just falling back to golden-section
+    stepping; this port preserves that tolerance instead of failing.
+    Returns (x_min, f_min)."""
+    CGOLD = 0.3819660
+    ZEPS = 1e-60
+    a = min(ax, cx); b = max(ax, cx)
+    x = w = v = bx
+    fx = fw = fv = f(x)
+    d = 0.0; e = 0.0
+    for _ in range(itmax):
+        xm = 0.5 * (a + b)
+        tol1 = tol * abs(x) + ZEPS
+        tol2 = 2.0 * tol1
+        if abs(x - xm) <= (tol2 - 0.5 * (b - a)):
+            return x, fx
+        if abs(e) > tol1:
+            r = (x - w) * (fx - fv)
+            q = (x - v) * (fx - fw)
+            p = (x - v) * q - (x - w) * r
+            q = 2.0 * (q - r)
+            if q > 0.0: p = -p
+            q = abs(q)
+            etemp = e; e = d
+            if abs(p) >= abs(0.5 * q * etemp) or p <= q * (a - x) or p >= q * (b - x):
+                e = (a - x) if x >= xm else (b - x); d = CGOLD * e
+            else:
+                d = p / q; u = x + d
+                if (u - a) < tol2 or (b - u) < tol2:
+                    d = tol1 if (xm - x) > 0 else -tol1
+        else:
+            e = (a - x) if x >= xm else (b - x); d = CGOLD * e
+        u = x + d if abs(d) >= tol1 else x + (tol1 if d > 0 else -tol1)
+        fu = f(u)
+        if fu <= fx:
+            if u >= x: a = x
+            else: b = x
+            v, w, x = w, x, u; fv, fw, fx = fw, fx, fu
+        else:
+            if u < x: a = u
+            else: b = u
+            if fu <= fw or w == x:
+                v, w = w, u; fv, fw = fw, fu
+            elif fu <= fv or v == x or v == w:
+                v = u; fv = fu
+    return x, fx
+
 def next_pow2_bucket(n, min_bucket=256):
     """Smallest power of 2 >= n (floored at min_bucket), for padding
     variable-length JAX inputs to a small, campaign-stable set of shapes so
@@ -801,7 +853,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 class PSF_Fitter:
     def __init__(self, psf):
         self.psf = psf; self.chi2_precision = 0.01
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None):
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, line_search='grid'):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
         # trace_wdeg (a shared X/Y default) falls back to wdeg -- see
@@ -1071,9 +1123,73 @@ class PSF_Fitter:
             # healthy chi2 trajectory).
             best_alpha, ls_chi2 = 0.0, float(chi2)
             if jnp.any(d_p != 0):
-                for alpha in [0.2, 0.5, 1.0]:
-                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]; c2 = _predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
-                    if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
+                def _ls_chi2_at(alpha):
+                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]
+                    return float(_predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+                if line_search == 'cpp':
+                    # EXPERIMENT (--line-search cpp): a *faithful* replica of
+                    # C++'s actual line-search logic
+                    # (specex_psf_fitter.cc:1497-1642, specex_brent.cc --
+                    # literally Numerical Recipes' brent()), not just "a
+                    # continuous search instead of a grid" (that weaker
+                    # version, --line-search brent below, tested negative and
+                    # used the wrong bracket/method entirely).
+                    # C++'s real behavior, mapped onto this branch's modes:
+                    #  - 'flux' mode is a pure linear least-squares problem in
+                    #    (flux, continuum) alone -- matches C++'s `linear`
+                    #    condition (fit_flux && !fit_position && !fit_trace
+                    #    && !fit_psf) exactly. C++ takes the raw Newton step
+                    #    with NO search at all in this case.
+                    #  - 'trace' mode: C++ always uses brent when fit_trace is
+                    #    true, regardless of whether the raw step already
+                    #    helps ("we use brent anyway for the fit of traces").
+                    #  - 'sigma'/'full' modes: not linear (flux is jointly fit
+                    #    with genuinely nonlinear/bilinear terms) and not
+                    #    fitting trace, so C++ first checks whether the raw
+                    #    Newton step (alpha=1) already decreases chi2; if so
+                    #    it's taken directly with no search at all; only if it
+                    #    increases chi2 does brent get called.
+                    # Brent bracket/tolerance match C++ exactly: bracketing
+                    # triple (-0.05, 1, 1.001) -- note this allows a small
+                    # *negative* step but essentially never exceeds 1.0 -- and
+                    # brent_precision=0.01 (C++ uses this as both the chi2
+                    # convergence threshold AND brent's own tol argument).
+                    # Uses _cpp_brent (a direct NR port, see its own
+                    # docstring) rather than scipy.optimize.minimize_scalar --
+                    # scipy raises on a "loose" bracket where f(xb) isn't
+                    # strictly below f(xa)/f(xc), which happens routinely
+                    # here (this codepath only runs when the raw step alpha=1
+                    # already made chi2 *worse*, so bx=1 need not be the best
+                    # of the three points at all) -- C++'s raw NR
+                    # implementation has no such precondition check and just
+                    # proceeds via golden-section fallback, which is what
+                    # _cpp_brent replicates.
+                    if mode == 'flux':
+                        best_alpha, ls_chi2 = 1.0, _ls_chi2_at(1.0)
+                    elif mode == 'trace':
+                        best_alpha, ls_chi2 = _cpp_brent(_ls_chi2_at, -0.05, 1.0, 1.001, 0.01)
+                    else:
+                        chi2_1 = _ls_chi2_at(1.0)
+                        if chi2_1 <= ls_chi2:
+                            best_alpha, ls_chi2 = 1.0, chi2_1
+                        else:
+                            a_x, f_x = _cpp_brent(_ls_chi2_at, -0.05, 1.0, 1.001, 0.01)
+                            if f_x < ls_chi2: best_alpha, ls_chi2 = a_x, f_x
+                elif line_search == 'brent':
+                    # EXPERIMENT (--line-search brent, earlier/weaker version,
+                    # kept for reference): a continuous but NOT C++-faithful
+                    # search -- wrong bracket/method (bounded [0,1.5] instead
+                    # of C++'s real (-0.05,1,1.001) triple), wrong tolerance
+                    # semantics. Tested negative (no change vs the 3-point
+                    # grid on 4 cases spanning hard/normal). Superseded by
+                    # --line-search cpp above for an honest comparison.
+                    from scipy.optimize import minimize_scalar
+                    sol = minimize_scalar(_ls_chi2_at, bounds=(0.0, 1.5), method='bounded', options={'xatol': 1e-4})
+                    if sol.fun < ls_chi2: best_alpha, ls_chi2 = float(sol.x), float(sol.fun)
+                else:
+                    for alpha in [0.2, 0.5, 1.0]:
+                        c2 = _ls_chi2_at(alpha)
+                        if c2 < ls_chi2: best_alpha, ls_chi2 = alpha, c2
             if os.environ.get("SPECEX_DEBUG_ALPHA"):
                 print(f"  ALPHA_DEBUG iter={i} mode={mode} best_alpha={float(best_alpha)} ls_chi2={float(ls_chi2)}", flush=True)
             # A line-search failure (no tried alpha improves chi2) only means
