@@ -1057,9 +1057,22 @@ class PSF_Fitter:
                 np.savez(os.environ["SPECEX_DEBUG_DUMP_A"], A=np.array(A), B=np.array(B),
                          Ns_l=Ns_l, n_gh=n_gh, Npoly_psf=Npoly_psf, Npoly_trace=Npoly_trace,
                          Ncont=Ncont, iter=i, chi2=float(chi2))
+            # EXPERIMENT (SPECEX_FREEZE_GH10): b2@20241105:17's coefficient-
+            # level disagreement is concentrated in GHSIGX and the low-order
+            # pure-X shape terms (GH-1-0, GH-2-0, GH-3-0), not spread evenly
+            # -- exactly the signature the existing GHSIGX/GHSIGY freeze
+            # already fixed for a Y-axis-adjacent degeneracy (2026-07-29).
+            # GH-1-0 (pc row 2, the lowest-order antisymmetric-in-X term,
+            # near-degenerate with a small X-trace-position shift to first
+            # order) has no analogous early, isolated stage -- it's only
+            # ever fit jointly with every other shape term in 'full' mode.
+            # This extends the existing sigma/full split to also cover row
+            # 2: 'sigma' mode gains GH-1-0 alongside GHSIGX/GHSIGY, 'full'
+            # mode then excludes it (frozen), same treatment.
+            _gh10_extra = 1 if os.environ.get("SPECEX_FREEZE_GH10") else 0
             if mode == 'flux': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             elif mode == 'trace': idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + n_psf_tot, Ns_l + n_psf_tot + 2*Npoly_trace), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
-            elif mode == 'sigma': idx = jnp.concatenate([jnp.arange(Ns_l + 2*Npoly_psf), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
+            elif mode == 'sigma': idx = jnp.concatenate([jnp.arange(Ns_l + (2+_gh10_extra)*Npoly_psf), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             # EXPERIMENT (branch experiment/cpp-alternating-solve): 'full'
             # mode excludes trace entirely instead of solving trace+shape
             # jointly -- matches C++'s real structure exactly (it never
@@ -1069,8 +1082,9 @@ class PSF_Fitter:
             # 'trace' mode (i=2..4) and stays frozen for the remainder of
             # the fit, same as C++ freezing it after its own TRACE stage.
             # Also excludes GHSIGX/GHSIGY (pc rows 0-1, frozen after 'sigma'
-            # mode above) for the same reason.
-            else: idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + 2*Npoly_psf, Ns_l + n_psf_tot), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
+            # mode above) for the same reason, plus GH-1-0 (row 2) too when
+            # SPECEX_FREEZE_GH10 is set.
+            else: idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + (2+_gh10_extra)*Npoly_psf, Ns_l + n_psf_tot), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
             A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
             try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
@@ -1121,10 +1135,24 @@ class PSF_Fitter:
             # at their INITIAL values and the whole converged fit was
             # silently discarded (seen as dx/dy_final == 0 with a perfectly
             # healthy chi2 trajectory).
+            # EXPERIMENT (SPECEX_MATCH_CPP_FLUX_CLAMP): C++'s real
+            # FitEverything (specex_psf_fitter.cc) only sets
+            # force_positive_flux=true starting at the sigma-fitting stage
+            # (line ~2791, right before "PSF+FLUX only gaussian terms") --
+            # during the earlier flux/trace stages (force_positive_flux
+            # defaults false, never set otherwise in the real
+            # direct_simultaneous_fit=true production path) C++ allows flux
+            # to go transiently negative. This branch's fit() has always
+            # clamped flux >= 0 on every iteration unconditionally; gated
+            # here to test whether relaxing that during 'flux'/'trace'
+            # modes changes hard-bundle behavior.
+            clamp_flux = not (os.environ.get("SPECEX_MATCH_CPP_FLUX_CLAMP") and mode in ('flux', 'trace'))
             best_alpha, ls_chi2 = 0.0, float(chi2)
             if jnp.any(d_p != 0):
                 def _ls_chi2_at(alpha):
-                    f_try = jnp.maximum(flux + alpha * d_p[:Ns_l], 0.0); p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]
+                    f_try = flux + alpha * d_p[:Ns_l]
+                    if clamp_flux: f_try = jnp.maximum(f_try, 0.0)
+                    p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]
                     return float(_predict_bundle_jax_jit(f_try, p_try, t_try, c_try, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
                 if line_search == 'cpp':
                     # EXPERIMENT (--line-search cpp): a *faithful* replica of
@@ -1204,7 +1232,9 @@ class PSF_Fitter:
             # and never fitting the higher-order shape terms at all.
             if best_alpha == 0 and mode == 'full' and i > 5: break
             if best_alpha == 0: best_alpha = 0.1
-            flux = jnp.maximum(flux + best_alpha * d_p[:Ns_l], 0.0); pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
+            flux = flux + best_alpha * d_p[:Ns_l]
+            if clamp_flux: flux = jnp.maximum(flux, 0.0)
+            pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
             # Anti-drift damping for the trace/GH degenerate direction --
             # DISABLED on this branch (experiment/cpp-alternating-solve).
             # The degeneracy this guards against requires trace and the
