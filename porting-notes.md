@@ -2905,3 +2905,380 @@ Means are remarkably close across two independent random samples -- reassuring t
 ### Still open / good next-session leads (additions)
 - The real, unresolved question is now narrower and better-characterized: *why does `'trace'` mode's own 3-iteration flux+trace joint solve land on a different X_vs_W for b2 specifically* (and a different, more diffuse mismatch for b7)? This is upstream of everything tested so far (all of which targeted 'sigma'/'full' mode or config/architecture differences outside the trace solve itself). A direct per-iteration trace-trajectory dump (both engines, same bundle, same starting point) during just the `'trace'`-mode/`FitSeveralSpots FLUX+TRACE` stage specifically would be the natural next step, rather than another shape-stage or config-level experiment.
 - This session's C++ source sweep (line search, `force_positive_flux`, dead pixels, broken fibers, CCD-edge handling, spot selection, several CLI options, GH degree, `chi2_precision`, tail fitting, gain, read noise) is now quite exhaustive with a very low remaining hit rate -- further blind sweeping of C++ flags is probably lower-value than the trace-trajectory-dump approach above.
+
+## 2026-08-04 -- Back on Perlmutter: `experiment/cpp-alternating-solve` gets its first real A100-scale validation, a real Cray-toolchain build regression found and fixed, and a genuine (non-blocking) speed anomaly root-caused on two r5 exposures
+
+Perlmutter's 2-week maintenance outage ended. Picked up `experiment/cpp-alternating-solve` (created 2026-07-29, never before run anywhere but homer's single RTX 3060) per direct instruction: read the full homer arc first (all entries above, 2026-07-23 through 2026-08-03/04), then ran a fresh 15-case (5/band) full-CCD campaign as the first-ever Perlmutter/A100-scale test of this branch -- exactly the "Phase 1 re-validation" flagged as top priority in the 2026-07-27/28 production plan, before any 30-CCD work. Confirmed via `git log`/`git merge-base`: `python-gpu-port` (production) never received any of the homer-era commits -- it's still sitting at the pre-outage `8edf16f`, and every fix described in the entries above (broken-fiber handling, dead-fiber generalization, the alternating-solve architecture itself, sigma-mode/GHSIGX freeze, the line-search fix, CPU thread-pinning) exists only on this experiment branch, never merged back, never run anywhere but homer's consumer GPU.
+
+**Real build regression found and fixed before anything else could run.** `cmake --build` failed immediately: homer's 2026-07-23 LAPACKE fix (`CMakeLists.txt`, `find_path`/`find_library` for `lapacke.h`/`liblapacke`, `FATAL_ERROR` if not separately found) unconditionally hard-requires a standalone, separately-discoverable LAPACKE library -- true for homer's reference-BLAS/Debian setup, but false for Perlmutter's Cray toolchain, which finds BLAS/LAPACK via **implicit linking** (the `cc`/`CC` compiler wrapper auto-links `cray-libsci`; `find_package(BLAS)` reports "Found BLAS: implicitly linked" with empty `BLAS_LIBRARIES`, no separately-named `.so` to find). The same implicit link has always silently supplied `LAPACKE_dposv`/`LAPACKE_dpotri` too (proven by every pre-outage Perlmutter build succeeding without any explicit LAPACKE handling at all) -- homer's new hard-require block just never accounted for this case. **Fixed**: only `FATAL_ERROR` when `BLAS_LIBRARIES`/`LAPACK_LIBRARIES` are non-empty (i.e. BLAS was found as real, separately-linked libraries, homer's actual case); when they're empty (implicit-link case), log and trust the same implicit link to cover LAPACKE too, exactly as it always has on Perlmutter. Rebuilt `_libspecex.so` clean. Verified correct, not just "builds": ran the standing z8/00344649 bundle-5 case through the rebuilt C++ path, got `chi2/ndf = 137677/114976 = 1.19744` -- bit-for-bit the same value homer recorded when it first unblocked `run_specex()` (2026-07-24) -- confirming the rebuild is functionally identical to what's been validated all along, not just "compiles now." Python side of the same smoke-test bundle (now correctly reaching `'sigma'`/`'full'` mode per this branch's architecture) gave xrms=0.026px/yrms=0.029px against that C++ output -- healthy, in-family with every z-band number in this file.
+
+### Files
+- `CMakeLists.txt`: LAPACKE hard-require now conditional on whether BLAS/LAPACK were found explicitly (homer's real case) vs. implicitly (Perlmutter's Cray-toolchain case) -- not yet committed.
+
+**First-ever Perlmutter/A100-scale campaign for this branch: 15 fresh cases (5/band, seed 424242, excluding all three pre-outage `random_full_ccd_{15,15_v2,30}` picks -- genuinely new nights/exposures), real production settings both sides (`srun -n 20 desi_compute_psf --mpi` vs `specex --gpu 4 --workers-per-gpu 5`), `--broken-fibers` sourced from the real production job logs (not homer's FIBERMAP workaround, unnecessary here). Zero failures, zero crashes, across all 15.**
+
+| band | n | mean xrms (px) | mean yrms (px) | sum t_cpp | sum t_py | speedup |
+|---|---|---|---|---|---|---|
+| b | 5 | 0.0452 | 0.0395 | 483.1s | 324.4s | **1.49x** |
+| r | 5 | 0.0437 | 0.0512 | 1878.1s | 633.9s | **2.96x** |
+| z | 5 | 0.0298 | 0.0322 | 2621.5s | 578.8s | **4.53x** |
+| **all** | **15** | | | 4982.7s | 1537.1s | **3.24x** |
+
+**Every band is faster than the pre-outage 9-camera baseline** (b 1.16-1.34x, r 2.33-2.87x, z 3.13-3.31x, aggregate 2.38x from the 2026-07-22 corrected headline) -- the specific risk flagged repeatedly in the 2026-07-27/28 entries (this session's added per-iteration overhead landing on b-band's structurally weakest code path) did not materialize; if anything b-band looks slightly better than before. **Correctness is uniformly healthy** -- every per-CCD mean xrms/yrms in this table is well inside the "normal" range established by homer's bundle-level campaigns, nothing resembling the b7/r0/r9-17-style hard-bundle outliers from that investigation.
+
+**One real, non-blocking speed anomaly found and root-caused: camera r5, both exposures tested, ran markedly slower than every other r-band case (~200s vs ~75-80s), via two genuinely different mechanisms.** Per-bundle `PHASE_TIMING` logs (all 20 bundles, both r5 exposures) show this isn't one straggler bundle -- it's most of the CCD: r7/r4/r0 have all 20 bundles under 80s each (tight, uniform, e.g. r7: 62.5-65.5s flat); r5@20240407 has only 3/20 under 80s (rest spread 80-162s); r5@20210617 has only 2/20 under 80s (9/20 at >=160s).
+
+- **r5@20240407: the trace warm-up loop (`select_bundle_spots_iterative`'s 5-iteration, break-below-0.5px loop) rarely converges on the first try.** r7's 20 bundles all converge in exactly 1 iteration each, shifts 0.25-0.46px. r5@20240407: only 6/20 bundles converge on iteration 0; 14/20 need 2-5 iterations, several exhausting the full 5-iteration budget without ever dropping below 0.5px (shifts up to 1.74px). This is the same "bundles needing a bigger real trace correction take longer and diverge more" mechanism established on homer (2026-07-30, r=0.81 correlation between C++'s own trace-loop max-centroid-shift and yrms) -- and this camera also has the highest xrms/yrms of the r-band set (0.063/0.077), consistent with that read.
+- **r5@20210617: a different mechanism.** Trace warm-up converges in exactly 1 iteration on all 20 bundles here (like the fast cameras), and per-bundle candidate counts are statistically identical to r7's (~1610-1799 both, no outlier) -- yet selection-phase time is still 80-120s/bundle (vs r7's flat 34-37s) and final-fit time is elevated too. Not explained by either of the two obvious levers (warm-up iteration count, candidate volume) checked. **Not root-caused tonight** -- would need direct instrumentation of `fit_candidate_fluxes`'s own per-call timing to isolate further, not attempted given this doesn't threaten correctness (xrms/yrms both fine, 0.052/0.064) or the overall speed conclusion (r5@20210617 is still 1.71x faster than C++, just less dramatically so).
+- **Not a "spectrograph unit 5 is bad" story**: z5 (same physical spectrograph, different band, both nights tested) shows no slowdown at all (5.50x, 89.4s/128.9s, in-family with every other z case) -- whatever's happening is specific to r-band's fit on these two particular exposures' data, not the hardware unit.
+
+### Files
+- No production code changes from the campaign itself -- pure validation. `random_full_ccd_altsolve_v1/` (pscratch, all_cases.jsonl + full_ccd_results.txt + per-case logs) is the new campaign directory, same convention as the pre-outage `random_full_ccd_15`/`_30` sets.
+
+### Still open / good next-session leads (additions)
+- **Commit the CMakeLists.txt Cray-toolchain fix** -- real, currently uncommitted, needed by anyone building this branch (or any future merge of it) on Perlmutter.
+- **r5@20210617's selection/final-fit slowdown (mechanism 2 above) is a genuine open question** -- worth a direct `fit_candidate_fluxes` timing instrumentation pass if this recurs on other cameras, but not urgent (doesn't threaten correctness or the overall speed lead).
+- Decide whether to merge `experiment/cpp-alternating-solve`'s validated fixes back into `python-gpu-port` (production) now that this branch has real A100-scale validation for the first time -- everything on this branch (architecture change, sigma-mode freeze, line-search fix, broken/dead-fiber handling, CPU thread-pinning) has been homer-validated for a while but this is the first Perlmutter confirmation any of it holds at real production scale.
+- Next per the standing plan: pivot to the 30-CCD-at-once production run (Phase 1 of the 2026-07-27/28 plan), now that this campaign has cleared the top-priority re-validation risk.
+
+## 2026-08-04 (continued) -- b5/r5 deep-dive: chi2/ndf as a real noisiness metric, root-caused to an incompletely-flagged dead CCD column, and a genuine (partly unexplained) GPU-contention amplification effect
+
+Per direct follow-up request: dug into the b5@20240407 spot-count anomaly and the r5 slowness precisely, pulled a third r5 exposure, and tested the trace-degree/line-search levers on the actual bad bundles rather than the previously-tested ones.
+
+**b5@20240407's "52% more Python spots" was a measurement artifact, not real.** C++'s own `Bundle N PSF fit nspots` completion line (true final count) averages 673.8/bundle -- 0.1% from Python's 674.45/bundle. `full_ccd_campaign.py`'s `nspots_cpp` column sums `cppspots_pass4.txt` line counts on disk, and for this exposure 19/20 of those files were left stale at an early strict-selection snapshot instead of being overwritten with C++'s true final list before the joint fit -- a pass4-freshness artifact in the measurement tooling. Confirmed by cross-checking b7 (whose pass4 files happened to be fresh for most bundles, hence no apparent gap there).
+
+**A third r5 exposure (20251016, picked fresh, excluding all prior night lists) reproduces the same slowdown a third time** (xrms=0.0586, yrms=0.0725, t_py=164.1s vs. the normal ~75-80s) -- confirming this is a persistent property of the physical camera, not exposure noise. Its broken-fiber list shares fibers 143,144,145,146,342 with both previously-tested r5 exposures -- the same physical fibers recurring across three independent observation dates.
+
+**Root cause, found via C++'s own `chi2/ndf` (nothing to do with Python) and `ndead` (literal `weight(i,j)==0` pixel count, confirmed in source) diagnostics:** bundle 5 (fibers 125-149) hits chi2/ndf=10.1 and 10.4 in two of the three r5 exposures (vs. 1.1-1.5 normal); bundle 14 hits 7.4-9.2 in the other two; b5's bundle 16 hits 3.3. `ndead=2075` for fiber 143 in r5@20210617 -- essentially the fiber's entire column is zero-weighted -- yet that specific exposure's official `--broken-fibers` list only includes 144,145, not 143 (the same physical fiber IS on the list for the 2024/2025 exposures of the same camera). Same pattern for b5: fiber 401 has `ndead=2063` but isn't on that exposure's broken list at all. A real, evolving CCD defect that DESI's own calibration database only partially/inconsistently flags depending on when it was first detected -- not a specex bug on either side. Fibers adjacent to the fully-dead core (147-149 for r5) show partial (100-228 pixel) dead-column contamination not caught by any exclusion list, the likely proximate driver of the chi2 inflation itself.
+
+**Confirmed this is NOT a convergence-struggle at the single-bundle level.** r5@20240407 bundle 5 run in isolation: 14-16 iterations, 29.2s wall time, single-iteration trace warm-up (0.38px shift), completely normal spot counts (1470 initial -> 998 strict pass-1 -> 1150 final) -- statistically indistinguishable from a normal bundle (r7@20221104 bundle 5 isolated: 15 iterations, 31.8s). It converges quickly and confidently to a genuinely ~9x higher chi2 because the data doesn't support a better fit, not because the optimizer is struggling.
+
+**The "bigger steps" lever (`--line-search cpp`, the faithful C++ Brent port from the 2026-08-03 entry) has zero effect on this specific bundle either**: xrms/yrms identical to 4 decimals, chi2 within 0.001%, timing a wash (27.8s vs 29.2s). Consistent with the earlier finding on different hard bundles -- line-search mechanics are not the lever anywhere tested so far.
+
+**Trace degree (x=5,y=6) gives a real but modest improvement on both b5 and r5's worst bundles** (r5 bundle 19: xrms -2.4%/yrms -8.6%; r5 bundle 7: xrms -5.0%/yrms -4.2%; b5 bundle 18: xrms -17.3%/yrms flat; b5 bundle 9: xrms flat/yrms -3.5%) -- confirms it is a real, positive, but secondary lever, not the primary driver, matching the user's read.
+
+**A new, only-partially-explained finding: the full-campaign-context slowdown is disproportionately larger than the isolated per-bundle cost predicts.** Isolated, r5's bundle 5 (29.2s) and r7's bundle 5 (31.8s) cost almost the same despite the ~9x chi2 difference. Under the real 20-worker-per-CCD concurrent campaign, r5's bundles average ~120-160s vs. r7's flat ~63-65s -- roughly a 4.3x contention penalty for r5 vs. ~2x for r7. Checked and ruled out the most obvious mechanical explanation (r5's bundles rounding to a bigger JAX power-of-2 padding bucket under GPU sharing): r5's footprint (98036px) and spot count (1150) at this bundle are actually *smaller* than r7's (106855px, 1269 spots), and total iteration count is only modestly higher (20 vs 15). Not root-caused further -- would need direct concurrent-worker GPU profiling (nsight-systems) to isolate, not attempted.
+
+**Deliverables produced for the user's supervisor**: `python-vs-cpp-diff.txt` (repo root) -- a comprehensive, numbered enumeration of every algorithmic/architectural difference between the two pipelines found across both investigation arcs, each with what was tested and its measured effect (not just what seemed plausible), plus a summary table; `testing/plot_spot_position_diff.py` -- a new, reusable script that matches two pipelines' own-selection spot lists by (fiber, nearest wavelength) and plots the position delta (python-C++) vs. xc/yc, with unmatched (python-only/C++-only) spots shown at delta=0 in a distinct marker rather than dropped. Run on the standing z8/00344649 bundle-5 case: 1521/1523 C++ spots matched (2 C++-only, 42 python-only, consistent with the long-standing "Python selects slightly more lines" finding), dx rms=0.0145px, dy rms=0.0145px, output at `/pscratch/sd/c/cdwarner/specex/testing/spot_position_diff/z8_00344649_bundle5.png`.
+
+### Files
+- `python-vs-cpp-diff.txt` (new, repo root) -- not yet committed.
+- `testing/plot_spot_position_diff.py` (new) -- not yet committed.
+- No specex code changes this entry -- investigation and documentation only.
+
+### Still open / good next-session leads (additions)
+- The GPU-contention-amplification mechanism (r5 showing ~4.3x concurrent/isolated slowdown vs. r7's ~2x) is real, reproducible, and unexplained by the obvious levers (padding bucket size, iteration count) -- would need direct profiling to chase further. Could matter for 30-CCD-scale throughput if common across the survey.
+- Planned for later (per direct instruction): a multi-CCD run outputting all files and intermediate spot lists from both pipelines to a shared location for review by someone else familiar with expected output -- to start once a fresh interactive node is available this evening.
+
+## 2026-08-04 (continued, part 3) -- Two corrections to python-vs-cpp-diff.txt caught on user review: the per-fiber trace result doesn't hold on this branch, and a real dead-column mechanism gap found
+
+User caught that the diff doc's per-fiber-trace section (1a) only presented the positive 2026-07-24 result without the later 2026-07-30 regression finding on this same branch -- a real omission, not just a missing caveat. **Confirmed and reconciled precisely**: the 3x yrms win was measured under the OLD joint-solve architecture, where `'full'` mode kept refining trace on every iteration (not just the fixed-3-iteration `'trace'` stage), effectively giving the 350-parameter per-fiber basis far more iterations to converge than its own dedicated stage provides. Re-tested identically on THIS branch (trace frozen forever after `'trace'` mode's fixed 3 iterations, matching C++'s real architecture): a clear regression on a hard bundle (r9@20220120:17, xrms 0.100->0.227, yrms 0.083->0.159, chi2 itself worse too -- not overfitting noise). Root cause is understood (3 iterations sufficient for ~9-14 shared params, nowhere near enough for ~350 per-fiber params from zero-init) but **not fixed** -- the CLI flag (`--trace-per-fiber-deg`) should not be trusted as-is on this branch. Added as a prominent caveat in the diff doc (both section 1a and the summary table), not silently corrected.
+
+**Second question, answered directly by reading source (not previously catalogued anywhere in this file): dead-column handling is NOT the same between the two pipelines, at two different pipeline stages.** C++, at spot-*selection* time (`specex_psf_fitter.cc:249-257`): every candidate gets a 5x5-pixel window check around its own center; >5 dead pixels -> explicit `ignore=true`, dropped before SNR/selection ever runs. Python has no equivalent at selection time -- `fit_candidate_fluxes` uses the raw weight array with no dead-column awareness; a candidate near a dead column just gets whatever SNR the raw math produces (a fully-dead window degenerates to a sentinel SNR=-1, which incidentally fails selection -- not an explicit check). Python's actual dead-column mechanism (`apply_dead_column_mask`) runs later, only just before the final joint fit's footprint construction, and does something structurally different: walks each fiber's own trace centerline, zeros a 9px-wide window in the *global* weight array around any dead pixel found there -- affects final-fit chi2 accumulation, not spot selection. Also found and ruled out a third candidate: C++'s `ndead>500`-gated GH-shape-degree reduction (`specex_psf_fitter.cc:2456-2461`) is wrapped in `if(false && ...)` -- confirmed dead code, never executes.
+
+Practical read: for a fully-dead fiber (ndead~2000+/2062, two of section-4c's cases), both mechanisms likely land in the same practical place through different paths. For the *partially* dead neighboring fibers in the same cases (100-228/2062 dead, not on any broken-fibers list) they plausibly diverge -- C++'s small-window check can still explicitly exclude an individual candidate depending on exactly where it lands; Python only degrades that candidate's SNR without excluding it. Not confirmed to matter -- flagged as a concrete, untested next step (port C++'s explicit per-candidate check into `fit_candidate_fluxes`), not a proven cause of anything in section 4's residual gap.
+
+### Files
+- `python-vs-cpp-diff.txt`: added the 1a per-fiber-trace regression caveat and a new section 1m on dead-column handling, updated the summary table. Not yet committed.
+
+### Still open / good next-session leads (additions)
+- ~~Give `'trace'` mode a convergence-based (not fixed-3-count) iteration budget, at least when `--trace-per-fiber-deg` is requested~~ -- DONE, see below (part 2, this same date).
+- ~~Port C++'s explicit per-candidate dead-column exclusion into the fit~~ -- DONE, see below (part 3, this same date); corrected understanding of *where* in C++ this actually lives, tested, negative result.
+
+## 2026-08-04 (evening session) -- Fixed the per-fiber-trace regression: large real win on 7/8 hard bundles including all three r5 exposures. Dead-column mechanism ported and correctly relocated; tested negative. 30-CCD full-pipeline campaign launched. Scratch cleanup.
+
+User resumed on a fresh interactive node with an explicit 6-item plan: (1) re-investigate per-fiber-trace on the b5/3xr5 cases plus homer's worst bundles, matching C++'s fit exactly; (2) investigate/port dead-column handling; (3) look for any other untried C++/Python differences; (4) a 30-CCD (10/band) campaign into `$SCRATCH/specex/04Aug2026-testing` including the standing z8 case + 5 others from the same night/expid, with spot-diff plots; (5) clean up old `$SCRATCH/specex` output into subfolders; (6) supervisor's 3-node full-night/expid C++ launch instructions, to be shared later.
+
+### Part 1: identified the "homer's worst bundles" test set
+From this project's own history: `b7@20210410:4` (xrms=0.1007, the single most stubborn case, survived 9+ investigations), `r9@20220120:17` (xrms=0.0945, the one that DID respond to trace-degree bumps), `b2@20241105:17` (xrms=0.1473, the worst X of the whole project, from the second independent 30-bundle sample), `r9@20230515:4` (yrms=0.0886 in the original finding -- this session picked expid 00180848, one of 5 candidates for that night, not necessarily the exact one from the earlier finding, but confirmed independently hard: base yrms=0.0807). Combined with the 4 already-flagged b5/r5 cases (b5@20240407:16, r5@20240407:5, r5@20210617:5, r5@20251016:5) for an 8-case test set.
+
+### Part 2: the fix, and a clean, mostly-positive result
+Root cause (already understood, not yet fixed as of the last entry): `'trace'` mode's fixed-3-iteration budget converges the ~9-14-parameter shared basis fine but leaves the ~350-parameter per-fiber basis badly under-converged from zero-init.
+
+**Fix implemented in `fitter.py`'s `fit()`:** `mode` is now tracked as mutable state advanced at the bottom of each iteration (previously derived fresh from the loop counter `i` every iteration) so `'trace'` mode's exit can be convergence-based. Scoped narrowly: only when `trace_per_fiber_deg is not None` does `'trace'` mode get a convergence check (stalls when `abs(old_chi2-chi2) < chi2_precision` for 2 consecutive trace-mode iterations, min 3 / max 20 iterations); the default shared-basis path keeps the exact fixed-3-iteration schedule unchanged (an earlier, already-reverted attempt at convergence-based trace exit, see 2026-07-3x entries, found zero benefit for the shared basis specifically -- this fix is deliberately not a blanket change). One subtlety worth flagging for future readers: `prev_mode` must be set to the mode *used this iteration*, not the possibly-just-advanced next mode, or the existing `'full'`-mode convergence-break check (and the new trace-stall check) would compare against the wrong mode's chi2 history -- handled via a `mode_used` local captured before the stage-advance block runs.
+
+**Tested on all 8 hard bundles (`--trace-per-fiber-deg 6`, C++ vs Python-default vs Python-per-fiber-fixed):**
+
+| case | xrms: base -> pf6(fixed) | yrms: base -> pf6(fixed) | chi2 |
+|---|---|---|---|
+| b7@20210410:4 | 0.1007 -> 0.1004 | 0.0755 -> 0.0744 | flat |
+| r9@20220120:17 | 0.0945 -> 0.1109 (+17%, worse) | 0.0709 -> 0.0540 (-24%) | +14% (worse) |
+| b2@20241105:17 | 0.1473 -> 0.0176 (-88%) | 0.0291 -> 0.0073 (-75%) | -10% |
+| r9@20230515:4 | 0.0447 -> 0.0415 (-7%) | 0.0807 -> 0.0118 (-85%) | -2% |
+| b5@20240407:16 | 0.0466 -> 0.0362 (-22%) | 0.0409 -> 0.0297 (-27%) | -0.8% |
+| r5@20240407:5 | 0.0839 -> 0.0348 (-59%) | 0.0866 -> 0.0244 (-72%) | flat (-0.1%) |
+| r5@20210617:5 | 0.0723 -> 0.0287 (-60%) | 0.0597 -> 0.0198 (-67%) | -0.2% |
+| r5@20251016:5 | 0.0649 -> 0.0264 (-59%) | 0.0481 -> 0.0207 (-57%) | -0.1% |
+
+**7 of 8 cases improve, several dramatically; chi2 never got meaningfully worse except on r9@20220120:17.** The regression that made this flag untrustworthy is gone -- with the fix, `--trace-per-fiber-deg 6` is now a clear net win on this test set, most dramatically on all three r5 exposures (the camera investigated at length earlier this session for slow/poor convergence): 55-72% improvement on both axes, every single time, with chi2 flat-to-slightly-better (never worse). b2@20241105:17 -- the single worst xrms case found anywhere in this project -- lands at 0.0176/0.0073, comfortably under the original 0.02px target on both axes. b7@20210410:4 remains completely unresponsive (consistent with its 9+ prior negative investigations -- whatever makes this specific bundle hard, it isn't trace parametrization). r9@20220120:17 is the one genuine tradeoff: Y improves 24% but X gets 17% worse and chi2 rises 14% -- worth a coefficient-level look if this is revisited, but not chased further tonight.
+
+**Not yet promoted to the default** -- `--trace-per-fiber-deg 6` remains opt-in. The one mixed case (r9@20220120:17) and the extra per-bundle cost (block-diagonal basis is larger, though wall time in this test set was actually *faster* in every case -- e.g. r5@20251016:5 46.6s base vs 46.9s pf6, r9@20230515:4 63.2s vs 33.9s -- plausibly because the old broken behavior was burning iterations on a badly-conditioned system) argue for broader validation (the pending 30-CCD campaign, part 4 below, uses the *default* shared basis, not this flag) before flipping the default. Flagged to the user as a strong, concrete candidate for the next round of validation.
+
+### Part 3: dead-column handling -- corrected understanding, ported, tested negative
+Re-read C++'s actual call graph before implementing anything (`specex_psf_fitter.cc`): `FitIndividualSpotFluxes` (the per-candidate flux/SNR measurement that feeds spot SELECTION) calls `FitOneSpot` -> `FitSeveralSpots({spot})`, i.e. a **1-element** spots vector, every single time. The `can_measure_flux`/`ignore` 5x5-window check in `InitTmpData` (lines 244-258) is explicitly gated behind `spots.size()>1` -- so it is **structurally impossible** for this mechanism to fire during selection. Confirmed the reverse too: `FitSeveralSpots` is *always* called with `selected_spots` (post-selection) everywhere else in the file (`grep` across all ~15 call sites). So the mechanism only ever affects the FINAL joint fit stages, never which spots get selected -- **the opposite of what the previous entry's python-vs-cpp-diff.txt section 1m claimed.** Corrected that document (see Files below).
+
+**Ported faithfully as `filter_dead_column_spots()` in `fitter.py`**, called at the top of `fit()` on the raw (pre-`apply_dead_column_mask`) weight array, gated behind `SPECEX_MATCH_CPP_DEAD_COLUMN` for controlled testing (same opt-in pattern as `SPECEX_MATCH_CPP_FLUX_CLAMP`): drops any already-selected spot whose own 5x5 window (centered at C++'s exact `int(floor(x)+0.5)` convention, which for positive x is just `floor(x)`, not the round-to-nearest convention used elsewhere in this file) has >5 zero-weight pixels.
+
+**Tested on b7@20210410:4 and r5@20240407:5 (the two cases with the clearest known dead-column pathology in this project): zero spots dropped, zero effect, in both cases.** Root cause: the fibers bad enough to matter (r5's fiber 143, `ndead~2075`) are already excluded upstream by `--broken-fibers` before candidate generation ever runs, so no candidate spots exist there for this mechanism to catch; the *partially*-dead neighboring fibers apparently don't cross the >5-bad-pixel-in-25 threshold on the specific bundles tested. A real, now-correctly-implemented parity fix, but -- like several other items in section 1l -- empirically inert on every case tried so far. Left in place, opt-in, not deleted (same rationale as the other inert-but-real fixes in this project).
+
+### Part 4: 30-CCD full-pipeline campaign
+Launched (`testing/full_ccd_campaign.py --cases-file .../campaign_04Aug2026/all_cases_30.jsonl`) into `$SCRATCH/specex/04Aug2026-testing`, running in the background: 10/band, including the standing `z8@20260401/00344649` case plus 5 more from the same night/expid (`z9`, `b1`, `b2`, `r1`, `r2`), and 24 fresh random cases (seed 812026, excluding every night touched by any prior campaign this project has run). Uses the *default* settings on both sides (not `--trace-per-fiber-deg`, not `SPECEX_MATCH_CPP_DEAD_COLUMN`) -- a clean baseline re-validation, not a test of tonight's new fixes. Results pending as of this entry; `plot_spot_position_diff.py` to be run against the spot-list outputs once complete.
+
+### Part 4b: one more untried difference closed out -- chi2_precision, NO EFFECT
+Item 3 of tonight's plan ("anything else not yet tried"). Section 1f flagged
+Python's `chi2_precision=0.01` (full-mode convergence threshold) vs C++'s
+looser per-stage `0.1` as a real, confirmed, but never-empirically-swept
+difference -- direction argued against it explaining Python being less
+accurate (Python already does *more* refinement, not less). Added an opt-in
+override (`SPECEX_CHI2_PRECISION_OVERRIDE`, default 0.01 unchanged) and
+tested at 0.1 on the two original hard bundles (b7@20210410:4,
+r9@20220120:17, default shared trace basis): **xrms/yrms identical to 4
+decimals in both cases.** Confirms the reasoning; ruled out. Kept as an
+opt-in flag per this project's established convention (same as the other
+tested-negative-but-real mechanisms).
+
+### Part 4c: the 30-CCD campaign completed clean, plus a real bug found trying to plot its spot files
+All 30 cases finished with zero failures (default settings both sides, not tonight's new fixes -- a clean baseline re-validation). Aggregate: b mean xrms=0.0407/yrms=0.0379 (max 0.0737/0.0480), r mean xrms=0.0487/yrms=0.0487 (max 0.0682/0.0764), z mean xrms=0.0301/yrms=0.0323 (max 0.0399/0.0425) -- nothing anywhere near the 0.10-0.15px hard-bundle range from tonight's earlier investigation; every case lands in the normal, previously-established range. Speedup: b 1.44x, r 4.86x, z 6.88x, aggregate 4.39x -- even better than the earlier 15-case campaign's 3.24x from this same session.
+
+**Real bug found while generating the requested spot-position-diff plots**: `plot_spot_position_diff.py` run against the campaign's combined `py-*.pyspots.txt` files matched only ~1500-1700 spots per case against ~25000-33000 C++ spots -- initially looked like a correctness problem. Root cause: `specex.py`'s `fit_bundle_task` sets `psf.output_psf_path = out_psf_file` (the single shared whole-CCD output path) identically for every one of the 20 concurrent bundle workers in a full-CCD run; every checkpoint file derived from it (`.pyspots.txt`, `.pyrawspots.txt`, `.refined_centroids_debug.txt`) is therefore written to the exact same filename by all 20 workers, and whichever bundle's worker finishes last silently "wins" -- the combined file only ever contains one bundle's ~25 fibers, not all 500. Confirmed directly: `py-z8@20260401-00344649.pyspots.txt` contained only fibers 25-49 (bundle 1).
+
+Notably, this was **already a known, documented limitation** -- `full_ccd_campaign.py`'s own comment (lines 231-233) explicitly works around it for spot *counts* by parsing "Iterative spot selection took..." lines from stdout instead of reading the (broken) combined file. The xrms/yrms/wrms correctness numbers reported by that script were never affected (computed from the merged FITS trace polynomials via `load_traces`, a completely separate code path from the per-bundle text checkpoints) -- only the actual spot *positions* needed for a real spot-by-spot diff plot were unavailable.
+
+**Fixed**: `psf.output_psf_path` (and the separate `debug_path` a few lines below it, same bug) now gets a `_bundle{bid:02d}` suffix inside `fit_bundle_task`, matching C++'s own per-bundle `_NN` checkpoint naming convention exactly (`cppspots_pass4.txt` etc.) -- confirmed NOT the actual merged-FITS output path (that's `write_python_psf(out_psf_file, bundle_results, ...)`, called once in the main process after all workers return, a fully separate code path). Verified on one case (b1@20260401): all 20 per-bundle `.pyspots.txt` files now present and distinct. Re-running the Python side only (C++ output untouched, unaffected by this fix) for all 30 cases to get complete spot lists for the plots.
+
+### Part 5: `$SCRATCH/specex` cleanup
+Archived (moved, not deleted -- fully reversible) everything predating this session's work into `_archive_pre_20260804/`: ~3.7GB across the top-level loose files (mostly June test artifacts), 5 old top-level dirs (`edge/`, `final_validation_test/`, `random_bundles/`, the stale duplicate `jax_compilation_cache/`), and every `testing/` subdirectory and loose file dated 2026-07-22 or earlier (20 subdirs + 527 loose files). `$SCRATCH/specex` top level is now just `04Aug2026-testing/`, `jax_cache/` (the live JAX compile cache), `testing/` (only today's active subdirectories), and the archive.
+
+### Files
+- `py/specex/fitter.py`: `fit()`'s mode-schedule made stateful (convergence-based `'trace'`-mode exit when `trace_per_fiber_deg` is set); new `filter_dead_column_spots()` function, called opt-in via `SPECEX_MATCH_CPP_DEAD_COLUMN`; `chi2_precision` now overridable via `SPECEX_CHI2_PRECISION_OVERRIDE`. Not yet committed.
+- `python-vs-cpp-diff.txt`: section 1a updated with tonight's fix + full 8-case results table; section 1m corrected (mechanism relocated to the final-fit stage, not selection) and updated with the negative test result; section 1f updated with the chi2_precision sweep result.
+- `testing/hard_bundle_tracefix_test.py`, `testing/campaign_04Aug2026/*.jsonl` (scratchpad, not committed): tonight's 8-case driver and the 30-CCD case list.
+
+### Node ran out mid-session -- exact resume point (2026-08-04 22:32, updated from the 22:22 version)
+Interactive allocation (SLURM job 56340836, 4hr limit) ends at 22:45. The
+Python spot-file rerun (30/30) AND all 30 spot-diff plots BOTH finished with
+~13min to spare (last plot written 22:31:55) -- item 4 of tonight's plan is
+now fully, cleanly complete, not just safely-stoppable. Item 6 (supervisor's
+C++ launch instructions) was never shared this session -- still fully open.
+User confirmed no way to extend this allocation's time limit as a regular
+user on this system -- next step is a fresh interactive node, not an extension.
+
+**Exact final state:**
+- `04Aug2026-testing/full_ccd_results.txt`: the original 30-CCD campaign,
+  complete, zero failures (aggregate in part 4c above).
+- All 30 cases now have complete 20/20 per-bundle `.pyspots.txt` files
+  (confirmed via `ls ..._bundle*.pyspots.txt | wc -l` per case = 20
+  everywhere) and matching C++ `_NN.cppspots_pass4.txt` files.
+- `04Aug2026-testing/spot_diff_plots/`: all 30 PNGs generated, one per case
+  (`{cam}_{night}_{expid}.png`). Matched-spot counts now correctly track the
+  full per-case totals (e.g. z8@20260401: matched=30419 of 30486 total C++
+  spots, vs the pre-fix run's matched=1548) -- the fix from part 4c is
+  confirmed working end to end. dx/dy std is consistently in the 0.01-0.03px
+  range across all 30 cases, consistent with everything measured earlier
+  tonight; a handful of cases show individual outlier spots with
+  max_abs dx/dy up to 0.4-0.9px (b6@20250125, b8@20230825, r2@20230825,
+  z3@20240611, z5@20220408) -- not investigated further tonight, worth a
+  look if spot-level (not just trace-RMS) outliers matter for the
+  supervisor review this campaign was partly meant to support.
+- `py/specex/specex.py` and `py/specex/fitter.py` both have tonight's fixes
+  applied but NOT committed (per this project's standing convention of only
+  committing when the user explicitly asks) -- `git diff` on those two files
+  plus `python-vs-cpp-diff.txt`/`porting-notes.md`/`CMakeLists.txt`/
+  `current-status.txt` shows everything pending.
+- Item 6 (supervisor's 3-node full-night/expid C++ launch instructions) was
+  never shared this session -- still fully open, first thing to pick up
+  once a fresh node is available if the user still wants to do it tonight
+  or next session.
+
+## 2026-08-05 -- Fresh node, follow-up investigation: force-spots+per-fiber-trace 2x2, and the supervisor's real 3-node production-scale C++ launch instructions
+
+### Force-spots x per-fiber-trace: the actually-clean "only the optimizer" test
+User asked whether the force-spots experiment (section 3 of python-vs-cpp-diff.txt) really isolates "only the optimizer" as the remaining difference once C++'s exact spots are injected. Traced the code (`specex.py`'s `fit_bundle_task`): `--force-spots` only replaces the spot-SELECTION step; every other setting (trace DOF, line search, regularization, convergence tolerance, dead-column handling, broken-fiber breadth) stays whatever the run's other CLI flags say. All of this project's historical force-spots tests used the *default shared trace basis* -- trace DOF, specifically, was never controlled for. Given last night's finding that trace DOF is a real, large lever, some of the historical force-spots residual could plausibly be attributable to that mismatch, not purely optimizer-path divergence.
+
+**Ran the actual clean test**: `--force-spots` + `--trace-per-fiber-deg 6` together, on r9@20220120:17 (the one bundle with a real X/chi2 tradeoff under the per-fiber fix):
+
+| variant | xrms | yrms |
+|---|---|---|
+| baseline (own spots, shared basis) | 0.0945 | 0.0709 |
+| per-fiber alone (own spots, per-fiber) | 0.1109 | 0.0540 |
+| force-spots alone (C++ spots, shared) | 0.0914 | 0.0694 |
+| force-spots + per-fiber (C++ spots, per-fiber) | 0.1118 | 0.0538 |
+
+Force-spots+per-fiber lands almost exactly on per-fiber-alone -- once trace DOF is matched, C++'s exact spot list on top barely moves either number. This bundle's X-regression under the per-fiber fix is confirmed NOT a spot-selection artifact; it persists with byte-identical spots, meaning it's genuinely the optimizer/parametrization landing on a different, locally-valid-but-worse-in-X answer on this bundle's true landscape. Full writeup added to python-vs-cpp-diff.txt section 4e.
+
+### Item 6: supervisor's real production-scale C++ launch instructions (received, not yet run)
+User shared the actual instructions for running a full night/expid through the REAL production wrapper (`desi_proc`, not the direct `desi_psf_fit`/`bundle_parity_suite.py`-style calls used everywhere else in this project so far) across 3 nodes:
+
+```
+source /global/cfs/cdirs/desi/software/desi_environment.sh main
+# optionally: module unload specex; adjust PATH/PYTHONPATH for this repo's build instead
+salloc -N 3 -C cpu -t 04:00:00 -q interactive
+export NIGHT=20250914
+export EXPID=311138
+time srun -N 3 -n 301 -c 2 --cpu-bind=cores desi_proc -n $NIGHT -e $EXPID --mpi
+```
+
+Output lands in `$DESI_SPECTRO_REDUX/$SPECPROD` (`$SPECPROD=$USER` by default). First run also does preprocessing (arc images + trace shifts), so first-run timing includes more than just specex; ~7 minutes expected for the full thing. For a specex-only rerun: delete everything in `exposures/$NIGHT/00$EXPID` *except* `shifted-input-psf-??-${EXPID}.fits` (note the doubled leading `00` on the exposure-id directory name) -- if those output files are already present, `desi_proc` silently skips calling specex entirely. Supervisor's own node-hour note: `-N 1 -n 101 -c 2` (single node) finished in ~11 min vs. `-N 3 -n 301` at ~7 min on 3 nodes -- not obviously the optimal choice, worth keeping in mind for later. For a smaller/faster smoke test: `-N 1 -n 121 --cameras a0123` (12 CCDs, 4 spectrographs x 3 cameras). Flagged fragility: bundle count should divide evenly by `n-1` workers -- `-n 128` was reported to hang after processing everything, not cleanly exit.
+
+**Not yet run.** This is a real, separate 3-node/4-hour resource request (`salloc -N 3 ...`), distinct from and larger than the single-node interactive session this whole project has used throughout -- requesting it needs to happen from a login node (this session is already inside a compute-node shell, nid001049, which cannot itself request a second nested allocation the normal way). Logistics -- whether the user runs the `salloc` themselves from a separate login-node terminal and hands this session a fresh shell there, or wants guidance on doing it some other way -- raised with the user, answer pending as of this entry.
+
+## 2026-08-05 (continued) -- Full 30-CCD campaign rerun with --trace-per-fiber-deg 6: b/r clean wins, apparent z-band regression root-caused to a GPU OOM infrastructure bug, not a real algorithmic weakness
+
+User asked to rerun the whole 30-CCD campaign (same 30 cases as the baseline run) with `--trace-per-fiber-deg 6`, reusing the already-completed C++ reference output (unaffected by Python's trace settings) rather than re-running C++. Driver: `/tmp/.../run_pf6_campaign.py` (scratchpad), results in `04Aug2026-testing/full_ccd_results_pf6.txt`.
+
+### Headline numbers (all 30 cases, before root-causing the z-band anomaly)
+| band | mean xrms | mean yrms |
+|---|---|---|
+| b (10) | 0.0407 -> 0.0309 (-24%) | 0.0379 -> 0.0284 (-25%) |
+| r (10) | 0.0487 -> 0.0248 (-49%) | 0.0487 -> 0.0132 (-73%) |
+| z (10) | 0.0301 -> 0.0386 (**+28%**) | 0.0323 -> 0.0385 (**+19%**) |
+
+b and r are large, clean wins across every single case (30/30 improved on at least one axis, most on both, several by 50-80%). z-band looked like a net regression, driven by one catastrophic case (z4@20240828: xrms +331%, yrms +185%) plus 3 milder ones. Timing never regressed anywhere -- every case ran faster with per-fiber trace than baseline in this rerun.
+
+### Root cause: GPU OOM crashes, not a z-band-specific algorithmic weakness
+Grepped every per-fiber run's log for bundle failures (`WORKING: Bundle N failed`). Result: **zero failures in all 20 b/r cases**; **z-band: 4 of 10 cases had 1-4 bundle-level `RESOURCE_EXHAUSTED` (GPU out-of-memory, ~2.2-2.3GiB allocation) crashes** -- z2@20220314 (2 bundles), z3@20240611 (3 bundles), z4@20240828 (1 bundle), z9@20260401 (4 bundles). These are exactly the 4 cases driving the apparent regression.
+
+Mechanism, traced through `fit_ccd_native` (`specex.py:548-552`): when a bundle worker task raises (here, JAX's OOM), the exception is caught, a `WARNING: Bundle N failed` is printed, and that bundle is simply **excluded from `bundle_results`** -- its 25 fibers' XTRACE/YTRACE rows in the final merged FITS are never touched by `write_python_psf`, so they retain whatever was in the *input* (pre-fit) PSF file. Comparing that untouched, never-actually-fit input trace against C++'s real fit for the same 25 fibers produces a huge, synthetic disagreement that dominates the whole-CCD xrms/yrms average (25/500 fibers contaminating a 500-fiber mean is enough to blow up the aggregate by itself, as seen on z4@20240828).
+
+Why only z-band: the campaign runs `--workers-per-gpu 5` (5 concurrent bundle-fit processes sharing one A100); per-fiber trace's block-diagonal design matrix (~350 trace parameters/bundle vs ~9-14 for the shared basis) is a real memory cost on top of z-band's already-higher spot density (z bundles run ~1500-1700 spots vs b/r's ~500-1400) -- the combination pushes memory over the edge specifically for z-band under 5-way sharing. b/r's smaller spot counts leave enough headroom that the same per-fiber memory increase never triggers OOM there.
+
+**Recomputed z-band's TRUE per-fiber signal, excluding the 4 OOM-corrupted cases:**
+| | mean xrms | mean yrms |
+|---|---|---|
+| z-band, 6 clean cases | 0.0315 -> 0.0284 (**-10%**) | 0.0349 -> 0.0227 (**-35%**) |
+
+Once the OOM-corrupted cases are excluded, z-band shows a genuine, real improvement under per-fiber trace, consistent in direction with b/r -- smaller in magnitude, but a real win, not a regression. **The entire "z-band regresses under per-fiber trace" story was an infrastructure artifact (GPU memory headroom at 5 workers/GPU), not a genuine algorithmic weakness of the per-fiber approach on z-band data.** Only one case (z5@20220408) remains a genuine, small, OOM-free regression (xrms +23%, yrms +22%) -- an isolated outlier, not chased further given the much larger and cleaner signal above, but flagged for a look if per-fiber trace work continues.
+
+**Practical implication for any future production use of `--trace-per-fiber-deg`**: z-band would need a lower `--workers-per-gpu` (or per-band-adaptive worker count) to avoid this OOM class entirely -- a real, concrete, fixable infrastructure requirement, not a blocker on the algorithm itself.
+
+### Real bug found and fixed: SPECEX_MATCH_CPP_DEAD_COLUMN + a spot actually getting dropped crashes with a shape mismatch
+Following up on the OOM investigation, tried combining `--trace-per-fiber-deg 6` with `SPECEX_MATCH_CPP_DEAD_COLUMN` on all three r5 hard-bundle exposures (motivated hypothesis: does dead-column exclusion matter more once each fiber's trace is fit independently, no longer regularized by sharing a basis with its neighbors?). r5@20240407:5 and r5@20210617:5 ran fine and reproduced per-fiber-alone exactly (0 spots dropped, as in every prior test). **r5@20251016:5 crashed** -- the first time in this entire project that `filter_dead_column_spots` actually dropped a spot in a real run (`dropped 1/1131 spots`), immediately hitting:
+```
+ValueError: operands could not be broadcast together with shapes (1130,) (1131,)
+```
+Root cause: `filter_dead_column_spots` reassigns `spots` *locally* inside `PSF_Fitter.fit()`; that reassignment never propagated back to the caller (`specex.py`'s `fit_bundle_task`), which kept using its own original (unfiltered, longer) `spots` list for `x_orig`/`y_orig` and -- more seriously -- for the `spots[i]['xc_init'] = float(xc_final[i])` refresh loop a few lines later, which would have silently misindexed rather than crashed if the length mismatch had been smaller/luckier. **Fixed**: `fit()` now returns `spots` (the possibly-filtered list) as an 8th value; `fit_bundle_task` reassigns its own `spots` variable to that returned list immediately after the call, so every downstream per-spot computation stays consistent by construction. Updated both callers (`specex.py:295`, `fitter.py:702`'s trace-warmup quick-fit) to the new 8-value return signature. Verified: the previously-crashing case now runs clean and reproduces per-fiber-alone's result almost exactly (xrms=0.0264, yrms=0.0207, matching last night's per-fiber-only number) -- confirms dead-column exclusion is still correctness-inert even combined with per-fiber trace; the value of this exercise was finding and closing a real, previously-latent crash bug (anyone using `SPECEX_MATCH_CPP_DEAD_COLUMN` on any case where it actually drops a spot would have hit this).
+
+### Closed the loop on the z-band OOM finding: --workers-per-gpu 3 fully fixes it, verified
+Reran z9@20260401 (the worst OOM case from the 30-CCD per-fiber campaign -- 4 bundle failures, xrms/yrms blown up to 0.0227/0.0932) with `--workers-per-gpu 3` instead of the campaign's default 5. **Zero bundle failures, xrms=0.0183, yrms=0.0169** -- not just fixed, actually BETTER than this case's own baseline (0.0255/0.0306 at shared-basis default), consistent with the "true" per-fiber signal seen on every OOM-free case. 53.5s wall time, still fast. This fully closes the z-band regression story: it was purely a `--workers-per-gpu` headroom issue, completely avoidable by lowering the worker count for z-band (or per-fiber trace generally) -- not a real constraint on using the per-fiber approach in production, just a concrete, now-validated operational parameter to set correctly.
+
+### r9@20220120:17's X regression mechanism finally found: a real, generalizable BUNDLE-EDGE-FIBER weakness in the per-fiber-independent trace
+Per-fiber breakdown of r9@20220120:17's 25 fibers (X-trace RMS, baseline vs per-fiber, computed directly from the two output FITS files): **the entire X regression is concentrated in exactly the two bundle-boundary fibers.** Fiber 425 (first fiber in the bundle): xrms 0.0576 -> 0.4297 (7.5x worse). Fiber 449 (last fiber): 0.0998 -> 0.3374 (3.4x worse). All 23 interior fibers (426-448) improve cleanly, most dramatically (typically 0.04-0.18px down to 0.01-0.03px) -- consistent with the general per-fiber win pattern. The two edge fibers alone are enough to drag the whole-bundle xrms average from an improvement into a net regression.
+
+**Checked whether this is unique to r9@20220120:17 or a general mechanism**: same per-fiber breakdown on b2@20241105:17 (the single biggest per-fiber win in this project, bundle 17 there too). Same qualitative pattern found: **edge fibers 425 and 449 improve far LESS than interior fibers** -- edge fibers land at 0.40x and 0.23x of their baseline xrms (a real but modest 60-77% reduction) while every interior fiber lands at 0.01-0.17x (an 83-99% reduction, often 10-50x better). On b2 the baseline was bad enough everywhere (~0.13-0.21px) that even the weaker edge improvement still nets out as a win; on r9 the baseline was only moderately elevated (~0.06-0.10px at the edges specifically), so the same weaker-edge-improvement effect tips over into an outright regression there.
+
+**This is now a real, generalizable, well-evidenced mechanism, not a one-off**: per-fiber-independent trace fitting systematically helps bundle-boundary fibers less than interior fibers -- plausible cause (not yet directly confirmed): a boundary fiber's own footprint/candidate pool is asymmetric (no same-bundle neighbor on one side, only the adjacent bundle, which may have different candidate-generation/exclusion behavior right at that seam), and the fully-independent per-fiber basis has no cross-fiber sharing to compensate the way the shared basis implicitly does (an interior fiber's shared-basis fit is smoothed by ALL 25 fibers' data, including the edges'; an edge fiber's own per-fiber fit only ever sees its own data). This explains r9@20220120:17's specific tradeoff completely: it is not really a distinct "sometimes per-fiber makes things worse" phenomenon needing its own explanation -- it is the SAME edge-fiber weakness seen everywhere, just crossing zero on this particular bundle because its baseline wasn't bad enough to absorb it. Not yet tested: whether widening a fiber's own candidate/footprint pool at bundle boundaries (borrowing a few rows from the adjacent bundle) would close this specific gap -- a concrete, well-motivated next step if per-fiber trace work continues.
+
+### DEFINITIVE 30-CCD result: reran all 4 OOM-affected cases with --workers-per-gpu 3, giving a fully clean, complete comparison
+Reran the other 3 OOM-affected cases (z2@20220314, z3@20240611, z4@20240828) the same way as z9 above -- all 3 completed with **zero bundle failures**. This gives a complete, infrastructure-artifact-free 30/30 comparison (baseline vs per-fiber, using each case's clean result):
+
+| band | mean xrms | mean yrms |
+|---|---|---|
+| b (10) | 0.0407 -> 0.0309 (-24%) | 0.0379 -> 0.0284 (-25%) |
+| r (10) | 0.0487 -> 0.0248 (-49%) | 0.0487 -> 0.0132 (-73%) |
+| z (10) | 0.0301 -> 0.0266 (-12%) | 0.0323 -> 0.0214 (-34%) |
+| **Aggregate** | **0.0398 -> 0.0274 (-31%)** | **0.0396 -> 0.0210 (-47%)** |
+
+**29 of 30 cases improve, most substantially; only ONE genuine regression** (z2@20220314: xrms +7%, yrms +18%, from an already-excellent baseline of 0.0157/0.0228 -- already flagged above as spot-sparsity-adjacent, though not as clearly as z5's bundle 6).
+
+Breaking down what the individual OOM-corrupted-case reruns revealed about how much of each case's *apparent* regression was really the OOM artifact vs. genuine:
+- **z9@20260401, z3@20240611, z4@20240828: OOM fully explains the apparent regression.** All three, once clean, show real, solid improvements (z9: -28%/-45%, z3: -16%/-44%, z4: -12%/-42%) -- their earlier OOM-corrupted numbers (up to +331%/+185% for z4) were pure infrastructure artifact.
+- **z2@20220314: OOM was NOT the (main) story.** Its OOM-corrupted result (+24%/+21%) and its clean result (+7%/+18%) are similar in direction and rough magnitude -- this is a genuine, if small, standalone per-fiber regression, independent of the memory issue.
+
+This is now the definitive number for this branch's per-fiber-trace validation: a clean, large, broad win (29/30 cases, most bundles) with one small, real, isolated exception -- a much stronger and cleaner result than either the original 8-hard-bundle set or the initial (OOM-contaminated) 30-CCD read gave.
+
+### z5@20220408's per-fiber regression: fiber-level breakdown reveals a THIRD manifestation of the same underlying edge-fiber principle -- a fiber adjacent to a large dead-fiber stretch
+Per-bundle breakdown (comparing baseline vs per-fiber xrms/yrms for all 20 bundles individually): **19/20 bundles improve cleanly, consistent with the general pattern -- bundle 6 alone is responsible for the whole-CCD regression** (0.0982/0.0505 baseline -> 0.1690/0.1442 under per-fiber).
+
+**Went one level deeper than the earlier per-bundle read (below) and looked at bundle 6's individual 25 fibers.** The picture is not "the whole bundle is mildly harder" (the earlier chi2/ndf=2.33, nspots=888 read suggested a diffuse sparsity effect) -- it's dominated by ONE fiber: **fiber 163's baseline xrms is already 0.4848px (catastrophic, far beyond anything else seen tonight) and gets WORSE under per-fiber (0.8430px)**, while fibers 164-174 (11 consecutive fibers) show exactly zero residual on both sides -- the standard all-zero dead-fiber write-back convention (section 1j), correctly matched. C++'s own `ndead` diagnostic for this bundle: fiber 160=22, 161=47, 162=119, **fiber 163=11829** -- an order-of-magnitude jump right at the edge of the fully-dead 164-174 stretch. Fiber 163 is not a "sparse bundle" symptom; it is itself heavily dead-pixel-contaminated, sitting immediately adjacent to a large dead-fiber region -- the same "partially-dead fiber next to a fully-dead stretch" pattern already documented in section 4c from the r5 investigation, now found independently in a completely different case.
+
+**This unifies with r9@20220120:17's edge-fiber finding (section 1a/4e above) under one underlying principle, even though the specific trigger differs.** r9's problem fibers are literally the bundle's first/last fiber (a *positional* boundary); z5's problem fiber is in the middle of the bundle numerically but sits at the *data-quality* boundary of a dead-fiber region. In both cases, the common thread is: **a fiber with poor/asymmetric local data support (no same-bundle neighbor to lean on, whether because it's at the literal edge or because its neighbors are dead) does WORSE under a fully-independent per-fiber trace fit than under the shared basis**, because the shared basis implicitly pools/smooths across all 25 fibers (borrowing stability from the bundle's good interior) while the per-fiber basis has zero cross-fiber sharing by construction. Not a coincidence that both of this project's two known per-fiber tradeoff cases turn out to be exactly this kind of fiber.
+
+### Still open
+- Whether widening a problem fiber's own candidate/footprint pool (borrowing from neighbors, whether across a bundle boundary or across a dead-fiber gap) would close this edge-fiber gap -- a concrete, well-motivated, unified next step for both known tradeoff cases if `--trace-per-fiber-deg` work continues.
+- Whether to promote `--trace-per-fiber-deg 6` (with tonight's fix) toward becoming a default: the 30-CCD campaign now gives much stronger support (b/r clean wins, z-band a real if smaller win once the OOM artifact is excluded) than last night's 8-case hard-bundle-only set -- but the GPU-memory-headroom issue (above) needs a real fix (adaptive/lower workers-per-gpu for z-band) before any production use, and both known tradeoff bundles (r9@20220120:17, z5@20220408 bundle 6) suggest per-fiber trace carries some real risk on a minority of bundles, not just upside.
+- Item 6: run the supervisor's real 3-node `desi_proc --mpi` production launch (instructions above), once resource-allocation logistics are settled.
+
+## 2026-08-05 (continued, fresh node) -- Per-bundle scatter plot; a real timing-methodology correction; the trace-coefficient prior ported from C++ (with a selective ndead-gated activation to make it safe); and a second, independent root cause for b-band bundle-wide regressions (a spurious out-of-band line reaching candidate selection), fixed at the source
+
+Picked up after a node handoff, working from the previous entry's "two known tradeoff bundles" (r9@20220120:17, z5@20220408 bundle 6) plus a newly-noticed second regression case (z2@20220314) and a user request for a trustworthy baseline-vs-per-fiber timing table.
+
+### 1. Confirmed both z-band regressions are single-bundle, and found a cleaner unifying predictor than "adjacent to a broken fiber"
+Per-bundle breakdown (all 20 bundles, both cases): z5@20220408's regression is 100% bundle 6 (19/20 bundles improve); z2@20220314's regression is 100% bundle 9 (19/20 improve, previously mis-ranked out of the "worst 10" list purely by manual sort cutoff). Fiber-level breakdown of both: z5's is fiber 163 alone (xrms 0.48->0.84px); z2's is fiber 238 alone (xrms 0.008->0.186px, 23x worse).
+
+C++'s own `ndead` log line explains both, but more precisely than previously written: fiber 163's `ndead=11829` sits right at the edge of an 11-fiber fully-broken stretch (a *positional* explanation), while fiber 238's `ndead=2289` has **no** broken-fiber-list neighbor at all (nearest broken fiber is 13 indices away) -- it's an isolated fiber crossing a real dead CCD column, unrelated to the broken-fiber list. This decouples the mechanism from "near a broken fiber": the actual, general predictor is a fiber's own elevated `ndead`, which broken-fiber-adjacency is just one common cause of.
+
+### 2. Real methodology correction: per-fiber trace is NOT faster than baseline -- the earlier "speedup" was a JAX-cache-order artifact
+User asked "are we sure we're comparing warm to warm?" Checked: `/pscratch/sd/c/cdwarner/specex/jax_cache` is a single, shared, ever-growing persistent JAX compile cache used across the *entire* session's history, not isolated per campaign run. The per-fiber 30-CCD campaign ran strictly *after* the baseline campaign against this same cache, so it inherited every shape baseline had already warmed. This project has been burned by exactly this trap twice before (documented in earlier entries: a 2x and a 1.5x "regression"/"speedup" that were both pure cache-order artifacts, only caught by using isolated `JAX_COMPILATION_CACHE_DIR`s per variant).
+
+Reran 6 representative cases (2/band, spanning two exposures) with fully isolated cache directories per variant, same `--workers-per-gpu 5` both sides:
+| case | baseline (isolated) | per-fiber (isolated) | delta |
+|---|---|---|---|
+| b1@20260401 | 75.2s | 76.2s | +1.3% |
+| r1@20260401 | 76.8s | 78.4s | +2.1% |
+| z8@20260401 | 82.0s | 81.5s | -0.6% |
+| b7@20240828 | 73.8s | 77.5s | +5.0% |
+| r7@20240828 | 78.9s | 74.9s | -5.1% |
+| z4@20240828 | 83.5s | 89.5s | +7.2% |
+
+Average: per-fiber ~1.6% *slower* -- a wash, not the 15-45% speedup the shared-cache campaign showed for these same 6 cases. **Every timing number reported for per-fiber trace in the previous 30-CCD campaign entries should be treated as unvalidated** (the correctness numbers are unaffected -- xrms/yrms don't depend on cache state). Python's large speed lead over C++ itself (4-7x, established via the isolated-cache pre-outage campaigns) is untouched by this -- it's specifically the baseline-vs-per-fiber *relative* timing claim that doesn't hold up.
+
+Separately clarified the `--workers-per-gpu` mechanism: `Pool.starmap` queues bundles dynamically (a freed worker immediately grabs the next queued task), not in discrete synchronous waves -- so "5 vs 3 workers" isn't a wave-wait effect. It *is* a real, if narrow, confound for exactly the 4 z-band rows that were rerun at `--workers-per-gpu 3` (their OOM fix) while their baseline counterpart used `--workers-per-gpu 5` -- fewer concurrent processes per GPU means less contention per process, a genuine independent effect on top of the cache issue. Doesn't apply to the other 26/30 rows (identical `wpg=5` both sides).
+
+### 3. Per-bundle scatter plot (600 bundles, 30 CCDs)
+`bundle_scatter_xrms_yrms.png`: xrms/yrms baseline vs per-fiber for every individual bundle, colored by band (b=blue, r=red, z=green -- matches the physical color association, not wavelength-technically-correct ordering), per-band mean marked with a prominent star. xrms improves in 431/600 bundles (72%); yrms improves in 561/600 (93%), including **100% (200/200) in r-band**. The two catastrophic outliers (z5 bundle 6, z2 bundle 9) are visually isolated as the only points that clearly separate from the pack.
+
+### 4. C++ has a real fix for high-ndead fibers built in -- but it's off, and was never tuned
+Read `specex_psf_fitter.cc:759-857`: a **trace prior**, gated by `trace_prior_deg>0` (CLI: `--trace-prior-deg`), adds `chi2 += weight*(c_i - mean_{j!=i}(c_j))**2` for every fiber's trace coefficients at Legendre degree >= `trace_prior_deg`, `weight=1e8` hardcoded -- a genuine cross-fiber regularization applied *inside* the per-fiber trace fit itself, pulling each fiber's high-order coefficients toward the bundle's consensus while leaving low orders (real per-fiber differences, e.g. actual Y-position) fully independent. Exactly the missing ingredient for the ndead problem.
+
+**But it's off by default (`trace_prior_deg=0`) and never enabled by real DESI production** -- checked both the CLI wrapper (`desispec/scripts/specex.py`, builds its `desi_psf_fit` command line explicitly, never adds `--trace-prior-deg`) and every C++ log line from the entire 30-CCD campaign (grep for the flag: zero hits). So this isn't something we're "missing" relative to a fair baseline -- it's an implemented-but-dormant lever in the C++ code itself, and (as section 5 below found) its hardcoded weight was never actually validated against real data since it's never run.
+
+(Also found, same file, line ~2455: `if(false && (name=="GH-1-0" || ...))` -- disabled dead code that would have reduced a *different* thing, the PSF-shape cross-fiber degree, in response to `number_of_fibers_with_dead_columns`. Also inactive, also not the trace fit.)
+
+### 5. Ported the trace prior; found and fixed a real shape bug; found C++'s literal weight hurts healthy bundles
+Implemented `build_trace_prior_hessian()` + `compute_fiber_ndead()` in `fitter.py`, activated via `SPECEX_TRACE_PRIOR_DEG`/`SPECEX_TRACE_PRIOR_WEIGHT` env vars (opt-in, same convention as this branch's other experimental knobs). Derivation (see the function's docstring): for fiber-consensus operator `L = (n/(n-1))*I - (1/(n-1))*ones(n,n)`, the Gauss-Newton contribution is `A_prior = weight * L^T L`, `B_prior = -A_prior @ c` -- verified by hand on a 2-fiber toy case (c=[10,0] with an infinitesimal external regularizer converges to c=[5,5] in one step, confirming both the sign and that it pulls toward cross-fiber *consensus*, not toward zero).
+
+**First bug**: used the spots-derived `fmin/fmax` (shrinks whenever a fiber has zero selected spots, e.g. z5 bundle 6's 11 broken fibers) instead of the bundle's true fixed fiber span (`psf.params_of_bundles[bundle_id]`) -- caused a shape mismatch (`98x98` vs `175x175`) crashing both hard-bundle test cases immediately. Fixed by reading the bundle's real span the same way `get_bundle_block_diagonal_trace_monomials` does.
+
+**First real test, C++'s literal weight=1e8, prior_deg=1/2, applied to every fiber (no selective gating yet)**: z2@20220314 bundle 9 fixed dramatically (fiber 238 xrms 0.1858->0.0091, whole-bundle yrms 0.0535->0.0122, now *better* than the case's own baseline). z5@20220408 bundle 6 substantially better (whole-bundle yrms 0.1364->0.0481, fiber 163 itself only partially recovers -- 0.56->0.36px xrms -- consistent with `ndead=11829` being a genuine data floor, not something reweighting alone fixes). **But it measurably hurt already-healthy bundles**: b1@20260401 bundle 0 (no bad fiber) went from xrms/yrms 0.0087/0.0068 to 0.0152/0.0136 -- roughly doubled. A weight sweep (1e6/1e5/1e4/1e3) confirmed the healthy-bundle damage persists at every weight tested down to 1e3 (still 0.0093/0.0084 at the weakest setting), while z2's fix visibly weakens below ~1e5 and z5's fiber 163 barely moves across the whole range (data-floor-limited either way). No single global weight is both strong enough to fix the bad fibers and gentle enough to leave good bundles alone.
+
+### 6. Fix: gate activation by ndead per-fiber, not a blanket per-bundle weight -- exactly matches the user's framing ("this lever wasn't active in C++ on good data either")
+Reworked `build_trace_prior_hessian` to accept an optional `fiber_flag` mask: only flagged fibers get their own penalty residual (`chi2 = weight * sum_{i in flagged}(...)`); unflagged fibers contribute no residual of their own, though their coefficients still enter a flagged fiber's consensus target (algebraically, `L^T diag(flag) L` instead of `L^T L`, using `diag(flag)` idempotency). `fit()` now computes `ndead` for every fiber in the bundle once (via `compute_fiber_ndead`, a vectorized port of C++'s own diagnostic window logic) right after `apply_dead_column_mask`, flags fibers above `SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD` (default 500 -- the only precedent for this exact threshold anywhere in the C++ codebase, comfortably above normal fibers' 20-120 range and comfortably below both known bad cases), and skips the entire A/B modification when nothing is flagged.
+
+**Validated, with the new default weight=1e5 and `trace_prior_deg=1`** (user's choice -- keeps each fiber's own physical Y-offset fully free, only pulls higher-order shape coefficients):
+| bundle | no prior | selective prior |
+|---|---|---|
+| b1@20260401 b0 (healthy) | 0.0087/0.0068 | **0.0087/0.0068 -- bit-identical** |
+| r6@20250125 b0 (healthy) | 0.0117/0.0062 | **0.0117/0.0062 -- bit-identical** |
+| z2@20220314 b9 (fiber 238) | 0.0455/0.0535 | **0.0137/0.0091** |
+| z5@20220408 b6 (fiber 163) | 0.1649/0.1364 | **0.1030/0.0452** |
+
+Exactly the intended behavior: zero measurable effect on bundles with no flagged fiber, large real fixes where one is flagged. Honest caveat: our own `compute_fiber_ndead` numbers (17501 for fiber 163, 14616 for fiber 238) don't numerically match C++'s logged values (11829, 2289) -- ours runs on the weight array *after* `apply_dead_column_mask` widens the zeroing, C++'s own diagnostic runs on the raw input weight. Doesn't change which fibers get flagged in practice (all are genuinely bad either way, and the selective mechanism flagged a few *more* borderline fibers this way, e.g. 11 fibers in z5's bundle 6 rather than just 163) but it's not a literal number-for-number match to C++'s own log.
+
+### 7. A second, independent bundle-wide regression mechanism found and fixed at the source: a real but out-of-band arc line reaching candidate selection
+Separately investigated the b-band bundles that got *worse* under per-fiber trace (b2@20260401 bundles 2/5/10/11/12, b6@20250125 bundles 2/4/5) -- a diffuse pattern, not a single-fiber one (every one of the ~25 fibers in each flagged bundle degrades by almost exactly the same amount, ~+0.025-0.031px yrms uniformly -- ruled out ndead (nothing above 35), degree/order mismatch (GHDEGX/Y, LEGDEG, trace_deg all confirmed identical to C++ and to healthy bundles), and elevated chi2pdf (only b2 shows this CCD-wide, not specific to the flagged bundles; b6 doesn't show it at all).
+
+Root cause, found by checking each bundle's wavelength coverage: **every one of the 8 flagged bundles contains a spot at ~9660-9802A** -- real XeI entries in `specex_linelist_desi.txt` ("added by hand... from KPNO data inspection", presumably real higher-order-diffraction ghosts), but nowhere near the b-band CCD's actual ~3600-5930A physical range. Only 1-3 of a bundle's 25 fibers get the spurious candidate directly, but it corrupts every fiber's per-fiber degree-6 polynomial roughly equally (propagation mechanism not fully traced -- plausibly via the bundle's shared line-search/convergence dynamics -- but the correlation is clean: 8/8 flagged bundles have it, checked every other bundle in both cameras, only 2 "clean-list" bundles also had it and, on closer look, also showed the same smaller regression that just hadn't made an arbitrary top-10 cutoff).
+
+C++'s final selected-spot list for this exposure has **zero** spots above 6200A -- traced to `specex_lamp_lines_utils.cc:65-72` (`allocate_spots_of_bundle`): every line-list wavelength is checked against `trace.X_vs_W.xmin/xmax` and `trace.Y_vs_W.xmin/xmax` -- that fiber's own trace polynomial's *fitted* wavelength domain -- and rejected before a `Spot` object is ever constructed, independent of brightness. No flux is ever measured for it; there's no "ignore" flag or downstream handling, it just never becomes a candidate. Python's `generate_bundle_candidates` had no equivalent check -- it evaluates `psf.x_ccd`/`psf.y_ccd` (a `Legendre1DPol.value()` call) for every line-list entry regardless of wavelength, and Legendre polynomials extrapolate smoothly rather than erroring outside their fit domain, so a wildly out-of-range wavelength can land at a plausible-looking in-bounds CCD position purely by extrapolation coincidence.
+
+**Fix**: ported the identical two-check gate into `generate_bundle_candidates`, using each fiber's own `X_vs_W.xmin/xmax`/`Y_vs_W.xmin/xmax` (the same `Legendre1DPol` attributes already used elsewhere in this file). Unconditional, not env-gated -- this is a straight correctness match to C++, not an experimental knob, and should help baseline as well as per-fiber trace (baseline was presumably silently absorbing a smaller version of the same bad input). **Validated**: ghost line confirmed gone from both test bundles' selected spots; results now clean and *better* than the trace-prior workaround would have achieved on the same bundles:
+| bundle | no fix (per-fiber) | wavelength filter |
+|---|---|---|
+| b2@20260401 bundle 2 | xrms 0.0525, yrms 0.0746 | **xrms 0.0285, yrms 0.0071** |
+| b6@20250125 bundle 2 | xrms 0.0240, yrms 0.0540 | **xrms 0.0150, yrms 0.0070** |
+
+Confirms the general lesson: fixing bad input at the selection stage beats damping its downstream effect with regularization, when both are available.
+
+### 8. Repo-wide file permission cleanup
+User flagged an accidental `chmod +x` from a previous session, believed mostly reverted. Checked properly (this repo has `core.fileMode=false`, so `git status`/`git diff` never show permission-only changes at all, regardless of state) -- found **478 tracked files** repo-wide still had the stray executable bit versus git's recorded mode (everything from `.gitignore` and `.pdf`/`.rst`/`.dat` data files to every `py/specex/*.py` module), plus one untracked script. Restored every file to exactly its git-recorded mode (or, for the untracked file, its tracked siblings' convention); reverified zero mismatches remain.
+
+### Settings landed (this session)
+- `--trace-per-fiber-deg 6`: unchanged recommendation, still not promoted to default (see previous entry's open items).
+- Trace prior: `SPECEX_TRACE_PRIOR_DEG=1` (recommended), `SPECEX_TRACE_PRIOR_WEIGHT` defaults to `1e5` (not C++'s untuned `1e8`), `SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD` defaults to `500`. Still opt-in (env-var gated) pending more validation -- not yet run at 30-CCD scale.
+- Wavelength-domain candidate filter (`generate_bundle_candidates`): unconditional, always on, no flag.
+
+### Still open
+- Run the full 30-CCD campaign with both fixes (trace prior + wavelength filter) active, using isolated JAX caches per variant this time, to get trustworthy aggregate xrms/yrms *and* timing numbers -- explicitly deferred to the next fresh node/session at the user's request.
+- Whether the trace prior's selective-gating threshold (ndead>500) and weight (1e5) generalize cleanly across all 30 cases, not just the 2 known bad bundles -- needs the above campaign to confirm no new surprises.
+- The uniform-bundle-wide propagation mechanism (how one bad candidate on 1-3 fibers drags every fiber in the bundle down roughly equally) is still not directly traced to a specific code path -- doesn't block the fix (which removes the bad candidate entirely) but would be good to understand if similar symptoms show up elsewhere.
+- Item 6 (supervisor's 3-node `desi_proc --mpi` production launch) still not run.

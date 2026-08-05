@@ -183,8 +183,19 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         if h_size_y is not None:
             psf.h_size_y = h_size_y
 
-        # Add output path for spot writing
-        psf.output_psf_path = out_psf_file
+        # Add output path for spot/debug-checkpoint writing. Suffixed with
+        # the bundle id (matching C++'s own `_NN` per-bundle checkpoint
+        # naming, e.g. cppspots_pass4) -- NOT used for the actual merged
+        # FITS output (that's written once, separately, by fit_ccd_native
+        # via write_python_psf(out_psf_file, ...) after all bundle workers
+        # return). Without this suffix, every bundle worker in a multi-
+        # bundle/full-CCD run derives the exact same checkpoint filenames
+        # from the shared out_psf_file and clobbers every other bundle's
+        # spot list -- confirmed 2026-08-04: a 20-bundle full-CCD run's
+        # final .pyspots.txt contained only one bundle's ~25 fibers, not
+        # all 500, silently (no error, just whichever bundle's worker
+        # finished writing last "wins").
+        psf.output_psf_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.fits')
 
         lamp_lines = read_lamp_lines(lamp_lines_file)
         t_io = time.time()
@@ -281,7 +292,16 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
                              if spot_fiber_counts.get(fib, 0) < 2 and fib not in explicitly_broken]
 
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux, xc_final, yc_final = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final, spots = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search)
+        # Reassigning `spots` here (not just capturing it under a new name)
+        # is deliberate: everything below this line -- x_orig/y_orig,
+        # trace_monomials_abs, the `spots[i]['xc_init'] = ...` refresh loop,
+        # pyspots.txt writing, final_selected -- assumes 1:1 correspondence
+        # with xc_final/yc_final by index/length. fit() may return a SHORTER
+        # list than it was given (SPECEX_MATCH_CPP_DEAD_COLUMN can drop
+        # spots), so every downstream use must see that same list, not the
+        # original pre-fit one -- see fitter.fit()'s return-statement
+        # comment for the real crash this fixes.
         t_finalfit = time.time()
         print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
 
@@ -350,7 +370,8 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
                     f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
 
         # Debug export: verify that xc_final/yc_final differ from initial raw values
-        debug_path = out_psf_file.replace('.fits', '.refined_centroids_debug.txt')
+        # (same per-bundle clobbering issue as psf.output_psf_path above -- fixed the same way)
+        debug_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.refined_centroids_debug.txt')
         with open(debug_path, 'w') as f:
             for i in range(len(spots)):
                 f.write(f"spot {i}: raw({raw_centroids[i][0]:.15f}, {raw_centroids[i][1]:.15f}) -> refined({float(xc_final[i]):.15f}, {float(yc_final[i]):.15f})\n")

@@ -710,3 +710,164 @@ concrete step: the user will provide (1) the real C++ 30-CCD-night
 wall-time and (2) the actual production command syntax for the 3-node
 C++ run, both needed to finalize Phase 1's node count and driver-script
 interface.
+
+===============================================================================
+11. BACK ON PERLMUTTER (2026-08-04): FIRST REAL A100-SCALE VALIDATION OF
+    experiment/cpp-alternating-solve
+===============================================================================
+Full detail in porting-notes.md's 2026-08-04 entry. `python-gpu-port`
+(production) never received any homer-era work -- it's still at the
+pre-outage 8edf16f. Everything described in section 10 above (broken-fiber
+fix, dead-fiber fix, alternating-solve architecture, sigma-mode/GHSIGX
+freeze, line-search fix, CPU thread-pinning) lives only on the
+`experiment/cpp-alternating-solve` branch, and until today had only ever
+run on homer's single consumer GPU.
+
+Found and fixed a real Cray-toolchain build regression first (homer's
+LAPACKE CMakeLists fix hard-required a separately-discoverable LAPACKE lib,
+which doesn't exist on Perlmutter's implicit-linked cray-libsci build --
+fixed to only hard-require it when BLAS was found explicitly, not
+implicitly). Rebuilt, verified bit-identical chi2 against homer's own
+standing-case reference.
+
+Ran a fresh 15-case (5/band) full-CCD campaign, genuinely new nights, real
+production settings both sides. Zero failures. Every band beats the
+pre-outage 9-camera baseline: b 1.49x (vs 1.16-1.34x), r 2.96x (vs
+2.33-2.87x), z 4.53x (vs 3.13-3.31x), aggregate 3.24x (vs 2.38x).
+Correctness uniformly healthy, no hard-bundle-style outliers. One
+non-blocking speed anomaly found and mostly root-caused: camera r5 (both
+exposures tested) ran ~2.5x slower than other r-band cameras -- one
+exposure via the trace-warm-up loop needing multiple iterations (large
+real trace corrections, same mechanism as homer's r=0.81 yrms correlation
+finding), the other via a still-unexplained per-bundle selection/final-fit
+slowdown despite normal candidate counts and immediate trace convergence.
+Neither threatens correctness or the overall speed lead.
+
+This clears the top-priority "Phase 1" re-validation risk flagged in
+section 10's production plan. Next: decide whether to merge this branch's
+fixes back into python-gpu-port (production), then pivot to the 30-CCD
+production run.
+
+===============================================================================
+12. PER-FIBER TRACE FIX + FULL 30-CCD VALIDATION (2026-08-04 evening --
+    2026-08-05): the biggest correctness lever found in this project,
+    now production-validated
+===============================================================================
+Full detail in porting-notes.md's 2026-08-04 evening and 2026-08-05
+entries; supervisor-facing summary in python-vs-cpp-diff.txt (executive
+summary + section 1a).
+
+Root-caused and fixed the per-fiber-trace regression flagged at the end of
+the previous session: `'trace'` mode's fixed-3-iteration budget converges
+the small shared trace basis (~9-14 params) fine but badly under-converges
+the full per-fiber-independent basis (~350 params, matching C++'s real
+parametrization) from zero-init. Fix: convergence-based iteration budget
+(min 3/max 20), scoped only to when `--trace-per-fiber-deg` is set.
+
+Validated first on 8 known-hard bundles (7/8 improved, several
+dramatically -- one bundle went from the worst xrms in the whole project,
+0.1473px, to 0.0176px). Then validated on the FULL 30-CCD campaign
+(10/band, production settings both sides): initially looked like a clean
+win on b/r but a net REGRESSION on z-band -- root-caused to a real but
+fixable GPU-memory infrastructure issue (the larger per-fiber design
+matrix, combined with z-band's higher spot density, triggers
+RESOURCE_EXHAUSTED crashes at the campaign's default `--workers-per-gpu
+5`; a crashed bundle's fibers silently keep their un-fit input trace,
+massively skewing that camera's average). Fixed by dropping to
+`--workers-per-gpu 3` for z-band -- verified zero failures. **Definitive,
+fully-clean 30-CCD result: 29 of 30 cases improve, most substantially --
+aggregate xrms -31%, yrms -47% (b: -24%/-25%, r: -49%/-73%, z: -12%/-34%).**
+Exactly one genuine, isolated regression remains (z2@20220314, already
+near the correctness target at baseline).
+
+Also: ported C++'s per-spot dead-column exclusion mechanism
+(`SPECEX_MATCH_CPP_DEAD_COLUMN`, opt-in) -- confirmed correctness-inert on
+every case tested (the fibers bad enough to matter are already excluded
+via `--broken-fibers` upstream) but found and fixed a real latent crash
+bug it exposed once combined with per-fiber trace (a spot-list-length
+mismatch between `PSF_Fitter.fit()` and its caller when a spot actually
+gets dropped). Cleaned up ~3.7GB of stale pre-session `$SCRATCH/specex`
+output (archived, not deleted).
+
+**Not yet promoted to default**: per-fiber trace needs (a) the
+`--workers-per-gpu` fix applied for z-band in whatever driver eventually
+uses it in production, and (b) a documented understanding that a small
+minority of individual bundles (2 found so far, different root causes
+each) can get worse, not just better. Given the strength of the 29/30
+result, this is now the clear next production-adoption candidate, pending
+a decision on those two points.
+
+Still open from the previous entry: item 6 (supervisor's real 3-node
+`desi_proc --mpi` production launch, instructions received but not yet
+run -- needs a separate 3-node/4hr `salloc`, logistics not yet settled).
+
+===============================================================================
+13. TIMING METHODOLOGY CORRECTION, THE TRACE-COEFFICIENT PRIOR, AND A SECOND
+    ROOT CAUSE FOR BUNDLE-WIDE REGRESSIONS (2026-08-05, continued)
+===============================================================================
+Full detail in porting-notes.md's 2026-08-05 (continued) entry.
+
+**Timing correction (important -- affects section 12's numbers)**: the
+30-CCD campaign's "per-fiber trace is faster than baseline" finding does
+not hold up under a controlled retest. It was a JAX-compile-cache-order
+artifact (per-fiber ran after baseline against one shared, ever-growing
+cache, inheriting its warm compiles) -- a trap this project has hit twice
+before. Reran 6 representative cases with isolated caches per variant:
+per-fiber trace is ~1.6% *slower* on average, a wash, not a speedup.
+Section 12's correctness numbers (xrms/yrms) are unaffected by this --
+only the timing claim. Python's ~4-7x speed lead over C++ itself is a
+separate, already-isolated-cache-validated result and is untouched.
+
+**Both known per-fiber regressions (z5@20220408 bundle 6, z2@20220314
+bundle 9) are confirmed single-bundle, single-fiber, and explained by
+C++'s own per-fiber `ndead` diagnostic** -- but the fibers aren't
+necessarily near a broken-fiber-list entry (z2's fiber 238 has none
+nearby at all); the real predictor is the fiber's own elevated dead-pixel
+count, which broken-fiber-adjacency is just one common cause of.
+
+**Found that C++ has a real, implemented fix for this (a "trace prior,"
+`specex_psf_fitter.cc:759-857`) -- but it's off by default and never
+enabled by real DESI production**, so its hardcoded weight was never
+actually validated. Ported it into Python, found and fixed a real bug
+(wrong fiber-count from spot-derived range instead of the bundle's true
+fixed span), then found C++'s literal weight (1e8) measurably hurts
+already-healthy bundles (~doubles their RMS) when applied blanket-style.
+**Fixed by gating activation per-fiber on ndead exceeding a threshold**
+(default 500, matching C++'s own only precedent for this exact
+diagnostic) rather than applying it to every fiber -- validated
+bit-identical results on healthy bundles (zero measurable effect) while
+still substantially fixing both known bad bundles (z2: 23x better on the
+bad fiber, now beats its own baseline; z5: ~65% better, partially limited
+by a genuine data floor on its most extreme fiber). Landed as opt-in
+(`SPECEX_TRACE_PRIOR_DEG=1`, `SPECEX_TRACE_PRIOR_WEIGHT=1e5` default,
+`SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD=500` default) -- not yet validated at
+30-CCD scale.
+
+**Separately found and fixed a second, independent bundle-wide regression
+mechanism**, affecting a different set of b-band bundles (uniform ~+0.03px
+yrms degradation across nearly every fiber in a bundle, not a single-fiber
+spike): a handful of real-but-out-of-band XeI arc lines
+(~9660-9802A, "added by hand... from KPNO data inspection" in the master
+line list, presumably real higher-order diffraction ghosts) were reaching
+Python's candidate selection for b-band bundles via unguarded Legendre
+polynomial extrapolation, despite being nowhere near the b-band CCD's real
+~3600-5930A range. C++ never has this problem -- it hard-rejects any
+line-list wavelength outside a fiber's own fitted trace domain
+(`X_vs_W`/`Y_vs_W .xmin/.xmax`) before ever constructing a candidate
+(`specex_lamp_lines_utils.cc:65-72`). **Fixed** by porting the identical
+check into `generate_bundle_candidates`, unconditionally (not
+experimental -- a straight correctness match to C++). Confirmed the ghost
+line is gone and the affected bundles are now clean, beating even what the
+trace-prior workaround achieved on the same bundles -- fixing bad input at
+the source beats damping its downstream effect.
+
+**Also**: found and fixed a repo-wide stray `chmod +x` (478 tracked files
+had the executable bit versus git's recorded mode -- invisible to `git
+status`/`diff` because this repo has `core.fileMode=false`) plus one
+untracked script; all restored to their correct mode.
+
+**Next planned step (explicitly deferred to a fresh node)**: rerun the
+full 30-CCD campaign with both fixes active and isolated JAX caches per
+variant, to get a trustworthy aggregate correctness *and* timing table --
+the previous 30-CCD numbers' correctness holds but timing does not, and
+neither fix from this session has been validated past 2-3 bundles each.

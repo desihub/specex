@@ -154,6 +154,90 @@ def get_bundle_block_diagonal_trace_monomials(psf, bundle_id, spots, trace_deg):
     block = onehot[:, :, jnp.newaxis] * wave_mono[:, jnp.newaxis, :]  # (Ns, n_fibers, trace_deg+1)
     return block.reshape(block.shape[0], n_fibers * (trace_deg + 1))
 
+
+def compute_fiber_ndead(psf, fiber, weight):
+    """Port of C++'s per-fiber dead-column diagnostic
+    (specex_psf_fitter.cc:2333-2355, the source of its own logged
+    "fiber N ndead=..." lines): counts zero-weight pixels in a +/-3-column
+    window around the fiber's trace center, across the trace's full
+    wavelength-defined row range. `weight` is indexed [x, y] (same
+    convention as fit()'s xpix/ypix/idx_map usage). Vectorized over rows
+    (a Python per-row loop with Legendre1DPol.invert()'s 1000-point grid
+    interpolation inside would be ~4000 calls/fiber -- too slow to run
+    routinely); only the +/-3 window is a short explicit loop.
+    """
+    trace = psf.fiber_traces[fiber]
+    y_vs_w = trace['Y_vs_W']
+    nx, ny = weight.shape
+    begin_j = max(0, int(np.floor(y_vs_w.value(y_vs_w.xmin))))
+    end_j = min(ny, int(np.floor(y_vs_w.value(y_vs_w.xmax))) + 1)
+    if end_j <= begin_j:
+        return 0
+    j_arr = np.arange(begin_j, end_j)
+    w_arr = y_vs_w.invert(j_arr.astype(float))
+    i_center = np.round(np.asarray(psf.x_ccd(fiber, w_arr))).astype(int)
+    ndead = 0
+    for d in range(-3, 4):
+        i_idx = i_center + d
+        valid = (i_idx >= 0) & (i_idx < nx)
+        ndead += int(np.sum(weight[i_idx[valid], j_arr[valid]] == 0))
+    return ndead
+
+
+def build_trace_prior_hessian(n_fibers, ndeg, prior_deg, weight, fiber_flag=None):
+    """Port of C++'s trace-coefficient prior (specex_psf_fitter.cc:759-857,
+    gated there by trace_prior_deg>0, off by default and not enabled by real
+    DESI production -- see porting-notes.md's 2026-08-05 ndead investigation).
+    For each wavelength-Legendre degree d >= prior_deg, C++ adds
+    chi2 += weight*sum_i(c_i - mean_{j!=i}(c_j))**2 across the bundle's
+    fibers -- a soft constraint pulling each fiber's HIGH-order per-fiber
+    trace coefficients toward cross-fiber consensus, while leaving degrees
+    below prior_deg (and, implicitly, everything when this is off) fully
+    per-fiber independent. This is the mechanism C++ has, but doesn't use,
+    for damping a single noisy/dead-column fiber's high-order coefficients
+    under an otherwise fully-independent per-fiber trace basis (see
+    z5@20220408 bundle 6 fiber 163 and z2@20220314 bundle 9 fiber 238,
+    ndead=11829/2289 respectively, both driving their whole bundle's
+    regression alone under --trace-per-fiber-deg with no such damping).
+
+    fiber_flag (optional length-n_fibers 0/1 array): restricts the chi2 SUM
+    above to i in flagged fibers only -- unflagged fibers never get their
+    own residual/penalty term (no pull toward anything), though their
+    coefficients still appear inside a flagged fiber's own "mean of the
+    others" target. This matters because C++'s own literal prior, applied
+    to every fiber unconditionally (fiber_flag=None, i.e. all-ones), was
+    found to measurably HURT already-healthy bundles when tested here
+    (b1@20260401 bundle 0: xrms 0.0087->0.0152, yrms 0.0068->0.0136 at
+    C++'s weight=1e8) -- expected, since C++ never actually runs with this
+    prior on in production, so that weight was never tuned against real
+    per-fiber data. Gating activation by ndead (see fit()'s
+    SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD) makes this a no-op on the ~590/600
+    bundles that don't have a bad fiber, by construction.
+
+    Returns the (n_fibers*ndeg, n_fibers*ndeg) Hessian contribution H such
+    that, for a coefficient vector c flattened as c[fiber*ndeg+d] (matching
+    get_bundle_block_diagonal_trace_monomials' block.reshape layout), the
+    prior's Gauss-Newton contribution is A += H, B += -H @ c (see the
+    inline derivation at the fit() call site: this is J^T W J for a linear
+    "residual" r = -L_F @ c pulling toward L_F @ c = 0 where L_F is L with
+    only the flagged fibers' rows kept, i.e. flagged fibers' coefficients
+    get pulled toward the mean of the OTHER fibers' coefficients at that
+    degree, while unflagged fibers contribute no residual of their own
+    (L_F^T L_F = L @ diag(fiber_flag) @ L for symmetric L, since a 0/1
+    diagonal is idempotent)).
+    """
+    import jax.numpy as jnp
+    if n_fibers < 2:
+        return jnp.zeros((n_fibers * ndeg, n_fibers * ndeg))
+    L = (n_fibers / (n_fibers - 1)) * jnp.eye(n_fibers) - (1.0 / (n_fibers - 1)) * jnp.ones((n_fibers, n_fibers))
+    if fiber_flag is None:
+        LFL = L @ L  # L symmetric, all fibers flagged: L^T L == L @ L
+    else:
+        flag_diag = jnp.diag(jnp.asarray(fiber_flag, dtype=L.dtype))
+        LFL = L @ flag_diag @ L
+    mask = jnp.array([1.0 if d >= prior_deg else 0.0 for d in range(ndeg)])
+    return weight * jnp.kron(LFL, jnp.diag(mask))
+
 # --- Global JIT Kernels (Standardized signatures) ---
 
 def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
@@ -399,6 +483,42 @@ def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
         except: continue
     return w_new
 
+def filter_dead_column_spots(spots, weight):
+    """
+    Port of C++'s per-spot can_measure_flux/ignore exclusion
+    (specex_psf_fitter.cc:244-258, InitTmpData -- gated there behind
+    spots.size()>1 and confirmed, by reading FitIndividualSpotFluxes/
+    FitOneSpot, to NEVER fire during the SNR-based selection stage, only
+    during the final joint fit's FitSeveralSpots(selected_spots,...) calls,
+    same pipeline stage as this function's caller): a spot is dropped from
+    the fit entirely if more than 5 of the 25 pixels in a 5x5 window
+    centered on its own position have zero weight ("can survive one dead
+    column = 5pix, not more"). C++'s center is int(floor(x)+0.5), which for
+    positive x truncates the .5 straight back off and is therefore exactly
+    floor(x) -- NOT the round-to-nearest-pixel floor(x+0.5) convention used
+    elsewhere in this file (e.g. apply_dead_column_mask) -- replicated
+    faithfully here rather than substituting the other convention.
+
+    A genuinely different mechanism from apply_dead_column_mask: that
+    function broadens zero-weight regions (a +/-4px column band) affecting
+    every spot whose stamp overlaps it; this one leaves the weight array
+    completely untouched and instead makes a binary per-spot keep/drop
+    decision using the RAW (unbroadened) weight -- so this must run BEFORE
+    apply_dead_column_mask, on the original weight array.
+    """
+    if len(spots) <= 1:
+        return spots
+    nx, ny = weight.shape
+    kept = []
+    for s in spots:
+        ic, jc = int(np.floor(s['xc_init'])), int(np.floor(s['yc_init']))
+        i0, i1 = max(0, ic - 2), min(nx, ic + 3)
+        j0, j1 = max(0, jc - 2), min(ny, jc + 3)
+        nbad = int(np.sum(weight[i0:i1, j0:j1] == 0))
+        if nbad <= 5:
+            kept.append(s)
+    return kept
+
 def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
     t0 = time.time(); nx, ny = (4114, 4128)
     if weight is not None: nx, ny = weight.shape
@@ -556,8 +676,30 @@ def generate_bundle_candidates(psf, fiber_min, fiber_max, lamp_lines, image_shap
     candidates = []
     for fiber in range(fiber_min, fiber_max + 1):
         if fiber in broken_list or fiber not in psf.fiber_traces: continue
+        trace = psf.fiber_traces[fiber]
+        x_vs_w, y_vs_w = trace['X_vs_W'], trace['Y_vs_W']
         for line in lines_sc:
-            wave = line['wave']; xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
+            wave = line['wave']
+            # Port of C++'s wavelength-domain gate (specex_lamp_lines_utils.cc:
+            # 65-72, allocate_spots_of_bundle): reject any line-list entry
+            # outside this fiber's OWN trace's fitted wavelength domain,
+            # before ever evaluating a CCD position for it. Without this,
+            # psf.x_ccd/y_ccd (a Legendre polynomial evaluation) happily
+            # *extrapolates* a plausible-looking (xc,yc) for a wavelength far
+            # outside where the trace was ever actually calibrated -- found
+            # via a handful of real-but-out-of-band XeI lines
+            # (specex_linelist_desi.txt's ~9660-9802A high-order-diffraction-
+            # ghost entries, "added by hand... from KPNO data inspection")
+            # landing inside a b-band CCD's pixel bounds by extrapolation
+            # coincidence and corrupting --trace-per-fiber-deg's per-fiber
+            # polynomial fit for every fiber in the bundle, not just the 1-3
+            # fibers the spurious candidate actually appears on (see
+            # porting-notes.md's 2026-08-05 b2@20260401/b6@20250125
+            # investigation). C++ never has this problem because this check
+            # runs unconditionally, independent of --trace-per-fiber-deg.
+            if wave < x_vs_w.xmin or wave > x_vs_w.xmax: continue
+            if wave < y_vs_w.xmin or wave > y_vs_w.xmax: continue
+            xc = psf.x_ccd(fiber, wave); yc = psf.y_ccd(fiber, wave)
             if 0 <= xc < nx and -4 <= yc < ny + 4:
                 candidates.append({'fiber': fiber, 'wave': wave, 'xc_init': xc, 'yc_init': yc})
     return candidates
@@ -663,7 +805,7 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
         if not selected:
             break
         fitter = PSF_Fitter(psf)
-        _, pc, tc, cc, flux_fit, xc_final, yc_final = fitter.fit(image, weight, selected, bundle_id, max_iter=5, wdeg=wdeg, fit_continuum=fit_continuum)
+        _, pc, tc, cc, flux_fit, xc_final, yc_final, _ = fitter.fit(image, weight, selected, bundle_id, max_iter=5, wdeg=wdeg, fit_continuum=fit_continuum)
 
         max_delta = 0.0
         for s in candidates:
@@ -852,10 +994,35 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 
 class PSF_Fitter:
     def __init__(self, psf):
-        self.psf = psf; self.chi2_precision = 0.01
-    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, line_search='grid'):
+        self.psf = psf
+        # EXPERIMENT (SPECEX_CHI2_PRECISION_OVERRIDE): C++'s equivalent
+        # per-stage convergence threshold is a looser 0.1 (specex_psf_fitter.cc:
+        # 2710,2790) vs this 0.01 -- direction argues Python already does
+        # *more* refinement, not less, so unlikely to explain worse
+        # hard-bundle accuracy, but never empirically swept (python-vs-cpp-
+        # diff.txt section 1f). Opt-in override for that sweep.
+        self.chi2_precision = float(os.environ.get("SPECEX_CHI2_PRECISION_OVERRIDE", 0.01))
+    def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, line_search='grid', trace_prior_deg=None):
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
+        # EXPERIMENT (SPECEX_TRACE_PRIOR_DEG / SPECEX_TRACE_PRIOR_WEIGHT):
+        # opt-in port of C++'s trace prior (see build_trace_prior_hessian's
+        # docstring) -- only meaningful alongside trace_per_fiber_deg.
+        # Env-var default follows this branch's established convention
+        # (SPECEX_MATCH_CPP_DEAD_COLUMN, SPECEX_TRACE_MAX_ITERS_OVERRIDE)
+        # for experimental knobs not yet promoted to a first-class CLI flag.
+        if trace_prior_deg is None and os.environ.get("SPECEX_TRACE_PRIOR_DEG"):
+            trace_prior_deg = int(os.environ["SPECEX_TRACE_PRIOR_DEG"])
+        # Default 1e5, not C++'s literal 1e8 -- the weight sweep run
+        # alongside the ndead-gating work (porting-notes.md, 2026-08-05)
+        # found 1e8 measurably over-smooths even the fibers it's meant to
+        # fix relative to 1e5/1e6 (more collateral pull on a bad bundle's
+        # healthy fibers, no extra benefit to the bad fiber itself), and
+        # 1e5 fully resolves z2@20220314 bundle 9's fiber 238 while giving
+        # z5@20220408 bundle 6's far-more-extreme fiber 163 (ndead=11829,
+        # largely a real data-floor problem no reweighting fixes) the same
+        # benefit as any higher weight tested.
+        trace_prior_weight = float(os.environ.get("SPECEX_TRACE_PRIOR_WEIGHT", 1e5))
         # trace_wdeg (a shared X/Y default) falls back to wdeg -- see
         # porting-notes.md's r2@20250109 investigation. trace_wdeg_x/
         # trace_wdeg_y independently override it per axis, falling back to
@@ -879,7 +1046,43 @@ class PSF_Fitter:
         # forced spot list; fixed here gives 113242, matching C++ to ~7%,
         # the residual being get_bundle_footprint's own missing x-margin).
         fmin, fmax = min(s['fiber'] for s in spots), max(s['fiber'] for s in spots)
+        # EXPERIMENT (SPECEX_MATCH_CPP_DEAD_COLUMN): C++'s per-spot
+        # can_measure_flux/ignore exclusion (see filter_dead_column_spots'
+        # docstring) -- must run on the RAW weight, before
+        # apply_dead_column_mask broadens it. Opt-in for now, same pattern
+        # as SPECEX_MATCH_CPP_FLUX_CLAMP, pending a correctness check on the
+        # known hard bundles (porting-notes.md, 2026-08-04).
+        if os.environ.get("SPECEX_MATCH_CPP_DEAD_COLUMN"):
+            n_before = len(spots)
+            spots = filter_dead_column_spots(spots, weight)
+            if len(spots) < n_before:
+                print(f"  SPECEX_MATCH_CPP_DEAD_COLUMN: dropped {n_before - len(spots)}/{n_before} spots (dead-column can_measure_flux)", flush=True)
         weight = apply_dead_column_mask(self.psf, fmin, fmax, weight)
+        # EXPERIMENT (SPECEX_TRACE_PRIOR_DEG): decide, once per bundle,
+        # which fibers (if any) get the trace prior activated, using C++'s
+        # own per-fiber ndead diagnostic (see compute_fiber_ndead) against
+        # a threshold. Computed here (using the bundle's TRUE fixed fiber
+        # span, not the spots-derived fmin/fmax which shrinks for broken
+        # fibers) so it's available once for every 'trace'-mode iteration
+        # below rather than recomputed per-iteration -- ndead only depends
+        # on `weight` and trace geometry, both fixed for this bundle.
+        # Threshold default (500) matches the only precedent for this
+        # exact diagnostic anywhere in the C++ codebase (its own
+        # number_of_fibers_with_dead_columns gate, specex_psf_fitter.cc:
+        # 2354) -- comfortably above the ~20-120 seen on this bundle's
+        # normal fibers and comfortably below both known bad cases
+        # (fiber163=11829, fiber238=2289).
+        trace_prior_fiber_flag = None
+        if trace_per_fiber_deg is not None and trace_prior_deg is not None:
+            _bundle_span0 = self.psf.params_of_bundles[bundle_id]
+            _fmin0, _fmax0 = _bundle_span0.fiber_min, _bundle_span0.fiber_max
+            _ndead_threshold = int(os.environ.get("SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD", 500))
+            _ndeads = [compute_fiber_ndead(self.psf, f, weight) for f in range(_fmin0, _fmax0 + 1)]
+            trace_prior_fiber_flag = np.array([1.0 if nd > _ndead_threshold else 0.0 for nd in _ndeads])
+            if trace_prior_fiber_flag.any():
+                _flagged = [(_fmin0 + i, nd) for i, nd in enumerate(_ndeads) if nd > _ndead_threshold]
+                print(f"  SPECEX_TRACE_PRIOR_DEG: activating trace prior for {len(_flagged)} fiber(s) "
+                      f"(ndead>{_ndead_threshold}): {_flagged}", flush=True)
         xpix, ypix, pix_idx = get_bundle_footprint(self.psf, spots, fmin, fmax, weight)
         Np = len(xpix); area = (2*self.psf.h_size_x+1)*(2*self.psf.h_size_y+1); Ns = len(spots)
         # Pixel-footprint padding: pad the pixel dimension fed to the JIT
@@ -1007,6 +1210,23 @@ class PSF_Fitter:
         best_flux = flux.copy()
         
         sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
+        # Stage/mode is now tracked as mutable state across iterations
+        # (rather than derived purely from `i`) so 'trace' mode's exit can
+        # be convergence-based specifically when trace_per_fiber_deg is set.
+        # The REVERTED note above already showed convergence-based exit is a
+        # pure-cost no-benefit change for the shared basis (9-14 params,
+        # always converges within the fixed 3 iterations) -- this scopes the
+        # extension to only the ~350-param per-fiber basis (2026-08-04
+        # regression finding, porting-notes.md), which does NOT reliably
+        # converge from zero-init in 3 iterations. Non-per-fiber runs keep
+        # the exact fixed-3-iteration schedule (min_it == max_it == 3 below).
+        mode = 'flux'
+        stage_iter = 0
+        # EXPERIMENT (SPECEX_TRACE_MAX_ITERS_OVERRIDE): quick knob for
+        # testing whether a tradeoff case (e.g. r9@20220120:17, section 1a/
+        # 4e) is still iteration-budget-limited at the default cap of 20,
+        # opt-in, default unchanged.
+        trace_min_iters, trace_max_iters = 3, int(os.environ.get("SPECEX_TRACE_MAX_ITERS_OVERRIDE", 20))
         for i in range(max_iter):
             chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
 
@@ -1050,9 +1270,46 @@ class PSF_Fitter:
             # all 9; GHSIGX smaller in 8/9) regardless of warm start --
             # only *structurally excluding* sigma from the joint solve, not
             # just seeding it well, can match C++ here.
-            mode = 'flux' if i < 2 else 'trace' if i < 5 else 'sigma' if i < 8 else 'full'
             print(f"Iter {i}: chi2 = {float(chi2):.4f} [Mode: {mode}]", flush=True)
             Npoly_psf = psf_monomials.shape[1]; Npoly_trace = trace_monomials.shape[1]; Ns_l = len(flux); n_psf_tot = (n_gh + 2) * Npoly_psf
+            # EXPERIMENT (SPECEX_TRACE_PRIOR_DEG): add C++'s trace-prior
+            # Gauss-Newton contribution directly to A/B (see
+            # build_trace_prior_hessian's docstring for the derivation).
+            # Only meaningful during 'trace' mode -- trace params are
+            # excluded from idx (frozen) in every other mode on this
+            # branch, so A/B changes in those rows/cols are inert there;
+            # gating on mode=='trace' just avoids the wasted compute.
+            # residual convention: r = -L@c (target: L@c == 0, i.e. each
+            # fiber's coefficient at degree>=trace_prior_deg equals the
+            # mean of the other fibers' coefficients there), so
+            # A_prior = J^T W J = weight*L^T L and B_prior = J^T W r =
+            # -A_prior @ c -- the sign is deliberately opposite the more
+            # common "B pulls toward zero" pattern: this prior pulls
+            # toward cross-fiber *consensus*, not toward zero.
+            # trace_prior_fiber_flag is None whenever trace_prior_deg isn't
+            # set at all, and all-zeros whenever no fiber in this bundle
+            # cleared the ndead threshold -- skip entirely in either case
+            # (not just for wasted compute: this is what makes the prior a
+            # guaranteed no-op on every bundle without a flagged fiber).
+            if (trace_per_fiber_deg is not None and trace_prior_deg is not None and mode == 'trace'
+                    and trace_prior_fiber_flag is not None and trace_prior_fiber_flag.any()):
+                # Bundle's true fixed fiber span (always e.g. 25), NOT
+                # fmax-fmin+1 over `spots` -- that range shrinks whenever a
+                # fiber has zero selected spots (broken fibers, e.g. z5
+                # bundle 6's 164-174), which silently mismatched
+                # get_bundle_block_diagonal_trace_monomials' own n_fibers
+                # (built from the bundle's fixed fiber_min/fiber_max) and
+                # broke the shapes of trace_monomials vs H_prior.
+                _bundle_span = self.psf.params_of_bundles[bundle_id]
+                n_fibers_bundle = _bundle_span.fiber_max - _bundle_span.fiber_min + 1
+                ndeg = trace_per_fiber_deg + 1
+                H_prior = build_trace_prior_hessian(n_fibers_bundle, ndeg, trace_prior_deg, trace_prior_weight,
+                                                     fiber_flag=trace_prior_fiber_flag)
+                trace_start = Ns_l + n_psf_tot
+                x_sl = slice(trace_start, trace_start + Npoly_trace)
+                y_sl = slice(trace_start + Npoly_trace, trace_start + 2 * Npoly_trace)
+                A = A.at[x_sl, x_sl].add(H_prior).at[y_sl, y_sl].add(H_prior)
+                B = B.at[x_sl].add(-H_prior @ tc[0]).at[y_sl].add(-H_prior @ tc[1])
             if mode == 'full' and os.environ.get("SPECEX_DEBUG_DUMP_A"):
                 np.savez(os.environ["SPECEX_DEBUG_DUMP_A"], A=np.array(A), B=np.array(B),
                          Ns_l=Ns_l, n_gh=n_gh, Npoly_psf=Npoly_psf, Npoly_trace=Npoly_trace,
@@ -1276,7 +1533,35 @@ class PSF_Fitter:
             # a *worse* chi2 than trace_wdeg=1's 13-iteration result: see
             # porting-notes.md.
             if mode == 'full' and prev_mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
-            old_chi2 = chi2; prev_mode = mode
+
+            # Stage advancement (flux -> trace -> sigma -> full). stage_iter
+            # counts iterations completed so far in the CURRENT mode. 'trace'
+            # mode's exit is convergence-based (min 3 / max 20 iterations)
+            # only when trace_per_fiber_deg is set -- see the comment above
+            # the loop for why this is scoped that way (shared-basis case
+            # already confirmed to need no more than a fixed 3, tested and
+            # reverted). All other stage transitions keep their original
+            # fixed iteration counts (2 for flux, 3 for sigma) unchanged.
+            # mode_used (not the possibly-just-advanced `mode`) is what
+            # prev_mode must record below -- it's this iteration's mode, the
+            # one every check above (idx selection, line search, the
+            # full-mode break just above) actually ran under.
+            mode_used = mode
+            stage_iter += 1
+            if mode == 'flux' and stage_iter >= 2:
+                mode, stage_iter = 'trace', 0
+            elif mode == 'trace':
+                per_fiber = trace_per_fiber_deg is not None
+                max_it = trace_max_iters if per_fiber else trace_min_iters
+                trace_stalled = (per_fiber and prev_mode == 'trace' and
+                                  stage_iter >= trace_min_iters and
+                                  jnp.abs(old_chi2 - chi2) < self.chi2_precision)
+                if stage_iter >= max_it or trace_stalled:
+                    mode, stage_iter = 'sigma', 0
+            elif mode == 'sigma' and stage_iter >= 3:
+                mode, stage_iter = 'full', 0
+
+            old_chi2 = chi2; prev_mode = mode_used
 
         # The state after the last applied step is never seen by the
         # top-of-loop best-state check - evaluate it explicitly so a
@@ -1299,4 +1584,15 @@ class PSF_Fitter:
         xc_final = np.array(xc_init + dx_final)
         yc_final = np.array(yc_init + dy_final)
         
-        return float(best_chi2), np.array(best_pc), np.array(best_tc), np.array(best_cc), np.array(best_flux), xc_final, yc_final
+        # Return `spots` too (not just the fitted arrays): when
+        # SPECEX_MATCH_CPP_DEAD_COLUMN drops spots at the top of this
+        # function, that reassignment is local to fit() and never
+        # propagates back to the caller's own `spots` list -- xc_final/
+        # yc_final are sized to THIS (possibly-filtered) list, so any
+        # caller-side per-spot computation (x_orig/y_orig, etc.) must use
+        # this returned list, not its own original one, or the array
+        # lengths silently mismatch. Found 2026-08-05 via a real crash
+        # (ValueError: operands could not be broadcast together with
+        # shapes (1130,) (1131,)) the first time this filter actually
+        # dropped a spot in a real production-scale run.
+        return float(best_chi2), np.array(best_pc), np.array(best_tc), np.array(best_cc), np.array(best_flux), xc_final, yc_final, spots

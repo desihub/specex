@@ -99,7 +99,25 @@ if(NOT MKL_FOUND)
 	find_path(LAPACKE_INCLUDE_DIR NAMES lapacke.h)
 	find_library(LAPACKE_LIBRARIES NAMES lapacke)
 	if(NOT LAPACKE_LIBRARIES OR NOT LAPACKE_INCLUDE_DIR)
-		message (FATAL_ERROR "LAPACKE not found (required unless building against MKL) -- install liblapacke-dev or equivalent.")
+		if(BLAS_LIBRARIES OR LAPACK_LIBRARIES)
+			# BLAS/LAPACK were found as real, explicitly-linked
+			# libraries (e.g. plain reference BLAS on Debian/Ubuntu)
+			# -- on that kind of system LAPACKE genuinely lives in
+			# its own separate package and must be found explicitly.
+			message (FATAL_ERROR "LAPACKE not found (required unless building against MKL) -- install liblapacke-dev or equivalent.")
+		else()
+			# BLAS/LAPACK were found via implicit linking (BLAS_LIBRARIES/
+			# LAPACK_LIBRARIES empty but BLAS_FOUND/LAPACK_FOUND true --
+			# e.g. Cray's cc/CC wrapper auto-linking cray-libsci on
+			# Perlmutter, with no separately-discoverable .so/header).
+			# cray-libsci also supplies the LAPACKE C interface the same
+			# implicit way, so trust it rather than hard-requiring a
+			# standalone liblapacke that doesn't exist as a named file
+			# on this kind of system.
+			message (STATUS "LAPACKE not separately found, but BLAS/LAPACK were implicitly linked -- assuming LAPACKE is provided the same way (e.g. Cray libsci).")
+			set(LAPACKE_LIBRARIES "")
+			set(LAPACKE_INCLUDE_DIR "")
+		endif()
 	endif()
 endif()
 
