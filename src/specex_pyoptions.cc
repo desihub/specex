@@ -73,7 +73,10 @@ void PrintHelp()
     "  --out-psf-xml         output psf xml file name\n"
     "  --out-spots           output spots file name\n"  
     "  --prior               gaussian prior on a param : 'name' value error\n"  
-    "  --tmp_results         write tmp results\n"  
+    "  --tmp_results         write tmp results\n"
+    "  --debug-spots         write per-pass spot-selection debug dump files\n"
+    "                        (cpp_cp0/1/2_pass*.txt, cppspots_pass*.txt,\n"
+    "                        rawspots.txt); off by default, adds I/O overhead\n"
 #ifdef EXTERNAL_TAIL
     "  --fit-psf-tails       unable fit of psf tails\n"
 #endif
@@ -151,6 +154,7 @@ int specex::PyOptions::parse(int argc, char *argv[] )
   loadmap(optmap, "out-spots",          required_argument);
   loadmap(optmap, "prior",              required_argument);
   loadmap(optmap, "tmp_results",        optional_argument);
+  loadmap(optmap, "debug-spots",        optional_argument);
 #ifdef EXTERNAL_TAIL
   loadmap(optmap, "fit-psf-tails",      optional_argument);
 #endif
@@ -286,6 +290,8 @@ int specex::PyOptions::parse(int argc, char *argv[] )
 	     back_inserter(argurment_priors));	  
       } else if (opt == argint(optmap, "tmp_results")){
 	write_tmp_results = true;
+      } else if (opt == argint(optmap, "debug-spots")){
+	debug_spots = true;
       } else if (opt == argint(optmap, "nlines")){
 	max_number_of_lines = stoi(optarg);
       }

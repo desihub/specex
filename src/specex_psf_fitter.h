@@ -113,6 +113,7 @@ class PSF_Fitter {
   bool sparse_pol;
   bool direct_simultaneous_fit;
   bool write_tmp_results;
+  bool debug_spots;
   int trace_prior_deg;
   
   double chi2_precision;
@@ -166,6 +167,7 @@ class PSF_Fitter {
     sparse_pol(true),
     direct_simultaneous_fit(false),
     write_tmp_results(false),
+    debug_spots(false),
     trace_prior_deg(0),
     fatal(true),
     parallelized(true),        

@@ -2030,7 +2030,7 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
     SPECEX_INFO("C++ SPOT SELECTION: Starting first pass. Input spots: " << input_spots.size());
 
     // CHECKPOINT 0
-     if(!output_filename.empty()) {
+     if(debug_spots && !output_filename.empty()) {
        string cp1_filename = output_filename;
        size_t pos = cp1_filename.find_last_of('.');
        if(pos != string::npos) {
@@ -2077,7 +2077,7 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
     }
 
     // CHECKPOINT 1: Post-S/N & Bounds
-     if(!output_filename.empty()) {
+     if(debug_spots && !output_filename.empty()) {
        string cp1_filename = output_filename;
        size_t pos = cp1_filename.find_last_of('.');
        if(pos != string::npos) {
@@ -2230,7 +2230,7 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
     }
 
     // CHECKPOINT 2: Final Selection
-    if(!output_filename.empty()) {
+    if(debug_spots && !output_filename.empty()) {
       string cp2_filename = output_filename;
       size_t pos = cp2_filename.find_last_of('.');
       if(pos != string::npos) {
@@ -2262,8 +2262,8 @@ std::vector<specex::Spot_p> specex::PSF_Fitter::select_spots(std::vector<specex:
   if( max_number_of_lines>0) SPECEX_INFO("  with a max. number of lines of " << max_number_of_lines << " (approximately) and keeping neighboring blended lines within " << min_dwave << "A and avoiding gaps larger than " << max_dwave << " A");
 
    SPECEX_INFO("C++ SPOT SELECTION: Final selected spots: " << selected_spots.size());
-   
-    if(!output_filename.empty()) {
+
+    if(debug_spots && !output_filename.empty()) {
       string spots_filename = output_filename;
       size_t pos = spots_filename.find_last_of('.');
       if(pos != string::npos) {
@@ -2309,7 +2309,7 @@ bool specex::PSF_Fitter::FitEverything(std::vector<specex::Spot_p>& input_spots,
 
     SPECEX_INFO("starting to fit PSF with " <<  input_spots.size() << " spots");
 
-    if(!psf->output_psf_filename.empty()) {
+    if(debug_spots && !psf->output_psf_filename.empty()) {
       string raw_filename = psf->output_psf_filename;
       size_t pos = raw_filename.find(".fits");
       if(pos != string::npos) {
