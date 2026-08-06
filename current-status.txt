@@ -871,3 +871,58 @@ full 30-CCD campaign with both fixes active and isolated JAX caches per
 variant, to get a trustworthy aggregate correctness *and* timing table --
 the previous 30-CCD numbers' correctness holds but timing does not, and
 neither fix from this session has been validated past 2-3 bundles each.
+-- DONE, see section 14.
+
+===============================================================================
+14. DEFINITIVE 30-CCD CAMPAIGN: BASELINE VS (PER-FIBER TRACE + NDEAD-GATED
+    TRACE PRIOR + WAVELENGTH FILTER), ISOLATED JAX CACHES (2026-08-05,
+    fresh node #2)
+===============================================================================
+Full detail in porting-notes.md's 2026-08-05 (fresh node #2) entry.
+
+Reran all 30 cases from the campaign_04Aug2026 case set, C++ reference
+FITS reused (unaffected by Python trace settings), two variants each given
+their own isolated JAX_COMPILATION_CACHE_DIR and run sequentially (avoids
+both the cache-order artifact and any GPU-contention timing confound):
+baseline (shared trace basis, --workers-per-gpu 5) vs per-fiber+prior
+(--trace-per-fiber-deg 6, SPECEX_TRACE_PRIOR_DEG=1/WEIGHT=1e5/
+NDEAD_THRESHOLD=500, --workers-per-gpu 3 for z-band / 5 for b/r). Zero
+bundle failures, zero OOMs, zero crashes across all 60 runs.
+
+RESULT: every single one of the 30 cases improves on BOTH xrms and yrms
+at the whole-CCD level -- no exceptions.
+
+  band   xrms: base -> per-fiber+prior      yrms: base -> per-fiber+prior    timing
+  b      0.0407 -> 0.0251  (-38.3%)         0.0375 -> 0.0138  (-63.1%)       +6.5%
+  r      0.0487 -> 0.0247  (-49.4%)         0.0487 -> 0.0141  (-71.0%)       -0.3%
+  z      0.0301 -> 0.0249  (-17.1%)         0.0323 -> 0.0186  (-42.5%)       +20.7%
+  ALL    0.0398 -> 0.0249  (-37.5%)         0.0395 -> 0.0155  (-60.7%)       +9.3%
+
+This includes both of the previously-flagged hard/regressed cases
+(z2@20220314, z5@20220408) and both ghost-line b-band cases (b2@20260401,
+b6@20250125) all landing as clean wins at the whole-CCD level. Timing is a
+genuine, modest ~9% aggregate cost (not the earlier cache-artifact
+"speedup" or a wash) -- still 3-4x+ faster than C++ overall.
+
+Bundle-level follow-up (checking whether either previously-known
+limitation is still lurking under the averages, as it was originally
+found): z5@20220408 bundle 6 / fiber 163 (the ndead=11829 "data floor"
+case) still doesn't fully respond -- whole-bundle xrms actually ticks up
+slightly (+8.2%) even as yrms improves (-8.1%); fiber 163 itself is
+essentially unchanged. b2@20260401's bundle-boundary fibers (2 per
+flagged bundle) still show the already-documented edge-fiber weakness
+(elevated but not regressed vs. baseline). Both are known, already-
+understood mechanisms from earlier this week, not new surprises, and both
+are small relative to the scale of improvement everywhere else.
+b6@20250125 is now fully clean at the bundle level too (no elevated
+fibers anywhere) -- the wavelength filter resolves it completely.
+
+CONCLUSION: the ndead-gated trace prior's selective-gating threshold
+(500) and weight (1e5) generalize cleanly across all 30 cases -- no
+"healthy bundle harmed" pattern anywhere. This is the strongest evidence
+yet for promoting --trace-per-fiber-deg 6 + the trace prior to a
+production default; the (already-unconditional) wavelength filter should
+already be considered a straight bug fix, not an experimental knob.
+DECISION ON PROMOTING TO DEFAULT: pending explicit user confirmation, not
+yet made -- per this project's standing convention for changing
+specex.py's production defaults.

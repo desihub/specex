@@ -3278,7 +3278,58 @@ User flagged an accidental `chmod +x` from a previous session, believed mostly r
 - Wavelength-domain candidate filter (`generate_bundle_candidates`): unconditional, always on, no flag.
 
 ### Still open
-- Run the full 30-CCD campaign with both fixes (trace prior + wavelength filter) active, using isolated JAX caches per variant this time, to get trustworthy aggregate xrms/yrms *and* timing numbers -- explicitly deferred to the next fresh node/session at the user's request.
-- Whether the trace prior's selective-gating threshold (ndead>500) and weight (1e5) generalize cleanly across all 30 cases, not just the 2 known bad bundles -- needs the above campaign to confirm no new surprises.
+- Run the full 30-CCD campaign with both fixes (trace prior + wavelength filter) active, using isolated JAX caches per variant this time, to get trustworthy aggregate xrms/yrms *and* timing numbers -- explicitly deferred to the next fresh node/session at the user's request. -- **DONE, see below.**
+- Whether the trace prior's selective-gating threshold (ndead>500) and weight (1e5) generalize cleanly across all 30 cases, not just the 2 known bad bundles -- needs the above campaign to confirm no new surprises. -- **DONE, see below: yes, cleanly.**
 - The uniform-bundle-wide propagation mechanism (how one bad candidate on 1-3 fibers drags every fiber in the bundle down roughly equally) is still not directly traced to a specific code path -- doesn't block the fix (which removes the bad candidate entirely) but would be good to understand if similar symptoms show up elsewhere.
+- Item 6 (supervisor's 3-node `desi_proc --mpi` production launch) still not run.
+
+## 2026-08-05 (continued, fresh node #2) -- DEFINITIVE 30-CCD campaign: baseline vs (per-fiber-trace + ndead-gated trace prior + wavelength filter), isolated JAX caches, zero failures, 30/30 cases improve on both axes
+
+User resumed on a fresh node with a single explicit request: rerun the full 30-CCD campaign with all of this week's fixes active, using proper isolated-cache methodology this time, to get trustworthy correctness *and* timing numbers before any decision on promoting `--trace-per-fiber-deg` to a default.
+
+### Methodology
+Reused the same 30 cases (`campaign_04Aug2026/all_cases_30.jsonl`) and the already-completed C++ reference FITS from the 04Aug2026 campaign (C++ output doesn't depend on any Python-side trace setting, so no need to re-run `desi_compute_psf`). Two variants, each given its own **isolated** `JAX_COMPILATION_CACHE_DIR` (the exact fix for the cache-order artifact found earlier this week), run sequentially (not concurrently, to avoid GPU-contention timing confounds between variants):
+- **baseline**: shared trace basis, default settings, `--workers-per-gpu 5`. (The wavelength-domain candidate filter from section 7 above is unconditional, so it's active here too -- this is "baseline + that fix", not the pre-fix baseline.)
+- **per-fiber+prior**: `--trace-per-fiber-deg 6`, `SPECEX_TRACE_PRIOR_DEG=1`, `SPECEX_TRACE_PRIOR_WEIGHT=1e5`, `SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD=500`, `--workers-per-gpu 3` for z-band (the established OOM-avoidance setting), `5` for b/r.
+
+Driver: `run_final_30ccd.py` (scratchpad, not committed). **Zero bundle failures, zero OOMs, zero crashes across all 60 runs** (grepped every log for `RESOURCE_EXHAUSTED`/`Bundle...failed`/`Traceback`: nothing).
+
+### Headline result: every single one of 30 cases improves on both axes -- no exceptions at the whole-CCD level
+| band | n | xrms base | xrms per-fiber+prior | Δ | yrms base | yrms per-fiber+prior | Δ | t base | t per-fiber+prior | Δ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| b | 10 | 0.0407 | 0.0251 | **-38.3%** | 0.0375 | 0.0138 | **-63.1%** | 62.5s | 66.6s | +6.5% |
+| r | 10 | 0.0487 | 0.0247 | **-49.4%** | 0.0487 | 0.0141 | **-71.0%** | 71.1s | 70.9s | -0.3% |
+| z | 10 | 0.0301 | 0.0249 | **-17.1%** | 0.0323 | 0.0186 | **-42.5%** | 76.0s | 91.7s | +20.7% |
+| **all 30** | | **0.0398** | **0.0249** | **-37.5%** | **0.0395** | **0.0155** | **-60.7%** | 69.9s | 76.4s | **+9.3%** |
+
+Every one of the 30 individual per-case deltas is negative (improving) on both xrms and yrms -- including the two originally-flagged hard cases (z2@20220314: yrms -43.4%; z5@20220408: yrms -40.8%) and the two ghost-line b-band cases (b2@20260401: yrms -64.6%; b6@20250125: yrms -75.3%). This is a dramatically cleaner result than any earlier iteration of this experiment (the first per-fiber-only pass had a z-band OOM artifact and two genuine tradeoff bundles; this pass has neither at the whole-CCD level).
+
+**Timing**: a genuine, modest ~9% aggregate slowdown, not the earlier cache-artifact "speedup" nor a wash -- r-band is flat, b-band pays a small real per-fiber-Jacobian-size cost (+6.5%), z-band pays more (+20.7%), attributable to a mix of the larger per-fiber design matrix and (mechanically) the reduced `--workers-per-gpu 3` packing (12 concurrent bundles/4 GPUs vs baseline's 20) rather than JAX overhead alone. **Verdict: an excellent trade** -- ~9% more wall time for 37-61% better trace accuracy, still 3-4x+ faster than C++ (per the standing isolated-cache baseline established earlier this project).
+
+### Bundle-level follow-up: the two previously-known limitations are still present, just no longer visible in the whole-CCD average
+Given this project's history of whole-CCD averages masking single-bundle problems (exactly how z5/z2 were originally found), re-checked the specific bundles/fibers already flagged as concerns, at the per-bundle and per-fiber level directly from this run's own FITS output:
+
+- **z5@20220408 bundle 6 / fiber 163 (the `ndead=11829` "data floor" case) is still not fully fixed**: whole-bundle xrms actually ticks up slightly under the prior (0.0982 -> 0.1063, +8.2%) while yrms improves (0.0505 -> 0.0464, -8.1%); fiber 163 itself is materially unchanged (xrms 0.4848 -> 0.5266, yrms 0.2304 -> 0.2287). This matches exactly what was already documented in section 6 above ("fiber 163 barely responds to weight... consistent with `ndead=11829` being a genuine data floor, not something reweighting alone fixes") -- not a new finding, just confirmation it persists at full-campaign scale. It's invisible in the whole-CCD number purely because the other 19/20 bundles in that same CCD improve so substantially (whole-CCD yrms -40.8%) that they swamp this one bundle's small mixed result.
+- **b2@20260401's edge fibers (bundles 2/5/10/11/12) show the already-documented boundary-fiber weakness, not a new problem**: each flagged bundle has elevated xrms (0.09-0.19px) on exactly its two boundary fibers (e.g. bundle 2 = fibers 50-74; fibers 50 and 74 both elevated, all 23 interior fibers clean) -- the same generalizable "per-fiber-independent trace helps interior fibers more than bundle-edge fibers" mechanism documented in the 2026-08-05 (part, pre-node-handoff) entry above. Whole-bundle numbers stay excellent regardless (e.g. bundle 2: xrms=0.0326, yrms=0.0090) since 23/25 fibers are clean.
+- **b6@20250125 (bundles 2/4/5) is now fully clean at the bundle level too** -- no elevated fibers anywhere, all three bundles landing at xrms 0.014-0.016, yrms 0.006-0.008. The wavelength-filter fix (section 7) resolves this case completely, not just on average.
+
+**Net assessment**: the two remaining bundle-level soft spots (z5 fiber 163's data floor, b2's edge fibers) are both already-understood, already-documented mechanisms from earlier this week, not new surprises from this campaign -- and both are small relative to the scale of improvement everywhere else. The trace prior's selective ndead-gating (threshold=500, weight=1e5) generalizes cleanly across all 30 cases: no case shows the "healthy bundle harmed" pattern that motivated the selective gating in the first place.
+
+### Files
+- `run_final_30ccd.py` (scratchpad, not committed): the two-variant isolated-cache campaign driver, reusable for any future baseline-vs-variant validation.
+- Output: `/pscratch/sd/c/cdwarner/specex/05Aug2026-final-campaign/` -- `results_baseline.txt`, `results_perfiber.txt`, per-case FITS + logs, `jax_cache_baseline/`, `jax_cache_perfiber/`.
+
+### A 600-bundle scatter plot surfaced a THIRD single-bundle regression, undetected until now, that the ndead gate doesn't catch
+Regenerated the bundle-level scatter (xrms/yrms, baseline vs per-fiber+prior, all 600 bundles, colored by band, per-band mean as a star) from this campaign's own FITS output. Visually near-total collapse toward/below the y=x line -- but one new outlier stands out on the Y panel: **z6@20250628 bundle 10** (xrms 0.0532->0.1071, yrms 0.0338->0.0959), invisible in the whole-CCD z6 number (-8.0%/-32.7%, per the table above) for the same reason z5/z2 were originally missed -- 19/20 other bundles in that CCD improve enough to swamp it in the average.
+
+Per-fiber breakdown: **fiber 260 alone is catastrophic** (xrms=0.5261, yrms=0.4731 -- baseline was already mediocre there, 0.0537/0.0343, but per-fiber makes it ~9x worse), with the bundle's two edge fibers (250, 274) also mildly elevated (the already-documented edge-fiber pattern). **Fiber 260 is NOT the ndead mechanism**: the log's `SPECEX_TRACE_PRIOR_DEG: activating...` line only fired for this CCD's bundle 12 (fibers 301/302), never bundle 10 -- fiber 260's ndead sits below the 500 threshold, so the prior never engages, yet it still blows up dramatically. This is a genuinely different failure mode from the two previously-understood ones (data-floor ndead, bundle-edge weakness) -- a bad-but-not-ndead-flagged fiber that per-fiber independence can apparently still make much worse than the shared basis would have. Not root-caused further this entry (would need the same kind of coefficient-level dig used earlier on b2/b7); flagged as a concrete open lead, and a reminder that whole-CCD averages can still hide single-bundle problems even after two rounds of targeted fixes -- bundle-level checks remain worth doing before trusting any aggregate number at face value.
+
+### Files
+- `plot_bundle_scatter_final.py` (scratchpad, not committed): regenerates the 600-bundle scatter from this campaign's FITS output. Output: `05Aug2026-final-campaign/bundle_scatter_xrms_yrms_final.png`.
+
+### Promoted to production default (2026-08-05, this entry)
+Per user confirmation, given the clean 30/30 result: `py/specex/specex.py`'s `--trace-per-fiber-deg` now defaults to `6` (was `None`/off), paired with new `--trace-prior-deg` (default `1`), `--trace-prior-weight` (default `1e5`), `--trace-prior-ndead-threshold` (default `500`) CLI flags that thread cleanly through `fit_ccd_native`/`fit_bundle_task`/`fitter.fit()` (previously only reachable via env vars). `--workers-per-gpu` now defaults to `None`/auto (5 normally, 3 for z-band when per-fiber trace is active -- the validated OOM-avoidance setting), inferred from the same CAMERA-header band detection already used for `legendre_deg_wave`. Escape hatches: `--trace-per-fiber-deg 0` falls back to the old shared basis; `--trace-prior-deg -1` (or any negative) keeps per-fiber trace on but disables just the prior. **Smoke-tested end-to-end**: the new bare-CLI-default run (no env vars, no experimental flags) reproduces this campaign's own env-var-driven per-fiber+prior result bit-for-bit (b4@20220314: xrms=0.0268, yrms=0.0200 both ways) -- confirms the promotion is a faithful wiring change, not a behavior change.
+
+### Still open
+- z5@20220408 fiber 163's data floor, b2@20260401's edge-fiber weakness, and now z6@20250628 fiber 260's non-ndead blowup remain open, low-priority leads if per-fiber-trace work continues.
 - Item 6 (supervisor's 3-node `desi_proc --mpi` production launch) still not run.

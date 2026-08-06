@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid'):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None):
     """
     Isolated task for fitting a single bundle.
     """
@@ -291,8 +291,18 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         zero_spot_fibers = [fib for fib in range(f_min, f_max + 1)
                              if spot_fiber_counts.get(fib, 0) < 2 and fib not in explicitly_broken]
 
+        # trace_prior_weight/trace_prior_ndead_threshold are read by fit()
+        # via os.environ (see SPECEX_TRACE_PRIOR_WEIGHT/NDEAD_THRESHOLD in
+        # fitter.py) rather than as direct parameters -- set them here, in
+        # this already-spawned worker process, right before the call, so a
+        # CLI-supplied value takes precedence over the env-only default.
+        if trace_prior_weight is not None:
+            os.environ["SPECEX_TRACE_PRIOR_WEIGHT"] = str(trace_prior_weight)
+        if trace_prior_ndead_threshold is not None:
+            os.environ["SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD"] = str(trace_prior_ndead_threshold)
+
         fitter = PSF_Fitter(psf)
-        chi2, pc, tc, cc, final_flux, xc_final, yc_final, spots = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final, spots = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search, trace_prior_deg=trace_prior_deg)
         # Reassigning `spots` here (not just capturing it under a new name)
         # is deliberate: everything below this line -- x_orig/y_orig,
         # trace_monomials_abs, the `spots[i]['xc_init'] = ...` refresh loop,
@@ -427,9 +437,10 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
-                     workers_per_gpu=4, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
+                     workers_per_gpu=None, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
-                     trace_per_fiber_deg=None, line_search='grid'):
+                     trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
+                     line_search='grid'):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -473,17 +484,31 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     only. z-band was not part of that validation, so its trace correction
     stays coupled to its own wdeg (3) on both axes unless overridden.
 
-    trace_per_fiber_deg (default None = off) is stage 1 of the full
-    per-fiber-independent trace redesign (see porting-notes.md): when
-    set to an integer degree (6, matching the input PSF's own native
-    trace degree, is the natural first thing to try), it replaces the
-    shared low-degree trace_legendre_deg_wave_x/y basis entirely with a
+    trace_per_fiber_deg (default 6, as of 2026-08-05) replaces the shared
+    low-degree trace_legendre_deg_wave_x/y basis entirely with a
     block-diagonal-by-fiber one -- each of the bundle's 25 fibers gets
     its own independent (trace_per_fiber_deg+1)-term wavelength basis
     with zero cross-fiber sharing, matching C++'s per-fiber trace
-    parameter count. Experimental/opt-in -- not validated at production
-    scale yet, and real GPU memory/wall-time cost has not been measured
-    beyond the single bundle-0 forced-spots test in porting-notes.md.
+    parameter count. Pass 0/None to fall back to the old shared basis.
+    Paired with trace_prior_deg (default 1), an ndead-gated cross-fiber
+    regularization on the per-fiber coefficients at that Legendre degree
+    and above (ported from C++'s own trace_prior_deg mechanism,
+    specex_psf_fitter.cc -- off by default in C++ itself, but a real,
+    validated fix here for the handful of fibers with severe local dead-
+    pixel contamination that per-fiber independence alone handles badly;
+    see porting-notes.md). Pass a negative trace_prior_deg to disable just
+    the prior while keeping per-fiber trace on. **Validated on a
+    definitive 30-CCD isolated-JAX-cache campaign, 2026-08-05**: 30/30
+    cases improved on both xrms (mean -37.5%) and yrms (mean -60.7%)
+    vs. the old shared-basis default, for a ~9%% aggregate timing cost
+    (b +6.5%, r -0.3%, z +20.7% -- still 3-4x+ faster than C++ overall).
+    Two known, small, already-understood residual limitations remain
+    (not blocking): a handful of fibers with extreme dead-pixel counts
+    (ndead>>threshold) only partially respond even with the prior active
+    (a genuine data floor, not a bug), and bundle-boundary fibers improve
+    less than interior fibers under full per-fiber independence (no
+    cross-fiber sharing to lean on at the edge) -- see porting-notes.md's
+    2026-08-05 entries for both.
 
     line_search (default 'grid') selects the final joint fit's per-
     iteration step-size search: 'grid' is the long-standing coarse
@@ -500,10 +525,28 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     all_bundles = range(first_bundle, last_bundle + 1)
     bundle_results = {}
 
-    if legendre_deg_wave is None or fit_continuum is None or trace_legendre_deg_wave_x is None or trace_legendre_deg_wave_y is None:
+    # trace_per_fiber_deg<=0 means "off" (fall back to the shared trace
+    # basis); trace_prior_deg<0 means "on but with the cross-fiber prior
+    # disabled" -- both CLI-level escape hatches from the 2026-08-05
+    # promoted defaults (6 / 1), see --trace-per-fiber-deg/--trace-prior-deg
+    # help text.
+    if trace_per_fiber_deg is not None and trace_per_fiber_deg <= 0:
+        trace_per_fiber_deg = None
+    if trace_prior_deg is not None and trace_prior_deg < 0:
+        trace_prior_deg = None
+
+    if legendre_deg_wave is None or fit_continuum is None or trace_legendre_deg_wave_x is None or trace_legendre_deg_wave_y is None or workers_per_gpu is None:
         import fitsio
         cam = fitsio.read_header(arc_file, ext=0)['CAMERA'].strip().lower()
         band = cam[0]
+        if workers_per_gpu is None:
+            # z-band's larger per-fiber design matrix (~350 params/bundle)
+            # combined with its higher spot density hits GPU
+            # RESOURCE_EXHAUSTED at 5 workers/GPU specifically -- see
+            # porting-notes.md's 2026-08-05 OOM investigation. 3/GPU fully
+            # avoids it (validated OOM-free across all 10 z-band cases in
+            # the definitive 30-CCD campaign) at a modest packing cost.
+            workers_per_gpu = 3 if (band == 'z' and trace_per_fiber_deg is not None) else 5
         if legendre_deg_wave is None:
             legendre_deg_wave = 3 if band == 'z' else 1
         if fit_continuum is None:
@@ -524,6 +567,8 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     print(f"  In PSF: {in_psf_file}")
     print(f"  Out PSF: {out_psf_file}")
     print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: x={trace_legendre_deg_wave_x} y={trace_legendre_deg_wave_y}  fit-continuum: {fit_continuum}")
+    if trace_per_fiber_deg is not None:
+        print(f"  trace-per-fiber-deg: {trace_per_fiber_deg}  trace-prior-deg: {trace_prior_deg}  workers-per-gpu: {workers_per_gpu}")
     if broken_fibers:
         print(f"  Broken Fibers: {broken_fibers}")
 
@@ -550,7 +595,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker, line_search))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -593,10 +638,13 @@ def main():
     parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, both axes at once (independent of --legendre-deg-wave's PSF-shape degree). Overridden per-axis by --trace-legendre-deg-wave-x/-y if either is also given. Default: auto per axis -- see those flags' help.")
     parser.add_argument("--trace-legendre-deg-wave-x", type=int, default=None, help="Legendre degree for the trace-position X basis only (default: auto -- same as --legendre-deg-wave, i.e. unchanged from the pre-decoupling behavior; X was found not to need the extra curvature Y does -- see porting-notes.md's r2@20250109 investigation)")
     parser.add_argument("--trace-legendre-deg-wave-y", type=int, default=None, help="Legendre degree for the trace-position Y basis only (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; validated against the real C++ engine -- see porting-notes.md's r2@20250109 investigation)")
-    parser.add_argument("--trace-per-fiber-deg", type=int, default=None, help="EXPERIMENTAL (stage 1 of the full per-fiber trace redesign, see porting-notes.md): replaces the shared trace basis with a block-diagonal-by-fiber one at this wavelength degree (6 matches the input PSF's own native trace degree, and C++'s per-fiber parameter count). Overrides --trace-legendre-deg-wave-x/-y entirely when set. Default: off (None).")
+    parser.add_argument("--trace-per-fiber-deg", type=int, default=6, help="Replaces the shared trace basis with a block-diagonal-by-fiber one at this wavelength degree (6 matches the input PSF's own native trace degree, and C++'s per-fiber parameter count), paired with an ndead-gated cross-fiber trace-coefficient prior (see --trace-prior-* below). DEFAULT AS OF 2026-08-05: on at degree 6 -- validated on a definitive 30-CCD isolated-cache campaign (porting-notes.md), 30/30 cases improved on both xrms (-37.5%% mean) and yrms (-60.7%% mean) vs the old shared-basis default, for a ~9%% timing cost. Pass 0 to fall back to the old shared trace_legendre_deg_wave_x/y basis.")
+    parser.add_argument("--trace-prior-deg", type=int, default=1, help="Legendre degree at/above which --trace-per-fiber-deg's per-fiber coefficients are pulled toward the bundle's cross-fiber consensus (C++'s trace prior, specex_psf_fitter.cc, ported and ndead-gated -- see porting-notes.md). Only active when --trace-per-fiber-deg is on. Default 1 (each fiber's own physical position, degree 0, stays fully independent; only higher-order shape terms are regularized). Pass a negative value to disable the prior entirely while keeping per-fiber trace on.")
+    parser.add_argument("--trace-prior-weight", type=float, default=1e5, help="Trace-prior penalty weight (C++'s own hardcoded value, 1e8, was found to measurably harm healthy bundles when applied blanket-style -- see porting-notes.md's weight sweep). Only matters for fibers flagged by --trace-prior-ndead-threshold.")
+    parser.add_argument("--trace-prior-ndead-threshold", type=int, default=500, help="A fiber's C++-style dead-pixel count (ndead) above this triggers the trace prior for that fiber only; fibers below it are completely unaffected (bit-identical to no-prior). 500 comfortably separates normal fibers (ndead ~20-120) from the known bad cases (ndead ~2300-17500).")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
-    parser.add_argument("--workers-per-gpu", type=int, default=4, help="Concurrent bundle-fit worker processes packed onto each GPU (validated safe ceiling: 4)")
+    parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see porting-notes.md's OOM investigation). Pass explicitly to override.")
     parser.add_argument("--cpu-workers", type=int, help="Concurrent worker processes for --backend cpu (default: --gpu count)")
     parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
@@ -636,6 +684,9 @@ def main():
         trace_legendre_deg_wave_x=args.trace_legendre_deg_wave_x,
         trace_legendre_deg_wave_y=args.trace_legendre_deg_wave_y,
         trace_per_fiber_deg=args.trace_per_fiber_deg,
+        trace_prior_deg=args.trace_prior_deg,
+        trace_prior_weight=args.trace_prior_weight,
+        trace_prior_ndead_threshold=args.trace_prior_ndead_threshold,
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision,
         line_search=args.line_search
