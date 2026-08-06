@@ -4,6 +4,14 @@ Full detail and evidence trail for everything below lives in porting-notes.md
 (append-only, chronological, grep it by topic keyword for the raw session logs).
 Standing test case throughout: night 20260401, expid 00344649, unless noted.
 
+*** LATEST (2026-08-05): see section 15. `python-gpu-port` (this branch) is
+*** now at commit a173d47, pushed to origin -- per-fiber trace + the ndead-
+*** gated trace prior + the wavelength filter are the live production
+*** defaults, validated on a definitive isolated-cache 30-CCD campaign
+*** (section 14). Sections 1-13 below are the historical build-up to that
+*** result and are still accurate as history, but treat section 14/15 as
+*** the current bottom line, not section 1.
+
 ===============================================================================
 1. BOTTOM LINE
 ===============================================================================
@@ -926,3 +934,42 @@ already be considered a straight bug fix, not an experimental knob.
 DECISION ON PROMOTING TO DEFAULT: pending explicit user confirmation, not
 yet made -- per this project's standing convention for changing
 specex.py's production defaults.
+-- DONE, see section 15: confirmed by the user, promoted, and the whole
+branch has since been merged into python-gpu-port.
+
+===============================================================================
+15. MERGED INTO python-gpu-port; PER-FIBER TRACE + PRIOR NOW THE LIVE
+    PRODUCTION DEFAULT (2026-08-05, continued)
+===============================================================================
+User confirmed section 14's result as sufficient evidence and asked to (a)
+promote --trace-per-fiber-deg 6 + the ndead-gated trace prior to specex.py's
+actual CLI defaults (previously only reachable via env vars/experimental
+flags -- see porting-notes.md for the exact wiring change and its bit-for-
+bit smoke test against section 14's own campaign output), and (b) merge the
+whole `experiment/cpp-alternating-solve` branch (42 commits) into
+`python-gpu-port`.
+
+`python-gpu-port` was found to be a strict ancestor of
+`experiment/cpp-alternating-solve` with zero divergent commits -- a clean
+`git merge --ff-only`, no conflicts, nothing lost. Pushed to
+`origin/python-gpu-port` (user ran the push manually, this environment
+can't hold interactive git credentials). **`python-gpu-port` is now at
+commit a173d47 and IS this project's current state** -- every finding,
+fix, and default described in this file and in porting-notes.md is live
+on the branch that name refers to; `experiment/cpp-alternating-solve` no
+longer needs to be checked out separately for any of it.
+
+Practical effect for anyone running the Python port from here on: a bare
+`python3 -m specex.specex -a ... --in-psf ... --out-psf ...` (no extra
+flags) now fits with per-fiber trace + the trace prior + the wavelength
+filter active by default -- this is the config validated in section 14.
+The old shared-trace-basis behavior is still reachable via
+`--trace-per-fiber-deg 0` for anyone who needs a direct A/B against the
+pre-2026-08-05 baseline.
+
+### Still open
+- Item 6: the supervisor's real 3-node `desi_proc --mpi` production launch
+  (instructions in porting-notes.md, "Item 6") -- the natural next step now
+  that a single-node validation this thorough exists. Needs a fresh
+  `salloc -N 3 -C cpu -t 04:00:00 -q interactive` allocation from a login
+  node; this session's compute-node shell can't request that itself.

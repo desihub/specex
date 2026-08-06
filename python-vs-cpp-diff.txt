@@ -1,7 +1,27 @@
 ===============================================================================
 PYTHON vs C++ SPECEX: ALGORITHMIC DIFFERENCES AND THEIR EFFECT ON THE FIT
 ===============================================================================
-Branch: experiment/cpp-alternating-solve (built on top of python-gpu-port).
+Branch: python-gpu-port (as of 2026-08-05; experiment/cpp-alternating-solve,
+where this file and everything in section 1a below was developed, has since
+been fast-forward-merged in -- there is no longer a separate branch to check
+out for any of this).
+
+*** UPDATE (2026-08-05): section 1a's headline gap is now RESOLVED, not just
+*** "an option that exists" -- `--trace-per-fiber-deg 6` + an ndead-gated
+*** trace-coefficient prior are now specex.py's actual CLI defaults,
+*** validated on a definitive isolated-JAX-cache 30-CCD campaign (30/30
+*** cases improve on both xrms and yrms; see current-status.txt section 14
+*** and porting-notes.md's 2026-08-05 "fresh node #2" entry for the real
+*** numbers, which supersede the "29/30", "-31%/-47%" figures quoted in the
+*** executive summary and section 1a below -- those were measured before a
+*** cache-order timing bug and two further correctness fixes, described in
+*** the same porting-notes.md entries, were found and corrected). Python and
+*** C++ now match on trace-model degrees of freedom by default; this is no
+*** longer a live python-vs-cpp difference, though the "Residual position
+*** disagreement" bullet below (a separate, still-open effect) was mostly
+*** characterized under the OLD shared-basis default and has not been fully
+*** re-measured under the new one.
+
 Written 2026-08-04, for internal review. Sources: two multi-week investigation
 arcs (Perlmutter, pre-2026-07-21 outage; homer, 2026-07-23 through 08-03/04,
 first validated on real A100 hardware today) documented in full, with every
@@ -36,25 +56,30 @@ Everything below is still true today. Anything already fixed or matched
 margin, dead-fiber write-back convention, etc.) is omitted here -- see the
 full sections below for that history. Ordered roughly by relevance.
 
-- Trace model degrees of freedom: Python's shipped default fits one shared,
-  low-order trace correction per bundle (~9-14 free parameters); C++ fits
-  every fiber's trace fully independently (~350 parameters/bundle). A
-  matching per-fiber option now exists in Python (`--trace-per-fiber-deg 6`)
-  and, as of a fix landed 2026-08-04, is validated on a full 30-CCD,
-  10-per-band production-representative sample (2026-08-05): **29 of 30
-  cases improve, most substantially** (aggregate -31% xrms, -47% yrms;
-  r-band alone -49%/-73%) -- but it is NOT YET the default. The two known
-  tradeoff cases are now understood (not a mystery): both trace to a
-  single fiber per bundle with poor/asymmetric local data support (either
-  a literal bundle-boundary fiber, or one sitting next to a large
-  dead-fiber stretch) -- a fully-independent per-fiber trace has no
-  cross-fiber sharing to fall back on the way the shared basis does, so
-  exactly this kind of fiber does worse, not better. z-band separately
-  needs a lower `--workers-per-gpu` (validated: 3, not the usual 5) to
-  avoid a real GPU-memory infrastructure issue the larger per-fiber basis
-  triggers there. IMPACT: this is the single biggest lever available for
-  closing the residual gap below, currently unused in production, now
-  validated at production scale with both known failure modes explained.
+- Trace model degrees of freedom: RESOLVED, no longer a live difference
+  (2026-08-05). Python's `specex.py` now defaults to `--trace-per-fiber-deg
+  6` (block-diagonal-by-fiber basis, same degree as C++'s native per-fiber
+  parametrization) plus an ndead-gated cross-fiber trace-coefficient prior
+  ported from C++'s own (off-by-default-in-C++) `trace_prior_deg`
+  mechanism -- see current-status.txt section 15 and porting-notes.md.
+  Validated on a definitive isolated-JAX-cache 30-CCD campaign: **30 of 30
+  cases improve on BOTH xrms (mean -37.5%) and yrms (mean -60.7%)** vs the
+  old shared-basis default, for a genuine (not cache-artifact) ~9%
+  aggregate timing cost -- still 3-4x+ faster than C++ overall. The two
+  previously-known tradeoff mechanisms (a fiber with poor/asymmetric local
+  data support -- literal bundle-boundary, or next to a dead-fiber
+  stretch/severe ndead -- doing worse under fully-independent per-fiber
+  fitting than the shared basis's implicit cross-fiber pooling) are still
+  present at the single-bundle level but no longer show up as whole-CCD
+  regressions; a third, distinct single-bundle case (z6@20250628 bundle 10,
+  not caught by the ndead gate) was found during this validation and
+  remains an open, low-priority lead. z-band uses `--workers-per-gpu 3`
+  (auto-selected) instead of the usual 5 to avoid a real GPU-memory
+  infrastructure issue the larger per-fiber basis triggers there. The old
+  shared-basis behavior is still reachable via `--trace-per-fiber-deg 0`
+  for a direct A/B. IMPACT: this was the single biggest lever found in this
+  whole investigation for closing the residual gap below, and is now live
+  in production by default, not just validated-but-unused.
 
 - Residual position disagreement: even after every other difference below
   is accounted for, Python and C++ still land at slightly different (both
@@ -98,6 +123,13 @@ full sections below for that history. Ordered roughly by relevance.
 
 1a. Trace correction: C++ per-fiber-independent, Python shared bundle-wide
     basis -- a ~15-40x degrees-of-freedom gap.
+    *** RESOLVED 2026-08-05: Python's default now matches C++'s
+    *** parametrization (`--trace-per-fiber-deg 6` + trace prior, both
+    *** shipped defaults as of specex.py's current state on python-gpu-port).
+    *** This section is kept as-is below for the historical investigation
+    *** trail (why the change was made, what was tried and ruled out) -- see
+    *** the file-level UPDATE banner at the top and current-status.txt
+    *** section 15 for the current, superseding numbers.
 -------------------------------------------------------------------------------
 C++: When `fit_trace` is active, every fiber in a bundle gets its own,
 fully independent Legendre-in-wavelength X_vs_W/Y_vs_W polynomial, at the
@@ -871,14 +903,13 @@ not just argued from a correlation.
 ===============================================================================
   Difference                          | Effect on fit          | Status
   -------------------------------------|-------------------------|------------------
-  Per-fiber trace DOF (350 vs ~9-14)   | Real win (3x yrms on    | Cheaper decoupled
-                                        | forced-spot test) under | version shipped;
-                                        | the OLD joint-solve     | full per-fiber option
-                                        | architecture; REGRESSES | UNFIXED on this
-                                        | (~2x worse) as currently| branch -- do not use
-                                        | implemented on THIS     | as-is, see 1a caveat
-                                        | branch's fixed-3-iter   |
-                                        | 'trace' stage           |
+  Per-fiber trace DOF (350 vs ~9-14)   | Real win: 30/30 cases,  | RESOLVED 2026-08-05
+                                        | both axes, mean xrms    | -- now the shipped
+                                        | -37.5%/yrms -60.7%      | specex.py default
+                                        | (definitive isolated-   | (--trace-per-fiber-
+                                        | cache 30-CCD campaign)  | -deg 6 + trace prior);
+                                        |                         | see file-level UPDATE
+                                        |                         | banner and 1a note.
   Dead-column handling at spot-        | Not yet tested -- C++   | Open, concrete next
   selection time (C++ explicit per-    | explicitly excludes,    | step: port C++'s
   candidate ignore vs. Python's raw-   | Python only implicitly  | per-candidate check
