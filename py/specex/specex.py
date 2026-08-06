@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False):
     """
     Isolated task for fitting a single bundle.
     """
@@ -196,6 +196,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # all 500, silently (no error, just whichever bundle's worker
         # finished writing last "wins").
         psf.output_psf_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.fits')
+        psf.debug_spots = debug_spots
 
         lamp_lines = read_lamp_lines(lamp_lines_file)
         t_io = time.time()
@@ -373,7 +374,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 
         # CRITICAL: Overwrite pyspots.txt with refined centroids.
         # get_bundle_spots wrote the raw selection; we must update it with fit results.
-        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+        if debug_spots and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
             spots_path = psf.output_psf_path.replace('.fits', '.pyspots.txt')
             with open(spots_path, 'w') as f:
                 for s in spots:
@@ -381,10 +382,11 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 
         # Debug export: verify that xc_final/yc_final differ from initial raw values
         # (same per-bundle clobbering issue as psf.output_psf_path above -- fixed the same way)
-        debug_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.refined_centroids_debug.txt')
-        with open(debug_path, 'w') as f:
-            for i in range(len(spots)):
-                f.write(f"spot {i}: raw({raw_centroids[i][0]:.15f}, {raw_centroids[i][1]:.15f}) -> refined({float(xc_final[i]):.15f}, {float(yc_final[i]):.15f})\n")
+        if debug_spots:
+            debug_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.refined_centroids_debug.txt')
+            with open(debug_path, 'w') as f:
+                for i in range(len(spots)):
+                    f.write(f"spot {i}: raw({raw_centroids[i][0]:.15f}, {raw_centroids[i][1]:.15f}) -> refined({float(xc_final[i]):.15f}, {float(yc_final[i]):.15f})\n")
 
         # We no longer re-run selection with the refined centroids as a second pass.
         # This matches the iterative snapping logic now implemented inside the fitter,
@@ -440,7 +442,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      workers_per_gpu=None, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
                      trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
-                     line_search='grid'):
+                     line_search='grid', debug_spots=False):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -595,7 +597,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             gpu_id = i % n_gpus
             # Use 2s stagger to prevent JIT compilation contention on CPU
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold))
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots))
 
         print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
         chunk_results = pool.starmap(fit_bundle_task, tasks)
@@ -654,6 +656,7 @@ def main():
     parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
     parser.add_argument("--double-precision", action="store_true", help="Force full float64 precision for the joint-fit Jacobian (default: mixed float32/float64 -- see porting-notes.md; validated equivalent accuracy, ~71%% less GPU memory/worker)")
     parser.add_argument("--line-search", type=str, default="grid", choices=["grid", "brent", "cpp"], help="EXPERIMENTAL: the final joint fit's per-iteration step-size search. 'grid' (default): the long-standing coarse 3-point [0.2,0.5,1.0] search. 'brent': a continuous but NOT C++-faithful search, kept for reference. 'cpp': a faithful replica of C++'s actual algorithm (mode-dependent skip logic + a direct Numerical Recipes brent() port, see specex_psf_fitter.cc/specex_brent.cc). Both 'brent' and 'cpp' tested negative (no xrms/yrms change on 2 hard + 2 normal bundles) -- see porting-notes.md.")
+    parser.add_argument("--debug-spots", action="store_true", help="Write per-pass spot-selection debug dump files (.pyrawspots.txt, .pyspots_pass*.txt, .pyrawspots_final.txt, .pyspots.txt, .refined_centroids_debug.txt), the direct Python analog of C++'s --debug-spots. Off by default -- adds I/O overhead (one set of files per bundle worker) with no effect on the fitted output.")
 
     args = parser.parse_args()
     
@@ -689,7 +692,8 @@ def main():
         trace_prior_ndead_threshold=args.trace_prior_ndead_threshold,
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision,
-        line_search=args.line_search
+        line_search=args.line_search,
+        debug_spots=args.debug_spots
     )
 
 if __name__ == "__main__":

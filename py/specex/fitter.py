@@ -768,11 +768,11 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
                                    sn_threshold=5.0, min_wave_dist=4.0, max_number_of_lines=max_number_of_lines)
         return status
 
-    if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+    if getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
         raw_path = psf.output_psf_path.replace('.fits', '.pyrawspots.txt')
 
     def write_pass_checkpoint(status, pass_name):
-        if not (hasattr(psf, 'output_psf_path') and psf.output_psf_path):
+        if not (getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path):
             return
         path = psf.output_psf_path.replace('.fits', f'.pyspots_{pass_name}.txt')
         with open(path, 'w') as f:
@@ -787,7 +787,7 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
     status = strict_select()
     print(f"  Pass 1 (strict): {int(status.sum())}/{len(candidates)} spots", flush=True)
     write_pass_checkpoint(status, 'pass1')
-    if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+    if getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
         with open(raw_path, 'w') as f:
             for s in candidates:
                 f.write(f"{s['fiber']},{s['wave']:.7f},{s['xc_init']:.7f},{s['yc_init']:.7f},{s['flux']:.7f},{s['eflux']:.7f},{s['snr']:.7f}\n")
@@ -826,7 +826,7 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
     # this is the list C++ hands to the final joint PSF+FLUX fit.
     fluxes, efluxes, snrs, chi2s = fit_candidate_fluxes(psf, candidates, image, weight)
 
-    if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+    if getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
         final_raw_path = psf.output_psf_path.replace('.fits', '.pyrawspots_final.txt')
         with open(final_raw_path, 'w') as f:
             for i, s in enumerate(candidates):
@@ -838,7 +838,7 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
                                sn_threshold=3.0, min_wave_dist=0.0, max_number_of_lines=max_number_of_lines)
     selected = _finalize_selected(psf, candidates, status)
 
-    if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+    if getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
         spots_path = psf.output_psf_path.replace('.fits', '.pyspots.txt')
         with open(spots_path, 'w') as f:
             for s in selected:
@@ -875,7 +875,7 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
         fluxes, efluxes, snrs, chi2s = fit_candidate_fluxes(psf, candidates, image, weight)
         waves = np.array([s['wave'] for s in candidates])
 
-        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+        if getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
             raw_path = psf.output_psf_path.replace('.fits', '.pyrawspots.txt')
             with open(raw_path, 'w') as f:
                 for i in range(Ns):
@@ -893,7 +893,7 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
 
         selected = _finalize_selected(psf, candidates, status)
 
-        if hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+        if getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
             spots_path = psf.output_psf_path.replace('.fits', '.pyspots.txt')
             with open(spots_path, 'w') as f:
                 for s in selected:
