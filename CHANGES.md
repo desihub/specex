@@ -1,8 +1,13 @@
 # specex Change Log
 
-## 0.10.1 (unreleased)
+## 0.10.2 (unreleased)
 
 * No changes yet.
+
+## 0.10.1 (2026-04-10)
+
+* Assign skipped fibers/bundles STATUS -1 and failed 1, 2, 3, or 4 (PR [#86](https://github.com/desihub/specex/pull/86)).
+* Initialize PSF_Params params in specex_psf.h (PR [#87](https://github.com/desihub/specex/pull/87)).
 
 ## 0.10.0 (2026-03-18))
 
