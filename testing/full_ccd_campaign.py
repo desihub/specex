@@ -77,7 +77,7 @@ def start_cpp_full(case, out_fits, log_path):
     cmd = ["srun", "-n", "20", "desi_compute_psf", "--mpi",
            "--input-image", case['image'],
            "--input-psf", case['input_psf'],
-           "-o", out_fits]
+           "-o", out_fits, "--extra=--debug-spots"]
     if case['broken_fibers']:
         cmd += ["--broken-fibers", case['broken_fibers']]
     lf = open(log_path, 'w')

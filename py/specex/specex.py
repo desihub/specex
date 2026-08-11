@@ -439,7 +439,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
                      broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
-                     workers_per_gpu=None, cpu_workers=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
+                     workers_per_gpu=None, cpu_workers=None, gpu_worker_threads=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
                      trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
                      line_search='grid', debug_spots=False):
@@ -576,7 +576,18 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
 
     if backend == "gpu":
         n_workers = min(len(all_bundles), n_gpus * workers_per_gpu)
-        cpu_threads_per_worker = None
+        # Normally unset -- GPU-backend workers' host-side NumPy/BLAS calls
+        # (the selection/housekeeping phase, ~70% of a bundle's wall time,
+        # see porting-notes.md) default to unconstrained thread counts,
+        # unlike --backend cpu workers which always get a computed budget
+        # below. --gpu-worker-threads lets this be forced explicitly, to
+        # test whether that default threading is (a) load-bearing for
+        # per-worker speed or (b) pure oversubscription noise that's
+        # crowding out any concurrent CPU-backend work -- see the 2026-08-09
+        # profiling session in porting-notes.md.
+        cpu_threads_per_worker = gpu_worker_threads
+        if cpu_threads_per_worker is not None:
+            print(f"  GPU-worker thread cap: {cpu_threads_per_worker} threads/worker (forced via --gpu-worker-threads)", flush=True)
     else:
         n_workers = min(len(all_bundles), cpu_workers or n_gpus)
         # See fit_bundle_task's thread-limiting comment for why this exists
@@ -648,6 +659,7 @@ def main():
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see porting-notes.md's OOM investigation). Pass explicitly to override.")
     parser.add_argument("--cpu-workers", type=int, help="Concurrent worker processes for --backend cpu (default: --gpu count)")
+    parser.add_argument("--gpu-worker-threads", type=int, default=None, help="Force an OMP/BLAS/XLA thread cap on each --backend gpu worker's host-side (CPU) computation, mirroring --backend cpu's own auto-computed budget. Default: unconstrained (each worker's BLAS calls may claim all visible threads). Diagnostic flag for probing whether GPU-worker host threading is load-bearing or pure oversubscription -- see porting-notes.md.")
     parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
     parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
@@ -664,8 +676,32 @@ def main():
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         args.lamp_lines = os.path.join(base, "specex/data/specex_linelist_desi.txt")
 
-    os.environ["JAX_PLATFORM_NAME"] = args.backend
-    
+    os.environ["JAX_PLATFORM_NAME"] = args.backend  # deprecated/ineffective on this JAX version, see below
+
+    if args.backend != "gpu":
+        # STRICT ISOLATION for the main process itself, mirroring
+        # fit_bundle_task's per-worker isolation above. Without this, the
+        # main process's own post-pool JAX usage (write_python_psf ->
+        # legendre_pol_jnp, io.py) has no backend restriction at all and
+        # defaults to JAX's normal CUDA-first device selection regardless
+        # of --backend cpu (the JAX_PLATFORM_NAME line above doesn't help --
+        # it's the deprecated singular name; only JAX_PLATFORMS, plural, is
+        # consulted, and even that needs to be set via jax.config, not
+        # os.environ, once jax is already imported -- see the matching
+        # comment in fit_bundle_task). Harmless when no other GPU job is
+        # running (CUDA init just succeeds or falls back cleanly), but under
+        # real concurrent CPU+GPU production use this touches CUDA while
+        # concurrent GPU-backend jobs have already exhausted GPU memory --
+        # confirmed directly to crash with CUDA_ERROR_OUT_OF_MEMORY on all
+        # visible devices (see porting-notes.md), and the prime suspect for
+        # an earlier session's CPU+GPU hybrid deadlock (same code path, a
+        # hang instead of a crash is plausible under different CUDA-driver
+        # contention timing).
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        os.environ["JAX_SKIP_CUDA_CONSTRAINTS_CHECK"] = "1"
+        import jax
+        jax.config.update("jax_platforms", "cpu")
+
     fit_ccd_native(
         arc_file=args.arc,
         in_psf_file=args.in_psf,
@@ -682,6 +718,7 @@ def main():
         force_spots_path=args.force_spots,
         workers_per_gpu=args.workers_per_gpu,
         cpu_workers=args.cpu_workers,
+        gpu_worker_threads=args.gpu_worker_threads,
         legendre_deg_wave=args.legendre_deg_wave,
         trace_legendre_deg_wave=args.trace_legendre_deg_wave,
         trace_legendre_deg_wave_x=args.trace_legendre_deg_wave_x,
