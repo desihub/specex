@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.join(REPO, "testing"))
 from select_test_case import parse_log_line
 
 SCRIPTS_DIR = "/global/cfs/cdirs/desi/spectro/redux/matterhorn/run/scripts/night"
+PRODUCTION_REDUX_ROOT = "/global/cfs/cdirs/desi/spectro/redux/matterhorn"
 ALL_CAMERAS = [f"{b}{s}" for b in "brz" for s in range(10)]
 
 # Validated per-band worker packing (testing/07Aug2026-30ccd-campaign/pinned30
@@ -87,6 +88,39 @@ def slurm_nodes():
     out = subprocess.run(["scontrol", "show", "hostnames", nodelist], capture_output=True, text=True)
     hosts = [h for h in out.stdout.split() if h]
     return hosts or [None]
+
+
+def resolve_python_run_dir(args):
+    """Where --backend python writes fit-psf-<cam>-<expid>.fits + per-camera
+    logs for this night/expid. Three tiers, in order:
+      1. --outdir, if given -- used exactly as-is (a flat directory, for
+         ad-hoc/scratch runs where production-style nesting isn't wanted).
+      2. $DESI_SPECTRO_REDUX (+ $SPECPROD, default $USER) if set --
+         mirrors --backend cpp's/desi_proc's own exposures/<night>/<expid>/
+         layout, so `export DESI_SPECTRO_REDUX=...` before running either
+         backend now lands both in the same, directly comparable location
+         instead of being silently ignored by --backend python.
+      3. $SCRATCH/specex/run_night_<night>_<expid>/ (previous default).
+    Refuses to resolve inside the real production tree -- never write
+    fit-psf output there by accident, explicit override or not.
+    """
+    if args.outdir is not None:
+        run_dir = args.outdir
+    elif os.environ.get("DESI_SPECTRO_REDUX"):
+        specprod = os.environ.get("SPECPROD") or os.environ.get("USER", "specex")
+        run_dir = os.path.join(os.environ["DESI_SPECTRO_REDUX"], specprod,
+                                "exposures", args.night, args.expid)
+    else:
+        scratch = os.environ.get("SCRATCH", "/tmp")
+        run_dir = os.path.join(scratch, "specex", f"run_night_{args.night}_{args.expid}")
+
+    real = os.path.realpath(run_dir)
+    if real == PRODUCTION_REDUX_ROOT or real.startswith(PRODUCTION_REDUX_ROOT + os.sep):
+        print(f"ERROR: resolved output dir {run_dir} is inside the real production "
+              f"redux tree ({PRODUCTION_REDUX_ROOT}) -- refusing to write there. "
+              f"Pass --outdir or point $DESI_SPECTRO_REDUX at a private tree.", file=sys.stderr)
+        sys.exit(1)
+    return run_dir
 
 
 def detect_gpus_per_node(default=4):
@@ -143,8 +177,16 @@ def tail_error(log_path, n=6):
 def run_camera_python(cam, case, gpu_id, outdir, wpg_override, dry_run):
     band = cam[0]
     wpg = wpg_override.get(band, DEFAULT_WORKERS_PER_GPU[band])
-    out_fits = os.path.join(outdir, f"{cam}.fits")
-    log = os.path.join(outdir, f"py-{cam}.log")
+    # fit-psf-<cam>-<expid>.fits matches desi_proc's/desi_compute_psf's own
+    # real output naming (see run_backend_cpp's printed output path below)
+    # -- was bare "{cam}.fits", which didn't line up with anything C++
+    # produces and made the two backends' outputs hard to tell apart or
+    # script against generically.
+    out_fits = os.path.join(outdir, f"fit-psf-{cam}-{case['expid']}.fits")
+    # Same stem as out_fits, .log instead of .fits -- was "py-<cam>.log"
+    # (no expid, so it collided across different expids of the same camera
+    # sharing one outdir, and didn't visually pair with its own fits file).
+    log = os.path.join(outdir, f"fit-psf-{cam}-{case['expid']}.log")
 
     # Check inputs up front rather than letting the subprocess fail deep
     # inside fitsio/io.py with a traceback that reads like a code bug --
@@ -261,7 +303,7 @@ def run_backend_python(args, cases):
         # reparse them here for the summary rather than trying to pipe
         # results back across process boundaries.
         for cam in cameras:
-            log = os.path.join(outdir, f"py-{cam}.log")
+            log = os.path.join(outdir, f"fit-psf-{cam}-{args.expid}.log")
             if not os.path.exists(log):
                 continue
             with open(log) as f:
@@ -279,6 +321,7 @@ def run_backend_python(args, cases):
     print(f"\n=== SUMMARY backend=python: {len(results)}/{len(cameras)} cameras, "
           f"{n_fail} rc!=0/SKIPPED, {n_bf_cams} cameras with bundle failures, "
           f"TOTAL WALL TIME: {total:.1f}s ({total/60:.1f} min) ===", flush=True)
+    print(f"  output: {outdir}/", flush=True)
     for cam, dt, rc, n_bf, err_tail in results:
         if rc not in (0, None) or n_bf:
             print(f"  PROBLEM: {cam} rc={rc} bundle_failures={n_bf}")
@@ -337,7 +380,7 @@ def main():
     ap.add_argument("--backend", choices=["cpp", "python"], default=os.environ.get("SPECEX_BACKEND", "python"),
                      help="Default: $SPECEX_BACKEND env var, or 'python' if unset.")
     ap.add_argument("--cameras", help="Comma-separated camera list (default: all 30 standard b0-9/r0-9/z0-9)")
-    ap.add_argument("--outdir", default=None, help="Default: $SCRATCH/specex/run_night_<night>_<expid>")
+    ap.add_argument("--outdir", default=None, help="Default (--backend python): $DESI_SPECTRO_REDUX/$SPECPROD/exposures/<night>/<expid> if $DESI_SPECTRO_REDUX is set (matches desi_proc's own layout), else $SCRATCH/specex/run_night_<night>_<expid>. Default (--backend cpp): always $SCRATCH/specex/run_night_<night>_<expid> (this backend manages its own private redux tree under it -- see --redux-dir).")
     ap.add_argument("--nodes", type=int, default=None, help="Default: this SLURM job's full node allocation")
     ap.add_argument("--dry-run", action="store_true", help="Print planned commands without executing them")
     # --backend python only
@@ -353,14 +396,13 @@ def main():
     ap.add_argument("--specprod", default=os.environ.get("USER", "specex"))
 
     args = ap.parse_args()
-    if args.outdir is None:
-        scratch = os.environ.get("SCRATCH", "/tmp")
-        args.outdir = os.path.join(scratch, "specex", f"run_night_{args.night}_{args.expid}")
-
     cameras = args.cameras.split(",") if args.cameras else ALL_CAMERAS
 
     if args._node_worker:
-        # invoked by run_backend_python via srun, one call per node
+        # invoked by run_backend_python via srun, one call per node --
+        # the parent always passes --outdir explicitly (it resolved it
+        # once, below, before launching any node), so no re-resolution
+        # needed/wanted here.
         wpg_override = {}
         if args.workers_per_gpu_b is not None: wpg_override["b"] = args.workers_per_gpu_b
         if args.workers_per_gpu_r is not None: wpg_override["r"] = args.workers_per_gpu_r
@@ -372,9 +414,17 @@ def main():
         return
 
     if args.backend == "cpp":
+        # Deliberately does NOT honor a pre-set $DESI_SPECTRO_REDUX for its
+        # own outdir default -- run_backend_cpp always manages its own
+        # private redux tree (see --redux-dir) so a real production
+        # DESI_SPECTRO_REDUX left set in the shell can never get written to.
+        if args.outdir is None:
+            scratch = os.environ.get("SCRATCH", "/tmp")
+            args.outdir = os.path.join(scratch, "specex", f"run_night_{args.night}_{args.expid}")
         run_backend_cpp(args)
         return
 
+    args.outdir = resolve_python_run_dir(args)
     cases = find_cases(args.night, args.expid, cameras)
     if not cases:
         print("No cases found -- nothing to do.", file=sys.stderr)
