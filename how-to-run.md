@@ -32,7 +32,7 @@ Before running any scripts, ensure your environment is set up correctly on Perlm
 source env_setup.sh
 ```
 
-This sets the `PYTHONPATH` to include the local `py` directory and loads necessary modules like `cudatoolkit`.
+This sets `PYTHONPATH` to include the local `py` directory, points `LD_LIBRARY_PATH` at the pip-installed NVIDIA CUDA libraries JAX needs, and loads the `cudatoolkit` module if on a compute node.
 
 ---
 
@@ -47,6 +47,8 @@ python testing/select_test_case.py --night 20260401 --list
 # Select a random case for testing
 python testing/select_test_case.py --night 20260401 --random
 ```
+
+For picking several *distinct* random nights (e.g. to build an independent test set that avoids reusing the same night twice), see `testing/random_case_picker.py`.
 
 ---
 
@@ -66,71 +68,159 @@ The script generates a table (default output: `instrumentation_analysis.txt`) co
 *   **Spots:** Number of spots identified and used in the fit.
 *   **XT RMS / YT RMS:** Root-Mean-Square difference in pixels between the Python-fitted traces and the C++-fitted traces.
 
----
-
-## 4. Multi-Mode Validation
-
-To compare **CPP** vs **JAX-CPU** vs **JAX-GPU** simultaneously, use `testing/validate_all_modes.py`.
-
+To compare **CPP** vs **JAX-CPU** vs **JAX-GPU** simultaneously, use `testing/validate_all_modes.py`:
 ```bash
 python testing/validate_all_modes.py --cameras b0 --bundle 5 --output comparison_results.txt
 ```
+This is useful for verifying that GPU acceleration doesn't introduce numerical divergence from the CPU version of the same code.
 
-This is useful for verifying that the GPU acceleration doesn't introduce numerical divergence from the CPU version of the same code.
+For a full night/expid, whole-CCD C++-vs-Python parity+timing sweep across many cameras at once, see `testing/full_ccd_campaign.py` (Section 4.2 below covers it as a production-scale driver too).
 
 ---
 
-## 5. Running the Full Python CCD Fit
+## 4. Running the Python CCD Fit -- Three Modes
 
-You can run a full CCD fit directly from the command line using the `specex.specex` module.
+All modes go through the same entry point, `python -m specex.specex` (or the `fit_ccd_native()` function directly). What changes is scope: a single bundle, one camera's full CCD, or all 30 cameras of an exposure.
+
+### 4.1 Mode 1: Single Bundle (25 fibers)
+
+Useful for fast iteration/debugging. Restrict fitting to one bundle with `--first-bundle`/`--last-bundle` (0-19) and, optionally, a matching `--first-fiber`/`--last-fiber` range (25 fibers/bundle, `bundle_id * 25` to `bundle_id * 25 + 24`).
 
 ```bash
 python -m specex.specex \
-    -a path/to/preproc.fits \
-    --in-psf path/to/input-psf.fits \
-    --out-psf output-psf.fits \
+    -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz \
+    --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
+    --out-psf $SCRATCH/pyfit-psf-z8-00344649_05.fits \
+    --first-bundle 5 --last-bundle 5 \
+    --first-fiber 125 --last-fiber 149 \
     --broken-fibers 473,474 \
-    --gpu 4
+    --gpu 1
 ```
 
-Examples:
-fit a single bundle of 25 fibers
-```
+### 4.2 Mode 2: Full CCD (one camera, all 20 bundles)
+
+Drop `--first-bundle`/`--last-bundle` (they default to the full 0-19 range) to fit an entire camera:
+
+```bash
 python -m specex.specex \
-     -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz \
-     --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
-     --lamp-lines /global/cfs/cdirs/desi/users/cdwarner/code/specex/py/specex/data/specex_linelist_desi.txt \
-     --out-psf $SCRATCH/pyfit-psf-z8-00344649_05.fits \
-     --first-bundle 5 --last-bundle 5 \
-     --first-fiber 125 --last-fiber 149 \
-     --legendre-deg-wave 3 \
-     --fit-continuum \
-     --broken-fibers 473,474 \
-     --gpu 4
+    -a /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz \
+    --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
+    --out-psf $SCRATCH/pyfit-psf-z8-00344649.fits \
+    --broken-fibers 473,474 \
+    --gpu 1 --workers-per-gpu 4
 ```
 
-Fit a full CCD PSF (20 bundles)
+`--gpu N` spreads the 20 bundles across `N` GPUs on the *current node*; `--workers-per-gpu` controls how many bundle-fit worker processes are packed onto each GPU concurrently (auto-detected per band if omitted -- see the CLI reference below).
+
+For a batch of full-CCD runs (many cameras, one at a time, each compared against C++), see `testing/full_ccd_campaign.py`:
+```bash
+python testing/full_ccd_campaign.py --night 20260401 --expid 00344649 \
+    --cameras b5,b4,b2,r3,r5,r1,z1,z6,z9 --outdir $SCRATCH/specex/full_ccd
 ```
-python -m specex.specex \
-  --input-image /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/preproc/20260401/00344649/preproc-z8-00344649.fits.gz \
-  --input-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
-  --output-psf $SCRATCH/pyfit-psf-z8-00344649.fits \
-  --broken-fibers 473,474 \
-  --gpu 4
+This launches the real C++ wrapper (`srun -n 20 desi_compute_psf --mpi`) and the Python port concurrently per camera (they don't contend for the same resources -- C++ is CPU/MPI, Python is GPU), and reports wall time plus X/Y trace RMS and wavelength-residual RMS for both.
+
+### 4.3 Mode 3: Full Night/Expid (all 30 cameras, production scale)
+
+**`testing/run_night.py` is the single entry point for this mode**, switchable between the C++ and Python/JAX backends via one flag (or the `SPECEX_BACKEND` env var), so the same command works for either pipeline:
+
+```bash
+python testing/run_night.py --night 20260401 --expid 00344649 --backend python
+python testing/run_night.py --night 20260401 --expid 00344649 --backend cpp
+
+# or set it once for the session:
+export SPECEX_BACKEND=python
+python testing/run_night.py --night 20260401 --expid 00344649
 ```
 
+**Scope:** this fits an *already-preprocessed* exposure (`preproc-*.fits.gz` + `shifted-input-psf-*.fits` must already exist -- true for any real matterhorn production night/expid). It is not a `desi_proc` replacement:
 
-### CLI Arguments:
-*   `-a`, `--arc`: Input preprocessed arc image.
-*   `--in-psf`: Input PSF file (the "shifted" version).
-*   `--out-psf`: Path where the fitted PSF will be saved.
-*   `--first-bundle` / `--last-bundle`: Range of bundles to fit (0-19).
-*   `--gpu`: Number of GPUs to utilize (default: 4).
-*   `--broken-fibers`: List of fiber IDs to exclude from the fit.
-*   `--sn-threshold`: Signal-to-Noise threshold for spot selection (default: 3.0).
-*   `--h-size-y`: Override the PSF stamp half-size in Y (default: 5).
+*   `--backend cpp` runs the real production driver, `desi_proc --mpi`, which does its own preprocessing (idempotent -- skips it if outputs already exist) then calls the C++ `desi_psf_fit` binary per camera via MPI ranks. One `srun` call; scales via `--nodes` using the validated rank formula (`100*nodes + 1` -- `-N1`/`-n101` measured ~11 min, `-N3`/`-n301` measured ~7 min, see `porting-notes.md`). Output goes to a **private** `$DESI_SPECTRO_REDUX/$SPECPROD` tree (`--redux-dir`/`--specprod`, default under `--outdir`), never the real production `matterhorn` tree.
+*   `--backend python` runs `python -m specex.specex` once per camera, each **pinned to a dedicated GPU** via `CUDA_VISIBLE_DEVICES` (no GPU sharing across cameras), using a **per-node dynamic work queue** so however many GPUs you have stay busy. Auto-detects node count (from the SLURM allocation) and GPUs/node (`nvidia-smi -L`); one node runs locally, multiple nodes launch via `srun -N1 -n1 -w <hostname>` per node (same pattern validated this session). Does **not** call `desi_proc` at all -- it goes straight to `specex.specex` on the existing preprocessed files.
 
-Alternatively, you can call it from within another Python script:
+**Validated settings per band** (`--workers-per-gpu-{b,r,z}`, i.e. concurrent bundle-fit workers packed onto one GPU for one camera -- override the defaults below if needed):
+| Band | Default | Why |
+|------|---------|-----|
+| b    | 10      | Validated sweet spot, no OOM |
+| r    | 7       | 10 silently OOMs a handful of bundles (`RESOURCE_EXHAUSTED`) on ~6/10 r-band cameras; 7 is clean |
+| z    | 4       | Larger per-fiber design matrix (per-fiber trace default) OOMs at 10 even in isolation |
+
+**Multi-node camera splitting:** the default is a naive alternating split (band-diverse but not load-balanced -- there's no timing prior for an arbitrary fresh night/expid). Pass `--lpt-profile cameras.json` (a `{"b0": 69.2, ...}` map of measured per-camera wall times, e.g. parsed from a prior run's own logs) to get an **LPT (longest-processing-time-first) balanced split** instead -- sorts cameras descending by known duration and greedily assigns each to whichever GPU-slot currently has the least total load, closing most of the gap a naive split leaves on the table (the slowest, most variable band, z, otherwise gets queued last with nothing to fill the tail).
+
+**Other flags:** `--cameras` (restrict to a subset, default all 30), `--outdir`, `--nodes` (default: full SLURM allocation), `--gpus-per-node` (default: auto-detect), `--dry-run` (print planned commands without executing).
+
+Measured with this exact tool's predecessor scripts (2026-08-10, before consolidation into `run_night.py`): **13.2 min / 30 cameras** on 1 node/4 GPUs (0 bundle failures); **6.7 min** on 2 nodes/8 GPUs with a naive split, **5.92 min** LPT-rebalanced -- both correctness-verified (xrms/yrms match a rebuilt/official C++ reference to <0.03px mean), and the result generalizes across independent nights/exposures (confirmed on a second night; absolute timing varies by exposure since real exposures differ in total compute needed, but the technique transfers). Always grep worker logs for `WARNING: Bundle` to catch silent per-bundle GPU-OOM failures -- a nonzero process exit code is *not* a reliable failure signal, `fit_ccd_native` logs a warning and keeps merging on a per-bundle failure. If `workers-per-gpu`, the camera set, or the node count change, an `--lpt-profile` needs to be recomputed from a fresh timing profile -- it isn't portable across settings changes, but the profile-then-rebalance *technique* is.
+
+Re-measured through the consolidated `run_night.py` itself on 1 node/4 GPUs across 4 independent nights (2026-08-10): 13.2, 11.4, 11.8, 12.3 min, all 30/30 cameras, 0 failures -- confirms the tool's own overhead is negligible and the timing is stable across different exposures/nights at this scale.
+
+### Clean failure reporting (`--backend python` only)
+
+Because each camera is an independent subprocess (not one MPI collective), a bad camera never blocks the rest, and failures are reported immediately with a reason instead of a bare nonzero exit code:
+*   **Missing input file(s)** (e.g. a preproc file production never generated for that camera/expid): reported as `SKIPPED` with the missing path(s) -- confirmed on `z7@20250822/00307722`, which resolved in **1.9s**. The equivalent `--backend cpp` run on the same case took **~12 minutes to hang** (see the MPI-hang gotcha below) before it had to be killed manually.
+*   **Per-camera subprocess failure** (nonzero rc): the run summary prints the last few lines of that camera's log (`tail_error()`) inline under a `PROBLEM:` entry, so the cause is visible without opening individual log files.
+
+---
+
+## 5. Full CLI Reference
+
+```
+python -m specex.specex -h
+```
+
+**Required:**
+| Flag | Description |
+|------|-------------|
+| `-a`, `--arc`, `--input-image` | Input preproc arc image |
+| `--in-psf`, `--input-psf` | Input (shifted) PSF file |
+| `--out-psf`, `--output-psf` | Output PSF file path |
+
+**Scope (bundle/fiber range):**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--first-bundle` | 0 | First bundle to fit (0-19) |
+| `--last-bundle` | 19 | Last bundle to fit (0-19) |
+| `--first-fiber` | (unset) | First fiber to fit |
+| `--last-fiber` | (unset) | Last fiber to fit |
+| `--broken-fibers` | (unset) | Comma-separated fiber IDs to exclude from the fit |
+
+**Fit basis / degrees:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--legendre-deg-wave` | auto (3 for z-band, 1 otherwise, from the CAMERA header) | Legendre degree for the joint fit's PSF-shape wavelength basis |
+| `--trace-legendre-deg-wave` | auto per axis | Legendre degree for the trace-position wavelength basis, both axes at once; overridden per-axis by the two flags below if given |
+| `--trace-legendre-deg-wave-x` | auto (same as `--legendre-deg-wave`) | Trace-position X basis degree only |
+| `--trace-legendre-deg-wave-y` | auto (2 for b/r, same as `--legendre-deg-wave` for z) | Trace-position Y basis degree only |
+| `--trace-per-fiber-deg` | **6** (production default since 2026-08-05) | Block-diagonal-by-fiber trace basis instead of a shared one, paired with the ndead-gated trace prior below. `0` reverts to the old shared basis. Validated: 30/30 cases improved on xrms (-37.5% mean) and yrms (-60.7% mean) vs. shared-basis, for a ~9% timing cost. |
+| `--trace-prior-deg` | 1 | Degree at/above which per-fiber trace coefficients are pulled toward the bundle's cross-fiber consensus. Only active with `--trace-per-fiber-deg` on. Negative disables the prior while keeping per-fiber trace on. |
+| `--trace-prior-weight` | 1e5 | Trace-prior penalty weight (C++'s own 1e8 measurably harms healthy bundles applied blanket-style; this is the corrected value) |
+| `--trace-prior-ndead-threshold` | 500 | A fiber's dead-pixel count (ndead) above this triggers the trace prior for that fiber only; normal fibers (ndead ~20-120) are unaffected |
+| `--fit-continuum` / `--no-fit-continuum` | auto (on for z-band, off otherwise, matching C++) | Fit a per-bundle continuum background |
+
+**Compute / concurrency:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--backend` | `gpu` | `cpu` or `gpu` |
+| `--gpu` | 4 | Number of GPUs to use (spreads bundles across them on the current node) |
+| `--workers-per-gpu` | auto (5, or 3 for z-band when per-fiber trace is active) | Concurrent bundle-fit worker processes per GPU. See Section 4.3's table for the validated per-band values (10 b / 7 r / 4 z) used in production-scale multi-camera runs. |
+| `--cpu-workers` | `--gpu` count | Concurrent worker processes for `--backend cpu` |
+| `--gpu-worker-threads` | unconstrained | Diagnostic: force an OMP/BLAS/XLA thread cap on each GPU-backend worker's host-side computation. Confirmed *not* load-bearing for the CPU+GPU hybrid-scheduling investigation (see porting-notes.md) -- left in as a diagnostic knob, no effect on a normal run. |
+| `--double-precision` | off (mixed float32/float64) | Force full float64 for the joint-fit Jacobian. Validated equivalent accuracy; mixed precision uses ~71% less GPU memory/worker. |
+
+**Spot selection:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--sn-threshold` | 3.0 | S/N threshold for spot selection |
+| `--max-lines` | 200 | Maximum number of lines to keep per bundle |
+| `--h-size-y` | 5 | Override PSF stamp half-size in Y |
+| `--force-spots` | (unset) | Path to a file of spots to fit (`fiber,wave,xc,yc`), bypassing spot selection |
+
+**Other:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--lamp-lines` | (unset) | Lamp lines file path |
+| `--line-search` | `grid` | EXPERIMENTAL: final joint fit's per-iteration step-size search. `grid` (default, coarse 3-point), `brent` (continuous, not C++-faithful), `cpp` (faithful replica of C++'s Numerical Recipes brent() + mode-dependent skip logic). Both alternates tested correctness-neutral vs `grid` -- kept for reference only. |
+| `--debug-spots` | off | Write per-pass spot-selection debug dump files (`.pyrawspots.txt`, `.pyspots_pass*.txt`, etc. -- the Python analog of C++'s own `--debug-spots`). Off by default: adds per-bundle-worker I/O overhead with no effect on the fitted output. |
+
+Alternatively, call it from within another Python script via `fit_ccd_native()`:
 
 ```python
 from specex.specex import fit_ccd_native
@@ -140,7 +230,8 @@ fit_ccd_native(
     in_psf_file='path/to/input-psf.fits',
     out_psf_file='output-psf.fits',
     lamp_lines_file='py/specex/data/specex_linelist_desi.txt',
-    broken_fibers="473,474"
+    broken_fibers="473,474",
+    gpu=1, workers_per_gpu=10,
 )
 ```
 
@@ -148,8 +239,38 @@ fit_ccd_native(
 
 ## 6. Understanding the Metrics
 
-*   **Spots:** If the Python version identifies significantly fewer spots than C++, check the `--sn` (S/N threshold) parameter in the scripts.
+*   **Spots:** If the Python version identifies significantly fewer spots than C++, check the `--sn-threshold` parameter.
 *   **Chi2:** A 2-4% difference is currently expected due to "Dead Column Masking" differences in the pre-processor.
-*   **Trace Deltas (XT/YT RMS):** We target values < 0.05 pixels. Current results typically show ~0.02 pixels.
-*   **Chi2: -1.0:** Usually indicates a crash or a failure to find any spots (often due to the PSF loading bug fixed on June 9th).
+*   **Trace Deltas (XT/YT RMS):** Typical whole-CCD results are ~0.02-0.03 pixels (well under the 0.05px target), using the `--trace-per-fiber-deg 6` production default.
+*   **Chi2: -1.0:** Usually indicates a crash or a failure to find any spots.
+*   **`WARNING: Bundle N failed` in a run's log:** A per-bundle failure (commonly GPU `RESOURCE_EXHAUSTED`/OOM) that `fit_ccd_native` logs and *continues past*, merging the rest of the camera anyway -- a `0` process exit code alone does **not** mean every bundle succeeded. Always grep multi-camera run logs for this string (or `RESOURCE_EXHAUSTED` directly) before trusting a "0 failures" summary.
 
+---
+
+## 7. Known Operational Gotchas (private-SPECPROD reruns)
+
+These apply when using `run_night.py` (either backend) against a night/expid you haven't run through real production yourself -- i.e. almost any from-scratch rerun via a private `DESI_SPECTRO_REDUX`/`SPECPROD`.
+
+### 7.1 `--backend cpp`: private reruns are missing calibration state real production already has
+
+A from-scratch `desi_proc` rerun only processes the single requested exposure -- it never runs the full calibration-night pipeline that real production uses to pre-generate certain per-night calibration products. Two distinct manifestations confirmed this session:
+*   **Missing CTE (charge-transfer-efficiency) correction file**: `RuntimeError: Missing .../calibnight/<night>/ctecorr-<night>.yaml`. **Free, zero-compute pre-screen**: read that yaml directly on the real `matterhorn` production tree -- `[]` (empty list) means no camera on that night needs it (clean rerun); a populated list names the exact `CAMERA`s that will fail. Confirmed accurate across 3 tested nights; ~76% of scanned 2026 nights are clean.
+*   **Missing calibration darks**: `Didn't find matching <cam> calibration darks in $DESI_SPECTRO_DARK` -- same root cause, no cheap pre-screen found yet. Even a fully production-validated arc exposure hit this on one camera (b0) in testing -- **29/30 or 30/30 looks like a realistic ceiling for a "clean" private rerun**, not a bug worth chasing further.
+
+`--backend python` is immune to both: it reads production's already-generated `preproc-*`/`shifted-input-psf-*` files directly and never invokes `desi_proc`, so it doesn't care whether the private redux tree has calibration state or not.
+
+### 7.2 `--backend cpp`: any single MPI rank failure hangs the whole job
+
+Confirmed repeatedly, across 3 distinct trigger types (CTE gap, missing preproc input, missing calibration darks): when any one of the ~100 MPI ranks in a `desi_proc --mpi` job fails, the **entire job hangs indefinitely** (log stops updating, zero further output) instead of exiting cleanly -- even though the processes stay in state `R` burning ~98%+ CPU, not zombie/D-state. Waiting does not resolve it; it must be killed manually:
+1. `ps aux | grep srun` -- find the `srun` frontend PID(s) for the job.
+2. `kill -9 <pid...>` on those. **This is sometimes not enough** -- it can fail to cascade to the actual worker processes.
+3. Verify: `ps aux | grep desi_proc | grep -v grep | wc -l`. If nonzero, `pkill -9 -f "desi_proc -n <night> -e <expid>"`, then re-check until it's 0.
+4. Do **not** `scancel` the whole SLURM allocation unless you intend to end the whole interactive session -- the hang is a job-level problem, not a node-level one.
+
+This is exactly what motivated `--backend python`'s per-camera clean-failure reporting in Section 4.3 above -- it's structurally immune to this failure mode since cameras are independent subprocesses, not MPI ranks in one collective.
+
+### 7.3 `find_cases()` (used by `--backend python`) only sees exposures processed through the normal nightly pipeline
+
+`run_night.py --backend python` locates each camera's input file paths and `--broken-fibers` list by scraping `arc*.log` files under matterhorn's `run/scripts/night/<night>/` directory -- the logs written by production's own SLURM job-script workflow. An expid that was never run through that workflow (e.g. one flagged in the exposure table as failing, and consequently skipped by production) has **no arc log entry at all**, so `find_cases()` silently skips it (`WARNING: no arc log entry found ... skipping`), even if the raw data and a preprocessed version exist somewhere.
+
+Confirmed on `20211028/00106396`: no arc log exists anywhere in production for that expid (consistent with its exposure-table comment, "fails psf fitting" -- production apparently never attempted it). Worked around by building the camera-to-file-path map manually, pointing at a private-redux preprocessing pass (from a `--backend cpp` run of the same expid, which does its own preprocessing regardless of the scripts/night logs), and borrowing the `--broken-fibers` list from the *next* arc exposure taken the same night (fiber breakage is a persistent hardware property, not a per-exposure one -- confirmed identical camera-by-camera across the two nearby expids where compared). There's no CLI flag for this yet; it requires a short one-off script (see `run_night.py`'s `find_cases()`/`run_node_python()` for the pieces to reuse).

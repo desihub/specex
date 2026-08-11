@@ -3333,3 +3333,138 @@ Per user confirmation, given the clean 30/30 result: `py/specex/specex.py`'s `--
 ### Still open
 - z5@20220408 fiber 163's data floor, b2@20260401's edge-fiber weakness, and now z6@20250628 fiber 260's non-ndead blowup remain open, low-priority leads if per-fiber-trace work continues.
 - Item 6 (supervisor's 3-node `desi_proc --mpi` production launch) still not run.
+
+## 2026-08-07 -- `--debug-spots` flag; a real C++ build-optimization bug found and fixed; corrected speed comparison (Python ~8% SLOWER than C++, not 3.73x faster); real production `desi_proc` does 30 cameras in ~7min wall clock on 3 nodes
+
+Gated the previously-unconditional per-pass debug-dump text files (both C++ and Python) behind a new `--debug-spots` flag, off by default -- cut a real 3-node `desi_proc` production run from 16m34s to 15m08s. `full_ccd_campaign.py`'s C++ invocation needs `--extra=--debug-spots` to keep its wavelength-residual metric working (note the `=` form -- `["--extra", "--debug-spots"]` as two argv elements is a *separate* bug, found and fixed later this same week, since argparse reads the second element as an unrecognized flag rather than `--extra`'s value).
+
+**Critical methodology bug found and fixed**: ad-hoc one-off timing scripts that skip `--broken-fibers` produce fake "catastrophic" per-fiber divergence (up to ~99px on 1-4 fibers/camera) that looks like corruption but is just C++'s calibration-driven broken-fiber list not being replicated on the Python side. Always use an existing `testing/*.py` parity script (which always passes `--broken-fibers`), never a new one-off comparison. See `[[feedback-broken-fibers]]` equivalent -- this is now a standing rule for any C++-vs-Python comparison.
+
+**Clean 30-camera baseline campaign** (`full_ccd_campaign.py`, correct `--broken-fibers`): 30/30 succeeded, xrms mean 0.027px (max 0.051, z2), yrms mean 0.015px (max 0.022) -- clean, matches the established correctness band. C++ and Python ran concurrently per-camera in this harness, so summed times aren't a clean apples-to-apples wall-clock comparison, but taken at face value: C++ 169.8min total, Python 45.5min total, "Python ~3.73x faster" -- **this number was later found to be wrong, see below.**
+
+**`workers-per-gpu` has no headroom above 5 for a single camera**: `n_workers = min(bundles, gpus*workers_per_gpu)`; every camera has exactly 20 bundles and 4 GPUs, so 5/GPU already saturates at `min(20,20)=20`.
+
+**New lever found: running 2 cameras concurrently on the same 4 GPUs (each still `--workers-per-gpu 5`, i.e. true oversubscription to 10 procs/GPU combined) roughly doubled throughput** vs sequential (96.5s wall for both vs 194.5s summed sequential, b0+b2 test).
+
+### Second interactive node, same day -- the real headline numbers land
+
+**2 concurrent camera slots validated at full 30-camera scale: 15.9 min (956.3s), 0 failures** -- 2.86x speedup vs the 45.5min sequential baseline. **3 concurrent cameras reliably OOMs** regardless of reducing `--workers-per-gpu` (tried 5/GPU and 3/GPU, both hit genuine `CUDA_ERROR_OUT_OF_MEMORY`) -- 2 concurrent slots is the ceiling on this architecture (spread-across-4-GPU sharing, not yet the later pinned-per-GPU scheme).
+
+**b2's earlier-flagged elevated xrms is a general bundle-BOUNDARY-fiber effect, not b2-specific**: fiber 0/24/25/49/50... (first/last fiber of each 25-fiber bundle) systematically diverge more (up to ~0.7px) than interior fibers (<0.03px) -- confirmed present in b0 and r0 too. Not investigated further at the root-cause level; a real, open, low-priority correctness lead (same mechanism `python-vs-cpp-diff.txt` section 1a documents for the per-fiber-trace edge-fiber weakness, likely related).
+
+**CPU-only backend validated at full-node scale**: all 30 cameras, `--cpu-workers 20`, no taskset restriction, 0 failures, 147.9min total.
+
+**CRITICAL BUG FOUND (later fully root-caused and fixed, see 2026-08-07 fresh-node entry below): CPU backend can deadlock when run concurrently with GPU-backend jobs on the same node.** A 3-slot hybrid (2 GPU + 1 CPU) had 29/30 cameras succeed but the CPU slot's 3rd camera (r0) hung completely after bundle 18/20 -- confirmed via zero `/proc/<pid>/stat` tick movement over 20+ minutes on multiple worker PIDs. Did NOT reproduce in a standalone CPU-only run of the same camera. Root cause not yet known at this point in the investigation.
+
+## 2026-08-07, 3-node CPU session -- root-caused the 7min-vs-15min C++ timing mystery: our checkout's `.so` had been built WITHOUT `-O3` since 2026-08-06
+
+Stephen reported reproducing `desi_proc --mpi -N 3 -n 301 -c 2` (night 20250914/expid 311138) in **7m15s**; our repo's environment had been giving ~15min for the same command. **Root cause: our checkout's compiled `_libspecex.so` had been built WITHOUT `-O3`** (a stray manual `cmake -B build` invocation, bypassing `setup.py`'s `build_ext` class which correctly passes `-DCMAKE_BUILD_TYPE=Release`, left an unoptimized `.so` installed 2026-08-06 ~12:20pm PT -- 3.5x the file size of the properly-optimized version). This is real C++ code (`_libspecex` pybind11 extension), not the JAX Python port, so **correctness numbers since 2026-08-06 12:20pm are unaffected -- but every C++ wall-clock timing number gathered since then is suspect.** Fixed via `python3 setup.py build_ext --inplace` from the repo root (confirmed `-O3 -DNDEBUG`, `.so` back to 1.68MB). **Verified fix**: re-ran the exact Stephen repro post-rebuild -> **6m34s wall, 5m42s internal -- beats Stephen's 7m15s.** Lesson: always rebuild via `python setup.py build_ext --inplace`, never a raw `cmake -B build`/`cmake --build build` in a fresh top-level directory (loses the Release flag).
+
+**Re-ran the 30-camera C++ baseline with the optimized build** (real 3-node CPU allocation, sequential, `srun -n 20`/camera): 30/30 succeeded, sum(t_cpp) = **42.0 min (2521.2s)** -- 4.04x faster than the unoptimized build's 169.8min.
+
+**CORRECTED HEADLINE RESULT: Python is NOT 3.73x faster than C++; Python is ~8% SLOWER than C++ in matched sequential-sum terms** (45.5min Python vs 42.0min honest-C++). The earlier "3.73x" figure is retired -- wrong, an artifact of comparing against an unoptimized C++ build.
+
+**Further wrinkle: real production `desi_proc` (Stephen's repro, 3 CPU nodes, MPI-scheduled 15-cameras-concurrently) does all 30 cameras in ~7 minutes WALL CLOCK** -- faster than even Python's best single-node result (15.9min, 2-concurrent-camera GPU sharing) at that point. C++ uses 3x the node count, not apples-to-apples on resources, but it IS the real bar. **This became the standing target for the rest of the GPU-scaling work below.**
+
+## 2026-08-07, fresh GPU node -- CPU+GPU deadlock ROOT-CAUSED AND FIXED
+
+Reproduced the CPU-backend-hangs-when-concurrent-with-GPU bug in isolation with a purpose-built watchdog script (py-spy stack dumps on stall detection). **Root cause**: `fit_bundle_task` (per-bundle worker) correctly isolates CUDA for non-GPU backends, but `main()` (the CLI entry point, running in the *master* process) never applied the same isolation to itself -- its only attempt set the deprecated `JAX_PLATFORM_NAME` env var, a silent no-op. Consequence: after all 20 bundle workers finish, the master's own first real JAX call (inside `write_python_psf()`) touches CUDA with zero restriction, and under real concurrent GPU load this fails with `CUDA_ERROR_OUT_OF_MEMORY` on all 4 devices -- a fast crash in this repro, plausibly a hang under slightly different driver-contention timing in the original session (same underlying bug, different observable symptom).
+
+**Fixed** (`specex.py`, `main()`): apply the same `CUDA_VISIBLE_DEVICES=""`/`JAX_SKIP_CUDA_CONSTRAINTS_CHECK=1`/`jax.config.update("jax_platforms","cpu")` isolation to the master process itself when `args.backend != "gpu"`. **Validated**: identical repro (2 GPU slots + 1 CPU slot, fully concurrent) post-fix -- all 4 CPU cameras completed cleanly, zero crashes/stalls, timings matching the uncontended CPU baseline. Unblocks the CPU+GPU hybrid investigation (which nonetheless still didn't end up paying off -- see below).
+
+### Concurrency scheme: pin-camera-to-one-GPU beats spread-across-4-GPUs
+
+Tested pinning each camera process to ONE dedicated GPU (`CUDA_VISIBLE_DEVICES`) vs the default spread-across-4-GPU sharing. 8-camera sweep (b1-4, r1-4):
+
+| scheme | wall time |
+|---|---|
+| spread (2 slots x 4-GPU-shared, wpg=5 -- old default) | 232.6s |
+| pinned, wpg=5 (4 slots, 1 GPU each) | 246.8s (worse) |
+| **pinned, wpg=10 (4 slots, 1 GPU each)** | **145.2s -- 1.6x faster than spread** |
+| pinned, wpg=15 | 161.8s |
+| pinned, wpg=20 (full packing) | 239.7s (worse) |
+
+**wpg=10 is the sweet spot** -- the win is specifically about eliminating CROSS-PROCESS sharing of one physical GPU between different camera processes, not just "more workers." **z-band needs a much lower ceiling**: wpg=10 OOMs even solo-pinned; wpg=4 confirmed clean (z's larger per-fiber-trace design matrix is the reason).
+
+**Full 30-camera GPU-only run, first attempt (wpg=10 b/r + wpg=4 z): 691.7s (11.5min), rc=0 for all 30 -- but WRONG, silently corrupted.** 6/10 r-band cameras had 2-6 bundles silently OOM (`fit_ccd_native` logs a warning and keeps merging on a per-bundle failure without a nonzero exit code -- `rc==0` alone is NOT sufficient to confirm correctness). r's real ceiling is **wpg=7** (confirmed clean, zero speed cost vs wpg=10). **Corrected full 30-camera run (wpg=10 b, wpg=7 r, wpg=4 z): 790.6s (13.2min), 0 rc failures AND 0 bundle-level failures.** Correctness confirmed clean: xrms mean 0.0270 (max 0.0514, z2) / yrms mean 0.0147 (max 0.0221, z5) -- matches the established baseline. **This 13.2min pinned scheme (wpg=10 b/7 r/4 z) is the real production-recommended single-node scheme.** Lesson for future timing runs: always grep logs for `WARNING: Bundle`/`RESOURCE_EXHAUSTED`, never trust rc==0 alone.
+
+### CPU+GPU hybrid: six distinct designs (v2-v6, N=1/N=2), all closed out negative
+
+- **v2** (4 GPU slots on r+z + 1 CPU slot sequentially processing all 10 b cameras): WORSE, 24.5min -- the sequential CPU queue (b-band ~147s/camera on CPU vs ~65s/camera on a dedicated GPU) gates the whole run.
+- **v3** (2 concurrent CPU slots, `--cpu-workers 10` each instead of v2's single 20): also worse, 23.4min -- `fit_ccd_native`'s per-process thread-budget calc has no cross-process awareness, so 2 slots x 10 workers x 12 threads = 240 threads requested against 128 real cores.
+- **v4** (MPI-style: taskset each CPU camera to its own disjoint 20-core range, `--cpu-workers 20` -> genuinely 1 thread/worker, closer to C++'s per-rank model): worked great in ISOLATION (3 concurrent b-cameras, no GPU load: 331.8s vs 507s sequential, 1.53x win) but **combined with concurrent GPU load, badly regressed** -- killed after 80+ min with the CPU side barely 1/3 done, bundles taking 250-400+s each.
+- **v5** (user-requested minimal isolation test: exactly ONE CPU camera alongside 29 GPU cameras): **786.8s (13.1min), statistically identical to pure-GPU's 790.6s -- no bug, 1 CPU camera runs essentially free.** The 4 GPU cameras that happened to overlap in time did show a real, bounded ~2x slowdown (152-154s vs 74-107s normal) during the ~150s overlap window, snapping back to normal once b0 finished.
+- **v6, N=1** (proper NUMA-aware pinning on BOTH sides -- each GPU's launcher taskset to 8 threads within its own NUMA domain, CPU work taskset to the disjoint 96-thread remainder): the overlapping GPU cameras improved to 111s (down from v5's 152s, 2.86x better) but still short of the ~74-83s baseline -- residual gap attributed to memory-bandwidth contention within a shared NUMA domain (GPU3's cores and part of the CPU pool share a memory controller even with disjoint core sets), not further isolated at this point.
+- **v6, N=2** (2 concurrent CPU cameras, proper disjoint NUMA pinning): **lost badly, 1540.6s (25.7min), ~2x worse than pure-GPU** -- each CPU camera now gets only 48/20=2.4 threads/worker (per-camera time nearly tripled), AND the overlapping GPU cameras slowed to 267.6-268.0s (up to 3.6x, worse than N=1's ~2x) -- 2 concurrent full-tilt CPU cameras pressure memory bandwidth across ALL 4 NUMA domains at once.
+
+**Conclusion across all six designs: going from 1 to 2 concurrent CPU-backend cameras does not scale, even with correct NUMA-aware pinning.** v5/v6-N1's "1 free CPU camera" result is a genuine but narrow window, not a scalable pattern. **FINAL PRODUCTION RECOMMENDATION at this point: pure-GPU-pinned (wpg=10 b/7 r/4 z, 790.6s/13.2min, 0 bundle failures, correctness-verified) -- CPU-in-the-mix never beats it.**
+
+## 2026-08-09 -- root-caused WHY the hybrid blows up: memory-bandwidth contention, not thread/core scheduling
+
+User drew a direct comparison to a prior Tractor GPU+CPU architecture (thin CPU-launcher thread per GPU, kernels do the real work, remaining CPUs genuinely idle -- why doesn't the same pattern work here?). Added `--gpu-worker-threads N` (threads-per-GPU-worker cap, previously unconstrained for `--backend gpu`) and profiled with `mpstat`/`/proc/<pid>/task` on 4 pinned b-cameras (40 concurrent worker processes, the real production concurrency level).
+
+**Four measurements pin down the mechanism:**
+1. Each of the 40 GPU-backend workers has ~425 OS threads (~17,000 node-wide) but `mpstat` shows the node 70-90% idle throughout -- the huge thread count is JAX/XLA/absl's internal pools, mostly parked, not real compute load.
+2. `--gpu-worker-threads 1` cuts thread count (~425->~269/process) but changes wall time not at all (65.2s vs 68.4s) -- no real CPU-cycle starvation existed in the GPU-only baseline.
+3. 2 CPU-backend cameras with ZERO concurrent GPU work: 246s each (mild 1.3-1.5x slowdown from sharing one uncoordinated 128-thread pool -- not catastrophic).
+4. The SAME 2 CPU cameras alongside a NUMA-pinned GPU workload with fully disjoint cores (v6 N=2): 442s each -- **1.8x worse than measurement 3, despite ZERO core overlap.**
+
+**Conclusion: the mechanism is memory-bandwidth contention, not thread-count or core-scheduling** -- both of the latter directly ruled out by measurements 1-3. specex's Python/JAX port keeps 4 A100s fed via 40 concurrent host processes that each spend ~70% of their own wall time in real NumPy/BLAS compute on the host (the selection/housekeeping phase -- ~39s of a ~54s bundle) -- structurally NOT a thin dispatcher like Tractor's GPU workers, so it genuinely fights CPU-backend cameras for DRAM bandwidth. **Not fixable via thread/worker/core tuning -- a real fix would mean reducing GPU workers' own host-side compute footprint, a genuine algorithmic project.** CPU+GPU hybrid investigation closed for good (mechanism understood, not just "no config found"). `--gpu-worker-threads` left in the codebase as a diagnostic knob, default unconstrained.
+
+## 2026-08-09/10, fresh 2-node (8 GPU) allocation -- 2-node pure-GPU-pinned run BEATS C++'s ~7min production baseline
+
+Split the validated pinned-per-GPU scheme (wpg=10 b/7 r/4 z) across 2 nodes x 4 GPUs = 8 GPUs, all 30 cameras, camera list alternated (not contiguous) between nodes for a balanced 5b+5r+5z per node. **Result: 6.7min total wall time (403s), 0 rc failures, 0 silent bundle failures.** Near-perfect 2x scaling off the single-node 13.2min baseline. **Beats C++ production's ~7min real-world wall clock.** Correctness re-verified: xrms mean 0.0270px (max 0.0514, z2), yrms mean 0.0147px (max 0.0221, z5) -- identical to the 1-node result, no regression from the split.
+
+### LPT scheduling optimization breaks 6 minutes: 5.92min/30cam
+
+The naive alternating split queued each node's work in b,r,z order -- since z-band is slowest AND most variable (z7=179.5s, a real outlier, not a scheduling artifact), queuing it last left no parallel work to fill around a straggling z camera at the tail. Per-node lower bounds (sum/4 GPUs) were 329.8s/353.3s, actual makespans 388.7s/401.1s -- a 12-15% gap from queue-order inefficiency alone.
+
+**Fix**: used the actual measured per-camera wall times from the first 2-node run to compute a proper LPT (longest-processing-time-first) balanced assignment across all 8 GPUs as one pool, grouped into 2 node-sized balanced groups, each node's queue sorted descending by duration (heavy z jobs enter first while every GPU is free). **Result: 355s / 5.92min total, node0=343.7s, node1=352.9s, 0 failures.** Correctness re-verified identical (same computation, only GPU/node assignment changed).
+
+**Generalizable lesson: for heterogeneous-duration batch scheduling, naive/band-ordered queuing is measurably worse (~12-15%) than LPT-based balancing once you have even one real timing sample to compute it from.** The technique (profile once, LPT-rebalance) generalizes; the hardcoded duration table itself does not (needs recomputing if wpg/cameras/hardware change).
+
+**Standing recommendation: 2-node/8-GPU, LPT-balanced camera assignment, 5.92min/30cam, correctness-verified.**
+
+### Second independent night/expid (20250914/00311138) confirms generalization
+
+Correctness: xrms mean=0.0289px (max 0.0597, b3), yrms mean=0.0156px (max 0.0336, z7) -- matches 20260401's numbers closely, confirming the scheme's correctness generalizes across nights, not one exposure's fluke.
+
+Timing: this exposure has ~20% more total compute (sum ~3280s vs ~2740s) -- a real per-exposure difference, not scheduling. Naive-split: 463.8s/451.2s (7.7/7.5min). LPT-rebalanced: 344.1s/350.2s (5.7/5.8min, 5.87min total). **Important confound flagged for honesty**: most of the 7.7min->5.87min improvement was JAX persistent-compilation-cache warming between back-to-back runs (b-band dropped ~40%, far more than LPT reordering alone explains; r/z only dropped ~5-10%, consistent with genuine scheduling gain), since this night's naive run was the first-ever run of that exact night/wpg/shape combo (cold cache) while 20260401's naive run benefited from an already-warm cache. **Practical bottom line unaffected**: in real repeated production (many nights back to back), caches stay warm, and both tested exposures land in the 5.7-6.7min range -- generalizes, both correctness-verified.
+
+## 2026-08-10 -- built `testing/run_night.py` single entry point; discovered a systematic private-SPECPROD CTE-calibration gap; C++ MPI jobs hang (don't fail cleanly) on any single-rank failure; ran the known problem cases
+
+**`testing/run_night.py` is now the single entry point for a full night/expid, either backend, one flag.** `--backend {cpp,python}` (or `$SPECEX_BACKEND`) switches between `desi_proc --mpi` (real production driver, does its own idempotent preprocessing) and this project's pinned-per-GPU work-queue scheme (assumes preprocessing already exists, never calls `desi_proc`). Documented in how-to-run.md Section 4.3. Also fixed `testing/instrumentation_analysis.py`, which was silently stale (bypassed the real CLI, missed the 2026-08-05 per-fiber-trace defaults, hardcoded z-band C++ settings for every band) -- now routes through the real `specex.specex` CLI with correct per-band flags.
+
+**`run_night.py`'s Python backend now reports camera failures cleanly**: checks input files exist before launching, tags results `SKIPPED` with the exact missing path, surfaces the last few log lines for any nonzero-rc camera -- directly motivated by the C++-side failure mode below.
+
+**Systematic discovery: private-`SPECPROD` `desi_proc` reruns are missing per-night CTE calibration files** (`calibnight/<night>/ctecorr-<night>.yaml`), which real production pre-generates via full calibration-night processing but a from-scratch single-exposure `desi_proc` run never creates. Any camera that night's characterization says needs CTE correction fails preprocessing with `RuntimeError: Missing .../ctecorr-<night>.yaml`. **Cheap zero-compute pre-screen**: read production's own `calibnight` yaml directly -- `[]` means clean, a populated list names the exact affected cameras and predicts failure exactly (confirmed on 20230207: z1+z3, 20230805: r6+z1+z3, both matched observed failures precisely; 20250724's is `[]`, matching its clean run). z1/z3 needed it on both 2023 nights tested -- looks like a persistent hardware property of those two spectrographs. **Scanned all of matterhorn's 2026 calibnight dirs: 77 nights have an empty CTE list + full 30-camera preproc data** -- 2026 data appears to no longer need CTE correction, a safer era to pick random test nights from.
+
+**Separately, more importantly: when any single MPI rank in one of these jobs fails, the WHOLE job hangs indefinitely instead of exiting cleanly** -- confirmed 3 times (`desi_proc -n101` on two nights, `desi_compute_psf --mpi -n20` on one camera): the failed rank(s) log their error and exit in <1s, but the job produces zero further output and sits burning CPU (state `R`, not zombie/D-state) for 10-35+ minutes until manually killed (`kill <srun-frontend-pid>`, never `scancel` the whole allocation). **This directly motivated the `run_night.py` Python-backend cleanup above**: per-camera-subprocess design is structurally immune (no MPI collective between cameras), which C++'s monolithic MPI job is not.
+
+**Problem-case results (user-supplied list):**
+- `20211028/106399`/`.../106400`, camera r8, missing amplifier A -- not rerun, already established as genuinely missing data.
+- `20250822/307722`, z7 (fiber-trace-overlap case) -- preproc file for z7 doesn't exist in production at all for this exposure (all other 29 cameras do); production appears to have excluded z7 entirely rather than let it fail downstream. Hit the MPI-hang pattern, killed after ~12min.
+- `20250822/307725`, z7 (same overlap case, different expid) -- ran clean, rc=0, 2m20s, bundle 10 fine (chi2/ndata=1.81). **Fiber 251 has ndead=2907** (fiber 250: 328), comfortably above the 500-threshold trace-prior gate -- a good baseline for comparing Python's handling of this exact fiber.
+- `20211028/106396`, flagged "fails psf fitting" in the exposure table -- did NOT reproduce. Ran clean via `run_night.py --backend cpp` (full preprocessing from raw + all 30 cameras), rc=0, 11.7min, 600/600 bundles succeeded. Worth flagging to the user/supervisor rather than assuming it's fixed -- the comment may be stale or specific to different original-run settings.
+
+**Gotcha caught mid-session**: the first "clean 2026 night" candidate (20260301/00339914) was picked using a flawed filter (checking only "30 preproc files exist" isn't sufficient -- that also matches science exposures, which correctly never get PSF-fit). **Fixed selection method**: cross-reference the night's `arc*.log` files for real `desi_compute_psf` invocations AND confirm >=25 final merged `fit-psf-<cam>-<expid>.fits` outputs exist. Corrected candidate: 20260104/00330184.
+
+**Gotchas worth remembering**: FITS COEFF arrays are big-endian (`>f8`) -- feed straight into JAX and get garbage; `load_python_psf`'s `.astype(np.float64)` is load-bearing. `[-Ncont:]`-style slices break silently at `Ncont=0` (numpy/jax `arr[-0:]` == `arr[0:]`) -- continuum-disable is implemented by zeroing the step direction instead. Never `wait $!` after backgrounding inside one Bash tool call -- blocks the tool call and risks killing the whole process group.
+
+## 2026-08-10, fresh 1-node/4-GPU session -- ran all queued problem cases + 3 random nights through the Python port; confirms the C++ CTE/hang issues are private-SPECPROD-rerun artifacts, not specex problems
+
+Ran the deferred GPU-side comparisons via `run_night.py --backend python`, one job at a time (sequential, for comparable timing), on nid002057. All 6 targets:
+
+**Timing, all 0 failures:** 20250724/00303328 30/30 13.2min; 20230207/00166569 30/30 11.4min; 20230805/00188851 30/30 11.8min; 20211028/00106396 30/30 12.3min; z7@20250822/00307722 SKIPPED cleanly in 1.9s; z7@20250822/00307725 1/1 2.9min. Confirms the 1-node/4-GPU pinned scheme's timing is stable (11.4-13.2min) across 4 independent full nights.
+
+**Key finding: `--backend python` is structurally immune to both C++-side failure modes.** 20230207 and 20230805 (the two nights whose private-SPECPROD `desi_proc` rerun hung on the CTE gap) ran both **30/30 clean** in Python, because it reads production's already-generated preproc/PSF files directly and never invokes `desi_proc`. z7@307722 (missing preproc, ~12min C++ hang) resolved in **1.9s** with a clean `SKIPPED` report.
+
+**Correctness, all vs. C++ baselines:** 20250724 30/30, mean 0.0298/0.0177px; 20230207 28/30 (z1/z3 have no cpp baseline -- cpp never completed them), mean 0.0261/0.0180px; 20230805 27/30 (z1/z3/r6 missing), mean 0.0266/0.0176px; 20211028/00106396 30/30, mean 0.0236/0.0181px. All squarely in the established ~0.02-0.03px band.
+
+**z7@307725 reproduces the same known fiber issue, isolated to the same single fiber:** whole-camera mean looked elevated (xrms=0.0349, yrms=0.0415) until broken down per-fiber -- **fiber 251 alone** is the outlier (xrms=1.68px, yrms=3.35px; next-worst fiber ~0.12-0.14px), consistent with C++'s own ndead=2907 diagnostic for that fiber. Excluding it, camera yrms drops to 0.0347px, back in family -- a genuine data/geometry issue, not a pipeline-specific bug.
+
+**New `find_cases()` blind spot found and worked around**: 20211028/00106396 has no production arc log entry at all (never run through the normal automated pipeline, consistent with the "fails psf fitting" exposure-table comment). Worked around with a one-off script (`run_106396.py`, reusing `run_night.py`'s `run_node_python`/`DEFAULT_WORKERS_PER_GPU`): input paths pointed at our own private-redux preprocessing (already generated by the earlier `--backend cpp` run of the same expid), broken-fiber lists borrowed from neighboring same-night arc exposure 00106397 (fiber breakage confirmed to be a persistent hardware property). Documented as how-to-run.md Section 7.3.
+
+**`how-to-run.md` updated** with a new Section 7 ("Known Operational Gotchas"): 7.1 the CTE gap + free screening method + why `--backend python` is immune; 7.2 the MPI-hang pattern + kill procedure; 7.3 the `find_cases()` blind spot + manual-case-dict workaround. Also a "Clean failure reporting" subsection under 4.3.
+
+**All originally-deferred "next node" work is done.** Nothing left queued from the problem-case list; the only case with no comparison data on either side is z7@307722 (both pipelines correctly skip it, since production never generated that camera's data for that expid).
