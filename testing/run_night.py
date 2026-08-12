@@ -26,6 +26,20 @@ production night/expid). It does not run raw-data preprocessing itself.
                       6.7min/30cam on 2 nodes/8 GPU). Assumes preprocessing
                       already done (see Scope above) -- this backend does
                       NOT call desi_proc at all.
+  --backend cpp-direct : runs the real C++ `desi_compute_psf --mpi` binary
+                      once per camera (--cpp-ranks MPI ranks each, default
+                      20, matching full_ccd_campaign.py's proven per-camera
+                      invocation), reading the same already-preprocessed
+                      inputs as --backend python and writing the same
+                      fit-psf-<cam>-<expid>.fits/.log naming. Does NOT call
+                      desi_proc -- no idempotent-preprocessing pass, no
+                      whole-job MPI collective for 101+ ranks to hang on if
+                      one camera's input is missing (see how-to-run.md
+                      Section 7). Sequential by default (--cpp-concurrency);
+                      CPU-only, safe to run alongside --backend python on
+                      the same node (disjoint resources -- see
+                      full_ccd_campaign.py's run_cpp_and_py_concurrent) but
+                      intended for a dedicated CPU node for clean timing.
 
 Both backends default to fitting the standard 30 cameras (b0-9, r0-9,
 z0-9); pass --cameras to restrict.
@@ -91,8 +105,8 @@ def slurm_nodes():
 
 
 def resolve_python_run_dir(args):
-    """Where --backend python writes fit-psf-<cam>-<expid>.fits + per-camera
-    logs for this night/expid. Three tiers, in order:
+    """Where --backend python or cpp-direct writes fit-psf-<cam>-<expid>.fits
+    + per-camera logs for this night/expid. Three tiers, in order:
       1. --outdir, if given -- used exactly as-is (a flat directory, for
          ad-hoc/scratch runs where production-style nesting isn't wanted).
       2. $DESI_SPECTRO_REDUX (+ $SPECPROD, default $USER) if set --
@@ -136,16 +150,39 @@ def detect_gpus_per_node(default=4):
 # --backend python
 # ---------------------------------------------------------------------------
 
+# Coarse per-band relative duration hint, used only to ORDER a node's own
+# queue when no real --lpt-profile is available -- not meant to be an
+# accurate absolute estimate, just enough to stop z (the heaviest, most
+# variable band) from being queued dead last. Roughly matches typical
+# wpg=10 b/7 r/4 z per-camera times (see porting-notes.md).
+DEFAULT_DURATION_HINT = {"b": 90.0, "r": 100.0, "z": 150.0}
+
+
 def split_cameras_for_nodes(cameras, n_nodes, lpt_profile):
     """LPT (longest-processing-time-first) balanced split across n_nodes if
     a per-camera timing profile is given (JSON: {"b0": 69.2, ...}, from a
     prior run's own measured wall times -- see how-to-run.md Section 4.3);
     otherwise a naive alternating split (band-diverse but not load-balanced,
-    since we have no timing prior for an arbitrary fresh night/expid)."""
+    since we have no timing prior for an arbitrary fresh night/expid).
+
+    Whichever way cameras get ASSIGNED to a node, each node's own returned
+    list is separately sorted by descending expected duration before being
+    handed to run_node_python's FIFO queue -- assignment and per-node queue
+    ORDER are different problems. `cameras` comes in alphabetically sorted
+    (b0..b9, r0..r9, z0..z9); left as-is, that queues every b before every
+    r before every z, so by the time a node's 4 GPU slots reach z -- the
+    heaviest, most variable band -- there's no lighter b/r work left to
+    overlap a straggling z camera against, and the whole node's wall time
+    is gated by z's own tail. This is the exact single-node instance of the
+    cross-node tail-starvation pattern porting-notes.md's 2026-08-10 LPT
+    session found and fixed at the multi-node level; fixing it here too
+    (uses the real profile if given, else DEFAULT_DURATION_HINT) closes it
+    for the single-node case as well, where it was previously untouched --
+    n_nodes==1 didn't even look at --lpt-profile before this."""
     if n_nodes == 1:
-        return [list(cameras)]
-    if lpt_profile:
-        durations = {c: lpt_profile.get(c, lpt_profile.get("__default__", 90.0)) for c in cameras}
+        bins = [list(cameras)]
+    elif lpt_profile:
+        durations = {c: lpt_profile.get(c, lpt_profile.get("__default__", DEFAULT_DURATION_HINT[c[0]])) for c in cameras}
         order = sorted(cameras, key=lambda c: -durations[c])
         bins = [[] for _ in range(n_nodes)]
         load = [0.0] * n_nodes
@@ -153,8 +190,12 @@ def split_cameras_for_nodes(cameras, n_nodes, lpt_profile):
             i = min(range(n_nodes), key=lambda k: load[k])
             bins[i].append(cam)
             load[i] += durations[cam]
-        return bins
-    return [cameras[i::n_nodes] for i in range(n_nodes)]
+    else:
+        bins = [cameras[i::n_nodes] for i in range(n_nodes)]
+
+    durations = {c: (lpt_profile.get(c, lpt_profile.get("__default__", DEFAULT_DURATION_HINT[c[0]]))
+                      if lpt_profile else DEFAULT_DURATION_HINT[c[0]]) for c in cameras}
+    return [sorted(b, key=lambda c: -durations[c]) for b in bins]
 
 
 def tail_error(log_path, n=6):
@@ -372,15 +413,99 @@ def run_backend_cpp(args):
 
 
 # ---------------------------------------------------------------------------
+# --backend cpp-direct
+# ---------------------------------------------------------------------------
+
+def run_camera_cpp(cam, case, outdir, ranks, dry_run):
+    """One `desi_compute_psf --mpi` call for a single camera, same pattern
+    as full_ccd_campaign.py's start_cpp_full but writing this project's
+    fit-psf-<cam>-<expid> naming so cpp-direct and python outputs sit in
+    the same outdir, directly comparable by filename alone."""
+    tag = f"fit-psf-{cam}-{case['expid']}"
+    out_fits = os.path.join(outdir, f"{tag}.fits")
+    log = os.path.join(outdir, f"{tag}.log")
+
+    missing = [p for p in (case["image"], case["input_psf"]) if not os.path.exists(p)]
+    if missing:
+        with open(log, "w") as f:
+            f.write(f"SKIPPED: missing input file(s): {missing}\n")
+        return cam, 0.0, "SKIPPED", [f"missing input file(s): {missing}"]
+
+    cmd = ["srun", "-n", str(ranks), "--cpu-bind=cores", "desi_compute_psf", "--mpi",
+           "--input-image", case["image"], "--input-psf", case["input_psf"],
+           "-o", out_fits]
+    if case.get("broken_fibers"):
+        cmd += ["--broken-fibers", case["broken_fibers"]]
+    if dry_run:
+        print(f"  [DRY RUN] {' '.join(cmd)}")
+        return cam, 0.0, 0, []
+    t0 = time.time()
+    with open(log, "w") as f:
+        rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT).returncode
+    dt = time.time() - t0
+    err_tail = tail_error(log) if rc != 0 else []
+    return cam, dt, rc, err_tail
+
+
+def run_backend_cpp_direct(args, cases):
+    cameras = sorted(cases)
+    outdir = args.outdir
+    os.makedirs(outdir, exist_ok=True)
+    concurrency = args.cpp_concurrency
+
+    print(f"=== backend=cpp-direct cameras={len(cameras)} ranks/camera={args.cpp_ranks} "
+          f"concurrency={concurrency} (no desi_proc) ===", flush=True)
+
+    work_q = queue.Queue()
+    for cam in cameras:
+        work_q.put(cam)
+    results = []
+    results_lock = threading.Lock()
+    t0 = time.time()
+
+    def worker():
+        while True:
+            try:
+                cam = work_q.get_nowait()
+            except queue.Empty:
+                return
+            cam, dt, rc, err_tail = run_camera_cpp(cam, cases[cam], outdir, args.cpp_ranks, args.dry_run)
+            with results_lock:
+                results.append((cam, dt, rc, err_tail))
+            if rc == "SKIPPED":
+                print(f"[{time.strftime('%H:%M:%S')}] {cam} SKIPPED -- {err_tail[0]}", flush=True)
+            else:
+                print(f"[{time.strftime('%H:%M:%S')}] {cam} done in {dt:.1f}s rc={rc}", flush=True)
+                if rc != 0:
+                    for line in err_tail:
+                        print(f"    | {line}", flush=True)
+
+    threads = [threading.Thread(target=worker) for _ in range(concurrency)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    total = time.time() - t0
+    n_fail = sum(1 for r in results if r[2] not in (0, None))
+    print(f"\n=== SUMMARY backend=cpp-direct: {len(results)}/{len(cameras)} cameras, "
+          f"{n_fail} rc!=0/SKIPPED, TOTAL WALL TIME: {total:.1f}s ({total/60:.1f} min) ===", flush=True)
+    print(f"  output: {outdir}/", flush=True)
+    for cam, dt, rc, err_tail in results:
+        if rc not in (0, None):
+            print(f"  PROBLEM: {cam} rc={rc}")
+            for line in err_tail:
+                print(f"    | {line}")
+
+
+# ---------------------------------------------------------------------------
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--night", required=True)
     ap.add_argument("--expid", required=True)
-    ap.add_argument("--backend", choices=["cpp", "python"], default=os.environ.get("SPECEX_BACKEND", "python"),
+    ap.add_argument("--backend", choices=["cpp", "cpp-direct", "python"], default=os.environ.get("SPECEX_BACKEND", "python"),
                      help="Default: $SPECEX_BACKEND env var, or 'python' if unset.")
     ap.add_argument("--cameras", help="Comma-separated camera list (default: all 30 standard b0-9/r0-9/z0-9)")
-    ap.add_argument("--outdir", default=None, help="Default (--backend python): $DESI_SPECTRO_REDUX/$SPECPROD/exposures/<night>/<expid> if $DESI_SPECTRO_REDUX is set (matches desi_proc's own layout), else $SCRATCH/specex/run_night_<night>_<expid>. Default (--backend cpp): always $SCRATCH/specex/run_night_<night>_<expid> (this backend manages its own private redux tree under it -- see --redux-dir).")
+    ap.add_argument("--outdir", default=None, help="Default (--backend python or cpp-direct): $DESI_SPECTRO_REDUX/$SPECPROD/exposures/<night>/<expid> if $DESI_SPECTRO_REDUX is set (matches desi_proc's own layout), else $SCRATCH/specex/run_night_<night>_<expid>. Default (--backend cpp): always $SCRATCH/specex/run_night_<night>_<expid> (this backend manages its own private redux tree under it -- see --redux-dir).")
     ap.add_argument("--nodes", type=int, default=None, help="Default: this SLURM job's full node allocation")
     ap.add_argument("--dry-run", action="store_true", help="Print planned commands without executing them")
     # --backend python only
@@ -394,6 +519,9 @@ def main():
     # --backend cpp only
     ap.add_argument("--redux-dir", default=None, help="Default: <outdir>/redux (a private tree, never the real matterhorn production output)")
     ap.add_argument("--specprod", default=os.environ.get("USER", "specex"))
+    # --backend cpp-direct only
+    ap.add_argument("--cpp-ranks", type=int, default=20, help="MPI ranks per desi_compute_psf call (default: 20, matches full_ccd_campaign.py)")
+    ap.add_argument("--cpp-concurrency", type=int, default=1, help="How many cameras' desi_compute_psf calls to run at once (default: 1, sequential -- for clean per-camera timing; raise only if you have rank budget to spare)")
 
     args = ap.parse_args()
     cameras = args.cameras.split(",") if args.cameras else ALL_CAMERAS
@@ -430,7 +558,10 @@ def main():
         print("No cases found -- nothing to do.", file=sys.stderr)
         sys.exit(1)
     os.makedirs(args.outdir, exist_ok=True)
-    run_backend_python(args, cases)
+    if args.backend == "cpp-direct":
+        run_backend_cpp_direct(args, cases)
+    else:
+        run_backend_python(args, cases)
 
 
 if __name__ == "__main__":

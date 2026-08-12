@@ -136,6 +136,7 @@ python testing/run_night.py --night 20260401 --expid 00344649
 
 *   `--backend cpp` runs the real production driver, `desi_proc --mpi`, which does its own preprocessing (idempotent -- skips it if outputs already exist) then calls the C++ `desi_psf_fit` binary per camera via MPI ranks. One `srun` call; scales via `--nodes` using the validated rank formula (`100*nodes + 1` -- `-N1`/`-n101` measured ~11 min, `-N3`/`-n301` measured ~7 min, see `porting-notes.md`). Output goes to a **private** `$DESI_SPECTRO_REDUX/$SPECPROD` tree (`--redux-dir`/`--specprod`, default under `--outdir`), never the real production `matterhorn` tree.
 *   `--backend python` runs `python -m specex.specex` once per camera, each **pinned to a dedicated GPU** via `CUDA_VISIBLE_DEVICES` (no GPU sharing across cameras), using a **per-node dynamic work queue** so however many GPUs you have stay busy. Auto-detects node count (from the SLURM allocation) and GPUs/node (`nvidia-smi -L`); one node runs locally, multiple nodes launch via `srun -N1 -n1 -w <hostname>` per node (same pattern validated this session). Does **not** call `desi_proc` at all -- it goes straight to `specex.specex` on the existing preprocessed files.
+*   `--backend cpp-direct` runs the real C++ `desi_compute_psf --mpi` binary once per camera (`--cpp-ranks`, default 20 -- same invocation `testing/full_ccd_campaign.py` already validates single-camera), reading the exact same preprocessed inputs `--backend python` does and writing the same `fit-psf-<cam>-<expid>.{fits,log}` naming, so the two are directly comparable file-for-file. Like `--backend python`, does **not** call `desi_proc` -- no idempotent-preprocessing pass, and no single 101+-rank MPI collective for one bad camera to hang (see 7.2 below). CPU-only; sequential by default (`--cpp-concurrency 1`) for clean per-camera timing. Added 2026-08-11 specifically to get a `desi_proc`-free C++ timing/correctness baseline without its MPI-hang or missing-calib-state failure modes.
 
 **Validated settings per band** (`--workers-per-gpu-{b,r,z}`, i.e. concurrent bundle-fit workers packed onto one GPU for one camera -- override the defaults below if needed):
 | Band | Default | Why |
@@ -281,3 +282,46 @@ This is exactly what motivated `--backend python`'s per-camera clean-failure rep
 `run_night.py --backend python` locates each camera's input file paths and `--broken-fibers` list by scraping `arc*.log` files under matterhorn's `run/scripts/night/<night>/` directory -- the logs written by production's own SLURM job-script workflow. An expid that was never run through that workflow (e.g. one flagged in the exposure table as failing, and consequently skipped by production) has **no arc log entry at all**, so `find_cases()` silently skips it (`WARNING: no arc log entry found ... skipping`), even if the raw data and a preprocessed version exist somewhere.
 
 Confirmed on `20211028/00106396`: no arc log exists anywhere in production for that expid (consistent with its exposure-table comment, "fails psf fitting" -- production apparently never attempted it). Worked around by building the camera-to-file-path map manually, pointing at a private-redux preprocessing pass (from a `--backend cpp` run of the same expid, which does its own preprocessing regardless of the scripts/night logs), and borrowing the `--broken-fibers` list from the *next* arc exposure taken the same night (fiber breakage is a persistent hardware property, not a per-exposure one -- confirmed identical camera-by-camera across the two nearby expids where compared). There's no CLI flag for this yet; it requires a short one-off script (see `run_night.py`'s `find_cases()`/`run_node_python()` for the pieces to reuse).
+
+## 8. Comparing C++ vs Python: Common Scripts
+
+Three small scripts, used together to get a true apples-to-apples C++ vs Python comparison for a night/expid (see porting-notes.md's 2026-08-11/12 entry for the full campaign this workflow produced -- 10 nights, mean xrms=0.0277px/yrms=0.0163px, C++ ~8% faster on a single CPU node vs a single 4-GPU node).
+
+### 8.1 `testing/stage_preproc.py` -- make a real `--backend cpp` run skip its own (buggy/incomplete) preprocessing
+
+A from-scratch `--backend cpp` run's own idempotent preprocessing pass isn't reliable (see 7.1) -- it can silently produce fewer than 30 cameras' `preproc-*.fits.gz` even on a clean, CTE-free night. Since `--backend python` already succeeds against the exact same night/expid, the real production preproc files demonstrably exist; the fix is to hand `desi_proc` copies of them at the exact paths its own idempotency checks look for, so it skips regenerating them entirely and goes straight to the real `-n101` fit stage:
+
+```bash
+python testing/stage_preproc.py --night 20260316 --expid 00342128 \
+    --redux-dir /pscratch/.../desiproc2/20260316_00342128/redux --specprod cdwarner
+python testing/run_night.py --night 20260316 --expid 00342128 --backend cpp \
+    --outdir /pscratch/.../desiproc2/20260316_00342128 \
+    --redux-dir /pscratch/.../desiproc2/20260316_00342128/redux --specprod cdwarner
+```
+
+Idempotent (safe to re-run); errors out up front if any camera has no arc-log entry (see 7.3) rather than silently staging a partial set.
+
+### 8.2 `testing/compare_correctness.py` -- per-camera and per-night xrms/yrms across a list of nights
+
+Same trace-RMS methodology as `full_ccd_campaign.py` (Legendre trace polynomials evaluated on a 100-point wavelength grid, `--broken-fibers` excluded), extended to loop over as many night/expid pairs as you give it:
+
+```bash
+python testing/compare_correctness.py \
+    --py-dir /pscratch/.../cpptest/redux/cdwarner \
+    --cpp-base /pscratch/.../cpptest/desiproc2 --specprod cdwarner \
+    --nights 20260316:00342128,20260401:00344649,20220120:00119496
+```
+
+`--py-dir` is wherever `--backend python` wrote `fit-psf-<cam>-<expid>.fits` (its flat `--outdir`); `--cpp-base` is the parent of each night's `<night>_<expid>/redux/<specprod>/exposures/<night>/<expid>/fit-psf-<cam>-<expid>.fits` (i.e. each night/expid's own `--outdir` from the `stage_preproc.py`+`--backend cpp` step above, one level up from `redux`).
+
+### 8.3 `testing/per_fiber_breakdown.py` -- drill into one camera's elevated RMS
+
+When `compare_correctness.py` flags one camera's mean xrms/yrms as elevated, this breaks it down per-fiber to distinguish "one or a few genuinely bad fibers" (a data-quality issue, exclude and move on) from "a systematic offset across the whole camera" (worth investigating further):
+
+```bash
+python testing/per_fiber_breakdown.py --night 20241021 --expid 00259030 --camera z6 \
+    --py-dir /pscratch/.../cpptest/redux/cdwarner \
+    --cpp-base /pscratch/.../cpptest/desiproc2 --specprod cdwarner --top 20
+```
+
+Prints the top-N fibers by yrms and by xrms, with their bundle number (`fiber // 25`) -- a cluster of top offenders at literal bundle-boundary positions (first/last of a 25-fiber bundle) is the signature of the known bundle-boundary weakness (porting-notes.md section 1.3(a) in `python-vs-cpp-diff.txt`), not a new bug.

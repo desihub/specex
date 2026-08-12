@@ -3468,3 +3468,51 @@ Ran the deferred GPU-side comparisons via `run_night.py --backend python`, one j
 **`how-to-run.md` updated** with a new Section 7 ("Known Operational Gotchas"): 7.1 the CTE gap + free screening method + why `--backend python` is immune; 7.2 the MPI-hang pattern + kill procedure; 7.3 the `find_cases()` blind spot + manual-case-dict workaround. Also a "Clean failure reporting" subsection under 4.3.
 
 **All originally-deferred "next node" work is done.** Nothing left queued from the problem-case list; the only case with no comparison data on either side is z7@307722 (both pipelines correctly skip it, since production never generated that camera's data for that expid).
+
+## 2026-08-11/12 -- true apples-to-apples C++ vs Python: the staged-preproc technique, a 10-night timing+correctness campaign, and two hard-case deep-dives
+
+**Goal**: get a real C++ vs Python comparison using the exact same `desi_proc -n101` scheduling C++ production actually uses (100 workers + 1 master, dynamically load-balanced via `desispec.workflow.schedule.Schedule`), not a hand-rolled substitute -- while both pipelines fit the same, complete, genuine production input.
+
+**False starts, both explicitly rejected before landing on the real fix:**
+- Built `testing/run_night.py --backend cpp-direct` (`desi_compute_psf --mpi` per camera, bypassing `desi_proc` entirely, `--cpp-ranks`/`--cpp-concurrency` knobs). Any concurrency>1 causes severe CPU-memory-bandwidth contention (concurrency=6: 45.6min for one night vs an expected ~11min); even a contention-free concurrency=2 was rejected outright as "not apples-to-apples" -- any hand-picked concurrency for a bypass tool is architecturally arbitrary, unlike C++ production's own real -n101 scheduling.
+- A from-scratch `--backend cpp` run (real `desi_proc`, private `SPECPROD`, does its own preprocessing) failed to generate several cameras' `preproc-*.fits.gz` files during its idempotent preprocessing pass (25/30 present, not 30/30) -- NOT the previously-documented CTE-gap hang, a different, silent partial-preprocessing failure. Since Python already succeeds against the exact same night/expid, the real production preproc file demonstrably exists; the gap is `desi_proc` regenerating a private copy from scratch, not missing source data.
+
+**The fix, `testing/stage_preproc.py`** (now committed): pre-copy real production `preproc-*.fits.gz` and `shifted-input-psf-*.fits` files into a private redux tree at the exact paths `desi_proc`'s own idempotency checks (`if not os.path.isfile(outpsf): ...runcmd(...)`) look for. This makes `desi_proc` skip both raw preprocessing (`desi_preproc`) and trace-shift calibration (`arc_traceshift`) entirely and go straight to the real `-n101` `fitframe` specex-fit stage against genuine, complete production input -- true apples-to-apples with zero custom orchestration code. Verified via log grep: all 30 cameras' preproc/shifted-psf stages log `SKIPPING`, run completes 30/30 rc=0.
+
+**`cpp-direct` kept in the codebase** (it's a legitimate desi_proc-free timing/correctness baseline for other purposes) but **staged-preproc + real `--backend cpp` is the tool that produced every number below.**
+
+### 10-night campaign: apples-to-apples timing + correctness, single CPU node (C++) vs single 4-GPU node (Python)
+
+10 nights (7 originally picked + 3 more requested after two hard cases turned up, all CTE-clean, all with genuine full 30-camera arc-log coverage, no two sharing a night): 20260316/00342128, 20260401/00344649, 20220120/00119496, 20240408/00234955, 20241021/00259030, 20250112/00273138, 20251013/00316043, 20251107/00320292, 20250509/00292102, 20240924/00254802.
+
+| metric | Python (GPU) | C++ (CPU) |
+|---|---|---|
+| mean wall time (30 cam) | 10.64 min | 9.86 min |
+| mean xrms | 0.0277px | (same measurement, both) |
+| mean yrms | 0.0163px | (same measurement, both) |
+
+C++ averages ~8% faster in this single-node, same-real-input comparison (vs. earlier multi-node Python-only scaling results, e.g. 5.92min/30cam on 2-node/8-GPU with LPT-balanced scheduling -- not directly comparable, different node counts). Correctness stable across all 10 nights, xrms range [0.0234, 0.0308]px, yrms range [0.0145, 0.0200]px -- no drift, and the two nights with elevated yrms both have identified, understood causes (below), not new bugs.
+
+Produced by `testing/stage_preproc.py` (staging) + `testing/run_night.py --backend cpp`/`--backend python` (the fits) + `testing/compare_correctness.py` (the trace-RMS comparison) + `testing/per_fiber_breakdown.py` (per-fiber drill-down) -- all three new scripts now committed alongside `run_night.py`.
+
+### Hard case 1: z6@20241021, fiber 343 -- isolated, root-caused, NOT a systematic bug
+
+Camera-level yrms was 0.1180px (vs the ~0.015-0.020px norm) but per-fiber breakdown showed this was **one fiber alone**: fiber 343 (bundle 13), yrms=2.60px, next-worst fiber in the same camera 0.08px. Excluding it, z6's yrms drops to 0.0187px and the night mean drops from 0.0193 to 0.0160px, back in family.
+
+**Is C++ "better" here, or just different?** Re-read `src/specex_psf_fitter.cc` directly to check. C++ *does* have a cross-fiber trace-consensus prior (`trace_prior_deg`, lines 759-896) -- but it defaults to 0 (off), and real `desi_proc` production never passes `--trace-prior-deg`, so **the C++ output used as ground truth throughout this entire project was fit with no such protection either.** The other candidate C++ mechanism (reducing GH polynomial degree when `number_of_fibers_with_dead_columns>0`, line 2457) is dead code, wrapped in `if(false && ...)` -- confirmed, not assumed, by reading it. So there is no untried C++ logic to port here: Python's `--trace-prior-ndead-threshold`-gated version of this same mechanism (already in production since 2026-08-05) is already more surgical than anything C++ itself does in practice.
+
+**Targeted-diagnostic attempts, both falsified against real data (not just reasoned about):**
+- *Max contiguous dead-row run length* as a smarter per-fiber gate than raw ndead count: falsified immediately using the real `--trace-prior-ndead-threshold 40` experiment output (helps fiber 343, regresses 42 others) as ground truth -- fiber 397 (regresses, doesn't need the prior) has a longer dead-pixel run (34 rows) than fiber 343 (10 rows).
+- *Local arc-line coverage gap* (does the fiber's dead-pixel cluster sit in a real desert of the master line list, accounting for lines killed by the dead pixels themselves): physically well-motivated -- fiber 343's cluster sits almost exactly on an isolated Xe doublet (9165.17/9170.04A) flanked by ~120-200A of nothing on both sides in the DESI line list -- but still not a clean separator: fiber 303 has an *even bigger* effective coverage gap (312A vs 343's 97A) yet regresses under the prior rather than needing it.
+
+**Conclusion: no simple pre-fit static metric from weight+linelist data alone separates this one real case from the 42 false positives a naive threshold drop creates.** Left open, low priority (matches the existing pattern for fiber 260 in section 1.3(b) of `python-vs-cpp-diff.txt`) -- the current default (`ndead>500`) stays as the aggregate-optimal setting. If revisited, the more promising next avenue is a post-hoc detect-and-refit scheme (flag fibers whose fitted trace looks discontinuous vs. neighbors after a normal fit, selectively re-fit those with the prior on) rather than more pre-fit static heuristics -- real new engineering, not evaluated this session.
+
+### Hard case 2: 20220120/00119496, r9 (and b9/z9, spectrograph 9) -- amplified bundle-boundary weakness, trigger not fully pinned down
+
+r9's xrms/yrms (0.1043/0.0629px) was by far the campaign's worst single camera. Initial hypothesis ("short 5.01s ARC exposure") was **checked directly and is wrong**: every arc exposure across all 10 nights measured ~5.01s (`EXPTIME` header) -- that's just how DESI ARC calibration exposures always are, not a variable that differs by night.
+
+Also ruled out directly: CTE gap (`calibnight/20220120/ctecorr-20220120.yaml` is `[]`, clean), spot yield (~1150-1220 selected/night, identical to other nights' r9), trace-correction magnitude (input-to-fit Y shift: 0.305px mean/0.332px rms this night vs 0.313/0.319px on a clean-night r9 -- essentially identical).
+
+What **is** confirmed: per-fiber breakdown shows the worst offenders sit almost exactly at bundle-boundary fiber positions (0, 25, 49/50, 74/75, 100, 125, 150, 175, 199/225, 250, 274/275, 325, 350, 359/374/375, 380/393/399, 400/409/424/425, 449/450, 474/499 -- literally every first/last-of-25 position in the camera) -- the same already-documented, normally-bounded (0.05-0.2px) mechanism from `python-vs-cpp-diff.txt` section 1.3(a), just amplified far more severely (0.1-0.7px) and broadly across an entire camera, correlated with elevated fit iteration counts (876 vs 640 on a clean-night r9) and higher raw chi2, but the trigger for *why* convergence was harder specifically for spectrograph 9 that night wasn't isolated further (interleaved multi-bundle logs made clean per-bundle chi2 comparison impractical without more instrumentation). z5 that same night additionally carries a genuine 28-fiber broken-hardware block (164-191, already excluded from RMS via `--broken-fibers`).
+
+**Left open at "known bounded mechanism, amplified, trigger not pinned down"** -- not blocking, and the 3 additional nights run afterward (20251107, 20250509, 20240924) all came back clean with no recurrence of either hard case, so this remains an isolated-night phenomenon, not a systematic Python weakness.
