@@ -432,8 +432,13 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     except Exception as e:
         import traceback
         err_msg = traceback.format_exc()
+        # JAX/XLA's OOM exception (jaxlib.xla_extension.XlaRuntimeError)
+        # always includes this token in its message -- distinguishing it
+        # from a genuine bug lets fit_ccd_native retry just these bundles
+        # at a lower packing instead of dropping them silently.
+        is_oom = "RESOURCE_EXHAUSTED" in err_msg
         print(f"FAILED Bundle {bid} on {backend.upper()} {gpu_id}:\n{err_msg}", flush=True)
-        return bid, {"error": str(e), "traceback": err_msg}
+        return bid, {"error": str(e), "traceback": err_msg, "is_oom": is_oom}
 
 
 def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
@@ -574,8 +579,10 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     if broken_fibers:
         print(f"  Broken Fibers: {broken_fibers}")
 
+    available_cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+
     if backend == "gpu":
-        n_workers = min(len(all_bundles), n_gpus * workers_per_gpu)
+        packing = workers_per_gpu  # bundle-fit workers packed onto each GPU
         # Normally unset -- GPU-backend workers' host-side NumPy/BLAS calls
         # (the selection/housekeeping phase, ~70% of a bundle's wall time,
         # see porting-notes.md) default to unconstrained thread counts,
@@ -585,38 +592,82 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         # per-worker speed or (b) pure oversubscription noise that's
         # crowding out any concurrent CPU-backend work -- see the 2026-08-09
         # profiling session in porting-notes.md.
-        cpu_threads_per_worker = gpu_worker_threads
-        if cpu_threads_per_worker is not None:
-            print(f"  GPU-worker thread cap: {cpu_threads_per_worker} threads/worker (forced via --gpu-worker-threads)", flush=True)
+        gpu_thread_cap = gpu_worker_threads
+        if gpu_thread_cap is not None:
+            print(f"  GPU-worker thread cap: {gpu_thread_cap} threads/worker (forced via --gpu-worker-threads)", flush=True)
     else:
-        n_workers = min(len(all_bundles), cpu_workers or n_gpus)
+        packing = cpu_workers or n_gpus  # concurrent CPU-backend worker processes
+
+    def _cpu_threads_for(n_workers_this):
         # See fit_bundle_task's thread-limiting comment for why this exists
         # at all: without it, every CPU worker independently claims all
         # available cores, and N concurrent workers thrash each other.
         # Scaling to (real core count / worker count) keeps the pool's
         # aggregate thread demand within the node's actual budget. Floor
         # of 1 thread/worker (an oversubscribed-but-not-zero fallback) if
-        # there happen to be more workers than cores.
-        available_cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
-        cpu_threads_per_worker = max(1, available_cores // n_workers)
-        print(f"  CPU thread budget: {available_cores} cores / {n_workers} workers = {cpu_threads_per_worker} threads/worker", flush=True)
+        # there happen to be more workers than cores. Recomputed per batch
+        # (not just once up front) so an OOM-retry batch, which runs with
+        # fewer workers, correctly gets a bigger per-worker thread budget.
+        if backend == "gpu":
+            return gpu_thread_cap
+        t = max(1, available_cores // n_workers_this)
+        print(f"  CPU thread budget: {available_cores} cores / {n_workers_this} workers = {t} threads/worker", flush=True)
+        return t
 
-    ctx = mp.get_context('spawn')
-    with ctx.Pool(processes=n_workers) as pool:
-        tasks = []
-        for i, bid in enumerate(all_bundles):
-            gpu_id = i % n_gpus
-            # Use 2s stagger to prevent JIT compilation contention on CPU
-            stagger_s = i * 2.0 if backend == "cpu" else 0.0
-            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_per_worker, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots))
+    def _run_batch(bundle_ids, n_workers_this, cpu_threads_this):
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(processes=n_workers_this) as pool:
+            tasks = []
+            for i, bid in enumerate(bundle_ids):
+                gpu_id = i % n_gpus
+                # Use 2s stagger to prevent JIT compilation contention on CPU
+                stagger_s = i * 2.0 if backend == "cpu" else 0.0
+                tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots))
+            return pool.starmap(fit_bundle_task, tasks)
 
-        print(f"Launching {len(tasks)} bundles across {n_workers} workers...", flush=True)
-        chunk_results = pool.starmap(fit_bundle_task, tasks)
+    # Bundles are independent tasks (Pool.starmap queues them dynamically),
+    # so a bundle that fails with a GPU OOM can simply be resubmitted in a
+    # smaller follow-up batch at reduced packing -- no need to restart the
+    # whole CCD. Non-OOM failures are NOT retried (retrying a real bug just
+    # wastes GPU time and reproduces the same failure); only OOM gets this
+    # treatment. Capped at 2 retry rounds, halving packing each time (floor
+    # of 1), so a bundle that's simply too large to ever fit still fails
+    # fast rather than looping.
+    pending = list(all_bundles)
+    failed_bundles = {}
+    attempt = 0
+    max_oom_retries = 2
+    while pending:
+        n_workers_this = min(len(pending), n_gpus * packing) if backend == "gpu" else min(len(pending), packing)
+        cpu_threads_this = _cpu_threads_for(n_workers_this)
+        label = "initial" if attempt == 0 else f"OOM-retry {attempt}"
+        print(f"Launching {len(pending)} bundles across {n_workers_this} workers ({label}, packing={packing})...", flush=True)
+        chunk_results = _run_batch(pending, n_workers_this, cpu_threads_this)
+
+        oom_bids = []
+        pending = []
         for bid, res in chunk_results:
             if "error" in res:
-                print(f"WARNING: Bundle {bid} failed: {res['error']}")
+                if res.get("is_oom"):
+                    oom_bids.append(bid)
+                else:
+                    print(f"WARNING: Bundle {bid} failed: {res['error']}")
+                    failed_bundles[bid] = res["error"]
             else:
                 bundle_results[bid] = res
+
+        if not oom_bids:
+            break
+        if attempt >= max_oom_retries or packing <= 1:
+            for bid in oom_bids:
+                print(f"WARNING: Bundle {bid} failed: GPU OOM persisted after {attempt} retry round(s) down to packing={packing}")
+                failed_bundles[bid] = "GPU OOM persisted after retries"
+            break
+
+        packing = max(1, packing // 2)
+        print(f"OOM RETRY: {len(oom_bids)} bundle(s) {sorted(oom_bids)} hit GPU OOM (RESOURCE_EXHAUSTED); retrying at packing={packing}", flush=True)
+        pending = oom_bids
+        attempt += 1
 
     print(f"Total CCD Fit Time: {time.time() - t_start:.2f}s")
 
@@ -635,6 +686,13 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     # never produces it, so there is nothing to replicate here.
     if bundle_results and out_psf_file:
         write_python_psf(out_psf_file, bundle_results, in_psf_file)
+
+    n_total = len(all_bundles)
+    if failed_bundles:
+        print(f"SPECEX_RESULT: FAILED {len(failed_bundles)}/{n_total} bundles: {sorted(failed_bundles)}", flush=True)
+    else:
+        print(f"SPECEX_RESULT: OK {n_total}/{n_total} bundles", flush=True)
+    return failed_bundles
 
 def main():
     import argparse
@@ -702,7 +760,7 @@ def main():
         import jax
         jax.config.update("jax_platforms", "cpu")
 
-    fit_ccd_native(
+    failed_bundles = fit_ccd_native(
         arc_file=args.arc,
         in_psf_file=args.in_psf,
         out_psf_file=args.out_psf,
@@ -732,6 +790,14 @@ def main():
         line_search=args.line_search,
         debug_spots=args.debug_spots
     )
+
+    if failed_bundles:
+        # Previously this always exited 0 even when bundles were silently
+        # dropped from the output -- rc==0 alone was never sufficient to
+        # confirm a real success (see porting-notes.md's OOM investigation).
+        # A non-zero exit here lets callers (run_night.py, desi_proc) tell
+        # a genuine failure apart from success without grepping logs.
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
