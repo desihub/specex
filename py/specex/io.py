@@ -78,94 +78,164 @@ def write_python_psf(filename, bundle_results, input_template):
     psf_hdr = fin['PSF'].read_header()
     param_names = [p.strip() for p in psf_table['PARAM']]
     name_to_idx = {name: i for i, name in enumerate(param_names)}
+    status_idx = name_to_idx.get('STATUS')
+    # Pristine copy of every PSF-table param (GH shape, tails, STATUS, ...)
+    # for the never-fit-fiber restoration below -- mirrors
+    # xtrace_input_orig/ytrace_input_orig, needed because the per-bundle
+    # loop below zeroes psf_table['COEFF'] in place before we get a chance
+    # to restore a specific fiber's original value.
+    psf_coeff_input_orig = psf_table['COEFF'].copy()
     xdeg_b = 1
     for bid, res in bundle_results.items():
         fmin, fmax = bid * 25, (bid + 1) * 25 - 1
-        pc = res['psf_coeffs']; tc = res['trace_coeffs']
-        # wdeg varies by band (3 for z, 1 otherwise -- see fit_ccd_native's
-        # auto-detection); carried through bundle_results since the writer
-        # has no other way to know what basis pc/tc were fit in. trace_wdeg
-        # is a separate, independently-sized basis for tc (defaults to
-        # wdeg when not set -- see porting-notes.md's r2@20250109
-        # investigation for why pc and tc can now differ here).
-        wdeg_b = res.get('wdeg', 3); nz_b = get_sparse_nz(xdeg_b, wdeg_b)
-        rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
-        poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
-        trace_per_fiber_deg = res.get('trace_per_fiber_deg')
-        if trace_per_fiber_deg is not None:
-            # Stage 1 of the full per-fiber redesign (see porting-notes.md):
-            # tc[0]/tc[1] are (n_fibers*(deg+1),) block-diagonal-by-fiber
-            # coefficient vectors, not a shared basis -- reshape to
-            # (n_fibers, deg+1) and add each fiber's own coefficients
-            # straight into its own XTRACE/YTRACE row, no fiber-position
-            # broadcast basis (poly_f) involved at all.
-            n_fibers = fmax - fmin + 1; n_coefs = trace_per_fiber_deg + 1
-            tc_x_pf = tc[0].reshape(n_fibers, n_coefs); tc_y_pf = tc[1].reshape(n_fibers, n_coefs)
-            n_write = min(n_coefs, xtrace_out.shape[1])
-            xtrace_out[fmin:fmax+1, :n_write] += tc_x_pf[:, :n_write]
-            ytrace_out[fmin:fmax+1, :n_write] += tc_y_pf[:, :n_write]
-        else:
-            trace_wdeg_b = res.get('trace_wdeg', wdeg_b); nz_trace_b = get_sparse_nz(xdeg_b, trace_wdeg_b)
-            for k_nz, k_lin in enumerate(nz_trace_b):
-                i_p, j_p = k_lin % 2, k_lin // 2
-                if j_p < xtrace_out.shape[1]:
-                    xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
-                    ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
-        # Zero the trace row for any fiber with zero selected spots, matching
-        # C++'s own output for such a fiber (specex_psf_proc.cc:49,58 --
-        # Trace::resize(0) empties that fiber's coeff array, so it's never
-        # copied into the zero-initialized output buffer). Without this,
-        # Python instead writes a smoothed/interpolated position inherited
-        # from neighboring fibers -- plausible-looking but never actually
-        # constrained by any real data for that fiber, unlike C++'s
-        # unambiguous all-zero "don't trust this" signal. Overridden last so
-        # it wins regardless of which branch above ran.
-        for fib in res.get('zero_spot_fibers', []):
-            if fmin <= fib <= fmax:
-                xtrace_out[fib, :] = 0.0
-                ytrace_out[fib, :] = 0.0
-        # An explicitly-listed --broken-fibers fiber is excluded from the
-        # fit entirely and must be left completely untouched at the input
-        # template's own value -- confirmed C++'s real behavior (bit-for-
-        # bit identical to the input PSF, not zeroed) is different from
-        # the dynamically-discovered zero-spot case just above. The
-        # correction broadcast above is applied uniformly across the whole
-        # bundle's fiber range regardless, so undo it here for exactly
-        # these fibers rather than excluding them from the broadcast
-        # itself (simpler, and the broadcast is a no-op to undo since
-        # xtrace_input_orig is the pristine pre-any-bundle value).
-        for fib in res.get('explicitly_broken_fibers', []):
+        # A bundle where EVERY fiber was excluded (fully inside a masked
+        # amp, or all explicitly broken) never got fit at all -- skip the
+        # normal per-bundle correction write entirely; the never-fit-fiber
+        # restoration below (which runs unconditionally) handles it.
+        if not res.get('skip_bundle'):
+            pc = res['psf_coeffs']; tc = res['trace_coeffs']
+            # wdeg varies by band (3 for z, 1 otherwise -- see fit_ccd_native's
+            # auto-detection); carried through bundle_results since the writer
+            # has no other way to know what basis pc/tc were fit in. trace_wdeg
+            # is a separate, independently-sized basis for tc (defaults to
+            # wdeg when not set -- see porting-notes.md's r2@20250109
+            # investigation for why pc and tc can now differ here).
+            wdeg_b = res.get('wdeg', 3); nz_b = get_sparse_nz(xdeg_b, wdeg_b)
+            rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
+            poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
+            trace_per_fiber_deg = res.get('trace_per_fiber_deg')
+            if trace_per_fiber_deg is not None:
+                # Stage 1 of the full per-fiber redesign (see porting-notes.md):
+                # tc[0]/tc[1] are (n_fibers*(deg+1),) block-diagonal-by-fiber
+                # coefficient vectors, not a shared basis -- reshape to
+                # (n_fibers, deg+1) and add each fiber's own coefficients
+                # straight into its own XTRACE/YTRACE row, no fiber-position
+                # broadcast basis (poly_f) involved at all.
+                n_fibers = fmax - fmin + 1; n_coefs = trace_per_fiber_deg + 1
+                tc_x_pf = tc[0].reshape(n_fibers, n_coefs); tc_y_pf = tc[1].reshape(n_fibers, n_coefs)
+                n_write = min(n_coefs, xtrace_out.shape[1])
+                xtrace_out[fmin:fmax+1, :n_write] += tc_x_pf[:, :n_write]
+                ytrace_out[fmin:fmax+1, :n_write] += tc_y_pf[:, :n_write]
+            else:
+                trace_wdeg_b = res.get('trace_wdeg', wdeg_b); nz_trace_b = get_sparse_nz(xdeg_b, trace_wdeg_b)
+                for k_nz, k_lin in enumerate(nz_trace_b):
+                    i_p, j_p = k_lin % 2, k_lin // 2
+                    if j_p < xtrace_out.shape[1]:
+                        xtrace_out[fmin:fmax+1, j_p] += tc[0, k_nz] * poly_f[i_p]
+                        ytrace_out[fmin:fmax+1, j_p] += tc[1, k_nz] * poly_f[i_p]
+            # Zero the trace row for any fiber with zero selected spots, matching
+            # C++'s own output for such a fiber (specex_psf_proc.cc:49,58 --
+            # Trace::resize(0) empties that fiber's coeff array, so it's never
+            # copied into the zero-initialized output buffer). Without this,
+            # Python instead writes a smoothed/interpolated position inherited
+            # from neighboring fibers -- plausible-looking but never actually
+            # constrained by any real data for that fiber, unlike C++'s
+            # unambiguous all-zero "don't trust this" signal. Overridden last so
+            # it wins regardless of which branch above ran.
+            for fib in res.get('zero_spot_fibers', []):
+                if fmin <= fib <= fmax:
+                    xtrace_out[fib, :] = 0.0
+                    ytrace_out[fib, :] = 0.0
+            for row in range(len(param_names)):
+                psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
+                if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
+            # Name mapping for GH terms. Must match the fitter's pc row order
+            # exactly: the full (deg+1)^2-1 grid excluding only (0,0), same
+            # convention as PSF.canonical_param_names() and the inner loop of
+            # _accumulate_bundle_jax (fitter.py). No i+j<=deg triangular filter -
+            # that filter (present here previously) desynchronized the enumerate
+            # index from the pc rows starting at GH-6-1, scrambling all shape
+            # coefficients written after that point.
+            gh_deg = psf_hdr['GHDEGX']
+            param_mapping = ['GHSIGX', 'GHSIGY']
+            for j_gh in range(gh_deg + 1):
+                for i_gh in range(gh_deg + 1):
+                    if i_gh == 0 and j_gh == 0: continue
+                    param_mapping.append(f'GH-{i_gh}-{j_gh}')
+            if len(param_mapping) != pc.shape[0]:
+                raise ValueError(f"PSF param mapping length {len(param_mapping)} != fitted coeff rows {pc.shape[0]}")
+
+            for i_par, pname in enumerate(param_mapping):
+                idx = name_to_idx.get(pname)
+                if idx is not None:
+                    for k_nz, k_lin in enumerate(nz_b):
+                        i_p, j_p = k_lin % 2, k_lin // 2
+                        if j_p < psf_table['COEFF'].shape[2]:
+                            psf_table['COEFF'][idx, fmin:fmax+1, j_p] += pc[i_par, k_nz] * poly_f[i_p]
+            psf_hdr[f'B{bid:02d}RCHI2'] = res['chi2'] / (120000.0)
+
+        # Never-fit fibers -- explicitly-listed --broken-fibers, dynamically-
+        # detected masked-amp fibers, or an entire skip_bundle bundle --
+        # are excluded from the fit entirely and must be left completely
+        # untouched at the input template's own values (trace AND PSF
+        # shape), with STATUS flagged -1. Confirmed against real C++
+        # production output (bit-for-bit identical to the input PSF, both
+        # trace and GH-shape rows, STATUS=-1) for both the explicit-broken
+        # case (z8@20260401 fibers 473/474, z3@20260401 fiber 368,
+        # b8@20221121 fibers 348/473/474) and the masked-amp case
+        # (r8@20211028 fibers 0-254) -- see porting-notes.md's 2026-08-14
+        # writeup. Runs after the normal per-bundle write above (when it
+        # ran at all) so it always wins for these specific fibers,
+        # regardless of what the broadcast correction wrote elsewhere in
+        # the bundle -- the broadcast is a no-op to undo since
+        # *_input_orig are the pristine pre-any-bundle values.
+        never_fit_fibers = set(res.get('explicitly_broken_fibers', [])) | set(res.get('masked_amp_fibers', []))
+        for fib in never_fit_fibers:
             if fmin <= fib <= fmax:
                 xtrace_out[fib, :] = xtrace_input_orig[fib, :]
                 ytrace_out[fib, :] = ytrace_input_orig[fib, :]
-        for row in range(len(param_names)):
-            psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
-            if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
-        # Name mapping for GH terms. Must match the fitter's pc row order
-        # exactly: the full (deg+1)^2-1 grid excluding only (0,0), same
-        # convention as PSF.canonical_param_names() and the inner loop of
-        # _accumulate_bundle_jax (fitter.py). No i+j<=deg triangular filter -
-        # that filter (present here previously) desynchronized the enumerate
-        # index from the pc rows starting at GH-6-1, scrambling all shape
-        # coefficients written after that point.
-        gh_deg = psf_hdr['GHDEGX']
-        param_mapping = ['GHSIGX', 'GHSIGY']
-        for j_gh in range(gh_deg + 1):
-            for i_gh in range(gh_deg + 1):
-                if i_gh == 0 and j_gh == 0: continue
-                param_mapping.append(f'GH-{i_gh}-{j_gh}')
-        if len(param_mapping) != pc.shape[0]:
-            raise ValueError(f"PSF param mapping length {len(param_mapping)} != fitted coeff rows {pc.shape[0]}")
+                psf_table['COEFF'][:, fib, :] = psf_coeff_input_orig[:, fib, :]
+                if status_idx is not None:
+                    psf_table['COEFF'][status_idx, fib, :] = 0.0
+                    psf_table['COEFF'][status_idx, fib, 0] = -1.0
 
-        for i_par, pname in enumerate(param_mapping):
-            idx = name_to_idx.get(pname)
-            if idx is not None:
-                for k_nz, k_lin in enumerate(nz_b):
-                    i_p, j_p = k_lin % 2, k_lin // 2
-                    if j_p < psf_table['COEFF'].shape[2]:
-                        psf_table['COEFF'][idx, fmin:fmax+1, j_p] += pc[i_par, k_nz] * poly_f[i_p]
-        psf_hdr[f'B{bid:02d}RCHI2'] = res['chi2'] / (120000.0)
-    
+    # Overlapping-trace QA (adapted from specex#91's trace_psf_qa, py/specex/
+    # qa.py -- present in this repo but dead code, imported only by the
+    # legacy C++-wrapper path and never actually called). Detects
+    # neighboring fiber pairs whose FITTED traces cross, and flags the pair
+    # PLUS their immediate neighbors (one fiber above/below) as STATUS=4
+    # ("overlapping traces (QA)", matching specex#91's own repurposing of
+    # that code) -- the neighbor-flagging is a deliberate difference from
+    # specex#91's own version (which only flags the crossing pair itself)
+    # and from this project's own prior behavior (flag the whole bundle,
+    # or crash the whole camera) -- see porting-notes.md's 2026-08-14
+    # writeup. This is the NON-fatal-accuracy case: trace values are left
+    # exactly as fitted, only STATUS changes. Never-fit fibers (STATUS=-1
+    # already, from the block above) are excluded on both sides of the
+    # comparison -- their trace is a pass-through input value, not a real
+    # fit, so an apparent "crossing" against a real neighbor is a
+    # comparison artifact, not a genuine overlap, and their STATUS=-1
+    # must not be downgraded to a 4.
+    if status_idx is not None:
+        no_data_fibers = set()
+        for res in bundle_results.values():
+            no_data_fibers.update(res.get('explicitly_broken_fibers', []))
+            no_data_fibers.update(res.get('masked_amp_fibers', []))
+        xt_hdr = fin['XTRACE'].read_header()
+        wmin, wmax = xt_hdr['WAVEMIN'], xt_hdr['WAVEMAX']
+        ww = np.linspace(wmin, wmax, 200)
+        n_fibers_total = xtrace_out.shape[0]
+        x_cache = {}
+        def _xval(fib):
+            if fib not in x_cache:
+                x_cache[fib] = np.array(Legendre1DPol(deg=xtrace_out.shape[1]-1, xmin=wmin, xmax=wmax, coeff=xtrace_out[fib]).value(ww))
+            return x_cache[fib]
+        crossing_fibers = set()
+        for f0 in range(n_fibers_total - 1):
+            f1 = f0 + 1
+            if f0 in no_data_fibers or f1 in no_data_fibers:
+                continue
+            if not np.all(_xval(f1) > _xval(f0)):
+                for nb in (f0 - 1, f0, f1, f1 + 1):
+                    if 0 <= nb < n_fibers_total and nb not in no_data_fibers:
+                        crossing_fibers.add(nb)
+        if crossing_fibers:
+            print(f"QA: {len(crossing_fibers)} fiber(s) flagged STATUS=4 for overlapping traces "
+                  f"(crossing pair + immediate neighbors): {sorted(crossing_fibers)}", flush=True)
+            for fib in crossing_fibers:
+                psf_table['COEFF'][status_idx, fib, :] = 0.0
+                psf_table['COEFF'][status_idx, fib, 0] = 4.0
+
     if os.path.exists(filename): os.remove(filename)
     fout = fitsio.FITS(filename, 'rw')
     fout.write(xtrace_out, header=fin['XTRACE'].read_header(), extname='XTRACE')

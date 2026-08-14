@@ -54,7 +54,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000):
     """
     Isolated task for fitting a single bundle.
     """
@@ -203,7 +203,45 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         print(f"PHASE_TIMING bundle={bid} image_psf_io={t_io - t_jax_import:.2f}s", flush=True)
 
         f_min, f_max = bid * 25, (bid + 1) * 25 - 1
-        
+
+        # Detect fibers with essentially no real data anywhere along their
+        # trace (a masked/dead CCD amp, not the milder single-bad-column
+        # case the trace-prior ndead gate already handles) -- see
+        # find_masked_amp_fibers' docstring and porting-notes.md's
+        # 2026-08-14 writeup. These are excluded from candidate generation
+        # below exactly like an explicitly-broken fiber, and get the same
+        # "propagate the input starting-guess PSF, flag STATUS=-1" write-
+        # time treatment (io.py's write_python_psf).
+        from .fitter import find_masked_amp_fibers
+        masked_amp_fibers, _ = find_masked_amp_fibers(psf, f_min, f_max, weight, ndead_threshold=masked_amp_ndead_threshold)
+        if masked_amp_fibers:
+            print(f"  MASKED-AMP DETECTION: {len(masked_amp_fibers)} fiber(s) in bundle {bid} flagged as "
+                  f"no-data (ndead>{masked_amp_ndead_threshold}, contiguous run): {sorted(masked_amp_fibers)}", flush=True)
+        explicit_broken_set = set()
+        if broken_fibers:
+            explicit_broken_set = {int(f) for f in str(broken_fibers).split(",") if f.strip()}
+        candidate_exclude_fibers = explicit_broken_set | masked_amp_fibers
+
+        # If EVERY fiber in this bundle is excluded (a bundle fully inside
+        # a masked amp, or an all-broken bundle), there's nothing left to
+        # fit -- select_bundle_spots_iterative would return an empty spot
+        # list and hit the "no spots" error path below, wrongly reporting
+        # a genuine no-op (whole bundle correctly propagated from input) as
+        # a bundle failure. Short-circuit cleanly instead: write_python_psf
+        # already does the right thing for a bundle_results entry with no
+        # pc/tc/chi2 at all, as long as 'skip_bundle' tells it to skip the
+        # normal per-bundle correction-write block entirely and fall
+        # straight through to the explicitly_broken_fibers/masked_amp_fibers
+        # pass-through + STATUS=-1 restoration (which doesn't need pc/tc).
+        if set(range(f_min, f_max + 1)) <= candidate_exclude_fibers:
+            print(f"  Bundle {bid}: all {f_max - f_min + 1} fibers excluded (broken/masked-amp) -- "
+                  f"no fit performed, propagating input PSF for the whole bundle.", flush=True)
+            return bid, {
+                'skip_bundle': True,
+                'masked_amp_fibers': sorted(masked_amp_fibers),
+                'explicitly_broken_fibers': sorted(explicit_broken_set),
+            }
+
         if force_spots_path:
             # Load spots from file: fiber,wave,xc,yc
             spots = []
@@ -237,7 +275,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             # reselection from the full candidate list with a trace warm-up loop.
             spots = select_bundle_spots_iterative(psf, f_min, f_max, lamp_lines,
                                                    image, weight, bid,
-                                                   broken_fibers=broken_fibers,
+                                                   broken_fibers=candidate_exclude_fibers,
                                                    max_number_of_lines=max_number_of_lines,
                                                    wdeg=wdeg, fit_continuum=fit_continuum)
 
@@ -283,14 +321,20 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # would otherwise wrongly pull it into the zeroing set below; skip
         # it here so it's left alone and inherits the input value exactly
         # like C++ does.
-        explicitly_broken = set()
-        if broken_fibers:
-            explicitly_broken = {int(f) for f in str(broken_fibers).split(",") if f.strip()}
+        explicitly_broken = explicit_broken_set
         spot_fiber_counts = {}
         for s in spots:
             spot_fiber_counts[s['fiber']] = spot_fiber_counts.get(s['fiber'], 0) + 1
+        # masked_amp_fibers excluded here too -- like explicitly_broken,
+        # they were kept out of candidate generation entirely (see
+        # candidate_exclude_fibers above), so they'd otherwise be wrongly
+        # swept into the zero-spot/literal-zero-trace convention below
+        # instead of their own pass-through/STATUS=-1 treatment
+        # (write_python_psf).
         zero_spot_fibers = [fib for fib in range(f_min, f_max + 1)
-                             if spot_fiber_counts.get(fib, 0) < 2 and fib not in explicitly_broken]
+                             if spot_fiber_counts.get(fib, 0) < 2
+                             and fib not in explicitly_broken
+                             and fib not in masked_amp_fibers]
 
         # trace_prior_weight/trace_prior_ndead_threshold are read by fit()
         # via os.environ (see SPECEX_TRACE_PRIOR_WEIGHT/NDEAD_THRESHOLD in
@@ -424,6 +468,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             'trace_per_fiber_deg': trace_per_fiber_deg,
             'zero_spot_fibers': zero_spot_fibers,
             'explicitly_broken_fibers': sorted(explicitly_broken),
+            'masked_amp_fibers': sorted(masked_amp_fibers),
             'chi2': float(chi2),
             's_fiber': np.array([s['fiber'] for s in final_selected]),
             's_wave': np.array([s['wave'] for s in final_selected]),
@@ -447,7 +492,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      workers_per_gpu=None, cpu_workers=None, gpu_worker_threads=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
                      trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
-                     line_search='grid', debug_spots=False):
+                     line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000):
     """
     Fits a full CCD (20 bundles) using parallel processes.
 
@@ -622,7 +667,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                 gpu_id = i % n_gpus
                 # Use 2s stagger to prevent JIT compilation contention on CPU
                 stagger_s = i * 2.0 if backend == "cpu" else 0.0
-                tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots))
+                tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold))
             return pool.starmap(fit_bundle_task, tasks)
 
     # Bundles are independent tasks (Pool.starmap queues them dynamically),
@@ -713,6 +758,7 @@ def main():
     parser.add_argument("--trace-prior-deg", type=int, default=1, help="Legendre degree at/above which --trace-per-fiber-deg's per-fiber coefficients are pulled toward the bundle's cross-fiber consensus (C++'s trace prior, specex_psf_fitter.cc, ported and ndead-gated -- see porting-notes.md). Only active when --trace-per-fiber-deg is on. Default 1 (each fiber's own physical position, degree 0, stays fully independent; only higher-order shape terms are regularized). Pass a negative value to disable the prior entirely while keeping per-fiber trace on.")
     parser.add_argument("--trace-prior-weight", type=float, default=1e5, help="Trace-prior penalty weight (C++'s own hardcoded value, 1e8, was found to measurably harm healthy bundles when applied blanket-style -- see porting-notes.md's weight sweep). Only matters for fibers flagged by --trace-prior-ndead-threshold.")
     parser.add_argument("--trace-prior-ndead-threshold", type=int, default=500, help="A fiber's C++-style dead-pixel count (ndead) above this triggers the trace prior for that fiber only; fibers below it are completely unaffected (bit-identical to no-prior). 500 comfortably separates normal fibers (ndead ~20-120) from the known bad cases (ndead ~2300-17500).")
+    parser.add_argument("--masked-amp-ndead-threshold", type=int, default=8000, help="A fiber's ndead above this, PLUS a contiguous run of >=3 such fibers, marks it as overlapping a masked/dead CCD amp (no real data at all, not the milder single-bad-column case --trace-prior-ndead-threshold handles) -- the fiber is excluded from the fit entirely, its input starting-guess PSF is propagated unchanged, and its STATUS is set to -1, matching real C++'s own observed behavior. FIRST-PASS HEURISTIC: calibrated against one real case (r8@20211028/00106399's amp-A mask, see porting-notes.md's 2026-08-14 writeup) -- treat as tunable, not load-bearing precision.")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see porting-notes.md's OOM investigation). Pass explicitly to override.")
@@ -785,6 +831,7 @@ def main():
         trace_prior_deg=args.trace_prior_deg,
         trace_prior_weight=args.trace_prior_weight,
         trace_prior_ndead_threshold=args.trace_prior_ndead_threshold,
+        masked_amp_ndead_threshold=args.masked_amp_ndead_threshold,
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision,
         line_search=args.line_search,

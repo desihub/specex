@@ -184,6 +184,61 @@ def compute_fiber_ndead(psf, fiber, weight):
     return ndead
 
 
+def find_masked_amp_fibers(psf, fmin, fmax, weight, ndead_threshold=8000, min_run_length=3, context=3):
+    """Detect fibers whose trace overlaps a masked/dead CCD amp -- these
+    have essentially no real data anywhere along their trace and should
+    never be fit at all (propagate the input starting-guess PSF and flag
+    STATUS=-1, matching real C++'s own observed behavior -- see
+    porting-notes.md's 2026-08-14 writeup). This is a DIFFERENT case from
+    the existing trace-prior ndead gate (--trace-prior-ndead-threshold,
+    default 500): that one damps a single noisy-but-still-fittable fiber's
+    high-order trace coefficients; this one is for fibers with no
+    meaningful signal to fit at all.
+
+    Distinguishing signal: a masked amp blanks out MANY adjacent fibers at
+    once (a contiguous run of near-maximal ndead), whereas the already-
+    known single-bad-column cases (z5@20220408 bundle 6 fiber163=11829,
+    z2@20220314 bundle9 fiber238=2289 -- both real, both still fittable
+    with the trace-prior) are isolated spikes surrounded by normal
+    neighbors. ndead magnitude alone doesn't separate these (11829 and
+    14448 are the same ballpark) -- requiring a contiguous run of
+    min_run_length is what does.
+
+    ndead_threshold=8000 is a first pass, calibrated against ONE real case
+    (r8@20211028/00106399's amp-A mask: real C++ STATUS=-1 boundary falls
+    exactly at fiber 254/255, ndead 8823/0 there, 14448-14462 for the
+    fully-masked fibers around it) -- not yet swept across more cases.
+    Flagged here as explicitly tunable, not load-bearing precision.
+
+    context (fibers examined beyond [fmin,fmax] on each side) lets a run
+    that starts in the bundle above/below still be detected at this
+    bundle's own edge fibers (real C++'s STATUS=-1 boundary for this exact
+    case falls mid-bundle, not on a 25-fiber edge).
+
+    Returns (flagged, ndeads): flagged is the subset of range(fmin,fmax+1)
+    to treat as no-data; ndeads is the full computed {fiber: ndead} dict
+    (fmin-context..fmax+context) for logging/diagnostics.
+    """
+    lo = max(0, fmin - context)
+    hi = min(499, fmax + context)
+    ndeads = {f: compute_fiber_ndead(psf, f, weight) for f in range(lo, hi + 1)}
+    high = {f: nd > ndead_threshold for f, nd in ndeads.items()}
+
+    flagged_all = set()
+    run_start = None
+    for f in range(lo, hi + 2):  # one past hi to flush a run ending exactly at hi
+        is_high = high.get(f, False)
+        if is_high and run_start is None:
+            run_start = f
+        elif not is_high and run_start is not None:
+            if f - run_start >= min_run_length:
+                flagged_all.update(range(run_start, f))
+            run_start = None
+
+    flagged = {f for f in flagged_all if fmin <= f <= fmax}
+    return flagged, ndeads
+
+
 def build_trace_prior_hessian(n_fibers, ndeg, prior_deg, weight, fiber_flag=None):
     """Port of C++'s trace-coefficient prior (specex_psf_fitter.cc:759-857,
     gated there by trace_prior_deg>0, off by default and not enabled by real
