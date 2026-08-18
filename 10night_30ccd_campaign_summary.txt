@@ -1,0 +1,70 @@
+10-night x 30-CCD campaign: Python (GPU) vs C++ (CPU) timing + correctness
+============================================================================
+Source: 2026-08-11/12 session, porting-notes.md "10-night campaign" section.
+Method: real production preproc/shifted-PSF files staged into a private
+redux tree (testing/stage_preproc.py) so both pipelines run the exact same,
+complete, genuine production input via desi_proc's real -n101 scheduling
+(C++) or run_night.py --backend python (Python) -- true apples-to-apples,
+single CPU node (C++) vs single 4-GPU node (Python).
+Correctness = XTRACE/YTRACE RMS difference (px) between the two pipelines'
+independently-fit output, Legendre trace polynomials evaluated on a
+100-point wavelength grid, broken fibers excluded, averaged over all
+non-broken fibers in a camera then averaged over all 30 cameras/night.
+Correctness columns regenerated directly from the campaign's own saved FITS
+output for this table (not retyped from memory) -- reproduces the
+previously-recorded aggregate (mean xrms 0.0277px, mean yrms 0.0163px,
+night-mean ranges [0.0234,0.0308]/[0.0145,0.0200]) to 4 decimal places.
+Timing columns for 20260316 and 20260401 recovered from a Slack post
+(the original run logs for those two nights had been overwritten); all
+other timing figures are from the original run logs directly.
+
+Output locations on disk (Perlmutter /pscratch, confirmed still present):
+  Python (GPU) fit-psf output, all 10 nights, one shared directory
+  (files distinguished by expid, so no collisions across nights):
+    /pscratch/sd/c/cdwarner/specex/cpptest/redux/cdwarner/
+      fit-psf-<camera>-<expid>.fits   e.g. fit-psf-b0-00344649.fits
+
+  C++ (CPU) fit-psf output, one subdirectory per night/expid (real
+  desi_proc redux tree layout, staged via testing/stage_preproc.py):
+    /pscratch/sd/c/cdwarner/specex/cpptest/desiproc2/<night>_<expid>/redux/cdwarner/exposures/<night>/<expid>/
+      fit-psf-<camera>-<expid>.fits   e.g.
+      /pscratch/sd/c/cdwarner/specex/cpptest/desiproc2/20260401_00344649/redux/cdwarner/exposures/20260401/00344649/fit-psf-b0-00344649.fits
+
+  Both are on /pscratch, which is purged on Perlmutter's normal scratch
+  retention policy (unused files eventually deleted) -- not a permanent
+  archive location.
+
+Night        Expid      Python wall   C++ wall    mean xrms   mean yrms   max xrms   max yrms
+                         (30 cam)      (30 cam)    (px)        (px)        (px)       (px)
+-----------  ---------  ------------  ----------  ----------  ----------  ---------  ---------
+20260316     00342128   10.2min       583.3s       0.0261      0.0145      0.0495     0.0215
+                                       (9.7min)
+20260401     00344649   10.5min       559.7s       0.0270      0.0147      0.0514     0.0221
+                                       (9.3min)
+20220120     00119496   608.6s        611.6s       0.0308      0.0200      0.1043     0.0629
+             (10.1min)  (10.2min)
+20240408     00234955   684.7s        584.6s       0.0234      0.0155      0.0367     0.0243
+             (11.4min)  (9.7min)
+20241021     00259030   689.9s        592.7s       0.0275      0.0193      0.0591     0.1180
+             (11.5min)  (9.9min)
+20250112     00273138   643.7s        566.9s       0.0276      0.0157      0.0623     0.0246
+             (10.7min)  (9.4min)
+20251013     00316043   650.5s        570.5s       0.0307      0.0159      0.0651     0.0256
+             (10.8min)  (9.5min)
+20251107     00320292   650.3s        715.3s       0.0296      0.0161      0.0676     0.0278
+             (10.8min)  (11.9min)
+20250509     00292102   608.0s        571.2s       0.0274      0.0152      0.0614     0.0249
+             (10.1min)  (9.5min)
+20240924     00254802   617.5s        567.3s       0.0268      0.0158      0.0514     0.0253
+             (10.3min)  (9.5min)
+-----------  ---------  ------------  ----------  ----------  ----------  ---------  ---------
+MEAN (10)               10.64min      9.86min      0.0277      0.0163
+
+Headline: C++ averages ~8% faster than Python in this single-node
+(4x A100 GPU vs single CPU node), same-real-input comparison. Correctness
+is stable across all 10 nights and matches the project's established
+~0.02-0.03px band; two nights carry a known, root-caused, non-systematic
+elevated yrms (20241021 z6/fiber 343: isolated single-fiber issue, camera
+yrms 0.118px vs its own ~0.019px once excluded; 20220120 r9/spectrograph 9:
+amplified but bounded bundle-boundary-fiber weakness, not a new failure
+mode) -- see porting-notes.md 2026-08-11/12 entry, "Hard case 1"/"Hard case 2".
