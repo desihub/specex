@@ -32,3 +32,10 @@ src/tests/*
 
 # MacOS
 .DS_Store
+
+# Analysis/debugging artifacts (fit outputs, run logs) -- keep out of git,
+# see 2026-08-18 cleanup: analysis work should stay off-repo, not committed
+# alongside the code.
+*.fits
+*.log
+logs/
