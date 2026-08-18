@@ -16,9 +16,16 @@ pip install --upgrade pip
 pip install numpy fitsio astropy scipy
 
 # Install JAX with CUDA support (for Perlmutter A100s)
-pip install --upgrade "jax[cuda13_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install --upgrade "jax[cuda13]"
 
-# Note: Ensure CUDA 13.x modules are loaded on the node
+# Note: no "-f ..." index URL and no "_pip" suffix on the extra -- both are
+# obsolete. The jax-cuda13-plugin/jax-cuda13-pjrt wheels and all needed
+# nvidia-* CUDA runtime libs now publish straight to PyPI via the plain
+# "cuda13" extra. "cuda13_pip" is NOT a valid extra as of jax 0.10.x/0.11.x
+# -- pip only warns (does not error) and silently falls back to installing
+# a CPU-only jaxlib, which then fails at runtime with "Unknown backend:
+# 'gpu' requested... Platforms present are: cpu". Watch for that warning
+# if you ever see it again after a jax upgrade.
 ```
 
 ---
