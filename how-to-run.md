@@ -7,7 +7,7 @@ This guide documents how to run the ported Python/JAX version of Specex and the 
 To recreate the environment used for development (`specex_env`):
 
 ```bash
-# Create venv
+# Create venv -- use the desiconda Python below, or any Python 3.11+
 python -m venv /path/to/your/specex_env
 source /path/to/your/specex_env/bin/activate
 
@@ -24,9 +24,36 @@ pip install --upgrade "jax[cuda13]"
 # "cuda13" extra. "cuda13_pip" is NOT a valid extra as of jax 0.10.x/0.11.x
 # -- pip only warns (does not error) and silently falls back to installing
 # a CPU-only jaxlib, which then fails at runtime with "Unknown backend:
-# 'gpu' requested... Platforms present are: cpu". Watch for that warning
-# if you ever see it again after a jax upgrade.
+# 'gpu' requested... Platforms present are: cpu" (as of 2026-08-18, that
+# specific crash is now a clear actionable error instead -- see the box at
+# the end of this section). Watch for the pip warning if you ever see it
+# again after a jax upgrade.
 ```
+
+### Known-good versions (this environment, confirmed working 2026-08-18)
+
+For reference/reproducibility -- these are the exact versions `specex_env` currently uses on a Perlmutter GPU node. Nothing here is strictly pinned by the code; if you land on nearby versions of any of these, that's fine.
+
+| Component | Version |
+|---|---|
+| Base Python (via `python -m venv`) | 3.13.12, from `desiconda` (see below) |
+| DESI environment | `source $CFS/desi/software/desi_environment.sh 26.3` -- optional, see note below |
+| jax / jaxlib | 0.10.1 |
+| jax-cuda13-plugin / jax-cuda13-pjrt | 0.10.1 |
+| numpy | 2.3.5 |
+| fitsio | 1.3.0 |
+| astropy | 7.2.0 |
+| scipy | 1.16.3 |
+| GPU | NVIDIA A100-PCIE-40GB |
+| NVIDIA driver | 580.159.04 (reports CUDA 13.0) |
+| `module load cudatoolkit` (loaded by `env_setup.sh`) | 12.9 |
+
+Notes:
+*   **`desi_environment.sh` is optional, not a prerequisite.** The core fit driver (`python -m specex.specex`, everything in Sections 2-4 below) never imports `desiutil`/`desispec` and doesn't need it. Only `py/specex/qa.py` (a separate, optional QA-plotting helper, not part of any run mode documented here) imports `desispec.io.xytraceset` and `desiutil.log` -- source `desi_environment.sh` (or otherwise have those two packages on `PYTHONPATH`) only if you plan to use `qa.py`.
+*   **Base Python matters less than you'd think.** `specex_env` was built via `python -m venv` from `desiconda`'s Python 3.13.12 (`/global/common/software/desi/perlmutter/desiconda/.../conda/bin/python3.13`) with `include-system-site-packages = false` -- a clean, non-inheriting venv. Any reasonably modern Python 3 (3.11+) that can install the pip packages above should work equally well; there's nothing desiconda-specific baked into the pip-installed dependency set itself.
+*   **Driver vs. loaded module CUDA version mismatch is expected and harmless.** The node's NVIDIA driver reports CUDA 13.0 (via `nvidia-smi`), while `env_setup.sh`'s `module load cudatoolkit` loads 12.9 -- these don't need to match. JAX's CUDA support comes entirely from the pip-installed `jax-cuda13-*`/`nvidia-*` wheels (self-contained, see `env_setup.sh`'s `LD_LIBRARY_PATH` derivation below); the driver only needs to be new enough to run CUDA 13 code (it is), and the loaded `cudatoolkit` module isn't actually load-bearing for the Python/JAX path at all.
+
+**If `--gpu`/`--backend gpu` (the default) is requested but no CUDA-enabled jaxlib is installed**, `python -m specex.specex` now fails immediately with a clear, actionable `RuntimeError` pointing back at this section, rather than either JAX's own opaque `Unknown backend: 'gpu' requested... Platforms present are: cpu` or (worse) silently falling back to CPU and running ~10x slower with no indication anything is wrong. This is deliberate fail-fast behavior, not a bug: since `--gpu` is the default and this is a performance-critical batch pipeline, a silent CPU fallback would be a much nastier trap than a loud failure. Pass `--backend cpu` explicitly if you ever want to run on CPU on purpose.
 
 ---
 
@@ -43,55 +70,15 @@ This sets `PYTHONPATH` to include the local `py` directory, points `LD_LIBRARY_P
 
 ---
 
-## 2. Finding Test Data
-
-If you want to run on a specific night or exposure, use `select_test_case.py` to find the correct file paths and parameters (like `--broken-fibers`).
-
-```bash
-# List all cases for a specific night
-python testing/select_test_case.py --night 20260401 --list
-
-# Select a random case for testing
-python testing/select_test_case.py --night 20260401 --random
-```
-
-For picking several *distinct* random nights (e.g. to build an independent test set that avoids reusing the same night twice), see `testing/random_case_picker.py`.
-
----
-
-## 3. Running Parity Comparisons (Recommended)
-
-The primary tool for verifying Python vs C++ metrics is `testing/instrumentation_analysis.py`. It runs both the production C++ code and the new JAX-GPU code on a single bundle and compares results.
-
-### Basic Usage:
-```bash
-python testing/instrumentation_analysis.py --night 20260401 --expid 00344649 --cameras b0,r3,z8 --bundle 5
-```
-
-### Metrics Produced:
-The script generates a table (default output: `instrumentation_analysis.txt`) containing:
-*   **Time(s):** Wall-clock time for the fit.
-*   **Chi2:** Final chi-squared value (lower is generally better).
-*   **Spots:** Number of spots identified and used in the fit.
-*   **XT RMS / YT RMS:** Root-Mean-Square difference in pixels between the Python-fitted traces and the C++-fitted traces.
-
-To compare **CPP** vs **JAX-CPU** vs **JAX-GPU** simultaneously, use `testing/validate_all_modes.py`:
-```bash
-python testing/validate_all_modes.py --cameras b0 --bundle 5 --output comparison_results.txt
-```
-This is useful for verifying that GPU acceleration doesn't introduce numerical divergence from the CPU version of the same code.
-
-For a full night/expid, whole-CCD C++-vs-Python parity+timing sweep across many cameras at once, see `testing/full_ccd_campaign.py` (Section 4.2 below covers it as a production-scale driver too).
-
----
-
-## 4. Running the Python CCD Fit -- Three Modes
+## 2. Running the Python CCD Fit -- Three Modes
 
 All modes go through the same entry point, `python -m specex.specex` (or the `fit_ccd_native()` function directly). What changes is scope: a single bundle, one camera's full CCD, or all 30 cameras of an exposure.
 
-### 4.1 Mode 1: Single Bundle (25 fibers)
+**Before you start timing anything, read this:** the *first* `python -m specex.specex` invocation in a fresh environment (or after a `~/.cache/specex/jax_compilation_cache` wipe) pays JAX's JIT-compilation cost on top of the real fit -- expect it to be several times slower than every run after it. `porting-notes.md`'s persistent compilation cache means that cost is paid once, not once per run: once a given (function, array-shape) pair has been compiled anywhere on this filesystem, every later run reuses it. So "cold" vs "warm" below isn't about caching your specific inputs, it's about whether *any* prior run has already compiled the shapes this run needs. Don't judge real throughput off a first run.
 
-Useful for fast iteration/debugging. Restrict fitting to one bundle with `--first-bundle`/`--last-bundle` (0-19) and, optionally, a matching `--first-fiber`/`--last-fiber` range (25 fibers/bundle, `bundle_id * 25` to `bundle_id * 25 + 24`).
+### 2.1 Mode 1: Single Bundle (25 fibers)
+
+Useful for fast iteration/debugging. Restrict fitting to one bundle with `--first-bundle`/`--last-bundle` (0-19) and, optionally, a matching `--first-fiber`/`--last-fiber` range (25 fibers/bundle, `bundle_id * 25` to `bundle_id * 25 + 24`). A single bundle doesn't benefit from more than one GPU/worker, so `--gpu 1` (no `--workers-per-gpu` needed) is the right call here:
 
 ```bash
 python -m specex.specex \
@@ -104,9 +91,9 @@ python -m specex.specex \
     --gpu 1
 ```
 
-### 4.2 Mode 2: Full CCD (one camera, all 20 bundles)
+### 2.2 Mode 2: Full CCD (one camera, all 20 bundles)
 
-Drop `--first-bundle`/`--last-bundle` (they default to the full 0-19 range) to fit an entire camera:
+Drop `--first-bundle`/`--last-bundle` (they default to the full 0-19 range) to fit an entire camera. Unlike Mode 1, this scope *does* benefit from spreading bundles across every GPU on the node -- on a standard 4-GPU Perlmutter node, `--gpu 4` (the CLI default) is the right starting point, not `--gpu 1`:
 
 ```bash
 python -m specex.specex \
@@ -114,10 +101,21 @@ python -m specex.specex \
     --in-psf /dvs_ro/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/shifted-input-psf-z8-00344649.fits \
     --out-psf $SCRATCH/pyfit-psf-z8-00344649.fits \
     --broken-fibers 473,474 \
-    --gpu 1 --workers-per-gpu 4
+    --gpu 4 --workers-per-gpu 5
 ```
 
-`--gpu N` spreads the 20 bundles across `N` GPUs on the *current node*; `--workers-per-gpu` controls how many bundle-fit worker processes are packed onto each GPU concurrently (auto-detected per band if omitted -- see the CLI reference below).
+`--gpu N` spreads the 20 bundles across `N` GPUs on the *current node*; `--workers-per-gpu` controls how many bundle-fit worker processes are packed onto each GPU concurrently. `5` is a good starting point for one-off/ad-hoc single-camera runs on any band (`4 GPUs x 5 workers = 20` -- exactly one wave for a 20-bundle CCD) -- if omitted it's auto-detected per band instead, defaulting lower (3) for z-band specifically once `--trace-per-fiber-deg` (on by default) is active, since the z-band per-fiber design matrix is the most memory-hungry combination and the auto-default errs conservative. See the callout below for when to use the lower, more conservative values instead.
+
+**Cold vs. warm, and what "optimal" actually means here** -- measured on this exact command (z8/00344649, one node/4 A100s):
+| Run | Flags | Time |
+|---|---|---|
+| 1st ever run (cold JIT cache) | `--gpu 1 --workers-per-gpu 4` | 270s |
+| 2nd run (warm cache) | `--gpu 4` (workers-per-gpu auto) | 42s |
+| 3rd run (warm cache) | `--gpu 4 --workers-per-gpu 5` | **33s** |
+
+The 270s->42s jump is dominated by the JIT cache going from cold to warm, not the GPU-count change alone (don't read that as "`--gpu 1` is 6x slower than `--gpu 4`" -- a cold `--gpu 4` run would still be slow). The 42s->33s jump is the real, repeatable effect of `--workers-per-gpu 5` over the lower auto-default for this camera/band. **33s with a warm cache is the best full-CCD single-camera number seen so far and a reasonable target to expect.**
+
+> **`--workers-per-gpu 5` vs. the lower production table in 2.3 below -- these are not in conflict.** `5` (this section) is safe and fast for testing *one specific camera at a time*, where you can watch the log for `WARNING: Bundle`/`RESOURCE_EXHAUSTED` and just re-run at a lower value if you ever see one. The lower per-band values in Section 2.3 (`10 b / 7 r / 4 z`, and the code's own even more conservative z auto-default of `3`) exist because an *unattended* full-night batch has no one watching logs camera-by-camera, and z-band's OOM risk at `workers-per-gpu 5` is data-dependent -- confirmed to hit real, silent `RESOURCE_EXHAUSTED` failures on roughly 4 of 10 z-band cameras tested (higher-than-typical spot density combined with the per-fiber trace's larger design matrix), while the other 6/10 ran clean at `5` just like this section's example. So: for a single ad-hoc camera, start at `5` and drop to `4` only if you see an OOM warning; for a full unattended night across cameras/exposures you haven't pre-screened, use Section 2.3's validated-safe table instead.
 
 For a batch of full-CCD runs (many cameras, one at a time, each compared against C++), see `testing/full_ccd_campaign.py`:
 ```bash
@@ -126,7 +124,7 @@ python testing/full_ccd_campaign.py --night 20260401 --expid 00344649 \
 ```
 This launches the real C++ wrapper (`srun -n 20 desi_compute_psf --mpi`) and the Python port concurrently per camera (they don't contend for the same resources -- C++ is CPU/MPI, Python is GPU), and reports wall time plus X/Y trace RMS and wavelength-residual RMS for both.
 
-### 4.3 Mode 3: Full Night/Expid (all 30 cameras, production scale)
+### 2.3 Mode 3: Full Night/Expid (all 30 cameras, production scale)
 
 **`testing/run_night.py` is the single entry point for this mode**, switchable between the C++ and Python/JAX backends via one flag (or the `SPECEX_BACKEND` env var), so the same command works for either pipeline:
 
@@ -173,6 +171,59 @@ Because each camera is an independent subprocess (not one MPI collective), a bad
 *   **Missing input file(s)** (e.g. a preproc file production never generated for that camera/expid): reported as `SKIPPED` with the missing path(s) -- confirmed on `z7@20250822/00307722`, which resolved in **1.9s**. The equivalent `--backend cpp` run on the same case took **~12 minutes to hang** (see the MPI-hang gotcha below) before it had to be killed manually.
 *   **Per-camera subprocess failure** (nonzero rc): the run summary prints the last few lines of that camera's log (`tail_error()`) inline under a `PROBLEM:` entry, so the cause is visible without opening individual log files.
 
+### Runtime guidelines (warm JIT cache, all modes)
+
+| Mode | Recommended flags | Typical warm time |
+|---|---|---|
+| 2.1 Single bundle | `--gpu 1` | a few seconds |
+| 2.2 Full CCD, one camera | `--gpu 4 --workers-per-gpu 5` | ~33-45s (this section's measurement; band-dependent, see `porting-notes.md`) |
+| 2.3 Full night, 30 cameras, 1 node/4 GPUs | `run_night.py --backend python` | ~11-13 min |
+| 2.3 Full night, 30 cameras, 2 nodes/8 GPUs, LPT-balanced | `run_night.py --backend python --lpt-profile ...` | ~6 min |
+
+The very first run in a fresh environment (empty `~/.cache/specex/jax_compilation_cache`) will be several times slower than this table for whichever mode you run first -- that cost only has to be paid once per machine/environment, not once per run.
+
+---
+
+## 3. Finding Test Data
+
+If you want to run on a specific night or exposure, use `select_test_case.py` to find the correct file paths and parameters (like `--broken-fibers`).
+
+```bash
+# List all cases for a specific night
+python testing/select_test_case.py --night 20260401 --list
+
+# Select a random case for testing
+python testing/select_test_case.py --night 20260401 --random
+```
+
+For picking several *distinct* random nights (e.g. to build an independent test set that avoids reusing the same night twice), see `testing/random_case_picker.py`.
+
+---
+
+## 4. Running Parity Comparisons (Recommended)
+
+The primary tool for verifying Python vs C++ metrics is `testing/instrumentation_analysis.py`. It runs both the production C++ code and the new JAX-GPU code on a single bundle and compares results.
+
+### Basic Usage:
+```bash
+python testing/instrumentation_analysis.py --night 20260401 --expid 00344649 --cameras b0,r3,z8 --bundle 5
+```
+
+### Metrics Produced:
+The script generates a table (default output: `instrumentation_analysis.txt`) containing:
+*   **Time(s):** Wall-clock time for the fit.
+*   **Chi2:** Final chi-squared value (lower is generally better).
+*   **Spots:** Number of spots identified and used in the fit.
+*   **XT RMS / YT RMS:** Root-Mean-Square difference in pixels between the Python-fitted traces and the C++-fitted traces.
+
+To compare **CPP** vs **JAX-CPU** vs **JAX-GPU** simultaneously, use `testing/validate_all_modes.py`:
+```bash
+python testing/validate_all_modes.py --cameras b0 --bundle 5 --output comparison_results.txt
+```
+This is useful for verifying that GPU acceleration doesn't introduce numerical divergence from the CPU version of the same code.
+
+For a full night/expid, whole-CCD C++-vs-Python parity+timing sweep across many cameras at once, see `testing/full_ccd_campaign.py` (Section 2.2 above covers it as a production-scale driver too).
+
 ---
 
 ## 5. Full CLI Reference
@@ -215,7 +266,7 @@ python -m specex.specex -h
 |------|---------|-------------|
 | `--backend` | `gpu` | `cpu` or `gpu` |
 | `--gpu` | 4 | Number of GPUs to use (spreads bundles across them on the current node) |
-| `--workers-per-gpu` | auto (5, or 3 for z-band when per-fiber trace is active) | Concurrent bundle-fit worker processes per GPU. See Section 4.3's table for the validated per-band values (10 b / 7 r / 4 z) used in production-scale multi-camera runs. |
+| `--workers-per-gpu` | auto (5, or 3 for z-band when per-fiber trace is active) | Concurrent bundle-fit worker processes per GPU. See Section 2.3's table for the validated per-band values (10 b / 7 r / 4 z) used in production-scale multi-camera runs. |
 | `--cpu-workers` | `--gpu` count | Concurrent worker processes for `--backend cpu` |
 | `--gpu-worker-threads` | unconstrained | Diagnostic: force an OMP/BLAS/XLA thread cap on each GPU-backend worker's host-side computation. Confirmed *not* load-bearing for the CPU+GPU hybrid-scheduling investigation (see porting-notes.md) -- left in as a diagnostic knob, no effect on a normal run. |
 | `--double-precision` | off (mixed float32/float64) | Force full float64 for the joint-fit Jacobian. Validated equivalent accuracy; mixed precision uses ~71% less GPU memory/worker. |
@@ -282,7 +333,7 @@ Confirmed repeatedly, across 3 distinct trigger types (CTE gap, missing preproc 
 3. Verify: `ps aux | grep desi_proc | grep -v grep | wc -l`. If nonzero, `pkill -9 -f "desi_proc -n <night> -e <expid>"`, then re-check until it's 0.
 4. Do **not** `scancel` the whole SLURM allocation unless you intend to end the whole interactive session -- the hang is a job-level problem, not a node-level one.
 
-This is exactly what motivated `--backend python`'s per-camera clean-failure reporting in Section 4.3 above -- it's structurally immune to this failure mode since cameras are independent subprocesses, not MPI ranks in one collective.
+This is exactly what motivated `--backend python`'s per-camera clean-failure reporting in Section 2.3 above -- it's structurally immune to this failure mode since cameras are independent subprocesses, not MPI ranks in one collective.
 
 ### 7.3 `find_cases()` (used by `--backend python`) only sees exposures processed through the normal nightly pipeline
 

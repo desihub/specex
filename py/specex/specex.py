@@ -782,6 +782,29 @@ def main():
 
     os.environ["JAX_PLATFORM_NAME"] = args.backend  # deprecated/ineffective on this JAX version, see below
 
+    if args.backend == "gpu":
+        # Fail fast with an actionable message instead of either (a) JAX's
+        # own opaque "Unknown backend: 'gpu' requested... Platforms present
+        # are: cpu" RuntimeError, which gives no hint at the actual cause, or
+        # (b) silently falling back to CPU and running ~10x slower with no
+        # indication anything is wrong. --gpu is the default and this is a
+        # perf-critical batch pipeline, so a silent fallback would be worse
+        # than a loud failure -- see how-to-run.md Section 0 for the real
+        # fix (confirmed root cause once: an invalid pip extra name, e.g.
+        # "jax[cuda13_pip]", is not a hard error -- pip only *warns* and
+        # silently installs a CPU-only jaxlib).
+        import jax
+        if not any(d.platform == "gpu" for d in jax.devices()):
+            raise RuntimeError(
+                "--backend gpu (the default) was requested, but no GPU-capable JAX "
+                "platform is available -- jax.devices() found only "
+                f"{sorted(set(d.platform for d in jax.devices()))}. This almost always means "
+                "jaxlib was installed without CUDA support (see how-to-run.md Section 0). "
+                "Reinstall with `pip install --upgrade \"jax[cuda13]\"` and confirm "
+                "`python -c \"import jax; print(jax.devices())\"` reports a CudaDevice, "
+                "or pass --backend cpu to run on CPU deliberately."
+            )
+
     if args.backend != "gpu":
         # STRICT ISOLATION for the main process itself, mirroring
         # fit_bundle_task's per-worker isolation above. Without this, the
