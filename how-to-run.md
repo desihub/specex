@@ -171,6 +171,30 @@ Because each camera is an independent subprocess (not one MPI collective), a bad
 *   **Missing input file(s)** (e.g. a preproc file production never generated for that camera/expid): reported as `SKIPPED` with the missing path(s) -- confirmed on `z7@20250822/00307722`, which resolved in **1.9s**. The equivalent `--backend cpp` run on the same case took **~12 minutes to hang** (see the MPI-hang gotcha below) before it had to be killed manually.
 *   **Per-camera subprocess failure** (nonzero rc): the run summary prints the last few lines of that camera's log (`tail_error()`) inline under a `PROBLEM:` entry, so the cause is visible without opening individual log files.
 
+### 2.4 Running on CPU (no GPU available)
+
+Every mode above also runs on CPU -- useful on a GPU-less machine (a laptop, a login node, a non-Perlmutter dev box), or just to sanity-check a result without touching a GPU at all. **Pass `--backend cpu` explicitly** (the CLI defaults to `--backend gpu`, and per Section 0's fail-fast check, `--backend gpu` on a machine with no CUDA-enabled jaxlib now errors immediately rather than silently doing the wrong thing):
+
+```bash
+python -m specex.specex \
+    -a .../preproc-z8-00344649.fits.gz --in-psf .../shifted-input-psf-z8-00344649.fits \
+    --out-psf $SCRATCH/pyfit-psf-z8-00344649.fits \
+    --broken-fibers 473,474 \
+    --backend cpu --cpu-workers 20
+```
+
+`--cpu-workers` is the CPU-backend analog of `--gpu`/`--workers-per-gpu` combined -- it's the total number of concurrent bundle-fit worker processes (defaults to the `--gpu` value, 4, if unset, which is usually too low; set it to roughly your machine's real core count instead, e.g. `20` on the interactive-node cases below). Each worker's own thread budget (`OMP_NUM_THREADS` etc.) is auto-computed as `available_cores // cpu_workers`, so you don't need to hand-tune per-worker threading on top of this -- just pick a sensible `--cpu-workers` for the box you're on. Correctness is validated equivalent to the GPU backend (bit-for-bit-consistent to within the standing mixed-precision float32/float64 difference documented in Section 6).
+
+**GPU vs. CPU timing** (both warm, i.e. past the first-run JIT cost from Section 2's intro):
+| Scope | GPU | CPU | Slowdown |
+|---|---|---|---|
+| Single bundle, solo | ~23s | ~80s (`--cpu-workers` >= bundle count, no queueing) | ~3.5x |
+| Full night, 30 cameras | 13.2 min (1 node/4 GPUs, pinned `wpg=10 b/7 r/4 z`, Section 2.3) | 147.9 min (1 node, `--cpu-workers 20`, one `python -m specex.specex --backend cpu` call per camera) | ~11.2x |
+
+**`testing/run_night.py` does not have a CPU-only mode** -- its `--backend` choices are `cpp`/`cpp-direct`/`python`, and `python` always assigns each camera a GPU. The 147.9 min full-night CPU number above was measured with a predecessor one-off script (pre-`run_night.py` consolidation) looping `python -m specex.specex --backend cpu --cpu-workers 20` over all 30 cameras sequentially; there's no single documented command for it today -- for a full CPU-only night, write the same kind of loop over Section 3's `select_test_case.py` cases.
+
+CPU is a genuine, correctness-equivalent fallback, not a performance option -- expect roughly an order of magnitude slower at production scale. **Don't try to combine CPU and GPU workers on the same node to "help" a GPU run go faster**: this was tested extensively (six distinct concurrency/pinning designs, `porting-notes.md`'s CPU+GPU hybrid investigation) and every design either left the GPU run unaffected at best or measurably slowed it down (up to ~3.6x on the cameras that overlapped) -- CPU-side host compute contends with the GPU workers' own host-side work for memory bandwidth. Pure-GPU-pinned is the standing, validated production recommendation; use CPU-only when there's truly no GPU, not alongside one.
+
 ### Runtime guidelines (warm JIT cache, all modes)
 
 | Mode | Recommended flags | Typical warm time |
@@ -179,6 +203,7 @@ Because each camera is an independent subprocess (not one MPI collective), a bad
 | 2.2 Full CCD, one camera | `--gpu 4 --workers-per-gpu 5` | ~33-45s (this section's measurement; band-dependent, see `porting-notes.md`) |
 | 2.3 Full night, 30 cameras, 1 node/4 GPUs | `run_night.py --backend python` | ~11-13 min |
 | 2.3 Full night, 30 cameras, 2 nodes/8 GPUs, LPT-balanced | `run_night.py --backend python --lpt-profile ...` | ~6 min |
+| 2.4 Full night, 30 cameras, CPU-only | `specex.specex --backend cpu --cpu-workers 20`, looped per camera (no `run_night.py` support yet) | ~148 min (~11x slower than GPU) |
 
 The very first run in a fresh environment (empty `~/.cache/specex/jax_compilation_cache`) will be several times slower than this table for whichever mode you run first -- that cost only has to be paid once per machine/environment, not once per run.
 
