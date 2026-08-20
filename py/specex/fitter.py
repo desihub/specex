@@ -8,14 +8,28 @@ from .psf import GaussHermitePSF
 # --- Helpers ---
 
 def _cpp_brent(f, ax, bx, cx, tol, itmax=100):
-    """Direct line-by-line port of specex_brent.cc's brent() (itself a
-    near-verbatim copy of Numerical Recipes' brent()), used by
-    SPECEX_CPP_LINESEARCH for a genuinely faithful replica of C++'s line
-    search. Not scipy's minimize_scalar(method='brent') -- that raises on a
-    "loose" (non-strictly-bracketing) triple, which C++'s raw NR
-    implementation tolerates by just falling back to golden-section
-    stepping; this port preserves that tolerance instead of failing.
-    Returns (x_min, f_min)."""
+    """Direct line-by-line port of specex_brent.cc's brent() (itself a near-verbatim copy of Numerical Recipes' brent()), used by the 'cpp' line-search mode for a genuinely faithful replica of C++'s line search.
+
+    Not scipy's minimize_scalar(method='brent') -- that raises on a "loose"
+    (non-strictly-bracketing) triple, which C++'s raw NR implementation
+    tolerates by just falling back to golden-section stepping; this port
+    preserves that tolerance instead of failing.
+
+    Args:
+        f (callable): scalar objective, f(x) -> float.
+        ax, bx, cx (float): bracketing triple (not required to strictly
+            bracket a minimum -- see above).
+        tol (float): convergence tolerance (also used as NR's own fractional
+            precision parameter).
+        itmax (int): maximum iterations.
+
+    Returns:
+        tuple[float, float]: (x_min, f_min).
+
+    Status: EXPERIMENTAL/DIAGNOSTIC -- only called from PSF_Fitter.fit()'s
+    `line_search == 'cpp'` branch, which is not the default ('grid' is) and is
+    kept for reference only (tested correctness-neutral).
+    """
     CGOLD = 0.3819660
     ZEPS = 1e-60
     a = min(ax, cx); b = max(ax, cx)
@@ -60,17 +74,34 @@ def _cpp_brent(f, ax, bx, cx, tol, itmax=100):
     return x, fx
 
 def next_pow2_bucket(n, min_bucket=256):
-    """Smallest power of 2 >= n (floored at min_bucket), for padding
-    variable-length JAX inputs to a small, campaign-stable set of shapes so
-    the persistent JIT-compilation cache (see porting-notes.md "JAX
-    persistent compilation cache") gets reused across bundles/cameras
-    instead of triggering a fresh XLA compile per distinct array length.
+    """Smallest power of 2 >= n (floored at min_bucket), for padding variable-length JAX inputs to a small, campaign-stable set of shapes so the persistent JIT-compilation cache gets reused across bundles/cameras instead of triggering a fresh XLA compile per distinct array length.
+
+    Args:
+        n (int): the real (unpadded) size.
+        min_bucket (int): smallest bucket returned, default 256.
+
+    Returns:
+        int: the padded bucket size.
+
+    Status: ACTIVE (production default path).
     """
     if n <= min_bucket:
         return min_bucket
     return 1 << (n - 1).bit_length()
 
 def get_sparse_nz(xdeg, ydeg):
+    """Build the sparse (i, j) monomial index list used by the shared-basis fiber-position x wavelength trace/PSF-shape polynomial (a "cross" pattern, not the full dense product grid). io.py imports this function directly rather than redefining it (previously an independent duplicate copy; consolidated here).
+
+    Args:
+        xdeg (int): fiber-position-axis degree (always 1 in this codebase's
+            usage).
+        ydeg (int): wavelength-axis degree.
+
+    Returns:
+        list[int]: flat indices k = i + j*(xdeg+1) of the included terms.
+
+    Status: ACTIVE (production default path).
+    """
     nz = []
     for j in range(ydeg + 1):
         for i in range(xdeg + 1):
@@ -80,14 +111,26 @@ def get_sparse_nz(xdeg, ydeg):
     return nz
 
 def build_warm_start_pc(psf, bundle_id, spots, gh_deg, monomials):
-    """
-    Mirrors C++'s default behavior (specex_pyio.cc: use_input_specex_psf=True
-    unless psf/trace degrees are overridden on the CLI) of warm-starting the
-    PSF shape fit from the input PSF's own already-fit Gauss-Hermite
-    coefficients, rather than cold-starting from a flat default. Projects the
-    input PSF's per-fiber Legendre-in-wave GH coefficients into the same
-    sparse 2D (fiber, wave) Legendre basis used by the joint fit, via
+    """Warm-start the PSF shape fit's coefficients from the input PSF's own already-fit Gauss-Hermite parameters, rather than cold-starting from a flat default -- mirrors C++'s default behavior (specex_pyio.cc: use_input_specex_psf=True unless psf/trace degrees are overridden on the CLI).
+
+    Projects the input PSF's per-fiber Legendre-in-wave GH coefficients into
+    the same sparse 2D (fiber, wave) Legendre basis used by the joint fit, via
     least-squares.
+
+    Args:
+        psf (psf.PSF): the PSF object, supplying the input model via
+            params_of_bundles[bundle_id].param_models.
+        bundle_id (int): bundle index.
+        spots (list[dict]): candidate/selected spots with 'fiber'/'wave' keys.
+        gh_deg (int): Gauss-Hermite expansion degree.
+        monomials (array-like): shape (Ns, Npoly) PSF-shape design matrix (see
+            get_bundle_monomials_jnp), used as the least-squares basis.
+
+    Returns:
+        np.ndarray: shape (n_gh_params, Npoly) warm-start coefficients, one row
+        per canonical GH parameter.
+
+    Status: ACTIVE (production default path).
     """
     param_mapping = ['GHSIGX', 'GHSIGY']
     for j_gh in range(gh_deg + 1):
@@ -109,6 +152,20 @@ def build_warm_start_pc(psf, bundle_id, spots, gh_deg, monomials):
     return np.array(rows)
 
 def get_bundle_monomials_jnp(psf, bundle_id, spots, wdeg=3):
+    """Build the shared-basis (fiber-position x wavelength) sparse 2D Legendre design matrix for a bundle's spots, at wavelength degree wdeg -- the PSF-shape basis, and (when trace_per_fiber_deg is off) also the trace-correction basis.
+
+    Args:
+        psf (psf.PSF): the PSF object (supplies bundle fiber range and
+            per-fiber wavelength domain).
+        bundle_id (int): bundle index.
+        spots (list[dict]): spots with 'fiber'/'wave' keys.
+        wdeg (int): wavelength Legendre degree.
+
+    Returns:
+        jnp.ndarray: shape (Ns, Npoly) design matrix, Npoly = len(get_sparse_nz(1, wdeg)).
+
+    Status: ACTIVE (production default path).
+    """
     import jax.numpy as jnp
     from .math import legendre_pol_jnp
     bundle = psf.params_of_bundles[bundle_id]
@@ -123,22 +180,29 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots, wdeg=3):
     return jnp.stack(m, axis=1)
 
 def get_bundle_block_diagonal_trace_monomials(psf, bundle_id, spots, trace_deg):
-    """
-    Per-fiber-independent trace design matrix (stage 1 of the full
-    per-fiber trace redesign, see porting-notes.md) -- block-diagonal by
-    fiber, each of the bundle's fibers getting its own (trace_deg+1)
-    wavelength-Legendre columns with zero cross-fiber sharing, mirroring
-    C++'s per-fiber independent Y_vs_W/X_vs_W refit (specex_psf_fitter.cc:
-    1213-1238) exactly in the DOF sense. Expressed as a *correction* on
-    top of xc_init/yc_init (already-close anchors from spot
-    selection/--force-spots) rather than replacing the trace outright, so
-    no changes are needed to PSF_Fitter.fit()'s anchor+correction
-    architecture, jax jit kernel signatures, or the line-search/step
-    logic -- this is a drop-in replacement for get_bundle_monomials_jnp's
-    output, just built from a different (structurally sparse, densely
-    stored) basis. One shared matrix serves both X and Y trace_coeffs
-    (same wavelength basis, different coefficient values), same
-    convention as the shared-basis path.
+    """Per-fiber-independent trace design matrix (stage 1 of the full per-fiber trace redesign) -- block-diagonal by fiber, each of the bundle's fibers getting its own (trace_deg+1) wavelength-Legendre columns with zero cross-fiber sharing, mirroring C++'s per-fiber independent Y_vs_W/X_vs_W refit (specex_psf_fitter.cc:1213-1238) exactly in the DOF sense.
+
+    Expressed as a *correction* on top of xc_init/yc_init (already-close
+    anchors from spot selection/--force-spots) rather than replacing the trace
+    outright, so no changes are needed to PSF_Fitter.fit()'s anchor+correction
+    architecture, jax jit kernel signatures, or the line-search/step logic --
+    a drop-in replacement for get_bundle_monomials_jnp's output, just built
+    from a different (structurally sparse, densely stored) basis. One shared
+    matrix serves both X and Y trace_coeffs (same wavelength basis, different
+    coefficient values).
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        bundle_id (int): bundle index.
+        spots (list[dict]): spots with 'fiber'/'wave' keys.
+        trace_deg (int): per-fiber wavelength Legendre degree.
+
+    Returns:
+        jnp.ndarray: shape (Ns, n_fibers*(trace_deg+1)) block-diagonal design
+        matrix.
+
+    Status: ACTIVE (production default path) -- used when --trace-per-fiber-deg
+    is set (the production default since 2026-08-05).
     """
     import jax.numpy as jnp
     from .math import legendre_pol_jnp
@@ -156,15 +220,23 @@ def get_bundle_block_diagonal_trace_monomials(psf, bundle_id, spots, trace_deg):
 
 
 def compute_fiber_ndead(psf, fiber, weight):
-    """Port of C++'s per-fiber dead-column diagnostic
-    (specex_psf_fitter.cc:2333-2355, the source of its own logged
-    "fiber N ndead=..." lines): counts zero-weight pixels in a +/-3-column
-    window around the fiber's trace center, across the trace's full
-    wavelength-defined row range. `weight` is indexed [x, y] (same
-    convention as fit()'s xpix/ypix/idx_map usage). Vectorized over rows
-    (a Python per-row loop with Legendre1DPol.invert()'s 1000-point grid
-    interpolation inside would be ~4000 calls/fiber -- too slow to run
-    routinely); only the +/-3 window is a short explicit loop.
+    """Port of C++'s per-fiber dead-column diagnostic (specex_psf_fitter.cc:2333-2355, the source of its own logged "fiber N ndead=..." lines): counts zero-weight pixels in a +/-3-column window around the fiber's trace center, across the trace's full wavelength-defined row range.
+
+    Vectorized over rows (a Python per-row loop with Legendre1DPol.invert()'s
+    1000-point grid interpolation inside would be ~4000 calls/fiber -- too
+    slow to run routinely); only the +/-3 window is a short explicit loop.
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        fiber (int): absolute fiber index.
+        weight (np.ndarray): inverse-variance weight image, indexed [x, y]
+            (same convention as fit()'s xpix/ypix/idx_map usage).
+
+    Returns:
+        int: ndead, the zero-weight pixel count in the +/-3-column trace band.
+
+    Status: ACTIVE (production default path) -- used by find_masked_amp_fibers
+    and PSF_Fitter.fit()'s trace-prior activation gate.
     """
     trace = psf.fiber_traces[fiber]
     y_vs_w = trace['Y_vs_W']
@@ -185,39 +257,37 @@ def compute_fiber_ndead(psf, fiber, weight):
 
 
 def find_masked_amp_fibers(psf, fmin, fmax, weight, ndead_threshold=8000, min_run_length=3, context=3):
-    """Detect fibers whose trace overlaps a masked/dead CCD amp -- these
-    have essentially no real data anywhere along their trace and should
-    never be fit at all (propagate the input starting-guess PSF and flag
-    STATUS=-1, matching real C++'s own observed behavior -- see
-    porting-notes.md's 2026-08-14 writeup). This is a DIFFERENT case from
-    the existing trace-prior ndead gate (--trace-prior-ndead-threshold,
+    """Detect fibers whose trace overlaps a masked/dead CCD amp -- these have essentially no real data anywhere along their trace and should never be fit at all (propagate the input starting-guess PSF and flag STATUS=-1, matching real C++'s own observed behavior).
+
+    Different from the trace-prior ndead gate (--trace-prior-ndead-threshold,
     default 500): that one damps a single noisy-but-still-fittable fiber's
-    high-order trace coefficients; this one is for fibers with no
-    meaningful signal to fit at all.
+    high-order trace coefficients; this one is for fibers with no meaningful
+    signal to fit at all. Distinguishing signal: a masked amp blanks out MANY
+    adjacent fibers at once (a contiguous run of near-maximal ndead), whereas
+    known single-bad-column cases are isolated spikes surrounded by normal
+    neighbors -- ndead magnitude alone doesn't separate these; requiring a
+    contiguous run of min_run_length does. context (fibers examined beyond
+    [fmin,fmax] on each side) lets a run that starts in the neighboring bundle
+    still be detected at this bundle's own edge fibers.
 
-    Distinguishing signal: a masked amp blanks out MANY adjacent fibers at
-    once (a contiguous run of near-maximal ndead), whereas the already-
-    known single-bad-column cases (z5@20220408 bundle 6 fiber163=11829,
-    z2@20220314 bundle9 fiber238=2289 -- both real, both still fittable
-    with the trace-prior) are isolated spikes surrounded by normal
-    neighbors. ndead magnitude alone doesn't separate these (11829 and
-    14448 are the same ballpark) -- requiring a contiguous run of
-    min_run_length is what does.
+    Args:
+        psf (psf.PSF): the PSF object.
+        fmin, fmax (int): inclusive bundle fiber range.
+        weight (np.ndarray): inverse-variance weight image, [x, y]-indexed.
+        ndead_threshold (int): ndead value above which a fiber counts as
+            "high" (default 8000 -- a first-pass value calibrated on one real
+            case, not load-bearing precision).
+        min_run_length (int): minimum contiguous run of "high" fibers to flag
+            as a masked amp (default 3).
+        context (int): extra fibers examined beyond [fmin, fmax] on each side
+            to catch a run starting in a neighboring bundle (default 3).
 
-    ndead_threshold=8000 is a first pass, calibrated against ONE real case
-    (r8@20211028/00106399's amp-A mask: real C++ STATUS=-1 boundary falls
-    exactly at fiber 254/255, ndead 8823/0 there, 14448-14462 for the
-    fully-masked fibers around it) -- not yet swept across more cases.
-    Flagged here as explicitly tunable, not load-bearing precision.
+    Returns:
+        tuple[set[int], dict[int, int]]: (flagged, ndeads) -- flagged is the
+        subset of range(fmin, fmax+1) to treat as no-data; ndeads is the full
+        computed {fiber: ndead} dict (fmin-context..fmax+context).
 
-    context (fibers examined beyond [fmin,fmax] on each side) lets a run
-    that starts in the bundle above/below still be detected at this
-    bundle's own edge fibers (real C++'s STATUS=-1 boundary for this exact
-    case falls mid-bundle, not on a 25-fiber edge).
-
-    Returns (flagged, ndeads): flagged is the subset of range(fmin,fmax+1)
-    to treat as no-data; ndeads is the full computed {fiber: ndead} dict
-    (fmin-context..fmax+context) for logging/diagnostics.
+    Status: ACTIVE (production default path).
     """
     lo = max(0, fmin - context)
     hi = min(499, fmax + context)
@@ -240,46 +310,40 @@ def find_masked_amp_fibers(psf, fmin, fmax, weight, ndead_threshold=8000, min_ru
 
 
 def build_trace_prior_hessian(n_fibers, ndeg, prior_deg, weight, fiber_flag=None):
-    """Port of C++'s trace-coefficient prior (specex_psf_fitter.cc:759-857,
-    gated there by trace_prior_deg>0, off by default and not enabled by real
-    DESI production -- see porting-notes.md's 2026-08-05 ndead investigation).
+    """Port of C++'s trace-coefficient prior (specex_psf_fitter.cc:759-857, gated there by trace_prior_deg>0, off by default and not enabled by real DESI production).
+
     For each wavelength-Legendre degree d >= prior_deg, C++ adds
     chi2 += weight*sum_i(c_i - mean_{j!=i}(c_j))**2 across the bundle's
-    fibers -- a soft constraint pulling each fiber's HIGH-order per-fiber
-    trace coefficients toward cross-fiber consensus, while leaving degrees
-    below prior_deg (and, implicitly, everything when this is off) fully
-    per-fiber independent. This is the mechanism C++ has, but doesn't use,
-    for damping a single noisy/dead-column fiber's high-order coefficients
-    under an otherwise fully-independent per-fiber trace basis (see
-    z5@20220408 bundle 6 fiber 163 and z2@20220314 bundle 9 fiber 238,
-    ndead=11829/2289 respectively, both driving their whole bundle's
-    regression alone under --trace-per-fiber-deg with no such damping).
+    fibers -- a soft constraint pulling each fiber's high-order per-fiber
+    trace coefficients toward cross-fiber consensus, leaving degrees below
+    prior_deg fully per-fiber independent. This is the mechanism C++ has, but
+    doesn't use, for damping a single noisy/dead-column fiber's high-order
+    coefficients under an otherwise fully-independent per-fiber trace basis.
 
-    fiber_flag (optional length-n_fibers 0/1 array): restricts the chi2 SUM
-    above to i in flagged fibers only -- unflagged fibers never get their
-    own residual/penalty term (no pull toward anything), though their
-    coefficients still appear inside a flagged fiber's own "mean of the
-    others" target. This matters because C++'s own literal prior, applied
-    to every fiber unconditionally (fiber_flag=None, i.e. all-ones), was
-    found to measurably HURT already-healthy bundles when tested here
-    (b1@20260401 bundle 0: xrms 0.0087->0.0152, yrms 0.0068->0.0136 at
-    C++'s weight=1e8) -- expected, since C++ never actually runs with this
-    prior on in production, so that weight was never tuned against real
-    per-fiber data. Gating activation by ndead (see fit()'s
-    SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD) makes this a no-op on the ~590/600
-    bundles that don't have a bad fiber, by construction.
+    Args:
+        n_fibers (int): number of fibers in the bundle.
+        ndeg (int): number of per-fiber wavelength-Legendre coefficients
+            (trace_per_fiber_deg + 1).
+        prior_deg (int): degree at/above which the prior applies.
+        weight (float): prior penalty weight.
+        fiber_flag (array-like or None): length-n_fibers 0/1 array restricting
+            the penalty to flagged fibers only (unflagged fibers contribute no
+            residual of their own, though their coefficients still appear in a
+            flagged fiber's "mean of the others" target); None applies to
+            every fiber (C++'s own literal, unconditional behavior, found here
+            to measurably hurt already-healthy bundles when applied blanket-
+            style).
 
-    Returns the (n_fibers*ndeg, n_fibers*ndeg) Hessian contribution H such
-    that, for a coefficient vector c flattened as c[fiber*ndeg+d] (matching
-    get_bundle_block_diagonal_trace_monomials' block.reshape layout), the
-    prior's Gauss-Newton contribution is A += H, B += -H @ c (see the
-    inline derivation at the fit() call site: this is J^T W J for a linear
-    "residual" r = -L_F @ c pulling toward L_F @ c = 0 where L_F is L with
-    only the flagged fibers' rows kept, i.e. flagged fibers' coefficients
-    get pulled toward the mean of the OTHER fibers' coefficients at that
-    degree, while unflagged fibers contribute no residual of their own
-    (L_F^T L_F = L @ diag(fiber_flag) @ L for symmetric L, since a 0/1
-    diagonal is idempotent)).
+    Returns:
+        jnp.ndarray: shape (n_fibers*ndeg, n_fibers*ndeg), the Gauss-Newton
+        Hessian contribution H, for a coefficient vector c flattened as
+        c[fiber*ndeg+d] (matching get_bundle_block_diagonal_trace_monomials'
+        layout) -- caller adds A += H, B += -H @ c.
+
+    Status: ACTIVE, but see note -- called from PSF_Fitter.fit() only when
+    trace_prior_deg is set (the production default, 1) alongside
+    trace_per_fiber_deg (also on by default); a genuine, validated production
+    mechanism, distinct from C++'s own same-named-but-unused feature.
     """
     import jax.numpy as jnp
     if n_fibers < 2:
@@ -299,6 +363,43 @@ def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
                         xc_init, yc_init, psf_monomials, trace_monomials, xpix, ypix,
                         sx_g, sy_g, idx_gg, degree,
                         tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data):
+    """Predict a bundle's total chi2 for a given (flux, psf_coeffs, trace_coeffs, continuum_coeffs) parameter set -- forward-model-only (no Jacobian/Hessian), used by the line-search step-size evaluation in PSF_Fitter.fit(). Module-level (not a closure) and jitted (see _predict_bundle_jax_jit) so it's cached purely by (shape, dtype) and reused across different bundles/cameras that share the same padded shapes.
+
+    Args:
+        flux (jnp.ndarray): shape (Ns,) per-spot flux.
+        psf_coeffs (jnp.ndarray): shape (n_gh_params, Npoly_psf) PSF-shape
+            polynomial coefficients.
+        trace_coeffs (jnp.ndarray): shape (2, Npoly_trace) trace-correction
+            coefficients (X, Y).
+        continuum_coeffs (jnp.ndarray): shape (Ncont,) continuum polynomial
+            coefficients.
+        xc_init, yc_init (jnp.ndarray): shape (Ns,) anchor spot centers.
+        psf_monomials (jnp.ndarray): shape (Ns, Npoly_psf) PSF-shape design
+            matrix.
+        trace_monomials (jnp.ndarray): shape (Ns, Npoly_trace) trace-correction
+            design matrix.
+        xpix, ypix (jnp.ndarray): shape (Np,) padded bundle-footprint pixel
+            coordinates.
+        sx_g, sy_g (jnp.ndarray): shape (Ns, stamp_area) per-spot stamp pixel
+            coordinates.
+        idx_gg (jnp.ndarray): shape (Ns, stamp_area) int, each stamp pixel's
+            flat index into the footprint (or Np, the padding sentinel, if
+            out of footprint).
+        degree (int): Gauss-Hermite expansion degree.
+        tx_g, tw_g (jnp.ndarray): shape (25, Np) per-fiber trace X-position and
+            wavelength at each footprint pixel's row, for the continuum model.
+        wmin_c, wmax_c (float): wavelength domain for the continuum's Legendre
+            basis.
+        image_data, weight_data (jnp.ndarray): shape (Np,) observed pixel
+            values/weights over the footprint.
+
+    Returns:
+        jnp.float: total weighted chi2 over the footprint.
+
+    Status: ACTIVE (production default path) -- called (as
+    _predict_bundle_jax_jit) once per line-search trial alpha in
+    PSF_Fitter.fit().
+    """
     import jax.numpy as jnp
     from jax import vmap
     from .math import legendre_pol_jnp
@@ -309,6 +410,18 @@ def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     xc_all, yc_all = xc_init + dx, yc_init + dy
     
     def spot_sig(i):
+        """Evaluate spot i's unit-flux (flux=1) PSF signature over its stamp, from the Gauss-Hermite basis decomposition (get_gh_basis) and this spot's fitted shape coefficients, vmapped by the caller over all Ns spots.
+
+        Args:
+            i (int): spot index.
+
+        Returns:
+            jnp.ndarray: shape (stamp_area,) unit-flux PSF value at each of the
+            spot's stamp pixels.
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        _predict_bundle_jax.
+        """
         Bx, By = GaussHermitePSF.get_gh_basis(xc_all[i], yc_all[i], sx_g[i], sy_g[i], gh_all[i], degree)
         psf_v = By[0] * Bx[0] 
         nx_p, ny_p = degree + 1, degree + 1; k = 2
@@ -339,6 +452,41 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
                                tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data,
                                gain, psf_error, wscale):
 
+    """Compute a bundle's chi2 plus the Gauss-Newton normal-equations system (A, B) for the joint (flux, PSF-shape, trace-correction, continuum) fit, in one jitted pass. This is the core per-iteration cost of PSF_Fitter.fit()'s optimization loop -- module-level and jitted (see _accumulate_bundle_jax_jit) for the same shape/dtype caching reasons as _predict_bundle_jax.
+
+    Builds the full per-spot per-pixel per-parameter Jacobian (b_jac, the
+    concatenation of flux/sigma-x/sigma-y/GH-shape/trace-x/trace-y partial
+    derivatives) via get_all_grads, then contracts it into the (Ntot, Ntot)
+    normal-equations matrix A and length-Ntot vector B (Ntot = Ns spots'
+    flux + Nsh shape/trace params + Ncont continuum params), using mixed
+    float32/float64 precision for the Jacobian terms by default (see
+    SPECEX_MIXED_PRECISION) to cut GPU memory. Deliberately drops C++'s
+    recompute_weight_in_fit Poisson/signal-dependent B-vector correction
+    (specex_psf_fitter.cc:670-673) -- that C++ code path is gated by a flag
+    that's hardcoded false and never set true anywhere in the C++ codebase,
+    i.e. structurally unreachable in the real reference implementation;
+    matching it here was found to be a real, if narrow, mismatch, and
+    disabling it measurably improved xrms/yrms on a 15-bundle sample.
+
+    Args:
+        flux, psf_coeffs, trace_coeffs, continuum_coeffs, xc_init, yc_init,
+            psf_monomials, trace_monomials, xpix, ypix, sx_g, sy_g, idx_gg,
+            degree, tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data: same
+            as _predict_bundle_jax's identically-named arguments.
+        gain (float): detector gain (currently unused in the accumulated
+            system -- see the recompute_weight_in_fit note above).
+        psf_error (float): PSF model error floor (currently unused, same
+            reason).
+        wscale (float): weight scale factor (currently unused, same reason;
+            always passed as 1.0).
+
+    Returns:
+        tuple[jnp.float, jnp.ndarray, jnp.ndarray]: (chi2, A, B) -- A shape
+        (Ns+Nsh+Ncont, Ns+Nsh+Ncont), B shape (Ns+Nsh+Ncont,).
+
+    Status: ACTIVE (production default path) -- called (as
+    _accumulate_bundle_jax_jit) once per PSF_Fitter.fit() iteration.
+    """
     import jax
     import jax.numpy as jnp
     from jax import vmap, lax
@@ -384,6 +532,23 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     idx_p = jnp.pad(idx_gg, ((0, n_pad), (0, 0)), constant_values=Np); mask_p = jnp.arange(batch_size) < Ns
 
     def get_all_grads(xi, yi, gi, si_x, si_y):
+        """Evaluate one spot's unit-flux PSF value plus its analytic partial derivatives (d/d-sigma_x, d/d-sigma_y, d/d-xc, d/d-yc, and each Gauss-Hermite shape coefficient) over its stamp, vmapped by the caller over all Ns spots to build the full per-spot Jacobian.
+
+        Args:
+            xi, yi (jnp.ndarray): shape (stamp_area,) spot center (broadcast).
+            gi (jnp.ndarray): shape (n_gh_params,) this spot's GH parameters.
+            si_x, si_y (jnp.ndarray): shape (stamp_area,) this spot's stamp pixel
+                coordinates.
+
+        Returns:
+            tuple of jnp.ndarray: (psf_v, basis_gh, dsigx, dsigy, dxc, dyc) --
+            psf_v/dsigx/dsigy/dxc/dyc each shape (stamp_area,); basis_gh shape
+            (stamp_area, n_gh_terms) (the raw GH basis products, i.e. d/d-GH_k of
+            psf_v for each term k).
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        _accumulate_bundle_jax.
+        """
         sigx = jnp.maximum(gi[0], 0.1); sigy = jnp.maximum(gi[1], 0.1)
         isx = 1.0 / sigx; isy = 1.0 / sigy
         x1 = (jnp.floor(si_x + 0.5) - xi - 0.5) * isx; x2 = (jnp.floor(si_x + 0.5) - xi + 0.5) * isx
@@ -402,6 +567,11 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
         H2_v = jnp.stack([hermite_pol_jnp(n, y2) for n in range(ny_p)], axis=0)
         
         def get_P(n, val, g1, g2, h1, h2, sig):
+            """Return the n-th order 1D Gauss-Hermite basis term (val for n==0, the implicit unit term; sig*(g1*h1[n-1] - g2*h2[n-1]) otherwise), vmapped by the caller over n. Same formula as psf.GaussHermitePSF.get_gh_basis's get_basis, duplicated here rather than shared.
+
+            Status: ACTIVE (production default path) -- internal helper closure of
+            get_all_grads.
+            """
             return jnp.where(n == 0, val, sig * (g1 * h1[n-1] - g2 * h2[n-1]))
         
         Bx = vmap(lambda n: get_P(n, ex, gx1, gx2, H1_u, H2_u, sigx))(jnp.arange(nx_p))
@@ -409,6 +579,11 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
         dexdsx = (x1 * gx1 - x2 * gx2); deydsy = (y1 * gy1 - y2 * gy2); dexdx = (gx1 - gx2); deydy = (gy1 - gy2)
         
         def get_dPds(n, g1, g2, h1, h2, x1, x2, val, dvalds, sig):
+            """Analytic derivative of get_P's n-th order basis term with respect to the Gaussian sigma parameter, vmapped by the caller over n.
+
+            Status: ACTIVE (production default path) -- internal helper closure of
+            get_all_grads.
+            """
             h1_m1 = h1[jnp.maximum(n-1, 0)]; h2_m1 = h2[jnp.maximum(n-1, 0)]
             h1_m2 = h1[jnp.maximum(n-2, 0)]; h2_m2 = h2[jnp.maximum(n-2, 0)]
             t1 = sig * g1 * h1_m1; t2 = sig * g2 * h2_m1
@@ -417,6 +592,11 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
             return jnp.where(n == 0, dvalds, res)
 
         def get_dPdx(n, g1, g2, h1, h2, x1, x2, val, dvaldx, sig):
+            """Analytic derivative of get_P's n-th order basis term with respect to the spot center position, vmapped by the caller over n.
+
+            Status: ACTIVE (production default path) -- internal helper closure of
+            get_all_grads.
+            """
             h1_m1 = h1[jnp.maximum(n-1, 0)]; h2_m1 = h2[jnp.maximum(n-1, 0)]
             h1_m2 = h1[jnp.maximum(n-2, 0)]; h2_m2 = h2[jnp.maximum(n-2, 0)]
             t1 = sig * g1 * h1_m1; t2 = sig * g2 * h2_m1
@@ -524,6 +704,20 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
 _accumulate_bundle_jax_jit = jit(_accumulate_bundle_jax, static_argnums=(13, 20, 21, 22))
 
 def apply_dead_column_mask(psf, fiber_min, fiber_max, weight):
+    """Broaden zero-weight ("dead") pixels near each fiber's trace center into a +/-4-column band, so a spot's fit stamp doesn't rely on a thin, off-nominal dead-column region right at the trace's own centerline. A genuinely different mechanism from filter_dead_column_spots: this one mutates a copy of the weight array (affecting every spot whose stamp overlaps a broadened region); that one leaves weight untouched and makes a binary per-spot keep/drop decision on the RAW (unbroadened) weight -- so filter_dead_column_spots must run first, on the original array, before this function's output is used.
+
+    Args:
+        psf (psf.PSF): the PSF object (supplies per-fiber trace geometry).
+        fiber_min, fiber_max (int): inclusive fiber range to process.
+        weight (np.ndarray): inverse-variance weight image, [x, y]-indexed.
+
+    Returns:
+        np.ndarray: a new weight array (copy of the input) with dead columns
+        broadened to +/-4 pixels around each affected fiber's trace center.
+
+    Status: ACTIVE (production default path) -- called unconditionally at the
+    top of PSF_Fitter.fit().
+    """
     nx, ny = weight.shape
     w_new = weight.copy(); rows_j = np.arange(ny).astype(float)
     for fib in range(fiber_min, fiber_max + 1):
@@ -575,6 +769,26 @@ def filter_dead_column_spots(spots, weight):
     return kept
 
 def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
+    """Compute the set of CCD pixels ("footprint") any of a bundle's selected spots' stamps overlap, restricted to the bundle's own trace envelope and (if given) to positive-weight pixels -- the pixel domain the joint fit's chi2/Jacobian are actually evaluated over.
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        spots (list[dict]): selected spots, each with 'stamp_imin'/'stamp_imax'/
+            'stamp_jmin'/'stamp_jmax' keys (set by _finalize_selected or
+            specex.fit_bundle_task's --force-spots path).
+        fiber_min, fiber_max (int): the bundle's own fixed fiber range (not
+            necessarily min/max over `spots`), used to build the fiber-x_ccd
+            trace envelope that clips the union of per-spot stamps.
+        weight (np.ndarray or None): inverse-variance weight image,
+            [x, y]-indexed; if given, zero-weight pixels are excluded.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, dict]: (fi, fj, pix_idx) -- fi/fj are the
+        footprint pixels' X/Y coordinates (sorted, row-major by X then Y);
+        pix_idx maps (x, y) -> flat index into fi/fj.
+
+    Status: ACTIVE (production default path).
+    """
     t0 = time.time(); nx, ny = (4114, 4128)
     if weight is not None: nx, ny = weight.shape
     rows_j = np.arange(ny).astype(float)
@@ -601,14 +815,36 @@ def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
 def select_spots_cpp(fibers, waves, snrs, xc, yc, image_shape,
                       sn_threshold, min_wave_dist, max_number_of_lines,
                       min_dwave=5.0, max_dwave=300.0):
-    """
-    Pure spot-selection logic mirroring C++ PSF_Fitter::select_spots
-    (src/specex_psf_fitter.cc:1976-2249). Operates on parallel arrays of
-    already-fit candidate stats and performs no fitting itself, so it can
-    be called repeatedly with different thresholds as the fit iterates
-    (matching FitEverything's multi-pass selection).
+    """Pure spot-selection logic mirroring C++ PSF_Fitter::select_spots (src/specex_psf_fitter.cc:1976-2249). Operates on parallel arrays of already-fit candidate stats and performs no fitting itself, so it can be called repeatedly with different thresholds as the fit iterates (matching FitEverything's multi-pass selection).
 
-    Returns a 0/1 status array over the candidates.
+    First pass: keep candidates passing the S/N threshold, in image bounds,
+    and (if min_wave_dist > 0) at least that far in wavelength from their
+    nearest same-fiber selected neighbor. Second pass (only if
+    max_number_of_lines > 0): coverage-limited line pruning -- bins candidates
+    by (truncated) wavelength, then iteratively drops the lowest-S/N lines
+    (without opening a gap wider than max_dwave) until at most
+    max_number_of_lines "full-coverage" lines remain, then brings back any
+    line within min_dwave of a kept one.
+
+    Args:
+        fibers, waves, snrs, xc, yc (array-like): parallel per-candidate
+            arrays -- fiber index, wavelength, S/N, and CCD position.
+        image_shape (tuple[int, int]): (nx, ny) CCD dimensions for the
+            in-bounds check.
+        sn_threshold (float): minimum S/N to pass the first-pass cut.
+        min_wave_dist (float): minimum wavelength separation (Angstrom) from
+            the nearest same-fiber selected neighbor; 0 disables this check.
+        max_number_of_lines (int): cap on distinct wavelength lines kept after
+            the second pass; <=0 skips the second pass entirely.
+        min_dwave (float): wavelength window (Angstrom) within which a pruned
+            line is brought back if a neighbor stays selected.
+        max_dwave (float): maximum allowed gap (Angstrom) between selected
+            lines; a candidate removal that would exceed this is skipped.
+
+    Returns:
+        np.ndarray: shape (Ns,) int, 0/1 status per candidate (1 = selected).
+
+    Status: ACTIVE (production default path).
     """
     fibers = np.asarray(fibers); waves = np.asarray(waves); snrs = np.asarray(snrs)
     xc = np.asarray(xc); yc = np.asarray(yc)
@@ -717,10 +953,28 @@ def select_spots_cpp(fibers, waves, snrs, xc, yc, image_shape,
     return status
 
 def generate_bundle_candidates(psf, fiber_min, fiber_max, lamp_lines, image_shape, broken_fibers=None):
-    """
-    Build the raw spot-candidate list for a bundle from the lamp line list and
-    the current trace model, mirroring the candidate list C++ builds before
-    any fitting (fiber x wavelength grid, filtered to fall on the CCD).
+    """Build the raw spot-candidate list for a bundle from the lamp line list and the current trace model, mirroring the candidate list C++ builds before any fitting (fiber x wavelength grid, filtered to fall on the CCD).
+
+    Rejects any line-list entry outside a fiber's own trace's fitted
+    wavelength domain before ever evaluating a CCD position for it (port of
+    C++'s wavelength-domain gate, specex_lamp_lines_utils.cc:65-72) -- without
+    this, psf.x_ccd/y_ccd would happily extrapolate a plausible-looking
+    position for a wavelength far outside where the trace was ever actually
+    calibrated, corrupting the per-fiber trace fit for real out-of-band lines
+    in the line list.
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        fiber_min, fiber_max (int): inclusive bundle fiber range.
+        lamp_lines (list[dict]): lamp line list, each with 'wave'/'score' keys
+            (see io.read_lamp_lines).
+        image_shape (tuple[int, int]): (nx, ny) CCD dimensions.
+        broken_fibers (str, list[int], or None): fibers to exclude entirely.
+
+    Returns:
+        list[dict]: candidate spots, each {'fiber', 'wave', 'xc_init', 'yc_init'}.
+
+    Status: ACTIVE (production default path).
     """
     lines_sc = [l for l in lamp_lines if 1 <= l.get('score', 1) <= 4]
     broken_list = []
@@ -761,12 +1015,19 @@ def generate_bundle_candidates(psf, fiber_min, fiber_max, lamp_lines, image_shap
 
 
 def fit_candidate_fluxes(psf, candidates, image, weight):
-    """
-    Individual-spot flux fit for every candidate, holding position fixed
-    (mirrors C++ FitIndividualSpotFluxes: fit_flux=true, fit_position=false).
-    Uses the housekeeping-phase stamp cap hSizeX/Y=min(3, ...)
-    (specex_psf_fitter.cc:2500-2501). Updates each candidate dict in place
-    with flux/eflux/snr/chi2 and returns the parallel numpy arrays.
+    """Individual-spot flux fit for every candidate, holding position fixed (mirrors C++ FitIndividualSpotFluxes: fit_flux=true, fit_position=false). Uses the housekeeping-phase stamp cap hSizeX/Y=min(3, ...) (specex_psf_fitter.cc:2500-2501). Updates each candidate dict in place with flux/eflux/snr/chi2 and returns the parallel numpy arrays.
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        candidates (list[dict]): candidate spots with 'fiber'/'wave'/'xc_init'/
+            'yc_init' keys; mutated in place.
+        image, weight (np.ndarray): CCD image/weight arrays, [x, y]-indexed.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: (fluxes,
+        efluxes, snrs, chi2s), one entry per candidate.
+
+    Status: ACTIVE (production default path).
     """
     import jax.numpy as jnp
     c_xc = jnp.array([s['xc_init'] for s in candidates]); c_yc = jnp.array([s['yc_init'] for s in candidates])
@@ -782,6 +1043,21 @@ def fit_candidate_fluxes(psf, candidates, image, weight):
 
 
 def _finalize_selected(psf, candidates, status):
+    """Filter candidates to those with keep==1 in status, and compute each surviving spot's fixed-size fit stamp bounds (stamp_imin/imax/jmin/jmax, from xc_init/yc_init and the PSF's h_size_x/y).
+
+    Args:
+        psf (psf.PSF): the PSF object (supplies h_size_x/h_size_y).
+        candidates (list[dict]): candidate spots with 'xc_init'/'yc_init' keys;
+            entries kept are mutated in place with stamp bounds added.
+        status (array-like): parallel 0/1 keep flags, same order as
+            candidates (see select_spots_cpp).
+
+    Returns:
+        list[dict]: the kept candidate dicts (same objects, now with stamp
+        bounds set).
+
+    Status: ACTIVE (production default path).
+    """
     selected = []
     for s, keep in zip(candidates, status):
         if keep:
@@ -795,16 +1071,38 @@ def _finalize_selected(psf, candidates, status):
 
 def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, weight, bundle_id,
                                    broken_fibers=None, max_number_of_lines=200, wdeg=3, fit_continuum=True):
-    """
-    Mirrors the housekeeping/selection phase of C++ FitEverything
-    (specex_psf_fitter.cc:2493-2783): repeatedly fits individual candidate
-    fluxes and reselects from the *full* raw candidate list, interleaved
-    with a trace-only warm-up fit that updates every candidate's xc/yc from
-    the fitted trace model, before a final loose-threshold selection pass.
+    """Mirrors the housekeeping/selection phase of C++ FitEverything (specex_psf_fitter.cc:2493-2783): repeatedly fits individual candidate fluxes and reselects from the *full* raw candidate list, interleaved with a trace-only warm-up fit that updates every candidate's xc/yc from the fitted trace model, before a final loose-threshold selection pass.
 
-    min_snr_non_linear_terms=5, min_wave_dist_non_linear_terms=4A ("strict")
-    and min_snr_linear_terms=3, min_wave_dist_linear_terms=0 ("loose") match
-    the C++ constants of the same name.
+    Sequence: strict select (pass1) -> up to 5 trace warm-up iterations (each:
+    strict select, a 5-iteration flux+trace-only PSF_Fitter.fit(), snap every
+    candidate's xc/yc to the new trace, stop once the max centroid shift is
+    < 0.5px) -> one more strict select (pass3) -> a final loose-threshold
+    select (min_snr_linear_terms=3, min_wave_dist=0), the list handed to the
+    real joint PSF+FLUX fit. "Strict" uses min_snr_non_linear_terms=5,
+    min_wave_dist_non_linear_terms=4A; both sets of constants match C++'s own
+    same-named constants. If debug_spots is set on `psf`, writes per-pass
+    `.pyrawspots*.txt`/`.pyspots_pass*.txt` dump files alongside
+    `psf.output_psf_path`.
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        fiber_min, fiber_max (int): inclusive bundle fiber range.
+        lamp_lines (list[dict]): lamp line list.
+        image, weight (np.ndarray): CCD image/weight arrays, [x, y]-indexed.
+        bundle_id (int): bundle index (passed through to the trace warm-up
+            fits).
+        broken_fibers (str, list[int], or None): fibers to exclude.
+        max_number_of_lines (int): cap on lines kept per selection pass.
+        wdeg (int): PSF-shape wavelength Legendre degree, used by the
+            trace-warm-up fits.
+        fit_continuum (bool): whether the trace-warm-up fits include a
+            continuum term.
+
+    Returns:
+        list[dict]: final selected spots, each with stamp bounds set (see
+        _finalize_selected), ready for the real joint fit.
+
+    Status: ACTIVE (production default path).
     """
     t0 = time.time()
     nx, ny = image.shape
@@ -817,6 +1115,14 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
     waves_arr = np.array([s['wave'] for s in candidates])
 
     def strict_select():
+        """Run one strict-threshold (S/N>=5, min_wave_dist=4A) select pass: refit every candidate's flux, then call select_spots_cpp.
+
+        Returns:
+            np.ndarray: shape (Ns,) 0/1 status per candidate.
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        select_bundle_spots_iterative.
+        """
         fluxes, efluxes, snrs, chi2s = fit_candidate_fluxes(psf, candidates, image, weight)
         xc = np.array([s['xc_init'] for s in candidates]); yc = np.array([s['yc_init'] for s in candidates])
         status = select_spots_cpp(fibers_arr, waves_arr, snrs, xc, yc, (nx, ny),
@@ -827,6 +1133,17 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
         raw_path = psf.output_psf_path.replace('.fits', '.pyrawspots.txt')
 
     def write_pass_checkpoint(status, pass_name):
+        """If psf.debug_spots is set, write the currently-selected candidates' fiber/wave/position to a per-pass debug dump file (`.pyspots_<pass_name>.txt`) alongside psf.output_psf_path. No-op otherwise.
+
+        Args:
+            status (array-like): 0/1 keep flags, same order as the enclosing
+                scope's `candidates`.
+            pass_name (str): suffix identifying this pass (e.g. 'pass1', 'pass2').
+
+        Status: ACTIVE, but see note -- only has an effect when --debug-spots is
+        passed (off by default); internal helper closure of
+        select_bundle_spots_iterative.
+        """
         if not (getattr(psf, 'debug_spots', False) and hasattr(psf, 'output_psf_path') and psf.output_psf_path):
             return
         path = psf.output_psf_path.replace('.fits', f'.pyspots_{pass_name}.txt')
@@ -907,10 +1224,33 @@ def select_bundle_spots_iterative(psf, fiber_min, fiber_max, lamp_lines, image, 
 def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=None,
                        sn_threshold=3.0, min_dist_angstrom=0.0, wave_min=None, wave_max=None,
                        broken_fibers=None, max_number_of_lines=100, provided_candidates=None):
-    """
-    Single-pass candidate generation + selection (no trace warm-up / re-fit
-    loop). Kept as a lighter-weight building block; prefer
-    select_bundle_spots_iterative for full C++ FitEverything parity.
+    """Single-pass candidate generation + selection (no trace warm-up / re-fit loop). Kept as a lighter-weight building block; prefer select_bundle_spots_iterative for full C++ FitEverything parity.
+
+    Args:
+        psf (psf.PSF): the PSF object.
+        fiber_min, fiber_max (int): inclusive bundle fiber range.
+        lamp_lines (list[dict]): lamp line list.
+        image, weight (np.ndarray or None): CCD image/weight; if image is
+            None, candidates are generated but not flux-fit/selected (raw
+            candidate list is returned as-is).
+        sn_threshold (float): S/N threshold for selection.
+        min_dist_angstrom (float): minimum wavelength separation for
+            selection.
+        wave_min, wave_max: accepted but unused.
+        broken_fibers (str, list[int], or None): fibers to exclude.
+        max_number_of_lines (int): cap on lines kept.
+        provided_candidates (list[dict] or None): skip candidate generation
+            and use this list instead.
+
+    Returns:
+        list[dict]: selected spots (with stamp bounds set) if `image` was
+        given, else the raw candidate list.
+
+    Status: ACTIVE, but see note -- specex.fit_bundle_task (the production
+    CLI/CCD-fit path) uses select_bundle_spots_iterative instead, not this
+    function. get_bundle_spots itself is real, actively-used code, though: it's
+    the spot-selection call used throughout testing/*.py's comparison/parity
+    scripts, including the maintained testing/validate_all_modes.py.
     """
     t0 = time.time()
     nx, ny = (4114, 4128)
@@ -961,6 +1301,25 @@ def get_bundle_spots(psf, fiber_min, fiber_max, lamp_lines, image=None, weight=N
 
 
 def _fit_one_spot_jax(image, weight, xc, yc, gh, degree, hsize_x, hsize_y):
+    """Closed-form flux/S/N fit for a single spot (position held fixed), the single-spot precursor to the batched _fit_all_spots_batch.
+
+    Args:
+        image, weight (jnp.ndarray): CCD image/weight arrays, [x, y]-indexed.
+        xc, yc (float): spot center.
+        gh (jnp.ndarray): this spot's Gauss-Hermite parameters.
+        degree (int): Gauss-Hermite expansion degree.
+        hsize_x, hsize_y (int): fit stamp half-sizes.
+
+    Returns:
+        tuple[float, float]: (flux_est, A) -- fitted flux and the closed-form
+        normal-equations coefficient A = sum(w*p^2).
+
+    Status: DEAD -- no callers anywhere in the active package (only its own
+    def, plus identically-named copies in the already-abandoned
+    fitter_old.py/fitter_old_gpt.py drafts); superseded by the batched
+    _fit_all_spots_batch/_get_spot_stats_jax, which every real caller
+    (fit_candidate_fluxes) uses instead.
+    """
     import jax.numpy as jnp
     from jax import jit
     nx, ny = image.shape
@@ -970,6 +1329,10 @@ def _fit_one_spot_jax(image, weight, xc, yc, gh, degree, hsize_x, hsize_y):
     def fit_loop(flux, x_shift, y_shift):
         # Simple 3-parameter fit (flux, dx, dy) for selection purposes
         # This mimics C++ FitOneSpot's initial phase
+        """Compute the closed-form (flux, A) fit for this spot over its stamp, given a trial (flux, x_shift, y_shift) -- only ever called with all-zero shifts by the enclosing (dead) function.
+
+        Status: DEAD -- internal helper closure of the dead _fit_one_spot_jax.
+        """
         im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int)
         gix = im + dx + x_shift; giy = jm + dy + y_shift
         valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
@@ -987,13 +1350,22 @@ def _fit_one_spot_jax(image, weight, xc, yc, gh, degree, hsize_x, hsize_y):
     return jit(fit_loop)(0.0, 0.0, 0.0)
 
 def _fit_all_spots_batch(cand_xc, cand_yc, gh_params, image, weight, hsize_x, hsize_y, degree):
-    """Per-candidate closed-form flux/S/N fit (position held fixed, mirrors
-    C++ FitIndividualSpotFluxes), vmapped over the candidate batch. `image`/
-    `weight` are real traced arguments (not closures) so this module-level
-    jitted function is cached purely by (shape, dtype), same as
-    _accumulate_bundle_jax_jit/_predict_bundle_jax_jit -- letting it be
-    reused across different cameras/exposures that share the same CCD shape,
-    not just repeated calls with the identical image object.
+    """Per-candidate closed-form flux/S/N fit (position held fixed, mirrors C++ FitIndividualSpotFluxes), vmapped over the candidate batch. `image`/`weight` are real traced arguments (not closures) so this module-level jitted function is cached purely by (shape, dtype), same as _accumulate_bundle_jax_jit/_predict_bundle_jax_jit -- letting it be reused across different cameras/exposures that share the same CCD shape, not just repeated calls with the identical image object.
+
+    Args:
+        cand_xc, cand_yc (jnp.ndarray): shape (Ns,) candidate centers.
+        gh_params (jnp.ndarray): shape (Ns, n_gh_params) per-candidate GH
+            parameters.
+        image, weight (jnp.ndarray): CCD image/weight arrays, [x, y]-indexed.
+        hsize_x, hsize_y (int): fit stamp half-sizes.
+        degree (int): Gauss-Hermite expansion degree.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]: (flux, snr,
+        chi2, eflux), each shape (Ns,).
+
+    Status: ACTIVE (production default path) -- called (as
+    _fit_all_spots_batch_jit, via _get_spot_stats_jax) by fit_candidate_fluxes.
     """
     import jax.numpy as jnp
     from jax import vmap
@@ -1002,6 +1374,18 @@ def _fit_all_spots_batch(cand_xc, cand_yc, gh_params, image, weight, hsize_x, hs
     dx = ix_rel.flatten() - hsize_x; dy = iy_rel.flatten() - hsize_y
 
     def fit_spot(xc, yc, gh):
+        """Closed-form flux fit for one candidate over its stamp: A = sum(w*p^2), B = sum(w*d*p), flux = B/A, eflux = 1/sqrt(A) (C++-parity inverse-Hessian-diagonal formula), snr = flux/eflux, chi2 of the flux-only model -- vmapped by the caller over the whole candidate batch.
+
+        Args:
+            xc, yc (float): candidate center.
+            gh (jnp.ndarray): this candidate's Gauss-Hermite parameters.
+
+        Returns:
+            tuple[float, float, float, float]: (flux, snr, chi2, eflux).
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        _fit_all_spots_batch.
+        """
         im = jnp.floor(xc + 0.5).astype(int); jm = jnp.floor(yc + 0.5).astype(int)
         gix = im + dx; giy = jm + dy
         valid = (gix >= 0) & (gix < nx) & (giy >= 0) & (giy < ny)
@@ -1027,6 +1411,23 @@ from jax import jit as _jit
 _fit_all_spots_batch_jit = _jit(_fit_all_spots_batch, static_argnums=(5, 6, 7))
 
 def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsize_x, hsize_y):
+    """Wrapper around _fit_all_spots_batch_jit that pads the candidate batch up to a power-of-2 bucket (next_pow2_bucket) before the jitted call, so JAX reuses one compiled shape across bundles/cameras instead of recompiling for every distinct raw-candidate count, then slices the real (unpadded) results back off. Padding is safe by construction: fit_spot is vmapped, so each padding row is fit fully independently and cannot influence any real candidate's result.
+
+    Args:
+        image, weight (jnp.ndarray): CCD image/weight arrays, [x, y]-indexed.
+        cand_xc, cand_yc (jnp.ndarray): shape (Ns_real,) candidate centers.
+        gh_params (jnp.ndarray): shape (Ns_real, n_gh_params) per-candidate GH
+            parameters.
+        degree (int): Gauss-Hermite expansion degree.
+        hsize_x, hsize_y (int): fit stamp half-sizes.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]: (flux, snr,
+        chi2, eflux), each shape (Ns_real,) -- padding already removed.
+
+    Status: ACTIVE (production default path) -- called by fit_candidate_fluxes
+    and specex.fit_bundle_task's --force-spots path.
+    """
     import jax.numpy as jnp
     # Pad the candidate batch to a power-of-2 bucket so JAX reuses one
     # compiled shape across bundles/cameras instead of recompiling for every
@@ -1048,7 +1449,23 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
 
 
 class PSF_Fitter:
+    """The joint bundle fitter: given a set of selected spots and a PSF object, iteratively solves for per-spot flux, PSF-shape (Gauss-Hermite) coefficients, trace-position correction, and continuum coefficients via a staged Gauss-Newton optimization (see fit()).
+
+    Status: ACTIVE (production default path) -- the core fit engine, used both
+    for the real per-bundle joint fit (specex.fit_bundle_task) and internally
+    by select_bundle_spots_iterative's trace warm-up loop.
+    """
     def __init__(self, psf):
+        """Args:
+            psf (psf.PSF): the PSF object this fitter operates on (trace/shape
+                models are read from and written back into it via the caller's use
+                of fit()'s returned coefficients, not mutated by __init__ itself).
+
+        Status: ACTIVE (production default path). Also reads the diagnostic
+        SPECEX_CHI2_PRECISION_OVERRIDE env var (default 0.01, C++'s own equivalent
+        per-stage threshold is 0.1) -- an opt-in override never yet empirically
+        swept, not a production knob.
+        """
         self.psf = psf
         # EXPERIMENT (SPECEX_CHI2_PRECISION_OVERRIDE): C++'s equivalent
         # per-stage convergence threshold is a looser 0.1 (specex_psf_fitter.cc:
@@ -1058,6 +1475,74 @@ class PSF_Fitter:
         # diff.txt section 1f). Opt-in override for that sweep.
         self.chi2_precision = float(os.environ.get("SPECEX_CHI2_PRECISION_OVERRIDE", 0.01))
     def fit(self, image, weight, spots, bundle_id, fit_type='full', max_iter=20, wdeg=3, fit_continuum=True, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, line_search='grid', trace_prior_deg=None):
+        """Run the staged joint (flux, PSF-shape, trace-correction, continuum) Gauss-Newton fit for one bundle, mirroring C++ FitEverything's PSF-fitting stage (specex_psf_fitter.cc).
+
+        Stages advance flux -> trace -> sigma -> full: 'flux' (2 iterations) fits
+        only per-spot flux + continuum; 'trace' (3 iterations, or up to
+        SPECEX_TRACE_MAX_ITERS_OVERRIDE/20 with convergence-based early exit when
+        trace_per_fiber_deg is set) additionally fits the trace-correction
+        coefficients; 'sigma' (3 iterations) additionally fits GHSIGX/GHSIGY (and,
+        if SPECEX_FREEZE_GH10 is set, GH-1-0); 'full' fits every remaining
+        GH-shape coefficient, with trace and the sigma/GH-1-0 rows now frozen
+        (matches C++'s structural separation -- it never solves trace and PSF
+        shape jointly). Each iteration computes the normal-equations system via
+        _accumulate_bundle_jax_jit, solves a diagonally-preconditioned regularized
+        linear system for the active parameter subset, applies a per-iteration
+        line search (line_search: 'grid' 3-point default, or the experimental
+        'brent'/'cpp' alternatives) to pick a step size, and tracks the best chi2
+        state seen. Several SPECEX_* environment variables gate additional
+        off-by-default diagnostic/experimental behavior within this method (dead-
+        column spot filtering, trace-prior activation/weight, debug memory/alpha/
+        matrix dumps, flux clamping) -- see the inline `# EXPERIMENT (...)`
+        comments at each site; none change behavior unless explicitly set.
+
+        Args:
+            image, weight (np.ndarray): CCD image/weight arrays, [x, y]-indexed.
+            spots (list[dict]): selected spots (from select_bundle_spots_iterative
+                or a --force-spots list), each with 'fiber'/'wave'/'xc_init'/
+                'yc_init'/'flux'/stamp-bounds keys.
+            bundle_id (int): bundle index (looks up self.psf.params_of_bundles).
+            fit_type (str): accepted but unused.
+            max_iter (int): maximum outer iterations across all stages.
+            wdeg (int): PSF-shape wavelength Legendre degree.
+            fit_continuum (bool): whether to fit continuum coefficients (if False,
+                they're held at zero).
+            trace_wdeg, trace_wdeg_x, trace_wdeg_y (int or None): trace-correction
+                wavelength degree, shared or per-axis; each defaults down to wdeg
+                if unset (see porting-notes.md's r2@20250109 investigation for why
+                trace and PSF-shape degrees are decoupled).
+            trace_per_fiber_deg (int or None): if set, use a block-diagonal-by-
+                fiber trace basis at this degree instead of the shared
+                trace_wdeg_x/y basis.
+            line_search (str): 'grid' (default), 'brent', or 'cpp'.
+            trace_prior_deg (int or None): degree at/above which per-fiber trace
+                coefficients (only meaningful with trace_per_fiber_deg set) are
+                pulled toward cross-fiber consensus; falls back to the
+                SPECEX_TRACE_PRIOR_DEG env var if None.
+
+        Returns:
+            tuple: (chi2, pc, tc, cc, flux, xc_final, yc_final, spots) -- chi2
+            (float, best chi2 seen); pc (np.ndarray, shape (n_gh_params, Npoly_psf),
+            PSF-shape coefficients); tc (np.ndarray, shape (2, Npoly_trace),
+            trace-correction coefficients); cc (np.ndarray, shape (Ncont,),
+            continuum coefficients); flux (np.ndarray, shape (Ns,), final per-spot
+            flux); xc_final/yc_final (np.ndarray, shape (Ns,), final spot
+            centers); spots (the input `spots` list, possibly SHORTER than given
+            if SPECEX_MATCH_CPP_DEAD_COLUMN dropped any -- callers must use this
+            returned list, not their own original one, for anything indexed
+            against xc_final/yc_final).
+
+        Status: ACTIVE (production default path). Contains two internal
+        EXPERIMENTAL/DIAGNOSTIC branches that are NOT the default: line_search
+        'brent'/'cpp' (default is 'grid'), and several off-by-default SPECEX_*
+        env-var-gated blocks (SPECEX_MATCH_CPP_DEAD_COLUMN, SPECEX_TRACE_PRIOR_DEG/
+        _WEIGHT/_NDEAD_THRESHOLD are exceptions -- these ARE active, on-by-default
+        production plumbing for the real --trace-prior-* CLI flags; see
+        SPECEX_CHI2_PRECISION_OVERRIDE, SPECEX_DEBUG_MEM, SPECEX_DEBUG_DUMP_A,
+        SPECEX_DEBUG_ALPHA, SPECEX_FREEZE_GH10, SPECEX_MATCH_CPP_FLUX_CLAMP,
+        SPECEX_TRACE_MAX_ITERS_OVERRIDE for the genuinely off-by-default,
+        undocumented-in-CLI diagnostic knobs).
+        """
         import jax.numpy as jnp
         print(f"Starting HIGH-PERFORMANCE OPTIMIZED fit for bundle {bundle_id}...")
         # EXPERIMENT (SPECEX_TRACE_PRIOR_DEG / SPECEX_TRACE_PRIOR_WEIGHT):
@@ -1462,6 +1947,17 @@ class PSF_Fitter:
             best_alpha, ls_chi2 = 0.0, float(chi2)
             if jnp.any(d_p != 0):
                 def _ls_chi2_at(alpha):
+                    """Evaluate the bundle's chi2 if the current Newton step d_p were applied scaled by `alpha`, without mutating any of the enclosing fit() call's real state -- used by every line_search mode to pick a step size.
+
+                    Args:
+                        alpha (float): trial step-size scale factor.
+
+                    Returns:
+                        float: chi2 at the trial (flux, pc, tc, cc) implied by this alpha.
+
+                    Status: ACTIVE (production default path) -- internal helper closure of
+                    PSF_Fitter.fit().
+                    """
                     f_try = flux + alpha * d_p[:Ns_l]
                     if clamp_flux: f_try = jnp.maximum(f_try, 0.0)
                     p_try = pc + alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); t_try = tc + alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); c_try = cc + alpha * d_p[-Ncont:]

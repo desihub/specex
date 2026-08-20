@@ -10,8 +10,22 @@ from .fitter import PSF_Fitter, get_bundle_spots, select_bundle_spots_iterative
 # --- Original C++ Wrapper (for baseline and legacy tools) ---
 
 def run_specex(com):
-    """
-    Original C++ wrapper. This allows desi_psf_fit to run using the C++ core.
+    """Run the original compiled C++ specex engine via the pybind11 `_libspecex` extension, driving it exactly like the C++ `desi_psf_fit` CLI would from a list of argument strings.
+
+    Args:
+        com (list[str]): CLI-style argument strings for the C++ `desi_psf_fit`
+            binary (e.g. ``['-a', arc_path, '--in-psf', in_psf_path, ...]``),
+            parsed by the C++ extension's own `PyOptions.parse()`.
+
+    Returns:
+        int: the C++ fitter's return code (0 = success), as returned by
+        `PyFitting.fit_psf()`. If `PyOptions.parse()` itself fails, that
+        nonzero return code is returned directly instead.
+
+    Status: LEGACY -- thin wrapper around the compiled C++ extension, used only
+    by old one-off comparison scripts (testing/example_specex.py,
+    testing/full_analysis.py), not the production Python/JAX pipeline
+    (fit_bundle_task/fit_ccd_native/main below).
     """
     from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
     from .io import read_psf, write_psf
@@ -55,8 +69,84 @@ def run_specex(com):
 
 # --- New High-Performance Python/JAX Driver ---
 def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000):
-    """
-    Isolated task for fitting a single bundle.
+    """Fit one 25-fiber bundle in an isolated worker process: run spot selection, the joint PSF/trace fit, and return the per-bundle results dict that fit_ccd_native merges into the final output PSF.
+
+    Runs as the target of a `multiprocessing` (spawn-context) worker, so it is
+    also responsible for all GPU/CPU backend isolation (CUDA_VISIBLE_DEVICES,
+    JAX platform config, persistent JIT-compilation cache, thread limits)
+    itself -- JAX must be configured before its own first import, which
+    happens fresh in every spawned process.
+
+    Args:
+        bid (int): bundle index (0-19); this bundle's fiber range is
+            [bid*25, bid*25+24].
+        gpu_id (int): GPU index (within CUDA_VISIBLE_DEVICES if the parent
+            already restricted it, else global) this worker pins itself to
+            when backend="gpu".
+        arc_file (str): path to the preprocessed arc image FITS file.
+        in_psf_file (str): path to the input (shifted) PSF FITS file supplying
+            starting-guess trace/PSF-shape coefficients.
+        out_psf_file (str): path the final merged CCD PSF will eventually be
+            written to; used here only to derive this bundle's own per-bundle
+            checkpoint/debug filenames (e.g. `_bundle05.fits`), never written
+            to directly by this function.
+        lamp_lines_file (str): path to the lamp line list used for spot
+            candidate generation.
+        backend (str): "gpu" or "cpu"; selects the JAX backend and the
+            corresponding isolation strategy.
+        broken_fibers (str or None): comma-separated fiber IDs to exclude from
+            the fit entirely (propagated from the input PSF unchanged).
+        sn_threshold (float): S/N threshold for spot selection.
+        h_size_y (int or None): override for the PSF stamp half-size in Y;
+            None keeps the input PSF's own value.
+        stagger_s (float): seconds to sleep before starting, used to stagger
+            concurrent CPU-backend workers and reduce JIT-compilation
+            contention.
+        force_spots_path (str or None): path to a fixed `fiber,wave,xc,yc`
+            spot list to fit instead of running spot selection.
+        max_number_of_lines (int): cap on lines kept per bundle during spot
+            selection.
+        raw_spots_path: unused -- accepted for signature compatibility but
+            never referenced in the function body.
+        wdeg (int): Legendre wavelength degree for the PSF-shape correction.
+        fit_continuum (bool): whether to fit a per-bundle continuum
+            background.
+        double_precision (bool): force full float64 for the joint-fit
+            Jacobian (default mixed float32/float64 if False).
+        trace_wdeg, trace_wdeg_x, trace_wdeg_y (int or None): trace-position
+            wavelength degree, shared or per-axis; trace_wdeg_x/y each
+            default to trace_wdeg, which itself defaults to wdeg.
+        trace_per_fiber_deg (int or None): if set, use a block-diagonal-by-
+            fiber trace basis at this degree instead of the shared
+            trace_wdeg_x/y basis.
+        cpu_threads_per_worker (int or None): per-process thread cap
+            (OMP_NUM_THREADS etc.) applied only for backend="cpu".
+        line_search (str): final joint fit's per-iteration step-size search
+            mode -- 'grid' (default/production), 'brent', or 'cpp'.
+        trace_prior_deg (int or None): degree at/above which per-fiber trace
+            coefficients are pulled toward the bundle's cross-fiber consensus.
+        trace_prior_weight (float or None): trace-prior penalty weight,
+            propagated to PSF_Fitter.fit() via the SPECEX_TRACE_PRIOR_WEIGHT
+            env var.
+        trace_prior_ndead_threshold (int or None): ndead threshold gating the
+            trace prior, propagated via SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD.
+        debug_spots (bool): write per-pass spot-selection debug dump files.
+        masked_amp_ndead_threshold (int): ndead threshold (with a contiguous-
+            run requirement) for detecting a masked/dead CCD amp.
+
+    Returns:
+        tuple[int, dict]: `(bid, result)`. On success, `result` contains
+        `psf_coeffs`, `trace_coeffs`, `continuum_coeffs`, `wdeg`,
+        `trace_wdeg`, `trace_per_fiber_deg`, `zero_spot_fibers`,
+        `explicitly_broken_fibers`, `masked_amp_fibers`, `chi2`, and the
+        final selected spots' `s_fiber`/`s_wave`/`s_flux` arrays. If every
+        fiber in the bundle is excluded (broken/masked-amp), `result` is
+        `{'skip_bundle': True, 'masked_amp_fibers': ..., 'explicitly_broken_fibers': ...}`
+        instead. On failure, `result` is `{'error': ..., 'traceback': ...,
+        'is_oom': bool}` (never raises -- exceptions are caught and reported
+        so one bad bundle doesn't kill the worker pool).
+
+    Status: ACTIVE (production default path).
     """
     t_entry = time.time()
     # trace_wdeg defaults to wdeg (old behavior) -- see fitter.py's
@@ -170,7 +260,16 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
 
         class Opts:
+            """Minimal stand-in for the C++-side options object, carrying just the two file paths read_preproc/load_python_psf need. Not the same class as main()'s argparse Namespace or run_specex()'s C++ PyOptions.
+
+            Status: ACTIVE (production default path) -- internal helper class of
+            fit_bundle_task.
+            """
             def __init__(self):
+                """Store the arc image and input PSF file paths from the enclosing fit_bundle_task call.
+
+                Status: ACTIVE (production default path).
+                """
                 self.arc_image_filename = arc_file
                 self.input_psf_filename = in_psf_file
         opts = Opts()
@@ -493,85 +592,79 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
                      trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
                      line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000):
-    """
-    Fits a full CCD (20 bundles) using parallel processes.
+    """Fit a full CCD (a configurable bundle range, default all 20) using a multiprocessing pool of fit_bundle_task workers, then merge the results into the output PSF file.
 
-    For backend="gpu", multiple worker processes are packed onto each
-    physical GPU (workers_per_gpu) since a single bundle fit doesn't
-    saturate an A100 -- benchmarked on bundle 5 (z8/00344649): 1/GPU
-    takes ~54s/bundle, 4/GPU takes ~75s/bundle (~1.4x slower) but yields
-    ~2.7x more aggregate throughput. 5/GPU reliably hits
-    RESOURCE_EXHAUSTED (peak ~8.6GB/worker x 5 exceeds the 40GB A100),
-    so 4/GPU is the validated safe ceiling. The pool size need not equal
-    the bundle count -- Pool.starmap dynamically queues remaining tasks
-    onto whichever worker frees up first.
+    For backend="gpu", multiple worker processes are packed onto each physical
+    GPU (workers_per_gpu) since a single bundle fit doesn't saturate an A100.
+    Bundles are dynamically queued (`Pool.starmap`) so the pool size need not
+    equal the bundle count. A bundle that fails with a GPU OOM
+    (RESOURCE_EXHAUSTED) is automatically retried in a follow-up batch at
+    halved packing (up to 2 retry rounds); non-OOM failures are reported but
+    never retried.
 
-    legendre_deg_wave/fit_continuum default to None, which auto-selects
-    real C++ production defaults (desispec/scripts/specex.py:224-228) by
-    detecting the band from the input image's CAMERA header: degree 3 +
-    continuum for z-band, degree 1 + no continuum otherwise. Pass either
-    explicitly to override (matching desi_psf_fit's own CLI override
-    behavior) for controlled A/B comparisons.
+    Args:
+        arc_file (str): path to the preprocessed arc image FITS file.
+        in_psf_file (str): path to the input (shifted) PSF FITS file.
+        out_psf_file (str): path to write the merged output PSF FITS file to
+            (skipped if no bundle produced a usable result).
+        lamp_lines_file (str): path to the lamp line list.
+        first_bundle, last_bundle (int): inclusive bundle-index range to fit
+            (0-19 for a full CCD).
+        n_gpus (int): number of GPUs to spread bundles across on the current
+            node (backend="gpu" only).
+        backend (str): "gpu" or "cpu".
+        broken_fibers (str or None): comma-separated fiber IDs to exclude.
+        sn_threshold (float): S/N threshold for spot selection.
+        h_size_y (int): PSF stamp half-size in Y.
+        force_spots_path (str or None): fixed spot list path, bypassing spot
+            selection.
+        max_number_of_lines (int): cap on lines kept per bundle.
+        workers_per_gpu (int or None): concurrent bundle-fit workers packed
+            onto each GPU; default (None) auto-selects 5, or 3 for z-band when
+            trace_per_fiber_deg is active (its larger per-fiber design matrix
+            is prone to GPU OOM at 5 -- see porting-notes.md).
+        cpu_workers (int or None): concurrent worker processes for
+            backend="cpu"; defaults to n_gpus.
+        gpu_worker_threads (int or None): diagnostic thread cap forced on each
+            GPU-backend worker's host-side computation; unconstrained if None
+            (not load-bearing for a normal run).
+        legendre_deg_wave (int or None): PSF-shape wavelength Legendre degree;
+            auto-detected from the input image's CAMERA header if None (3 for
+            z-band, 1 otherwise, matching real C++ production).
+        fit_continuum (bool or None): fit a per-bundle continuum background;
+            auto (on for z-band) if None.
+        double_precision (bool): force full float64 for the joint-fit
+            Jacobian.
+        trace_legendre_deg_wave (int or None): convenience override setting
+            both trace_legendre_deg_wave_x and _y at once.
+        trace_legendre_deg_wave_x, trace_legendre_deg_wave_y (int or None):
+            per-axis trace-position wavelength degree; auto per axis if None
+            (X defaults to legendre_deg_wave's value, Y to 2 for b/r or
+            legendre_deg_wave's value for z).
+        trace_per_fiber_deg (int or None): block-diagonal-by-fiber trace basis
+            degree (default 6, the production default since 2026-08-05); <=0
+            or None falls back to the old shared trace_legendre_deg_wave_x/y
+            basis.
+        trace_prior_deg (int or None): degree at/above which per-fiber trace
+            coefficients are pulled toward the bundle's cross-fiber consensus
+            (default 1); negative disables the prior while keeping per-fiber
+            trace on.
+        trace_prior_weight, trace_prior_ndead_threshold (float/int or None):
+            trace-prior penalty weight and its ndead activation threshold.
+        line_search (str): final joint fit's step-size search mode -- 'grid'
+            (default), 'brent', or 'cpp'.
+        debug_spots (bool): write per-pass spot-selection debug dump files.
+        masked_amp_ndead_threshold (int): ndead threshold for masked/dead-amp
+            fiber detection.
 
-    trace_legendre_deg_wave_x/trace_legendre_deg_wave_y independently set
-    the wavelength degree of the trace-position correction per axis,
-    leaving legendre_deg_wave's value governing just the PSF-shape
-    (Gauss-Hermite) correction. trace_legendre_deg_wave (no suffix), if
-    given, sets *both* axes at once as a convenience override; otherwise
-    each axis defaults independently: X to legendre_deg_wave's own value
-    (1 for b/r, 3 for z -- i.e. unchanged from the pre-decoupling
-    behavior), Y to 2 for b/r bands and legendre_deg_wave's value (3) for
-    z-band. See porting-notes.md's r2@20250109 investigation: raising the
-    *shared* wdeg to give the trace fit more wavelength curvature also
-    handed the PSF-shape fit the same extra freedom, opening a
-    trace-position/PSF-asymmetry degeneracy that made xrms worse even as
-    it fixed yrms; decoupling trace from PSF-shape and validating
-    trace_wdeg=2 against the real C++ engine (run_specex()) on 6 bundles
-    across both flagged exposures plus 3 on a clean control exposure found
-    a clean win on Y (yrms cut ~68%) but a smaller, real xrms cost on 2 of
-    those 6 bundles. Root-caused to X sharing the same raised degree as Y
-    even though X's own true residual (checked against C++) is well
-    described by degree 1 already -- decoupling X and Y within the trace
-    correction (this parameter split) isolates the extra freedom to Y
-    only. z-band was not part of that validation, so its trace correction
-    stays coupled to its own wdeg (3) on both axes unless overridden.
+    Returns:
+        dict[int, str]: `failed_bundles`, mapping each bundle id that did not
+        succeed (after OOM retries) to its error message. Empty if every
+        bundle in range succeeded.
 
-    trace_per_fiber_deg (default 6, as of 2026-08-05) replaces the shared
-    low-degree trace_legendre_deg_wave_x/y basis entirely with a
-    block-diagonal-by-fiber one -- each of the bundle's 25 fibers gets
-    its own independent (trace_per_fiber_deg+1)-term wavelength basis
-    with zero cross-fiber sharing, matching C++'s per-fiber trace
-    parameter count. Pass 0/None to fall back to the old shared basis.
-    Paired with trace_prior_deg (default 1), an ndead-gated cross-fiber
-    regularization on the per-fiber coefficients at that Legendre degree
-    and above (ported from C++'s own trace_prior_deg mechanism,
-    specex_psf_fitter.cc -- off by default in C++ itself, but a real,
-    validated fix here for the handful of fibers with severe local dead-
-    pixel contamination that per-fiber independence alone handles badly;
-    see porting-notes.md). Pass a negative trace_prior_deg to disable just
-    the prior while keeping per-fiber trace on. **Validated on a
-    definitive 30-CCD isolated-JAX-cache campaign, 2026-08-05**: 30/30
-    cases improved on both xrms (mean -37.5%) and yrms (mean -60.7%)
-    vs. the old shared-basis default, for a ~9%% aggregate timing cost
-    (b +6.5%, r -0.3%, z +20.7% -- still 3-4x+ faster than C++ overall).
-    Two known, small, already-understood residual limitations remain
-    (not blocking): a handful of fibers with extreme dead-pixel counts
-    (ndead>>threshold) only partially respond even with the prior active
-    (a genuine data floor, not a bug), and bundle-boundary fibers improve
-    less than interior fibers under full per-fiber independence (no
-    cross-fiber sharing to lean on at the edge) -- see porting-notes.md's
-    2026-08-05 entries for both.
-
-    line_search (default 'grid') selects the final joint fit's per-
-    iteration step-size search: 'grid' is the long-standing coarse
-    3-point [0.2,0.5,1.0] search; 'brent' is a continuous but NOT
-    C++-faithful search (wrong bracket/tolerance, kept for reference,
-    tested negative); 'cpp' is a faithful replica of C++'s actual
-    algorithm (specex_psf_fitter.cc/specex_brent.cc -- mode-dependent
-    skip logic plus a direct Numerical Recipes brent() port). Both
-    'brent' and 'cpp' were tested on 2 hard + 2 normal bundles and found
-    to produce no meaningful xrms/yrms change vs 'grid' -- see
-    porting-notes.md. Experimental/opt-in, not the default.
+    Status: ACTIVE (production default path). The line_search='brent'/'cpp'
+    values it accepts and forwards to PSF_Fitter.fit() are themselves
+    EXPERIMENTAL/DIAGNOSTIC -- see fitter.py's PSF_Fitter.fit().
     """
     t_start = time.time()
     all_bundles = range(first_bundle, last_bundle + 1)
@@ -653,6 +746,18 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         # there happen to be more workers than cores. Recomputed per batch
         # (not just once up front) so an OOM-retry batch, which runs with
         # fewer workers, correctly gets a bigger per-worker thread budget.
+        """Compute this batch's per-worker OS-thread budget for backend="cpu" (available_cores // n_workers_this, floor 1), so N concurrent CPU workers collectively stay within the node's real core count instead of each independently claiming every thread. Returns gpu_thread_cap unchanged for backend="gpu" (see fit_ccd_native's gpu_worker_threads).
+
+        Args:
+            n_workers_this (int): number of workers in the batch about to launch.
+
+        Returns:
+            int or None: threads to allocate per worker (backend="cpu"), or the
+            (possibly None) gpu_thread_cap value (backend="gpu").
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        fit_ccd_native.
+        """
         if backend == "gpu":
             return gpu_thread_cap
         t = max(1, available_cores // n_workers_this)
@@ -660,6 +765,21 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         return t
 
     def _run_batch(bundle_ids, n_workers_this, cpu_threads_this):
+        """Launch one multiprocessing.Pool batch of fit_bundle_task calls (spawn context) for the given bundle ids and wait for all of them to complete.
+
+        Args:
+            bundle_ids (list[int]): bundle indices to fit in this batch.
+            n_workers_this (int): pool size for this batch.
+            cpu_threads_this (int or None): per-worker thread budget, from
+                _cpu_threads_for.
+
+        Returns:
+            list[tuple[int, dict]]: one `(bid, result)` pair per bundle, in the
+            same format fit_bundle_task returns.
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        fit_ccd_native.
+        """
         ctx = mp.get_context('spawn')
         with ctx.Pool(processes=n_workers_this) as pool:
             tasks = []
@@ -740,6 +860,22 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     return failed_bundles
 
 def main():
+    """CLI entry point (`python -m specex.specex`): parse arguments, apply backend isolation/fail-fast checks, call fit_ccd_native, and set the process exit code.
+
+    Fails fast with an actionable RuntimeError if --backend gpu (the default)
+    is requested but no GPU-capable JAX platform is available, rather than
+    either JAX's own opaque error or a silent, much-slower CPU fallback (see
+    how-to-run.md Section 0). For --backend cpu, applies the same CUDA
+    isolation to this master process that fit_bundle_task applies to its
+    workers, so the master's own post-pool JAX usage (write_python_psf) can't
+    touch a GPU a concurrent GPU-backend job is using.
+
+    Returns:
+        None. Calls `sys.exit(1)` if any bundle failed (after OOM retries);
+        otherwise returns normally (implicit exit code 0).
+
+    Status: ACTIVE (production default path).
+    """
     import argparse
     parser = argparse.ArgumentParser(description="Specex Python/JAX PSF Fitter")
     parser.add_argument("-a", "--arc", "--input-image", type=str, required=True, help="Input preproc arc image")

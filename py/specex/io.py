@@ -5,8 +5,21 @@ from fitsio import FITS, FITSHDR
 from datetime import datetime
 from .psf import PSF, PSF_Params
 from .math import SparseLegendre2DPol, Legendre1DPol, legendre_pol_jnp
+from .fitter import get_sparse_nz
 
 def meta2header(meta):
+    """Convert a plain Python dict of FITS header metadata into the C++ extension's MapStringString header type (specex._libspecex), quoting strings and stripping trailing '.0' from float-looking values the way C++'s own header formatting does.
+
+    Args:
+        meta (dict): header key -> value (bool/str/other), typically a
+            fitsio-read header converted to a dict.
+
+    Returns:
+        specex._libspecex.MapStringString: the C++-side header object.
+
+    Status: LEGACY -- only called by read_preproc_cpp, itself only used by
+    specex.run_specex() (the C++-wrapper path).
+    """
     import specex._libspecex as spx
     header = spx.MapStringString()
     for key in meta:
@@ -23,16 +36,21 @@ def meta2header(meta):
             header[key]=mstr
     return header
 
-def get_sparse_nz(xdeg, ydeg):
-    nz = []
-    for j in range(ydeg + 1):
-        for i in range(xdeg + 1):
-            if i == 0: nz.append(i + j*(xdeg + 1))
-            elif i == 1 and j < 2: nz.append(i + j*(xdeg + 1))
-            elif i > 1 and j == 0: nz.append(i + j*(xdeg + 1))
-    return nz
-
 def load_python_psf(filename, opts):
+    """Read an input (shifted) PSF FITS file into a PSF object: per-fiber XTRACE/YTRACE Legendre trace polynomials, and (if a PSF extension is present) per-bundle Gauss-Hermite shape parameter models.
+
+    Args:
+        filename (str): path to the input PSF FITS file.
+        opts: unused (accepted for interface symmetry with C++-wrapper-style
+            callers).
+
+    Returns:
+        psf.PSF: populated with fiber_traces (all fibers in [FIBERMIN,
+        FIBERMAX]) and, if a PSF extension exists, params_of_bundles (one
+        psf.PSF_Params per bundle found via the header's `B<NN>NDATA` keys).
+
+    Status: ACTIVE (production default path).
+    """
     f = fitsio.FITS(filename)
     psf = PSF()
     xt_hdr = f['XTRACE'].read_header()
@@ -68,6 +86,22 @@ def load_python_psf(filename, opts):
     return psf
 
 def write_python_psf(filename, bundle_results, input_template):
+    """Merge all fitted bundles' results into a single output PSF FITS file: apply each bundle's trace correction to the input template's XTRACE/YTRACE, write its fitted Gauss-Hermite coefficients into the PSF table, restore never-fit fibers (broken/masked-amp) to their input values with STATUS=-1, run an inline trace-crossing QA pass (STATUS=4), and copy through any other input extensions unchanged.
+
+    Args:
+        filename (str): output PSF FITS file path (overwritten if it exists).
+        bundle_results (dict[int, dict]): per-bundle result dicts as returned
+            by specex.fit_bundle_task (or `{'skip_bundle': True, ...}` for a
+            fully-excluded bundle).
+        input_template (str): input (shifted) PSF FITS file path -- supplies
+            the starting-guess trace/PSF-shape values every correction is
+            applied on top of, and every extension not itself recomputed here.
+
+    Returns:
+        None. Writes `filename` as a side effect.
+
+    Status: ACTIVE (production default path).
+    """
     import fitsio
     fin = fitsio.FITS(input_template)
     xtrace_out = fin['XTRACE'].read().astype(np.float64)
@@ -217,6 +251,17 @@ def write_python_psf(filename, bundle_results, input_template):
         n_fibers_total = xtrace_out.shape[0]
         x_cache = {}
         def _xval(fib):
+            """Evaluate (and memoize) a fiber's fitted X-trace position over the shared 200-point wavelength grid, for the trace-crossing QA pass.
+
+            Args:
+                fib (int): absolute fiber index.
+
+            Returns:
+                np.ndarray: shape (200,), X position at each grid wavelength.
+
+            Status: ACTIVE (production default path) -- internal helper closure of
+            write_python_psf's QA pass.
+            """
             if fib not in x_cache:
                 x_cache[fib] = np.array(Legendre1DPol(deg=xtrace_out.shape[1]-1, xmin=wmin, xmax=wmax, coeff=xtrace_out[fib]).value(ww))
             return x_cache[fib]
@@ -257,6 +302,20 @@ def write_python_psf(filename, bundle_results, input_template):
     fout.close()
 
 def write_psf(pyps, opts, pyio):
+    """Write a C++-side fitted PSF (PyPSF object) out to a PSF FITS file, via the specex._libspecex extension's own trace/table accessors.
+
+    Args:
+        pyps: a specex._libspecex.PyPSF object (already fit).
+        opts: a specex._libspecex.PyOptions object; `opts.output_fits_filename`
+            is the output path (overwritten if it exists).
+        pyio: a specex._libspecex.PyIO object.
+
+    Returns:
+        None. Writes `opts.output_fits_filename` as a side effect.
+
+    Status: LEGACY -- only called by specex.run_specex() (the C++-wrapper
+    path).
+    """
     import specex._libspecex as spx
     pyio.load_psf(opts, pyps); spx.tablewrite_init(pyps)
     xtrace = spx.get_trace(pyps, 'x'); ytrace = spx.get_trace(pyps, 'y')
@@ -290,11 +349,38 @@ def write_psf(pyps, opts, pyio):
     fout.close()
 
 def read_image(filename):
+    """Read a preproc FITS file's IMAGE/IVAR/MASK extensions and IMAGE header.
+
+    Args:
+        filename (str): path to the preproc FITS file.
+
+    Returns:
+        dict: {'image': np.ndarray (float64), 'ivar': np.ndarray (float64),
+        'mask': np.ndarray (int32), 'meta': fitsio header of the IMAGE
+        extension}.
+
+    Status: ACTIVE (production default path) -- called by both read_preproc
+    (the active Python pipeline) and read_preproc_cpp (LEGACY, C++-wrapper
+    path).
+    """
     f = fitsio.FITS(filename)
     image = f['IMAGE'].read().astype(np.float64); ivar = f['IVAR'].read().astype(np.float64); mask = f['MASK'].read().astype(np.int32); meta = f['IMAGE'].read_header()
     return {'image': image, 'ivar': ivar, 'mask': mask, 'meta': meta}
 
 def read_preproc(opts):
+    """Read a preproc arc image for the Python/JAX pipeline: read_image plus zeroing ivar at masked pixels and synthesizing a per-pixel readout-noise array from the header's RDNOISE.
+
+    Args:
+        opts: an object with an `arc_image_filename` (str) attribute (e.g.
+            specex.fit_bundle_task's local Opts class).
+
+    Returns:
+        dict: read_image's dict, with 'ivar' zeroed where 'mask' != 0 and an
+        added 'rdnoise' key (np.ndarray, same shape as 'image', filled with
+        the header's RDNOISE value, default 0.0 if absent).
+
+    Status: ACTIVE (production default path).
+    """
     ddata = read_image(opts.arc_image_filename)
     ddata['ivar'][ddata['mask'] != 0] = 0.0
     rdnoise_meta = ddata['meta'].get('RDNOISE', 0.0)
@@ -302,6 +388,19 @@ def read_preproc(opts):
     return ddata
 
 def read_psf(opts, pyps):
+    """Read an input PSF FITS file's trace and (if present) PSF-shape data directly into a C++-side PyPSF object, via the specex._libspecex extension.
+
+    Args:
+        opts: a specex._libspecex.PyOptions object (supplies
+            `input_psf_filename`, `trace_deg_x`, `trace_deg_wave`).
+        pyps: a specex._libspecex.PyPSF object, populated in place.
+
+    Returns:
+        None. Mutates `pyps` in place.
+
+    Status: LEGACY -- only called by specex.run_specex() (the C++-wrapper
+    path).
+    """
     import specex._libspecex as spx
     pyps.init_traces(opts)
     fitsfilename = opts.input_psf_filename
@@ -346,6 +445,19 @@ def read_psf(opts, pyps):
         pyps.set_psf(table_col0,table_col1,table_col2,table_col3)
 
 def read_preproc_cpp(opts):
+    """Read a preproc arc image (same processing as read_preproc) and wrap it as a C++-side PyImage object for the C++ fitter.
+
+    Args:
+        opts: a specex._libspecex.PyOptions object (supplies
+            `arc_image_filename`).
+
+    Returns:
+        specex._libspecex.PyImage: the image/ivar/mask/rdnoise/header data,
+        C++-extension-ready.
+
+    Status: LEGACY -- only called by specex.run_specex() (the C++-wrapper
+    path).
+    """
     import specex._libspecex as spx
     ddata = read_image(opts.arc_image_filename)
     ddata['ivar'][ddata['mask'] != 0] = 0.0
@@ -355,6 +467,17 @@ def read_preproc_cpp(opts):
     return spx.PyImage(ddata['image'], ddata['ivar'], ddata['mask'], ddata['rdnoise'], hdr)
 
 def read_lamp_lines(filename):
+    """Parse a lamp line list file (whitespace-separated `name wave score` per line, '#'-prefixed comments and blank/malformed lines skipped) into candidate-generation input.
+
+    Args:
+        filename (str): path to the lamp line list file.
+
+    Returns:
+        list[dict]: one {'wave': float, 'name': str, 'score': int} per valid
+        line, in file order.
+
+    Status: ACTIVE (production default path).
+    """
     lines = []
     with open(filename, 'r') as f:
         for line in f:
