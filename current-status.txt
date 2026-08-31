@@ -4,7 +4,22 @@ Full detail and evidence trail for everything below lives in porting-notes.md
 (append-only, chronological, grep it by topic keyword for the raw session logs).
 Standing test case throughout: night 20260401, expid 00344649, unless noted.
 
-*** LATEST (2026-08-05): see section 15. `python-gpu-port` (this branch) is
+*** LATEST (2026-08-30): see section 17. The bundle-boundary trace
+*** divergence -- present since the earliest days of this port, root-caused
+*** exactly this session -- is CLOSED. Root cause: Python's per-bundle pixel
+*** footprint was clipped at zero margin, silently discarding real
+*** boundary-fiber pixel data C++ deliberately includes (a 7px margin into
+*** the neighboring bundle's territory). Fixed and now the production
+*** default (`--footprint-margin`, default 7, commit 5c3d4b2), validated
+*** against genuine ground truth (not just C++-as-relative-baseline) for
+*** the first time in this port's history, on 9 simulated cameras and 19
+*** real production cases with zero exceptions. Sections 1-16 below are the
+*** historical build-up (including section 16's own two "hard cases," one
+*** of which -- the r9@20220120 bundle-boundary amplification -- this
+*** section fully explains) and are still accurate as history, but treat
+*** section 17 as the current bottom line.
+
+*** SUPERSEDED (2026-08-05): see section 15. `python-gpu-port` (this branch) is
 *** now at commit a173d47, pushed to origin -- per-fiber trace + the ndead-
 *** gated trace prior + the wavelength filter are the live production
 *** defaults, validated on a definitive isolated-cache 30-CCD campaign
@@ -1027,3 +1042,63 @@ New scripts committed: `testing/stage_preproc.py`,
 `testing/compare_correctness.py`, `testing/per_fiber_breakdown.py` (all
 argparse-based, no hardcoded personal paths). Full narrative, false starts,
 and exact per-fiber diagnostic data in porting-notes.md's matching entry.
+
+===============================================================================
+17. BUNDLE-BOUNDARY TRACE DIVERGENCE CLOSED: ROOT-CAUSED AND FIXED
+    (FOOTPRINT MARGIN), VALIDATED ON GROUND TRUTH (2026-08-30)
+===============================================================================
+The boundary-fiber "comb" -- edge fibers of each 25-fiber bundle diverging
+from C++ far more than interior fibers -- has been a known, open,
+non-blocking pattern since the earliest sessions of this port (section 16's
+r9@20220120 hard case is one instance of it). This session found and fixed
+the actual cause.
+
+**The breakthrough: real ground truth, for the first time.** Every prior
+test of this pattern (including section 16's hard cases) only ever compared
+C++ and Python to each other -- useful for confirming they disagree, useless
+for saying which one is right. Stephen Bailey built a tool that projects a
+real 1D arc spectrum onto a simulated CCD using an existing fit-psf file as
+literal ground truth, already in our own native format. Diffing both
+pipelines against that truth: **C++ tracks it flat across bundle position
+(edge:interior ratio 0.97-1.06); Python is consistently 1.5-2x worse at the
+boundary (ratio 1.54-1.96), in every band.** First proof this is a
+Python-specific defect, not a cost shared by both pipelines.
+
+**Root cause**: C++'s bundle footprint/weight-window construction
+(`ComputeWeigthImage`, `specex_psf_fitter.cc:1043-1058`) extends 7px past
+each bundle's own fiber range on each side -- deliberately reaching into the
+neighboring bundle's territory so a boundary fiber's chi2 can see real pixel
+data. Python's footprint was zero-margin: boundary-fiber pixel data was
+being silently discarded before the fit ever saw it.
+
+**The fix**: `--footprint-margin` (default 7, matching C++; 0 reproduces the
+old behavior) -- now the production default (commit 5c3d4b2). Validated with
+zero exceptions: 9 simulated cameras (real per-camera truth PSFs, ratio
+0.86-1.25), 19 real production cases across 10 nights (ratio 0.76-1.57,
+including a case that showed a real regression under an earlier, now-
+superseded partial-fix candidate), and a 4-night whole-CCD rerun of section
+16's own standing campaign (mean xrms 0.0268->0.0122px, -54%; mean yrms
+0.0167->0.0130px, -22%; runtime unaffected). Section 16's own
+z6@20241021/fiber-343 outlier is confirmed unchanged by this fix in both
+old and new runs -- a genuinely different, already-closed issue, and a good
+sanity check that this fix is targeted rather than general noise reduction.
+
+Also committed alongside the fix: several off-by-default diagnostic/
+experimental env-var levers accumulated across this and the preceding
+2026-08-23/26 investigation (`SPECEX_TRACE_PRIOR_EDGE_WIDTH` -- a real but
+strictly weaker partial-fix candidate, superseded by footprint margin;
+`SPECEX_CPP_STAGE_SPOTS`, `SPECEX_RAW_CHOLESKY`, `SPECEX_TRACE_UNCERTAINTY_BUNDLE`,
+`SPECEX_CROSSEVAL_*`) -- none change default behavior.
+
+Full narrative (including the chi2-landscape-sharpness mechanism finding,
+the retracted/corrected sub-audit lead, and the superseded trace-prior
+candidate's own results) in porting-notes.md's 2026-08-30 entry. Full
+tables, dx/dy plots, and xrms/yrms bar charts vs C++ in the artifact
+"Footprint Margin Fix", https://claude.ai/code/artifact/40dc3919-ce78-4a95-806b-0f42a18d4e30.
+
+**Still open**: 6 of the standing 10-night campaign's nights not yet rerun
+with the new fix (queued, stopped early for node time); whether the
+true-slit-edge (fiber 0/499) phenomenon relates to this fix at all (not
+tested -- architecturally a different boundary condition than an internal
+bundle seam); Julien's convolved-preproc amplifier-test data is still
+broken on his end (blocked, reported, not this project's bug).

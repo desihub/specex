@@ -5879,3 +5879,138 @@ divergence pattern.** They can produce a real, sometimes large effect on
 a camera's overall fit (z2), but that effect is not concentrated at
 boundaries in any test run so far. This closes spot selection as a
 candidate mechanism with high confidence.
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ibers' own RMS error vs truth): **C++ = 0.98/0.97/1.06
+across b/r/z -- flat, no boundary degradation at all. Python =
+1.54/1.66/1.96 -- consistently 1.5-2x worse at the boundary than its own
+interior, in every band.** This is the first genuine (non-relative)
+evidence that the long-documented boundary-fiber comb (section 1.3(a) of
+`python-vs-cpp-diff.txt`, and this file's own 2026-08-23/24 entries) is a
+Python-specific defect, not a structural cost symmetrically paid by both
+pipelines as earlier framing had assumed.
+
+### 3. Chi2 cross-evaluation: Python's own objective prefers being wrong (but not just at the boundary)
+
+Reused the existing `SPECEX_CROSSEVAL_CPP_PSF`/`_BUNDLE` diagnostic
+(2026-08-24, previously only ever pointed at a C++ output file) pointed at
+the arcsim ground truth instead. At a boundary-containing bundle, Python's
+own converged chi2 is ~108-126k; the TRUE trace, even with flux/continuum
+exactly re-optimized (one exact linear solve, not an approximation),
+scores ~6.5M -- 50-60x worse. A follow-up (`SPECEX_CROSSEVAL_PERFIBER`,
+new diagnostic this session, attributes each footprint pixel to its
+nearest fiber and sums chi2 per fiber instead of per bundle) found this
+extreme sensitivity is **uniform across the whole bundle, not concentrated
+at the boundary** (interior fibers show the same ~50-60x gap) -- a
+property of chi2-landscape sharpness on bright/narrow arc-line data, not
+itself evidence of boundary-specific bias. What it does NOT explain:
+interior fibers still land much closer to truth than boundary fibers
+despite the equally sharp landscape -- pointing at the *optimizer's
+ability to locate* the sharp minimum being worse at the boundary, not the
+objective preferring a different answer there.
+
+### 4. First candidate fix: SPECEX_TRACE_PRIOR_EDGE_WIDTH (a lever that already existed, real but partial)
+
+Forced the existing (2026-08-24, shelved) position-based trace-prior gate
+active and retested against the arcsim ground truth: edge-fiber accuracy
+improved 4-7x in both axes with no interior cost on the idealized sim.
+Retested on 6 real production cases (b4x2 nights, r2, z8, r9, r3): X
+improved in all 6 (13-45%), but Y was genuinely mixed -- 4 improved, 1
+flat, 1 (r2) regressed 44%, confirmed via direct isolation (disabling the
+unrelated ndead gate) to be a real property of the lever itself, not a
+confound. Real, meaningful, but partial -- motivated looking for the
+actual underlying mechanism instead of treating this as the answer.
+
+### 5. Root cause found: C++ extends the bundle footprint 7px past its own fiber range; Python didn't
+
+A source-level audit of both codebases (after one dispatched sub-audit
+gave a confirmed-wrong lead -- "C++ has a missing frozen-flux trace
+pre-stage" -- retracted after direct source verification: the C++ call in
+question fits flux only with position/trace frozen, the opposite of what
+was claimed, and Python already has the equivalent iterative warm-up in
+`select_bundle_spots_iterative`) found the real answer directly: C++'s
+`ComputeWeigthImage` (`specex_psf_fitter.cc:1043-1058`) extends the pixel
+weight/footprint window `margin = min(MAX_X_MARGIN=7, psf->hSizeX)` pixels
+past `fiber_min`/`fiber_max`'s trace center on each side -- "7 is half
+distance between center of ext. fibers of adjacent bundles" per its own
+comment, deliberately reaching into the neighboring bundle's territory so
+a boundary fiber's chi2/weight construction can see real pixel data a
+strictly-own-fibers window would miss. Python's `get_bundle_footprint`
+(`fitter.py:830`) was zero-margin -- a boundary fiber's own stamp pixels
+near the bundle edge were being silently discarded before the fit ever
+saw them. `MAX_X_MARGIN=7` (`specex_model_image.h:13`) is used in 5 places
+in the C++ source; only this one is live in production (gated by
+`fit_psf_tail || fit_continuum`) -- a second copy in the same function is
+an unused opposite-gate branch, a third sits inside
+`increase_weight_of_side_bands` (confirmed dead, off by default, never
+enabled anywhere in the codebase), and the remaining two are in
+`specex_model_image.cc` (model-image/QA generation, not the fit path).
+This exact footprint-margin gap had been noted once before, ~2026-08-06,
+and tested with no aggregate xrms/yrms effect -- but that test predated
+both the edge/interior/f0 fiber-position bucketing this investigation
+uses and the arcsim ground truth, so the earlier null was measuring the
+wrong thing, not evidence the gap didn't matter.
+
+### 6. The fix, validated everywhere it's been tested
+
+Ported as `SPECEX_FOOTPRINT_MARGIN` / `--footprint-margin` (default 7,
+matching C++; `fitter.py`'s `get_bundle_footprint`, widens the envelope
+clip before it restricts the union of selected spots' own stamps -- a
+faithful-in-spirit, not byte-identical, port given Python's
+spot-stamp-union footprint construction vs C++'s spot-independent
+row-window one).
+
+- **Arcsim (3 original + 6 new cameras, real per-camera truth PSFs)**:
+  edge:interior X ratio 0.86-1.25 in all 9, vs truth or fresh C++, zero
+  interior cost (bit-identical to 4 decimals on the original 3).
+- **19 real production cases** (6 vs archived truth across 4 nights + 13
+  fresh vs C++ across 6 previously-untouched nights, chosen without
+  cherry-picking): ratio 0.76-1.57 in every case, no exceptions. r2's
+  earlier 44% Y regression under the trace-prior lever is fully resolved
+  here (edge-Y 0.0494->0.0107px) -- a clean fix, not a trade-off.
+- **Full-night, whole-CCD (not edge/interior split) validation**: reran 4
+  of the standing 10-night apples-to-apples campaign (section 16 above)
+  with the new fix. Mean xrms 0.0268->0.0122px (-54%), mean yrms
+  0.0167->0.0130px (-22%) vs C++, even though boundary fibers are only
+  ~8% of all fibers. Runtime unaffected (~648s/night new vs 615s C++ vs
+  661s old Python -- all three in the same ballpark, matching precedent).
+  20241021's yrms outlier (z6 fiber 343, the already-root-caused
+  single-fiber data anomaly from section 16) is UNCHANGED by the fix in
+  both old and new runs -- confirms this fix is targeted, not a general
+  noise-reduction effect. 6 of the 10 nights remain queued (stopped early
+  by direct request, node time) for a future session.
+- **One honest caveat, not glossed over**: z3@20251107 shows a real
+  outlier at the true slit edge (fiber 0/499, xrms_f0=0.34px) -- the
+  separately-documented fiber-0 phenomenon from the 2026-08-25 entries
+  above, unrelated to the bundle-boundary effect this fix targets; its
+  actual bundle-edge number (0.0137px) is unremarkable.
+
+**Promoted to the production default** (commit 5c3d4b2): `--footprint-margin`
+CLI flag in `specex.py`, default 7 matching C++, threaded through
+`fit_bundle_task`/`fit_ccd_native` identically to the existing
+`--trace-prior-*` flags; `fitter.py`'s internal env-var fallback also
+changed 0->7. `--footprint-margin 0` reproduces the old (broken) behavior
+exactly if ever needed. Verified numerically: default with no flag
+reproduces the old `SPECEX_FOOTPRINT_MARGIN=7` experimental result to 4
+decimals; `--footprint-margin 0` reproduces the old zero-margin baseline
+to 4 decimals.
+
+**The trace-prior-edge-width lever (section 4 above) is superseded, not
+deleted** -- left in the codebase, off by default, real but strictly worse
+than the footprint-margin fix on every axis tested (partial X-only gain,
+real Y trade-offs, real interior cost on production data vs. this fix's
+clean wins everywhere). `SPECEX_CROSSEVAL_PERFIBER`,
+`SPECEX_TRACE_PRIOR_EDGE_WIDTH`, `SPECEX_CPP_STAGE_SPOTS`,
+`SPECEX_RAW_CHOLESKY`, and `SPECEX_TRACE_UNCERTAINTY_BUNDLE` are all now
+committed alongside the fix (commit 5c3d4b2) as documented, off-by-default
+diagnostic/experimental levers -- none change default behavior.
+
+Full writeup with tables, dx/dy plots, and xrms/yrms bar charts vs C++:
+artifact "Footprint Margin Fix",
+https://claude.ai/code/artifact/40dc3919-ce78-4a95-806b-0f42a18d4e30.
+
+**Still open**: the remaining 6 nights of the full-night campaign; whether
+the true-slit-edge (fiber 0/499) phenomenon has any relationship to this
+fix (not tested, f0 is architecturally a different boundary condition than
+an internal bundle seam); the convolved-preproc amplifier test Julien
+staged is still blocked on his end (broken FITS files, missing
+IVAR/MASK/READNOISE/FIBERMAP extensions and header keywords, reported
+back, not this project's bug).
