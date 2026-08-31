@@ -68,7 +68,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=None):
     """Fit one 25-fiber bundle in an isolated worker process: run spot selection, the joint PSF/trace fit, and return the per-bundle results dict that fit_ccd_native merges into the final output PSF.
 
     Runs as the target of a `multiprocessing` (spawn-context) worker, so it is
@@ -444,6 +444,16 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             os.environ["SPECEX_TRACE_PRIOR_WEIGHT"] = str(trace_prior_weight)
         if trace_prior_ndead_threshold is not None:
             os.environ["SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD"] = str(trace_prior_ndead_threshold)
+        # footprint_margin: same pattern -- get_bundle_footprint (fitter.py)
+        # reads SPECEX_FOOTPRINT_MARGIN via os.environ rather than a direct
+        # parameter; set here in the already-spawned worker so the CLI value
+        # takes precedence. C++'s own bundle footprint extends up to 7px past
+        # fiber_min/fiber_max on each side (specex_psf_fitter.cc:1043-1058);
+        # Python's was zero-margin, which root-caused the bundle-boundary
+        # trace divergence (porting-notes.md, 2026-09-01) -- 7 is now the
+        # production default, matching C++, not an experimental opt-in.
+        if footprint_margin is not None:
+            os.environ["SPECEX_FOOTPRINT_MARGIN"] = str(footprint_margin)
 
         fitter = PSF_Fitter(psf)
         chi2, pc, tc, cc, final_flux, xc_final, yc_final, spots = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search, trace_prior_deg=trace_prior_deg)
@@ -591,7 +601,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      workers_per_gpu=None, cpu_workers=None, gpu_worker_threads=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
                      trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
-                     line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000):
+                     line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=7):
     """Fit a full CCD (a configurable bundle range, default all 20) using a multiprocessing pool of fit_bundle_task workers, then merge the results into the output PSF file.
 
     For backend="gpu", multiple worker processes are packed onto each physical
@@ -787,7 +797,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                 gpu_id = i % n_gpus
                 # Use 2s stagger to prevent JIT compilation contention on CPU
                 stagger_s = i * 2.0 if backend == "cpu" else 0.0
-                tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold))
+                tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold, footprint_margin))
             return pool.starmap(fit_bundle_task, tasks)
 
     # Bundles are independent tasks (Pool.starmap queues them dynamically),
@@ -895,6 +905,7 @@ def main():
     parser.add_argument("--trace-prior-weight", type=float, default=1e5, help="Trace-prior penalty weight (C++'s own hardcoded value, 1e8, was found to measurably harm healthy bundles when applied blanket-style -- see porting-notes.md's weight sweep). Only matters for fibers flagged by --trace-prior-ndead-threshold.")
     parser.add_argument("--trace-prior-ndead-threshold", type=int, default=500, help="A fiber's C++-style dead-pixel count (ndead) above this triggers the trace prior for that fiber only; fibers below it are completely unaffected (bit-identical to no-prior). 500 comfortably separates normal fibers (ndead ~20-120) from the known bad cases (ndead ~2300-17500).")
     parser.add_argument("--masked-amp-ndead-threshold", type=int, default=8000, help="A fiber's ndead above this, PLUS a contiguous run of >=3 such fibers, marks it as overlapping a masked/dead CCD amp (no real data at all, not the milder single-bad-column case --trace-prior-ndead-threshold handles) -- the fiber is excluded from the fit entirely, its input starting-guess PSF is propagated unchanged, and its STATUS is set to -1, matching real C++'s own observed behavior. FIRST-PASS HEURISTIC: calibrated against one real case (r8@20211028/00106399's amp-A mask, see porting-notes.md's 2026-08-14 writeup) -- treat as tunable, not load-bearing precision.")
+    parser.add_argument("--footprint-margin", type=int, default=7, help="Pixels each bundle's pixel footprint extends past its own fiber_min/fiber_max trace center on each side, before the fit ever sees the data (get_bundle_footprint, fitter.py). Matches C++'s own ComputeWeigthImage margin (specex_psf_fitter.cc:1043-1058, 'half distance between center of ext. fibers of adjacent bundles') -- default 7 root-causes and closes the bundle-boundary trace divergence (porting-notes.md, 2026-09-01): a zero-margin footprint was silently discarding real boundary-fiber pixel data. Pass 0 to reproduce the old zero-margin behavior; any positive value is accepted.")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see porting-notes.md's OOM investigation). Pass explicitly to override.")
@@ -994,7 +1005,8 @@ def main():
         fit_continuum=args.fit_continuum,
         double_precision=args.double_precision,
         line_search=args.line_search,
-        debug_spots=args.debug_spots
+        debug_spots=args.debug_spots,
+        footprint_margin=args.footprint_margin
     )
 
     if failed_bundles:

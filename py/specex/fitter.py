@@ -180,7 +180,7 @@ def get_bundle_monomials_jnp(psf, bundle_id, spots, wdeg=3):
     return jnp.stack(m, axis=1)
 
 def get_bundle_block_diagonal_trace_monomials(psf, bundle_id, spots, trace_deg):
-    """Per-fiber-independent trace design matrix (stage 1 of the full per-fiber trace redesign) -- block-diagonal by fiber, each of the bundle's fibers getting its own (trace_deg+1) wavelength-Legendre columns with zero cross-fiber sharing, mirroring C++'s per-fiber independent Y_vs_W/X_vs_W refit (specex_psf_fitter.cc:1213-1238) exactly in the DOF sense.
+    """Per-fiber trace design matrix (stage 1 of the full per-fiber trace redesign) -- block-diagonal by fiber, each of the bundle's fibers getting its own (trace_deg+1) wavelength-Legendre columns with zero cross-fiber sharing, mirroring C++'s fit_trace parameterization (specex_psf_fitter.cc:1215-1242, where each fiber's own X_vs_W/Y_vs_W coefficients get their own contiguous block of the single joint Params vector) exactly in the DOF sense. NOTE (2026-08-24): "independent" here means per-fiber *parameters*, not per-fiber *solves* -- in BOTH codes these blocks live inside one joint bundle Gauss-Newton system alongside the shared PSF-shape params. The residual difference: C++ accumulates its Hessian per CCD pixel over all overlapping spots (A += w*H*H^T with one H spanning every spot covering the pixel, specex_psf_fitter.cc:515-584+syr), so overlapping-stamp pixels create cross-fiber trace-trace (and flux-flux) Hessian cross-terms; _accumulate_bundle_jax instead sums per-spot J^T W J blocks and a diagonal-only flux block, dropping those inter-spot cross-terms (its gradient B is still exact, computed from the true joint multi-spot residual, so a fully converged fixed point is a true stationary point in both codes).
 
     Expressed as a *correction* on top of xc_init/yc_init (already-close
     anchors from spot selection/--force-spots) rather than replacing the trace
@@ -445,6 +445,65 @@ def _predict_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
 
 from jax import jit
 _predict_bundle_jax_jit = jit(_predict_bundle_jax, static_argnums=(13,))
+
+
+def _predict_bundle_jax_pixelwise(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
+                        xc_init, yc_init, psf_monomials, trace_monomials, xpix, ypix,
+                        sx_g, sy_g, idx_gg, degree,
+                        tx_g, tw_g, wmin_c, wmax_c, image_data, weight_data):
+    """DIAGNOSTIC ONLY (SPECEX_CROSSEVAL_PERFIBER): identical to
+    _predict_bundle_jax except it returns the per-pixel weighted squared
+    residual array (shape (Np,)), not the summed scalar chi2 -- lets the
+    caller attribute chi2 to individual fibers post-hoc instead of only
+    ever seeing one whole-bundle total. Not used on the production path;
+    kept as a separate function (rather than adding a return-mode flag to
+    _predict_bundle_jax) so the hot-path function's jit cache/shape
+    signature is untouched.
+
+    Args: identical to _predict_bundle_jax.
+
+    Returns:
+        jnp.ndarray: shape (Np,), weight_data * (image_data - model)**2 at
+        each bundle-footprint pixel.
+
+    Status: EXPERIMENT, added 2026-08-31 alongside SPECEX_CROSSEVAL_PERFIBER
+    to test whether the chi2 cross-eval gap (porting-notes.md, 2026-08-28
+    truth-cross-eval entries) is concentrated at bundle-boundary fibers or
+    spread evenly across the bundle.
+    """
+    import jax.numpy as jnp
+    from jax import vmap
+    from .math import legendre_pol_jnp
+
+    Ns = flux.shape[0]; Np = xpix.shape[0]
+    gh_all = jnp.dot(psf_monomials, psf_coeffs.T)
+    dx, dy = jnp.dot(trace_monomials, trace_coeffs[0]), jnp.dot(trace_monomials, trace_coeffs[1])
+    xc_all, yc_all = xc_init + dx, yc_init + dy
+
+    def spot_sig(i):
+        Bx, By = GaussHermitePSF.get_gh_basis(xc_all[i], yc_all[i], sx_g[i], sy_g[i], gh_all[i], degree)
+        psf_v = By[0] * Bx[0]
+        nx_p, ny_p = degree + 1, degree + 1; k = 2
+        for j_p in range(ny_p):
+            bj = By[j_p]; imin_p = 1 if j_p == 0 else 0
+            for i_p in range(imin_p, nx_p):
+                psf_v += gh_all[i, k] * bj * Bx[i_p]; k += 1
+        return psf_v
+
+    unit_sigs = vmap(spot_sig)(jnp.arange(Ns))
+    tsig_p = jnp.zeros(Np + 1).at[idx_gg.flatten()].add((unit_sigs * flux[:, jnp.newaxis]).flatten())
+
+    Ncont = continuum_coeffs.shape[0]
+    rw = 2 * (tw_g - wmin_c) / (wmax_c - wmin_c) - 1
+    m_c = jnp.stack([legendre_pol_jnp(k, rw) for k in range(Ncont)], axis=0)
+    f_c = jnp.tensordot(continuum_coeffs, m_c, axes=([0], [0]))
+    striped_cont = jnp.sum(vmap(lambda fi: f_c[fi] * jnp.exp(-0.5 * (xpix - tx_g[fi])**2) / jnp.sqrt(2 * jnp.pi))(jnp.arange(25)), axis=0)
+
+    total_sig = tsig_p[:Np] + striped_cont
+    return weight_data * (image_data - total_sig)**2
+
+
+_predict_bundle_jax_pixelwise_jit = jit(_predict_bundle_jax_pixelwise, static_argnums=(13,))
 
 def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
                                xc_init, yc_init, psf_monomials, trace_monomials, xpix, ypix,
@@ -795,6 +854,27 @@ def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
     w1 = psf.fiber_traces[fiber_min]['Y_vs_W'].invert(rows_j); w2 = psf.fiber_traces[fiber_max]['Y_vs_W'].invert(rows_j)
     x1, x2 = psf.x_ccd(fiber_min, w1), psf.x_ccd(fiber_max, w2)
     xmin_env, xmax_env = np.floor(np.minimum(x1, x2) + 0.5).astype(int), np.floor(np.maximum(x1, x2) + 0.5).astype(int) + 1
+
+    # Bundle footprint margin (SPECEX_FOOTPRINT_MARGIN, default 7, set from
+    # --footprint-margin in specex.py): C++'s equivalent envelope
+    # (specex_psf_fitter.cc:1043-1058, ComputeWeigthImage) extends
+    # margin = min(MAX_X_MARGIN=7, psf->hSizeX) pixels beyond fiber_min/max's
+    # trace center on each side -- "7 is half distance between center of
+    # ext. fibers of adjacent bundles" per its own comment, i.e. deliberately
+    # reaches into the neighboring bundle's edge-fiber territory so a
+    # boundary fiber's chi2/weight construction can see cross-bundle flux
+    # leakage. Python's envelope above was zero-margin, bundle-own-fibers-
+    # only, which root-caused the bundle-boundary trace divergence between
+    # the two pipelines (porting-notes.md, 2026-09-01): a zero-margin
+    # footprint silently discarded real boundary-fiber pixel data before the
+    # fit ever saw it. Validated against real ground truth (arcsim) and 19
+    # sim+production cases with zero exceptions -- promoted to the
+    # production default (7, matching C++) as of that date. Pass
+    # --footprint-margin 0 to reproduce the old zero-margin behavior.
+    _margin = min(int(os.environ.get("SPECEX_FOOTPRINT_MARGIN", 7)), psf.h_size_x)
+    if _margin > 0:
+        xmin_env = xmin_env - _margin
+        xmax_env = xmax_env + _margin
     j_min_all = max(0, min(s['stamp_jmin'] for s in spots)); j_max_all = min(ny, max(s['stamp_jmax'] for s in spots))
     i_min_all = max(0, min(s['stamp_imin'] for s in spots)); i_max_all = min(nx, max(s['stamp_imax'] for s in spots))
     active_mask = np.zeros((i_max_all - i_min_all, j_max_all - j_min_all), dtype=bool)
@@ -1618,11 +1698,35 @@ class PSF_Fitter:
             _fmin0, _fmax0 = _bundle_span0.fiber_min, _bundle_span0.fiber_max
             _ndead_threshold = int(os.environ.get("SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD", 500))
             _ndeads = [compute_fiber_ndead(self.psf, f, weight) for f in range(_fmin0, _fmax0 + 1)]
-            trace_prior_fiber_flag = np.array([1.0 if nd > _ndead_threshold else 0.0 for nd in _ndeads])
+            _ndead_flag = [nd > _ndead_threshold for nd in _ndeads]
+            # EXPERIMENT (SPECEX_TRACE_PRIOR_EDGE_WIDTH, 2026-08-24): a second,
+            # independent gating criterion alongside ndead -- flag the first/
+            # last N fibers of the bundle (bundle-boundary position, not a
+            # data-quality diagnostic). Motivated by porting-notes.md's
+            # 2026-08-24 entry: C++-vs-Python trace disagreement in b/r bands
+            # shows sharp periodic spikes exactly at bundle boundaries (every
+            # 25 fibers), absent in z (dense lines + continuum fit leaves
+            # even edge fibers well-constrained on their own) -- i.e. real,
+            # data-sparsity-driven under-determination concentrated at bundle
+            # edges specifically, not a general per-fiber noise floor.
+            # Deliberately NOT blanket (the weight-sweep entry above found
+            # applying this prior to *every* fiber measurably hurts already-
+            # healthy interior fibers' match to C++, at every weight tested
+            # down to 1e3) -- restricting to a narrow band of true edge
+            # fibers leaves interior fibers' rows/cols in A/B completely
+            # untouched (bit-identical), only ever pulling the specific
+            # fibers shown to actually diverge. Off by default (env var
+            # unset -> width 0, identical to ndead-only gating).
+            _edge_width = int(os.environ.get("SPECEX_TRACE_PRIOR_EDGE_WIDTH", 0))
+            _edge_flag = [(f - _fmin0) < _edge_width or (_fmax0 - f) < _edge_width
+                          for f in range(_fmin0, _fmax0 + 1)]
+            trace_prior_fiber_flag = np.array([1.0 if (nd_f or edge_f) else 0.0
+                                                for nd_f, edge_f in zip(_ndead_flag, _edge_flag)])
             if trace_prior_fiber_flag.any():
-                _flagged = [(_fmin0 + i, nd) for i, nd in enumerate(_ndeads) if nd > _ndead_threshold]
+                _flagged = [(_fmin0 + i, _ndeads[i], 'ndead' if _ndead_flag[i] else 'edge')
+                            for i in range(len(_ndeads)) if _ndead_flag[i] or _edge_flag[i]]
                 print(f"  SPECEX_TRACE_PRIOR_DEG: activating trace prior for {len(_flagged)} fiber(s) "
-                      f"(ndead>{_ndead_threshold}): {_flagged}", flush=True)
+                      f"(ndead>{_ndead_threshold} or edge<{_edge_width}): {_flagged}", flush=True)
         xpix, ypix, pix_idx = get_bundle_footprint(self.psf, spots, fmin, fmax, weight)
         Np = len(xpix); area = (2*self.psf.h_size_x+1)*(2*self.psf.h_size_y+1); Ns = len(spots)
         # Pixel-footprint padding: pad the pixel dimension fed to the JIT
@@ -1671,9 +1775,9 @@ class PSF_Fitter:
             ix_r_p = np.concatenate([ix_r, np.full(n_pix_extra, ix_r[0], dtype=ix_r.dtype)])
         else:
             xpix_p, ypix_p, ix_r_p = xpix, ypix, ix_r
-        tx_g, tw_g = jnp.array(tx_j[:, ix_r_p]), jnp.array(tw_j[:, ix_r_p])
-        flux = jnp.array([s['flux'] for s in spots]); xc_init, yc_init = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
-        psf_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
+        tx_g_full, tw_g_full = jnp.array(tx_j[:, ix_r_p]), jnp.array(tw_j[:, ix_r_p])
+        flux_full = jnp.array([s['flux'] for s in spots]); xc_init_full, yc_init_full = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
+        psf_monomials_full = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
         # trace_per_fiber_deg (stage 1 of the full per-fiber redesign, see
         # porting-notes.md) swaps the shared low-degree basis for a
         # block-diagonal-by-fiber one -- each fiber gets its own
@@ -1683,8 +1787,8 @@ class PSF_Fitter:
         # trace_wdeg_x/trace_wdeg_y (no freeze-masking -- both axes get
         # the full per-fiber basis).
         if trace_per_fiber_deg is not None:
-            trace_monomials = get_bundle_block_diagonal_trace_monomials(self.psf, bundle_id, spots, trace_per_fiber_deg)
-            Npoly_trace_x = Npoly_trace_y = trace_monomials.shape[1]
+            trace_monomials_full = get_bundle_block_diagonal_trace_monomials(self.psf, bundle_id, spots, trace_per_fiber_deg)
+            Npoly_trace_x = Npoly_trace_y = trace_monomials_full.shape[1]
         else:
             # Single shared trace_monomials sized at max(trace_wdeg_x,
             # trace_wdeg_y): get_sparse_nz(1, d)'s output is a strict
@@ -1699,10 +1803,10 @@ class PSF_Fitter:
             # what's structurally just a masked subset of the one already
             # there.
             trace_wdeg_shared = max(trace_wdeg_x, trace_wdeg_y)
-            trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg_shared)
+            trace_monomials_full = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=trace_wdeg_shared)
             Npoly_trace_x = len(get_sparse_nz(1, trace_wdeg_x)); Npoly_trace_y = len(get_sparse_nz(1, trace_wdeg_y))
         gh_deg = self.psf.gh_psf.degree; n_gh = (gh_deg + 1) * (gh_deg + 1) - 1
-        pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, psf_monomials))
+        pc = jnp.array(build_warm_start_pc(self.psf, bundle_id, spots, gh_deg, psf_monomials_full))
         # pc0/asym_gh_rows support the anti-drift correction below: a
         # near-null Hessian direction mixes the trace correction with the
         # GH-i-0/GH-0-j ("pure x"/"pure y", i.e. antisymmetric-in-one-axis)
@@ -1722,11 +1826,11 @@ class PSF_Fitter:
                 _gh_row_of[(_i, _j)] = _r; _r += 1
         asym_gh_rows = jnp.array([_gh_row_of[(_i, 0)] for _i in range(1, gh_deg + 1)] +
                                   [_gh_row_of[(0, _j)] for _j in range(1, gh_deg + 1)], dtype=jnp.int32)
-        tc = jnp.zeros((2, trace_monomials.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
-        img_d, w_d = jnp.array(image[xpix_p, ypix_p]), jnp.array(weight[xpix_p, ypix_p])
+        tc = jnp.zeros((2, trace_monomials_full.shape[1])); Ncont = 4; cc = jnp.zeros(Ncont)
+        img_d_full, w_d_full = jnp.array(image[xpix_p, ypix_p]), jnp.array(weight[xpix_p, ypix_p])
         if n_pix_extra > 0:
-            w_d = w_d.at[Np:].set(0.0)
-        xpix_j, ypix_j = jnp.array(xpix_p), jnp.array(ypix_p)
+            w_d_full = w_d_full.at[Np:].set(0.0)
+        xpix_j_full, ypix_j_full = jnp.array(xpix_p), jnp.array(ypix_p)
         wmin_c, wmax_c = float(self.psf.fiber_traces[fmin]['X_vs_W'].xmin), float(self.psf.fiber_traces[fmin]['X_vs_W'].xmax); old_chi2 = 1e30; prev_mode = None
         # REVERTED (branch experiment/cpp-alternating-solve): tried making
         # trace mode's exit convergence-based instead of a fixed 3
@@ -1747,9 +1851,94 @@ class PSF_Fitter:
         best_tc = tc.copy()
         best_pc = pc.copy()
         best_cc = cc.copy()
-        best_flux = flux.copy()
-        
-        sx_g, sy_g, idx_gg = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
+        best_flux = flux_full.copy()
+
+        sx_g_full, sy_g_full, idx_gg_full = jnp.array(sx), jnp.array(sy), jnp.array(idx_g)
+
+        # EXPERIMENT (SPECEX_CPP_STAGE_SPOTS, 2026-08-26): C++'s trace and
+        # sigma (GHSIGX/GHSIGY) fit stages only ever see a strict spot subset
+        # (SNR>=5, >=4A from the nearest same-fiber selected line --
+        # specex_psf_fitter.cc:2298-2299, re-selected via select_spots()
+        # immediately before every FitSeveralSpots call for those stages,
+        # e.g. :2707-2716/2741-2782); only the FINAL shape+flux stage widens
+        # to the loose (SNR>=3) list (:2823). This branch's fit() has always
+        # used one shared loose spot list across every stage -- confirmed
+        # nothing here re-subsets by SNR (porting-notes.md, 2026-08-25/26).
+        # Off by default. When on, builds a second, smaller bundle geometry
+        # (footprint/stamp-indexing/monomials) restricted to that strict
+        # subset, swapped in for 'trace'/'sigma' iterations below via a
+        # per-iteration rebind of the (xc_init, yc_init, psf_monomials,
+        # trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, tx_g, tw_g,
+        # img_d, w_d) names -- 'flux'/'full' stay on the full loose set
+        # (the *_full names) exactly as before.
+        #
+        # flux is the one genuinely tricky part: it's a persistent, jointly-
+        # solved-with-trace Ns-sized array carried across every stage, but
+        # Ns changes between the strict subset and the full set. Handled by
+        # gathering the persistent flux_full array at the strict subset's
+        # original indices (orig_idx_s) right before a strict-mode
+        # iteration's Newton solve, and scattering the updated values back
+        # into flux_full right after -- leaving every OTHER (loose-only)
+        # spot's flux untouched during trace/sigma, exactly matching C++'s
+        # real behavior (an unselected spot's flux simply isn't touched by
+        # that stage's fit, and gets refreshed again once the final loose-
+        # list stage runs). chi2 used for best-state tracking/printing is
+        # always evaluated on the full loose set (via _predict_bundle_jax_jit),
+        # never the strict subset -- comparing chi2 values computed over two
+        # different-sized pixel footprints would be meaningless.
+        strict_arrs = None
+        if os.environ.get("SPECEX_CPP_STAGE_SPOTS"):
+            _fib_a = np.array([s['fiber'] for s in spots]); _wav_a = np.array([s['wave'] for s in spots])
+            _snr_a = np.array([s['snr'] for s in spots])
+            _xc_a = np.array([s['xc_init'] for s in spots]); _yc_a = np.array([s['yc_init'] for s in spots])
+            _strict_status = select_spots_cpp(_fib_a, _wav_a, _snr_a, _xc_a, _yc_a, image.shape, 5.0, 4.0, 0)
+            _orig_idx_s = np.where(_strict_status == 1)[0]
+            strict_spots = [spots[k] for k in _orig_idx_s]
+            print(f"  SPECEX_CPP_STAGE_SPOTS: {len(strict_spots)}/{len(spots)} spots pass C++'s strict "
+                  f"trace/sigma criteria (SNR>=5, wave-dist>=4A)", flush=True)
+            if len(strict_spots) >= 2:
+                s_xpix, s_ypix, _ = get_bundle_footprint(self.psf, strict_spots, fmin, fmax, weight)
+                s_Np = len(s_xpix); s_Ns = len(strict_spots); s_Np_pad = next_pow2_bucket(s_Np)
+                s_sx, s_sy = np.zeros((s_Ns, area)), np.zeros((s_Ns, area)); s_idx_g = np.full((s_Ns, area), s_Np_pad, dtype=np.int32)
+                s_idx_map = np.full((nx, ny), -1, dtype=np.int32); s_idx_map[s_xpix, s_ypix] = np.arange(s_Np)
+                for s_i, s in enumerate(strict_spots):
+                    ix, iy = np.meshgrid(np.arange(s['stamp_imin'], s['stamp_imax']), np.arange(s['stamp_jmin'], s['stamp_jmax']), indexing='ij')
+                    s_sx[s_i], s_sy[s_i] = ix.flatten(), iy.flatten()
+                    in_bounds = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+                    ix_c, iy_c = np.clip(ix, 0, nx - 1), np.clip(iy, 0, ny - 1)
+                    st_idx = s_idx_map[ix_c.astype(int), iy_c.astype(int)].flatten()
+                    m = in_bounds.flatten() & (st_idx >= 0)
+                    s_idx_g[s_i, m] = st_idx[m]
+                s_rows_u = np.unique(s_ypix); s_row_m = {j: i for i, j in enumerate(s_rows_u)}
+                s_tx_j, s_tw_j = np.zeros((25, len(s_rows_u))), np.zeros((25, len(s_rows_u)))
+                for f_i in range(25):
+                    fib = fmin + f_i; w_v = self.psf.fiber_traces[fib]['Y_vs_W'].invert(s_rows_u.astype(float)); s_tw_j[f_i], s_tx_j[f_i] = w_v, self.psf.x_ccd(fib, w_v)
+                s_ix_r = np.array([s_row_m[j] for j in s_ypix])
+                s_n_extra = s_Np_pad - s_Np
+                if s_n_extra > 0:
+                    s_xpix_p = np.concatenate([s_xpix, np.full(s_n_extra, s_xpix[0], dtype=s_xpix.dtype)])
+                    s_ypix_p = np.concatenate([s_ypix, np.full(s_n_extra, s_ypix[0], dtype=s_ypix.dtype)])
+                    s_ix_r_p = np.concatenate([s_ix_r, np.full(s_n_extra, s_ix_r[0], dtype=s_ix_r.dtype)])
+                else:
+                    s_xpix_p, s_ypix_p, s_ix_r_p = s_xpix, s_ypix, s_ix_r
+                s_tx_g, s_tw_g = jnp.array(s_tx_j[:, s_ix_r_p]), jnp.array(s_tw_j[:, s_ix_r_p])
+                s_xc_init = jnp.array([s['xc_init'] for s in strict_spots]); s_yc_init = jnp.array([s['yc_init'] for s in strict_spots])
+                s_psf_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, strict_spots, wdeg=wdeg)
+                if trace_per_fiber_deg is not None:
+                    s_trace_monomials = get_bundle_block_diagonal_trace_monomials(self.psf, bundle_id, strict_spots, trace_per_fiber_deg)
+                else:
+                    s_trace_monomials = get_bundle_monomials_jnp(self.psf, bundle_id, strict_spots, wdeg=trace_wdeg_shared)
+                s_img_d, s_w_d = jnp.array(image[s_xpix_p, s_ypix_p]), jnp.array(weight[s_xpix_p, s_ypix_p])
+                if s_n_extra > 0:
+                    s_w_d = s_w_d.at[s_Np:].set(0.0)
+                s_xpix_j, s_ypix_j = jnp.array(s_xpix_p), jnp.array(s_ypix_p)
+                strict_arrs = (s_xc_init, s_yc_init, s_psf_monomials, s_trace_monomials,
+                               s_xpix_j, s_ypix_j, jnp.array(s_sx), jnp.array(s_sy), jnp.array(s_idx_g),
+                               s_tx_g, s_tw_g, s_img_d, s_w_d, jnp.array(_orig_idx_s))
+            else:
+                print(f"  SPECEX_CPP_STAGE_SPOTS: fewer than 2 strict spots survive, "
+                      f"falling back to the full set for every stage", flush=True)
+
         # Stage/mode is now tracked as mutable state across iterations
         # (rather than derived purely from `i`) so 'trace' mode's exit can
         # be convergence-based specifically when trace_per_fiber_deg is set.
@@ -1768,7 +1957,34 @@ class PSF_Fitter:
         # opt-in, default unchanged.
         trace_min_iters, trace_max_iters = 3, int(os.environ.get("SPECEX_TRACE_MAX_ITERS_OVERRIDE", 20))
         for i in range(max_iter):
+            # Rebind this iteration's active geometry: the strict subset
+            # during 'trace'/'sigma' when SPECEX_CPP_STAGE_SPOTS is on,
+            # otherwise (and always for 'flux'/'full') the full loose set.
+            # flux is gathered from the persistent flux_full array at the
+            # strict subset's original indices -- see the strict_arrs
+            # construction above for why.
+            use_strict = strict_arrs is not None and mode in ('trace', 'sigma')
+            if use_strict:
+                (xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j,
+                 sx_g, sy_g, idx_gg, tx_g, tw_g, img_d, w_d, orig_idx_s) = strict_arrs
+                flux = flux_full[orig_idx_s]
+            else:
+                xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, tx_g, tw_g, img_d, w_d = (
+                    xc_init_full, yc_init_full, psf_monomials_full, trace_monomials_full, xpix_j_full, ypix_j_full,
+                    sx_g_full, sy_g_full, idx_gg_full, tx_g_full, tw_g_full, img_d_full, w_d_full)
+                flux = flux_full
+
             chi2, A, B = _accumulate_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
+            # chi2 for best-state tracking/printing/convergence checks is
+            # always the FULL loose set's -- comparing chi2 across two
+            # different-sized pixel footprints would be meaningless, and
+            # every downstream use of `chi2` (best_chi2, old_chi2, the
+            # 'full'-mode convergence break) implicitly assumes one
+            # consistent footprint throughout the fit.
+            if use_strict:
+                chi2 = _predict_bundle_jax_jit(flux_full, pc, tc, cc, xc_init_full, yc_init_full, psf_monomials_full,
+                                                trace_monomials_full, xpix_j_full, ypix_j_full, sx_g_full, sy_g_full,
+                                                idx_gg_full, gh_deg, tx_g_full, tw_g_full, wmin_c, wmax_c, img_d_full, w_d_full)
 
             if i == 0 and os.environ.get("SPECEX_DEBUG_MEM"):
                 import jax
@@ -1787,8 +2003,8 @@ class PSF_Fitter:
                 best_tc = tc.copy()
                 best_pc = pc.copy()
                 best_cc = cc.copy()
-                best_flux = flux.copy()
-                
+                best_flux = flux_full.copy()
+
             # 'sigma' mode (i=5..7, before 'full'): matches C++'s
             # scheduled_fit_of_sigmas stage exactly -- GHSIGX/GHSIGY (pc
             # rows 0-1) are fit alone (with flux), then PERMANENTLY
@@ -1883,9 +2099,53 @@ class PSF_Fitter:
             # SPECEX_FREEZE_GH10 is set.
             else: idx = jnp.concatenate([jnp.arange(Ns_l), jnp.arange(Ns_l + (2+_gh10_extra)*Npoly_psf, Ns_l + n_psf_tot), jnp.arange(A.shape[0]-Ncont, A.shape[0])])
             A_sub, B_sub = A[jnp.ix_(idx, idx)], B[idx]; diag = jnp.diag(A_sub); S = jnp.sqrt(diag); S = jnp.where(S < 1e-12, 1.0, S)
-            A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
-            try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
-            except: d_p = jnp.zeros(A.shape[0])
+            # EXPERIMENT (SPECEX_RAW_CHOLESKY, 2026-08-26): C++'s real solve
+            # (specex_linalg.cc:62 cholesky_solve -> LAPACK dposv, called
+            # from specex_psf_fitter.cc:1463) is a bare, UNREGULARIZED
+            # positive-definite Cholesky solve -- no diagonal preconditioning,
+            # no ridge/epsilon of any kind. On failure it sets chi2=1e30 and,
+            # since FitEverything sets fatal=true unconditionally
+            # (specex_psf_fitter.cc, top of FitEverything), calls SPECEX_ERROR
+            # (which aborts). This branch's default solve above instead always
+            # diagonal-preconditions and adds a fixed 1e-8 ridge before
+            # solving -- fine for well-conditioned interior fibers, but a
+            # boundary fiber's own A_sub is confirmed only *softly*
+            # ill-conditioned this session (eigenvalue ratio ~1.2-2x
+            # interior, never dramatically singular) -- exactly the regime
+            # where "damped Newton step" (this branch, always) vs "raw
+            # Newton step, or hard failure" (C++, real production) could
+            # plausibly steer two independently-implemented solvers to
+            # genuinely different points, not just noisier ones. Tests
+            # that hypothesis directly: replicate C++'s exact solve
+            # (np.linalg.cholesky raises LinAlgError on non-PD, same
+            # binary succeed/fail semantics as dposv) and log every
+            # attempt's conditioning regardless of outcome, so a run also
+            # answers "how close does this ever get to failing" even when
+            # it doesn't actually fail. Off by default; mirrors C++'s
+            # skip-this-step-but-don't-crash behavior (its own non-fatal
+            # branch, specex_psf_fitter.cc:1483-1492) on failure rather
+            # than aborting the whole Python process, so a real boundary
+            # fiber that DOES fail can still be observed instead of killing
+            # the run.
+            if os.environ.get("SPECEX_RAW_CHOLESKY"):
+                A_np, B_np = np.array(A_sub, dtype=np.float64), np.array(B_sub, dtype=np.float64)
+                eigvals = np.linalg.eigvalsh(A_np)
+                min_eig, max_eig = float(eigvals.min()), float(eigvals.max())
+                cond = max_eig / min_eig if min_eig > 0 else float('inf')
+                try:
+                    L = np.linalg.cholesky(A_np)
+                    ds_raw = np.linalg.solve(A_np, B_np)
+                    d_p = jnp.zeros(A.shape[0]).at[idx].set(jnp.array(ds_raw))
+                    print(f"  RAW_CHOLESKY bundle={bundle_id} iter={i} mode={mode}: OK  "
+                          f"min_eig={min_eig:.4e} max_eig={max_eig:.4e} cond={cond:.4e}", flush=True)
+                except np.linalg.LinAlgError as e:
+                    d_p = jnp.zeros(A.shape[0])
+                    print(f"  RAW_CHOLESKY bundle={bundle_id} iter={i} mode={mode}: FAILED "
+                          f"({e}) min_eig={min_eig:.4e} max_eig={max_eig:.4e} cond={cond:.4e}", flush=True)
+            else:
+                A_reg = (A_sub / jnp.outer(S, S)) + 1e-8 * jnp.eye(A_sub.shape[0])
+                try: ds = jnp.linalg.solve(A_reg, B_sub / S); d_p = jnp.zeros(A.shape[0]).at[idx].set(ds / S)
+                except: d_p = jnp.zeros(A.shape[0])
             # Freeze tc's trailing columns for whichever trace axis has the
             # smaller degree (see trace_monomials' construction above) --
             # tc starts at exactly zero and never gets a nonzero step in
@@ -2042,6 +2302,13 @@ class PSF_Fitter:
             if best_alpha == 0: best_alpha = 0.1
             flux = flux + best_alpha * d_p[:Ns_l]
             if clamp_flux: flux = jnp.maximum(flux, 0.0)
+            # Write this iteration's flux update back into the persistent
+            # full-set array: a direct replacement when this iteration used
+            # the full set, or a scatter into just the strict subset's
+            # original positions when it didn't -- every other (loose-only)
+            # spot's flux is deliberately left untouched, matching C++'s
+            # real behavior during trace/sigma (see strict_arrs' comment).
+            flux_full = flux_full.at[orig_idx_s].set(flux) if use_strict else flux
             pc = pc + best_alpha * d_p[Ns_l : Ns_l + n_psf_tot].reshape(n_gh + 2, Npoly_psf); tc = tc + best_alpha * d_p[Ns_l + n_psf_tot : Ns_l + n_psf_tot + 2*Npoly_trace].reshape(2, Npoly_trace); cc = cc + best_alpha * d_p[-Ncont:]
             # Anti-drift damping for the trace/GH degenerate direction --
             # DISABLED on this branch (experiment/cpp-alternating-solve).
@@ -2117,9 +2384,240 @@ class PSF_Fitter:
         # The state after the last applied step is never seen by the
         # top-of-loop best-state check - evaluate it explicitly so a
         # converged final state cannot lose to a stale intermediate one.
+        # Explicitly restore the full-set bindings for everything below --
+        # the loop always ends in 'full' mode (never 'trace'/'sigma'), so
+        # these already hold the full-set arrays by the time it exits, but
+        # naming them explicitly here removes any reliance on that being
+        # true rather than just happening to be true.
+        xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, tx_g, tw_g, img_d, w_d, flux = (
+            xc_init_full, yc_init_full, psf_monomials_full, trace_monomials_full, xpix_j_full, ypix_j_full,
+            sx_g_full, sy_g_full, idx_gg_full, tx_g_full, tw_g_full, img_d_full, w_d_full, flux_full)
         final_chi2 = float(_predict_bundle_jax_jit(flux, pc, tc, cc, xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
         if final_chi2 < best_chi2:
             best_chi2 = final_chi2; best_tc = tc.copy(); best_pc = pc.copy(); best_cc = cc.copy(); best_flux = flux.copy()
+
+        # EXPERIMENT (SPECEX_CROSSEVAL_CPP_PSF/_BUNDLE, 2026-08-24): does
+        # C++'s bundle-edge trace solution score BETTER or the SAME under
+        # Python's own pixel chi2 objective? Motivated by the exact-Hessian
+        # null result (porting-notes.md) -- with the optimizer structurally
+        # equalized, a genuine difference must live in the objective/data
+        # term, not the solve. Substitute C++'s trace curve for this
+        # bundle's fibers (re-expressed in Python's own per-fiber Legendre
+        # basis via linear regression against the per-spot dx/dy -- exact
+        # to numerical precision when both use the same degree, as here:
+        # trace_per_fiber_deg=6 matches XTRACE's stored degree), hold PSF
+        # shape frozen at Python's own converged value (neither pipeline
+        # ever fits shape jointly with trace), and re-solve flux+continuum
+        # EXACTLY (one linear solve -- the model is linear in flux/cont
+        # given trace+shape fixed, so this is the true optimum for that
+        # trace hypothesis, not an approximation). Compares like for like:
+        # best achievable chi2 under each trace hypothesis.
+        if os.environ.get("SPECEX_CROSSEVAL_CPP_PSF") and bundle_id == int(os.environ.get("SPECEX_CROSSEVAL_BUNDLE", bundle_id)):
+            import jax.numpy as jnp
+            import fitsio
+            cpp_path = os.environ["SPECEX_CROSSEVAL_CPP_PSF"]
+            cf = fitsio.FITS(cpp_path); chdr = cf['PSF'].read_header()
+            cwmin, cwmax = float(chdr['WAVEMIN']), float(chdr['WAVEMAX'])
+            cxtrace, cytrace = cf['XTRACE'].read(), cf['YTRACE'].read()
+            from .math import Legendre1DPol
+            fibers_sp = np.array([s['fiber'] for s in spots]); waves_sp = np.array([s['wave'] for s in spots])
+            dx_cpp = np.zeros(len(spots)); dy_cpp = np.zeros(len(spots))
+            for fib in range(fmin, fmax + 1):
+                m = fibers_sp == fib
+                if not m.any(): continue
+                xpol = Legendre1DPol(deg=cxtrace.shape[1]-1, xmin=cwmin, xmax=cwmax, coeff=cxtrace[fib])
+                ypol = Legendre1DPol(deg=cytrace.shape[1]-1, xmin=cwmin, xmax=cwmax, coeff=cytrace[fib])
+                dx_cpp[m] = np.array(xpol.value(waves_sp[m])) - np.array(xc_init)[m]
+                dy_cpp[m] = np.array(ypol.value(waves_sp[m])) - np.array(yc_init)[m]
+            tm_np = np.array(trace_monomials)
+            tc_cpp_x, *_ = np.linalg.lstsq(tm_np, dx_cpp, rcond=None)
+            tc_cpp_y, *_ = np.linalg.lstsq(tm_np, dy_cpp, rcond=None)
+            resid_x = tm_np @ tc_cpp_x - dx_cpp; resid_y = tm_np @ tc_cpp_y - dy_cpp
+            print(f"  CROSSEVAL bundle={bundle_id}: cpp trace re-expressed in py basis, "
+                  f"projection residual rms dx={np.sqrt(np.mean(resid_x**2)):.6f} dy={np.sqrt(np.mean(resid_y**2)):.6f} px "
+                  f"(should be ~0 -- confirms same-degree basis captures the cpp curve exactly)", flush=True)
+            tc_cpp = jnp.array(np.stack([tc_cpp_x, tc_cpp_y]))
+
+            chi2_py_own = float(best_chi2)
+
+            # Control: re-optimize flux/cont at PYTHON'S OWN trace, same
+            # linear-solve machinery as the cpp case below. If the fit
+            # already converged, this should barely move chi2 -- validates
+            # that the linear re-solve mechanism itself isn't the source of
+            # any delta seen for the cpp trace.
+            _, A_ctl, B_ctl = _accumulate_bundle_jax_jit(jnp.array(best_flux), jnp.array(best_pc), jnp.array(best_tc), jnp.array(best_cc), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
+            Ns_ctl = len(best_flux); Ncont_ctl = len(best_cc)
+            idx_fc_ctl = np.concatenate([np.arange(Ns_ctl), np.arange(A_ctl.shape[0] - Ncont_ctl, A_ctl.shape[0])])
+            step_ctl = np.linalg.solve(np.array(A_ctl)[np.ix_(idx_fc_ctl, idx_fc_ctl)], np.array(B_ctl)[idx_fc_ctl])
+            flux_ctl, cc_ctl = np.array(best_flux) + step_ctl[:Ns_ctl], np.array(best_cc) + step_ctl[Ns_ctl:]
+            chi2_py_own_refit = float(_predict_bundle_jax_jit(jnp.array(flux_ctl), jnp.array(best_pc), jnp.array(best_tc), jnp.array(cc_ctl), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+
+            # chi2 at cpp's trace, Python's own flux/cont unchanged (naive, no refit)
+            chi2_cpp_noflux = float(_predict_bundle_jax_jit(jnp.array(best_flux), jnp.array(best_pc), tc_cpp, jnp.array(best_cc), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+
+            # chi2 at cpp's trace with flux+continuum EXACTLY re-optimized
+            # (one linear solve -- flux/cont are linear given trace+shape
+            # fixed, so the Gauss-Newton normal equations are exact, not an
+            # approximation. NOTE: A\B solves for a STEP relative to the
+            # linearization point (best_flux, best_cc), matching the main
+            # loop's own `flux = flux + best_alpha*d_p[...]` convention --
+            # must be ADDED, not treated as the absolute optimum.)
+            _, A_ce, B_ce = _accumulate_bundle_jax_jit(jnp.array(best_flux), jnp.array(best_pc), tc_cpp, jnp.array(best_cc), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
+            Ns_ce = len(best_flux); Ncont_ce = len(best_cc)
+            idx_fc = np.concatenate([np.arange(Ns_ce), np.arange(A_ce.shape[0] - Ncont_ce, A_ce.shape[0])])
+            A_fc = np.array(A_ce)[np.ix_(idx_fc, idx_fc)]; B_fc = np.array(B_ce)[idx_fc]
+            step_fc = np.linalg.solve(A_fc, B_fc)
+            flux_refit, cc_refit = np.array(best_flux) + step_fc[:Ns_ce], np.array(best_cc) + step_fc[Ns_ce:]
+            chi2_cpp_refit = float(_predict_bundle_jax_jit(jnp.array(flux_refit), jnp.array(best_pc), tc_cpp, jnp.array(cc_refit), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d))
+
+            print(f"  CROSSEVAL bundle={bundle_id}: chi2(python's own trace, own flux/cont)          = {chi2_py_own:.4f}", flush=True)
+            print(f"  CROSSEVAL bundle={bundle_id}: chi2(python's own trace, flux/cont re-solved) [control] = {chi2_py_own_refit:.4f}  (delta={chi2_py_own_refit-chi2_py_own:+.4f})", flush=True)
+            print(f"  CROSSEVAL bundle={bundle_id}: chi2(cpp trace, python's own flux/cont)           = {chi2_cpp_noflux:.4f}  (delta={chi2_cpp_noflux-chi2_py_own:+.4f})", flush=True)
+            print(f"  CROSSEVAL bundle={bundle_id}: chi2(cpp trace, flux/cont EXACTLY re-optimized)    = {chi2_cpp_refit:.4f}  (delta={chi2_cpp_refit-chi2_py_own:+.4f})", flush=True)
+
+            # EXPERIMENT (SPECEX_CROSSEVAL_PERFIBER, 2026-08-31): the whole-
+            # bundle chi2 numbers above can't say WHERE the gap lives --
+            # every bundle has its own 2 boundary fibers baked into the
+            # total, so a similar gap on a different bundle (tested
+            # porting-notes.md 2026-08-28) doesn't distinguish "boundary
+            # fibers are uniquely bad" from "the chi2 landscape is sharp
+            # for every fiber regardless of position". Attribute each
+            # footprint pixel to its nearest fiber's trace center (tx_g,
+            # shape (25, Np)) and sum weighted squared residual per fiber,
+            # for both the python-own and cpp/truth-refit parameter sets.
+            if os.environ.get("SPECEX_CROSSEVAL_PERFIBER"):
+                owner = jnp.argmin(jnp.abs(xpix_j[None, :] - tx_g), axis=0)  # (Np,) local fiber idx 0-24
+
+                r_py = _predict_bundle_jax_pixelwise_jit(jnp.array(best_flux), jnp.array(best_pc), jnp.array(best_tc), jnp.array(best_cc), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+                r_truth = _predict_bundle_jax_pixelwise_jit(jnp.array(flux_refit), jnp.array(best_pc), tc_cpp, jnp.array(cc_refit), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d)
+
+                owner_np = np.array(owner)
+                r_py_np = np.array(r_py); r_truth_np = np.array(r_truth)
+                is_boundary = (owner_np == 0) | (owner_np == 24)
+                print(f"  CROSSEVAL bundle={bundle_id} PERFIBER: pixel-count boundary={int(is_boundary.sum())} interior={int((~is_boundary).sum())}", flush=True)
+                for local_f in range(25):
+                    m = owner_np == local_f
+                    if not m.any():
+                        continue
+                    cat = 'BOUNDARY' if local_f in (0, 24) else 'interior'
+                    print(f"  CROSSEVAL bundle={bundle_id} PERFIBER: local_fiber={local_f:>2} ({cat:<8}) npix={int(m.sum()):>5} "
+                          f"chi2_py={r_py_np[m].sum():>14.2f} chi2_truth={r_truth_np[m].sum():>16.2f} "
+                          f"delta={r_truth_np[m].sum()-r_py_np[m].sum():>+16.2f}", flush=True)
+                b_py, b_truth = r_py_np[is_boundary].sum(), r_truth_np[is_boundary].sum()
+                i_py, i_truth = r_py_np[~is_boundary].sum(), r_truth_np[~is_boundary].sum()
+                print(f"  CROSSEVAL bundle={bundle_id} PERFIBER SUMMARY: boundary chi2 py={b_py:.2f} truth={b_truth:.2f} ratio={b_truth/b_py if b_py else float('nan'):.2f}", flush=True)
+                print(f"  CROSSEVAL bundle={bundle_id} PERFIBER SUMMARY: interior chi2 py={i_py:.2f} truth={i_truth:.2f} ratio={i_truth/i_py if i_py else float('nan'):.2f}", flush=True)
+
+        # EXPERIMENT (SPECEX_TRACE_UNCERTAINTY_BUNDLE, 2026-08-24): does the
+        # bundle-edge trace divergence trace back to a genuine formal-
+        # uncertainty (Hessian conditioning) difference, independent of any
+        # C++ comparison? Needs no reference file -- inspects Python's own
+        # converged Hessian at its own solution. Computed AFTER ruling out
+        # elevated true curvature (checked directly against real production
+        # XTRACE/YTRACE coefficients: boundary vs interior ratio 1.00x at
+        # every Legendre degree, porting-notes.md) and lower data density
+        # (checked directly against debug-spot dumps: boundary fibers get
+        # the same ~25 spots/fiber and ~5 blue-wavelength(<4000A) spots/
+        # fiber as interior ones) -- so if boundary fibers really are
+        # inherently noisier, it must show up as a genuinely smaller
+        # Hessian eigenvalue in the trace-coefficient direction, not as
+        # less/worse input data. Full marginal covariance (A^-1, not just
+        # the isolated trace sub-block's own diagonal) so correlations with
+        # flux/shape/continuum are properly accounted for -- a naive
+        # per-block inverse would understate the true uncertainty.
+        if os.environ.get("SPECEX_TRACE_UNCERTAINTY_BUNDLE") and bundle_id == int(os.environ["SPECEX_TRACE_UNCERTAINTY_BUNDLE"]) and trace_per_fiber_deg is not None:
+            import jax.numpy as jnp
+            _, A_u, _ = _accumulate_bundle_jax_jit(jnp.array(best_flux), jnp.array(best_pc), jnp.array(best_tc), jnp.array(best_cc), xc_init, yc_init, psf_monomials, trace_monomials, xpix_j, ypix_j, sx_g, sy_g, idx_gg, gh_deg, tx_g, tw_g, wmin_c, wmax_c, img_d, w_d, self.psf.gain, self.psf.psf_error, 1.0)
+            A_u = np.array(A_u)
+            Ns_u = len(best_flux); Nparams_u = best_pc.shape[0]; Npoly_psf_u = psf_monomials.shape[1]
+            Npoly_trace_u = trace_monomials.shape[1]; n_fibers_u = fmax - fmin + 1
+            deg_p1 = Npoly_trace_u // n_fibers_u
+            tx0 = Ns_u + Nparams_u * Npoly_psf_u; ty0 = tx0 + Npoly_trace_u
+            # Ridge-regularize before inverting: a broken/excluded fiber
+            # (e.g. --broken-fibers) in this bundle range contributes zero
+            # spots, so its trace-coefficient block of A is exactly zero
+            # (unconstrained), which is exactly singular -- a tiny diagonal
+            # bump (relative to A's own scale) makes the inverse well-
+            # defined without perturbing any genuinely-constrained entry.
+            A_reg = A_u + 1e-8 * np.mean(np.abs(np.diag(A_u))) * np.eye(A_u.shape[0])
+            cov = np.linalg.inv(A_reg)
+            sig_x = np.sqrt(np.abs(np.diag(cov)[tx0:tx0 + Npoly_trace_u])).reshape(n_fibers_u, deg_p1)
+            sig_y = np.sqrt(np.abs(np.diag(cov)[ty0:ty0 + Npoly_trace_u])).reshape(n_fibers_u, deg_p1)
+            print(f"  TRACE_UNCERTAINTY bundle={bundle_id}: formal sigma (px) on each fiber's trace Legendre coeffs, "
+                  f"marginalized over flux/shape/continuum via full A^-1 (fiber = absolute fiber number, deg0..deg{deg_p1-1}):", flush=True)
+            print(f"  {'fiber':>6} " + " ".join(f"sigX_d{d}".rjust(9) for d in range(deg_p1)) + "  " +
+                  " ".join(f"sigY_d{d}".rjust(9) for d in range(deg_p1)), flush=True)
+            for fi in range(n_fibers_u):
+                fib_abs = fmin + fi
+                tag = " <-- boundary" if (fi == 0 or fi == n_fibers_u - 1) else ""
+                print(f"  {fib_abs:6d} " + " ".join(f"{sig_x[fi,d]:9.5f}" for d in range(deg_p1)) + "  " +
+                      " ".join(f"{sig_y[fi,d]:9.5f}" for d in range(deg_p1)) + tag, flush=True)
+            interior_mask = np.ones(n_fibers_u, bool); interior_mask[[0, -1]] = False
+            print(f"  TRACE_UNCERTAINTY bundle={bundle_id} SUMMARY (highest degree, deg{deg_p1-1}): "
+                  f"boundary mean sigX={sig_x[[0,-1],-1].mean():.5f} sigY={sig_y[[0,-1],-1].mean():.5f}  |  "
+                  f"interior mean sigX={sig_x[interior_mask,-1].mean():.5f} sigY={sig_y[interior_mask,-1].mean():.5f}  |  "
+                  f"ratio X={sig_x[[0,-1],-1].mean()/sig_x[interior_mask,-1].mean():.2f}x "
+                  f"Y={sig_y[[0,-1],-1].mean()/sig_y[interior_mask,-1].mean():.2f}x", flush=True)
+
+            # FOLLOW-UP (2026-08-25): the per-coefficient sigma above is the
+            # sqrt of the marginal covariance's DIAGONAL only -- axis-aligned,
+            # one Legendre coefficient at a time. It can't see a genuinely
+            # near-singular direction that happens to be an off-diagonal
+            # (correlated x/y-coefficient) combination, which is exactly what
+            # a "hard" structural degeneracy (fiber 0 having literally zero
+            # neighbor on one side, vs. an internal boundary's merely-distant
+            # one) would produce. Eigendecompose each fiber's own FULL
+            # (2*deg_p1 x 2*deg_p1) trace-x+trace-y marginal covariance
+            # sub-block instead: its largest eigenvalue is the variance along
+            # the single worst-constrained linear combination of that fiber's
+            # own trace coefficients, whatever direction that is. A "soft"
+            # under-determination (weak but nonzero signal, section 4's
+            # internal-boundary story) should show a largest eigenvalue only
+            # modestly bigger than the interior fibers'; a "hard" one (a
+            # literal missing cross-fiber term, fiber 0's candidate
+            # explanation) should show one that's a qualitatively different
+            # order of magnitude, not just 20-50% larger.
+            max_eig = np.zeros(n_fibers_u)
+            for fi in range(n_fibers_u):
+                idx = np.concatenate([np.arange(tx0 + fi*deg_p1, tx0 + (fi+1)*deg_p1),
+                                       np.arange(ty0 + fi*deg_p1, ty0 + (fi+1)*deg_p1)])
+                block = cov[np.ix_(idx, idx)]
+                max_eig[fi] = np.linalg.eigvalsh(block).max()
+            print(f"  TRACE_UNCERTAINTY bundle={bundle_id} EIGENVALUE CHECK: largest eigenvalue of each fiber's own "
+                  f"full (trace-x+trace-y) marginal covariance block (px^2, worst-constrained direction, any combination "
+                  f"of that fiber's own Legendre coefficients):", flush=True)
+            for fi in range(n_fibers_u):
+                fib_abs = fmin + fi
+                tag = " <-- boundary" if (fi == 0 or fi == n_fibers_u - 1) else ""
+                print(f"  {fib_abs:6d}  max_eig={max_eig[fi]:12.6f}  sqrt={np.sqrt(max_eig[fi]):9.5f}{tag}", flush=True)
+            print(f"  TRACE_UNCERTAINTY bundle={bundle_id} EIGENVALUE SUMMARY: "
+                  f"boundary max_eig={max_eig[[0,-1]].max():.6f}  interior mean max_eig={max_eig[interior_mask].mean():.6f}  "
+                  f"ratio={max_eig[[0,-1]].max()/max_eig[interior_mask].mean():.2f}x", flush=True)
+
+            # FOLLOW-UP (2026-08-25 cont'd): the combined X+Y block above
+            # averages over axis -- a real X/Y asymmetry in the *observed*
+            # divergence (see porting-notes.md's 15-camera campaign: fiber 0
+            # shows a real, reproducible excess in Y specifically but not X)
+            # would be invisible to a diagnostic whose largest eigenvalue is
+            # free to be along either axis. Redo the same eigendecomposition
+            # separately on each fiber's OWN X-only and Y-only sub-blocks.
+            max_eig_x = np.zeros(n_fibers_u); max_eig_y = np.zeros(n_fibers_u)
+            for fi in range(n_fibers_u):
+                idx_x = np.arange(tx0 + fi*deg_p1, tx0 + (fi+1)*deg_p1)
+                idx_y = np.arange(ty0 + fi*deg_p1, ty0 + (fi+1)*deg_p1)
+                max_eig_x[fi] = np.linalg.eigvalsh(cov[np.ix_(idx_x, idx_x)]).max()
+                max_eig_y[fi] = np.linalg.eigvalsh(cov[np.ix_(idx_y, idx_y)]).max()
+            print(f"  TRACE_UNCERTAINTY bundle={bundle_id} EIGENVALUE CHECK (X/Y split): largest eigenvalue of each "
+                  f"fiber's own X-only and Y-only trace covariance sub-block (px^2):", flush=True)
+            for fi in range(n_fibers_u):
+                fib_abs = fmin + fi
+                tag = " <-- boundary" if (fi == 0 or fi == n_fibers_u - 1) else ""
+                print(f"  {fib_abs:6d}  max_eig_x={max_eig_x[fi]:12.6f}  max_eig_y={max_eig_y[fi]:12.6f}{tag}", flush=True)
+            print(f"  TRACE_UNCERTAINTY bundle={bundle_id} EIGENVALUE SUMMARY (X/Y split): "
+                  f"X: boundary={max_eig_x[[0,-1]].max():.6f} interior_mean={max_eig_x[interior_mask].mean():.6f} "
+                  f"ratio={max_eig_x[[0,-1]].max()/max_eig_x[interior_mask].mean():.2f}x  |  "
+                  f"Y: boundary={max_eig_y[[0,-1]].max():.6f} interior_mean={max_eig_y[interior_mask].mean():.6f} "
+                  f"ratio={max_eig_y[[0,-1]].max()/max_eig_y[interior_mask].mean():.2f}x", flush=True)
 
         # --- C++ Parity: Snap centroids to the final optimized model ---
         # Use the best coefficients found during the optimization process
