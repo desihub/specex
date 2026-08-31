@@ -173,6 +173,15 @@ def write_python_psf(filename, bundle_results, input_template):
             for row in range(len(param_names)):
                 psf_table['COEFF'][row, fmin:fmax+1, :] = 0.0
                 if param_names[row] == 'GH-0-0': psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
+                # TAILXSCA/TAILYSCA/TAILCORE are never fit (tail amplitude is
+                # always 0 here), but C++ still writes 1.0 for these three,
+                # not 0.0. Matching that convention is functionally a no-op
+                # (TAILAMP=0 zeroes the whole tail term regardless), but a 0
+                # here makes downstream tools that evaluate the tail formula
+                # unconditionally (e.g. specter's gausshermite.py, used by
+                # Julien's plot_psf_comparison_using_specter.py) divide by
+                # zero -- see porting-notes.md 2026-08-23.
+                if param_names[row] in ('TAILXSCA', 'TAILYSCA', 'TAILCORE'): psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
             # Name mapping for GH terms. Must match the fitter's pc row order
             # exactly: the full (deg+1)^2-1 grid excluding only (0,0), same
             # convention as PSF.canonical_param_names() and the inner loop of
