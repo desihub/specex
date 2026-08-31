@@ -3585,3 +3585,2297 @@ Stephen's follow-up on the edge cases above gave three concrete directives: (1) 
 - **Checked whether C++ has any ndead-based STATUS mechanism separate from crossing/solver-failure** (`grep fit_status src/*.cc`): no. C++'s only STATUS-setting code paths are the generic `fit_status` enum (1=cholesky error, 2=no convergence, 3=nan -- all bundle-uniform, `specex_psf_proc.cc:252` broadcasts one value across every fiber in the bundle) and specex#91's crossing-specific per-fiber STATUS=4. There is no C++ precedent for flagging a fiber just because ndead is high with no actual crossing or solver failure -- confirming the decision to leave the QA pass geometry-only (no ndead trigger) is correct, not a gap: adding one would make Python flag fibers as bad that C++ itself has no mechanism to flag, for a case where Python's own fit is objectively better-behaved.
 - **Confirmed and kept, per explicit user decision**: Python's QA deliberately flags pair+neighbors even though real C++ flags only the crossing pair itself -- intentionally more conservative, not a bug to fix toward parity.
 
+
+## 2026-08-23 -- Julien's first independent review (Slack, r2/b4 @ 20251013/00316043): bundle-edge trace offsets and wavelength-edge PSF-shape divergence, both root-caused
+
+Julien posted a Slack walkthrough (10 plots, forwarded by the user) comparing real production C++ (`psf1`) against this port's GPU output (`psf2`) for one random recent night/expid, using his own tools (`plot_fiber_traces`, `plot_psf_comparison_using_specter.py`) -- the first outside-eyes look at the port's output. Overall verdict: "very encouraging," center-of-CCD PSF shape agreement excellent, two open items flagged for investigation. Both traced to root cause below using this repo's own code plus one real reproduction run on the login-node GPU (no allocation needed for either).
+
+**Tooling note (not a specex bug):** his `plot_psf_comparison_using_specter.py` crashed (`sigx2=nan`) on the raw GPU output because `TAILXSCA`/`TAILYSCA`/`TAILCORE` are 0 in our output vs. 1 in C++'s -- harmless in practice since tail amplitude is always fit to 0 in both, but it breaks `specter`'s `gausshermite.py` division. He worked around it with a `fixpsf.py` script that force-sets those three params to 1 in a copy of the file before comparing. Not something to fix here (specter is not our code), but worth remembering if any other downstream comparison tool hits the same nan.
+
+**Finding 1 -- bundle-edge fiber trace offsets (~0.04px in r2, up to ~0.27px in b4), architectural, not a Python-only bug:**
+
+Julien's own hypothesis in his messages: "This could [be] because [of] a fit performed independently from one fiber to the next... we want to account for the signal in adjacent fibers." Confirmed directly against the code:
+
+- `--trace-per-fiber-deg` (default 6, on since 2026-08-05) makes the per-fiber trace-correction basis **block-diagonal by fiber** (`get_bundle_block_diagonal_trace_monomials`, `fitter.py:183-220`) -- explicitly "mirroring C++'s per-fiber independent Y_vs_W/X_vs_W refit (`specex_psf_fitter.cc:1213-1238`) exactly in the DOF sense." This is a deliberate match to C++'s own architecture, not a Python shortcut.
+- The one cross-fiber consensus mechanism that exists (`build_trace_prior_hessian`, `fitter.py:312`, ported from C++'s own `trace_prior_deg` prior) only regularizes Legendre degree >= `trace_prior_deg` (default 1) toward the bundle's consensus, and **degree 0 -- each fiber's own physical position -- is explicitly left "fully independent" always** (`specex.py:894`'s own CLI help text). Worse: per `fitter.py:1616-1624`, even that degree>=1 regularization is **ndead-gated** -- it only activates for fibers flagged with high dead-pixel counts, so a normal healthy bundle-edge fiber gets zero cross-fiber constraint from either implementation.
+- Per the 2026-08-13 entry above (`Hard case 1`), confirmed by reading `src/specex_psf_fitter.cc` directly that **real C++ production never passes `--trace-prior-deg` either** -- the ground-truth files used throughout this whole port were themselves fit with fully independent per-fiber trace positions at every bundle edge.
+
+So bundle-edge fibers are inherently the least cross-constrained position in *both* codebases by design -- what Julien is seeing isn't "Python fits independently, C++ doesn't"; it's "both fit independently at bundle edges, and that's exactly where two different numerical implementations (different regularization epsilon, solver, float precision, iteration path) will diverge from *each other* the most," since there's nothing pulling either one toward a shared answer there. Consistent with the b4 (blue) spikes being ~5x larger than r2 (red)'s -- fewer/fainter arc lines in blue (see Finding 2) means the per-fiber solve is less constrained by data too, compounding the effect.
+
+**Not yet a fix, but the concrete next step if this needs closing**: broaden `trace_prior_deg`'s activation beyond the ndead gate (e.g. always-on at a small weight, not just for flagged fibers) so bundle-edge fibers get *some* cross-fiber pull even when healthy -- real engineering work, not evaluated this session, and would need re-validation against the 2026-08-10 30-CCD correctness campaign to make sure it doesn't regress the cases that gate was tuned for.
+
+**Finding 2 -- wavelength-array-edge PSF-shape divergence (image10: b4, fiber 249, lambda~3800A, visible "shoulder" mismatch), confirmed to be a real, reproducible line-list gap, not a degree/config bug:**
+
+First ruled out the obvious suspect: Python's `--legendre-deg-wave` auto-default (`specex.py:696`, `1` for b/r bands, `3` for z) is claimed to match real C++ production. Verified directly against the real ground-truth file rather than trusting the docstring: `fitsio.read_header('.../fit-psf-b4-00316043.fits', ext='PSF')` gives `LEGDEG=1, GHDEGX=6, GHDEGY=6` -- **exact match**. So this is not a Legendre-degree mismatch between the two codebases.
+
+Next, quantified arc-line coverage near the wavelength his test point (3800A, close to b4's `WAVEMIN=3531A`) sits in, using `py/specex/data/specex_linelist_desi.txt`: the bundle-wide usable line set has a real, **238A gap with zero lines between 3664.33A and 3902.97A** -- 3800A falls right in the middle of it.
+
+Then reproduced directly rather than just inferring from the static line list: ran a real single-bundle Python fit (bundle 9, fibers 225-249, same night/expid/camera, `--gpu 1 --debug-spots` on the login-node GPU, `python -m specex.specex -a .../preproc-b4-00316043.fits.gz --in-psf .../shifted-input-psf-b4-00316043.fits ...`, converged cleanly, `chi2` 218k->74k over 34 iterations) and inspected the actual selected-spot dump (`*.pyspots.txt`) for fiber 249 specifically. **Fiber 249's own selected spots jump directly from lambda=3664.33A to lambda=4047.71A** -- an even wider ~383A gap for this specific fiber (the bundle-wide 3902.97/3907.48A lines exist but weren't selected/usable for fiber 249 itself, likely too faint at that fiber's S/N). Julien's lambda=3800 test point has **zero constraining data** on either side closer than ~150-380A.
+
+So the "shoulder" mismatch at that wavelength is exactly where both implementations are furthest from having any local line to anchor the low-degree (LEGDEG=1, i.e. linear-in-Legendre-space) shape basis -- consistent with his own read ("looking at the blue channel that is more sensitive to extrapolations because there are fewer lamp lines used in the fit"), now backed by an exact reproduction rather than just the general hypothesis. The double-peak/shoulder *shape* itself is a real instrumental PSF feature present in both curves (not an artifact of either code) -- it's specifically the *reconstruction* in that data-starved gap that differs between implementations, for the same reason as Finding 1: nothing locally constrains either fit there, so small numerical/implementation differences aren't damped by data the way they are mid-line-coverage.
+
+**Both findings share one root cause**: real gaps in per-fiber/per-wavelength data density (bundle edges for trace; sparse-line regions, worse in blue, for PSF shape) leave both C++ and Python under-constrained in the same places, and that's where implementation-level differences become visible. Neither is a correctness bug in the sense of "Python computes the wrong answer for well-constrained data" -- center-of-CCD agreement (images 4/5/6/9) is excellent, matching Julien's own conclusion.
+
+**Reproduction artifacts**: `/tmp` scratch run only (not saved to `porting-notes.md`-adjacent paths); rerun anytime via the command above if useful for follow-up. Image-to-Slack-message mapping (all 10 plots) given to the user directly in-conversation, not duplicated here.
+
+**Open, not yet started**: no code changes made this session for either finding -- both are diagnostic root-causes to report back to Julien/Stephen, not fixes. If Finding 1's "always-on light trace prior" direction gets picked up, needs a GPU node (not just the login-node single GPU) for the full 30-CCD correctness re-validation campaign this port's changes are normally checked against.
+
+## 2026-08-24 -- Reproducing Julien's findings with his own comparison tools: bundle-edge trace spikes confirmed real and periodic, PSF-shape "shoulder" confirmed shared/real, both worse in b/r than z
+
+Follow-up to the 2026-08-23 entry (Julien's Slack review). Ran his own tools
+(`plot_fiber_traces` at `/global/cfs/cdirs/desi/users/cdwarner/code/desispec/bin/plot_fiber_traces`,
+`plot_psf_comparison_using_specter.py` at
+`/global/common/software/desi/users/jguy/teststand/bin/plot_psf_comparison_using_specter.py`)
+directly, on the GPU node, against fresh full-CCD Python output (with the
+TAILXSCA/TAILYSCA/TAILCORE fix from the same session applied) vs. real
+production C++ output, for two night/expid sets:
+- Julien's own case: `b4`/`r2` @ `20251013/00316043` (real matterhorn
+  production `fit-psf-{b4,r2}-00316043.fits` as C++ truth).
+- Our standing standard test case: `b4`/`r2`/`z8` @ `20260401/00344649`
+  (also real matterhorn production output, not a private rerun -- confirmed
+  `fit-psf-{b4,r2,z8}-00344649.fits` exist at
+  `/global/cfs/cdirs/desi/spectro/redux/matterhorn/exposures/20260401/00344649/`).
+
+Broken fibers for each camera pulled from the real arc-exposure logs via
+`testing/full_ccd_campaign.py`'s `find_case()` (not guessed): `b4`=36,51,132,156
+both nights; `r2`=497 both nights; `z8`=473,474 (already established). All 5
+fresh Python full-CCD fits (`--gpu 4 --workers-per-gpu 5`, one node) ran clean,
+20/20 bundles, 103-208s each (cold-ish JIT, first run on this node this
+session).
+
+**Tooling notes (both fixed this session, not specex bugs):**
+- `plot_fiber_traces` and `plot_psf_comparison_using_specter.py` both
+  unconditionally call `plt.show()` with no working `--output`/`-o` save path
+  (`plot_psf_comparison_using_specter.py`'s `-o` is accepted but dead --
+  the only write call after it, `pyfits.writeto(...)`, is commented out).
+  On this node that surfaced as an actual GUI window popping up on the
+  user's screen (some working X11/remote-display path), not a hang -- but
+  it's not scriptable/headless. Fixed locally (not upstream, these are
+  Julien's personal scripts) with two tiny wrapper scripts in this session's
+  scratchpad that force `matplotlib.use('Agg')` and monkeypatch `plt.show`
+  to `savefig` each open figure instead -- `exec()`s the real script under
+  `__main__` so no edits to Julien's files are needed. Per user request,
+  now routing all such comparison-plot output to `$SCRATCH/specex/plots/`
+  (the same directory Julien's own 10 Slack plots were uploaded to) instead
+  of ad-hoc scratch paths.
+- Confirms the 2026-08-23 TAILXSCA/TAILYSCA/TAILCORE fix (`io.py`) actually
+  resolved the `sigx2=nan` crash Julien hit -- `plot_psf_comparison_using_specter.py`
+  ran cleanly against fresh Python output with no `fixpsf.py` workaround needed.
+
+**Finding 1 (bundle-edge trace offsets), now directly visualized and
+quantified, not just architecturally argued:** `plot_fiber_traces --other-psf`
+at each camera's central wavelength, dx/dy vs. fiber, all 500 fibers:
+- `b4` (both nights): sharp, clean periodic spikes exactly every 25 fibers
+  (bundle boundaries), amplitude growing toward the CCD edges -- up to
+  ~0.27px (00316043) / ~0.24px (00344649) at the outermost bundles, near-zero
+  mid-CCD. Textbook confirmation of the per-fiber-independent trace fit
+  mechanism argued from code in the prior entry.
+- `r2` (both nights): same periodic-spike signature, smaller typical
+  amplitude (~0.03-0.05px away from the edges) but with one much larger
+  outlier (up to ~0.35px) right at fiber ~497-500 -- that's the `--broken-fibers`
+  fiber (497), a different, already-understood mechanism (explicit-broken-fiber
+  handling), not a new finding.
+- **`z8` (standard night): no periodic bundle-edge spiking at all.** The
+  C++-vs-Python difference is smooth, low-amplitude broadband noise
+  (~0.01-0.02px) with no visible 25-fiber periodicity, an order of magnitude
+  smaller than b/r's spikes. One isolated ~0.1px spike sits at the very first
+  bundle edge (fiber 0) and another near the 473/474 broken-fiber region --
+  otherwise flat.
+- **New synthesis: this is a band-density effect, not purely an architectural
+  inevitability.** z-band's much richer arc line set plus `--fit-continuum`
+  gives every fiber (including bundle-edge ones) enough of its own data that
+  the per-fiber-independent trace fit is well-constrained on its own, so the
+  shared architectural weak point (no cross-fiber prior in real production)
+  doesn't manifest as a visible discrepancy. b/r's sparser lines leave
+  bundle-edge fibers more exposed to it. Directly generalizes the
+  "shared root cause" argument from the 2026-08-23 entry's Finding 2 (data
+  sparsity) to Finding 1 as well -- both findings are really one finding.
+
+**Finding 2 (wavelength-edge PSF-shape divergence / "shoulder"), now
+visually confirmed shared and real, not a Python-only artifact:**
+`plot_psf_comparison_using_specter.py`, `b4`/fiber 249 (Julien's own case),
+three wavelengths spanning the band:
+- `wl=3650` (blue edge, near the 238-383A line-list gap found 2026-08-23):
+  double-peaked "shoulder" profile clearly visible in **both** C++ and
+  Python's x/y cross-sections, overlapping almost exactly (red-dashed
+  Python line sits directly on top of blue C++ line in both profiles).
+  `sigx1/sigx2=1.00096`, `sigy1/sigy2=1.01733` -- the largest sigma
+  mismatch of the three wavelengths tested, but not visually distinguishable
+  in the profile plot itself.
+- `wl=4756` (band center): profiles effectively identical, no shoulder
+  feature at all. `sigx1/sigx2=1.00434`, `sigy1/sigy2=1.00616`.
+- `wl=5900` (red edge): `sigx1/sigx2=1.00670`, `sigy1/sigy2=0.99639` --
+  small, same order as center.
+- **Conclusion: the "shoulder" itself is a genuine PSF feature present in
+  real C++ production output, not a Python-port artifact** -- Julien's
+  instinct that something was off at the wavelength edge was right in the
+  sense that the sigma-ratio mismatch really is largest there (1.7% vs.
+  <1% elsewhere), but the qualitative shape (including the shoulder) is
+  shared, and the quantitative mismatch is still sub-2%.
+
+**Bottom line for both findings:** both are real, both are largest in
+blue/red (sparse-line) bands and smallest/absent in z (dense-line,
+continuum-fit) band, and both are consistent with a shared root cause
+(real per-fiber/per-wavelength data sparsity under-constraining an
+architecturally-shared fitting approach) rather than either being a
+Python-specific correctness bug. Nothing here changes the "very encouraging"
+verdict; it sharpens *where* residual disagreement concentrates and *why*.
+
+**Open, not yet started:** the Finding-1 enhancement floated 2026-08-23
+(broadening `trace_prior_deg`'s ndead-gated activation to also help
+bundle-edge fibers in sparse bands) is now better-motivated by this
+session's z-vs-b/r contrast, but still not implemented or validated on a
+30-CCD campaign. All plots from this session are at
+`$SCRATCH/specex/plots/` (`plot_traces_*`, `psfshape_*`); fresh full-CCD
+Python outputs at `$SCRATCH/specex/julien_repro_20260824/`.
+
+## 2026-08-24 (cont'd) -- Experiment: position-based bundle-edge gating for the trace prior, alongside ndead
+
+Direct follow-up to the same-day entry above, per direct request to "dig into
+trace_prior_deg's activation." Added a second, independent fiber-flagging
+criterion to `PSF_Fitter.fit()` (`fitter.py:1615-1638`): alongside the
+existing ndead>threshold gate, a fiber is now also flagged if it's within
+`SPECEX_TRACE_PRIOR_EDGE_WIDTH` positions of either end of its bundle's fixed
+25-fiber span (env var, default 0 -- off, bit-identical to before this
+change; no CLI flag added yet, this is exploratory). `trace_prior_fiber_flag`
+becomes ndead-flag OR edge-flag; `build_trace_prior_hessian` itself needed no
+changes (already accepts an arbitrary per-fiber flag array).
+
+**Deliberately not blanket**, learning directly from the 2026-08-1x weight-sweep
+entry above (flagging *every* fiber in a bundle, even down to weight=1e3,
+measurably hurt already-healthy interior fibers -- b1@20260401 bundle 0
+roughly doubled its xrms/yrms, 0.0087/0.0068 -> 0.0152/0.0136). Position-based
+gating only ever touches the true edge fibers (first/last N of 25); every
+interior fiber's A/B rows are completely untouched by construction whenever
+its own flag is 0 (it can still appear as a "consensus" contributor to a
+flagged neighbor's target mean, but gets no residual of its own).
+
+**Tested on `b4@20260401/00344649` (full CCD, C++ real production truth),
+comparing X/Y trace agreement at the same lambda=4756A used for the spike
+plots, split into "edge fibers" (first/last N of each bundle) vs "interior"
+(everything else), broken fibers 36/51/132/156 excluded from both sets:**
+
+| Config | Edge xrms | Edge yrms | Interior xrms | Interior yrms |
+|---|---|---|---|---|
+| baseline (ndead-only, current default) | 0.08454 | 0.00983 | 0.00121 | 0.00119 |
+| edge-width=2, weight=1e5 (default) | 0.07448 | 0.01313 | 0.00135 | 0.00137 |
+| edge-width=2, weight=1e6 | 0.07544 | 0.01349 | 0.00135 | 0.00139 |
+| edge-width=4, weight=1e5 (over its own wider edge set) | 0.05318 | 0.01307 | 0.00144 | 0.00164 |
+
+(edge-width=4's baseline-for-comparison over the same wider edge set: xrms
+0.05959, yrms 0.00701, interior xrms 0.00120, yrms 0.00111.)
+
+**Reading these numbers:**
+- **X (the axis the whole finding is about) genuinely improves**: ~12% edge-xrms
+  reduction at width=2, single worst-fiber outlier (474) shrinks -0.241px ->
+  -0.209px (13%). This is real, not noise -- confirmed by grepping the fit
+  log, which shows the prior activating for exactly the 4 intended edge
+  fibers per bundle (`SPECEX_TRACE_PRIOR_DEG: activating trace prior for 4
+  fiber(s) ... 'edge'`) on all 20/20 bundles.
+- **Y gets slightly worse at the edges** (0.0098 -> 0.0131px) -- small in
+  absolute terms, but a real, consistent regression, not something to gloss
+  over. The prior pulls X and Y together (same `H_prior`, same fiber flag,
+  applied to both `x_sl`/`y_sl`); it isn't free to help one axis without
+  touching the other.
+- **Weight saturates fast**: 1e5 -> 1e6 (10x) changed almost nothing
+  (0.07448 -> 0.07544 edge-xrms, i.e. slightly *worse*, not better) --
+  the pull is already near its practical limit at the existing default
+  weight, matching the pre-existing weight-sweep finding that this
+  prior's effect is not simply "more weight = more consensus."
+  **Note on methodology**: `SPECEX_TRACE_PRIOR_WEIGHT` set as a shell env
+  var is silently overwritten inside each worker by `specex.py`'s own
+  `--trace-prior-weight` CLI default (`specex.py:443-444` always sets
+  `os.environ["SPECEX_TRACE_PRIOR_WEIGHT"]` when the CLI arg isn't None,
+  which it never is by default) -- had to pass `--trace-prior-weight 1e6`
+  explicitly on the CLI for the weight sweep to actually take effect;
+  worth remembering for anyone else trying to override this via env var
+  alone.
+- **Widening the edge band (2->4 fibers/side) doesn't help further and
+  costs slightly more on interior fibers** -- edge-width=2 looks like the
+  better setting of what was tried, not just the first one tried.
+- **Interior-fiber cost is real but ~10-30x smaller than the blanket-prior
+  harm already documented** (~0.0001-0.0005px absolute degradation here vs.
+  ~0.007px there) -- position-based gating is a fundamentally gentler
+  intervention, as designed.
+
+**Bottom line: a real but partial, axis-asymmetric improvement, not a fix.**
+Thins the X spikes at bundle edges by roughly a tenth without meaningfully
+disturbing interior fibers, at the cost of a small new Y regression in
+exactly the same fibers. Consistent with the underlying diagnosis (real data
+sparsity leaves both pipelines under-determined at bundle edges) --
+softening one pipeline's answer toward cross-fiber consensus can only ever
+partially compensate for that, it doesn't remove the sparsity. **Purely
+exploratory** -- env-var gated (default off, zero behavior change), no CLI
+flag added, not run on any other camera/night, not checked against the
+known dead-column/masked-amp regression cases that gated the *existing*
+ndead mechanism's rollout, not run at 30-CCD scale. Code: `fitter.py`,
+`trace_prior_fiber_flag` block just above the 'trace'-mode prior
+application. Not committed.
+
+## 2026-08-24 (cont'd) -- Broken-fiber trace mismatch: exhaustively ruled out every reproducible-locally explanation, still open
+
+Direct follow-up, per request to dig into what C++ does for `--broken-fibers`
+fibers and try to match it. Confirmed the starting premise directly: Python
+(`io.py:225-233`, `never_fit_fibers` block) does not fit explicitly-broken
+fibers at all -- it copies the input template's XTRACE/YTRACE/PSF-coeff rows
+through unchanged and sets STATUS=-1. This was deliberately validated
+against C++ in 2026-07-27/2026-08-14 (commit `70e988f`) using **private,
+locally-run C++ reruns**, which showed bit-for-bit identical output to the
+template for the two known cases (`z8@20260401` 473/474, `z3@20260401` 368).
+
+**This session's finding: real matterhorn production output is NOT
+bit-identical to the template for the same fibers.** `b4@20260401/00344649`
+fibers 36/51/132/156 (real, FIBERMAP-confirmed `BROKENFIBER` fibers, matching
+the arc log's own `--broken-fibers 36,51,132,156`) differ from
+`shifted-input-psf-b4-00344649.fits` by +0.082 to +0.113px in Y (same sign
+all 4, at the band-center wavelength). Re-checked C++'s `STATUS` semantics
+directly in `specex_psf_proc.cc:244-256`: it's written **per bundle**
+(`params_of_bundle.fit_status`), not per fiber -- every fiber in a
+successfully-fit bundle gets STATUS=0 regardless of individual Off()/mask
+status, so STATUS=0 on these fibers does NOT mean they were independently
+fit; that's a real semantic gap between Python's (fiber-level, -1 for
+never-fit) and C++'s (bundle-level) STATUS convention, but a separate,
+smaller issue from the trace-value mismatch, and not itself the explanation.
+
+**Exhaustively tried to reproduce the offset locally -- every attempt gave
+the "frozen at template" result instead, matching the private-rerun-era
+finding, not real production:**
+
+1. **Our repo's own compiled `_libspecex.so`**, single-bundle
+   (`desi_psf_fit --first-bundle 1 --last-bundle 1 --first-fiber 25
+   --last-fiber 49 --broken-fibers 36,51,132,156`, same `--in-psf`/`-a` as
+   production): fiber 36 Y bit-identical to template (diff = 0.00000).
+2. **Diffed our `src/` against the actual upstream checkout** installed
+   alongside the production module
+   (`/global/common/software/desi/perlmutter/desiconda/20260227-2.3.1/code/specex/main`,
+   a live git clone with its own `.git`): `specex_psf_proc.cc` (the trace/PSF
+   table writer) is **byte-identical**, zero diff. `specex_pyfitting.cc`
+   differs only in this project's own added `--debug-spots` instrumentation
+   (env/flag-gated, unrelated). `specex_psf_fitter.cc` differs by ~150 lines,
+   confirmed (via targeted grep for `Off()`/`mask`/`trace_prior`/`X_vs_W`/
+   `Y_vs_W` in the diff) to be entirely our own added `SPECEX_DEBUG_DUMP_A_CPP`
+   instrumentation and `--debug-spots` selection-pass dumps -- no algorithmic
+   difference in trace-fitting or Off()-exclusion logic.
+3. **Ran the literal deployed production binary directly** -- found
+   `specex/0.10.1`'s installed `_libspecex.cpython-313-...so` on disk
+   (`.../code/specex/0.10.1/lib/python3.13/site-packages/specex/`), imported
+   it directly (bypassing our repo's `specex` package via `sys.path`
+   manipulation) and called its own `run_specex()` with the exact same
+   single-bundle command. Same result: bit-identical to template. This is
+   not "our build" vs "prod's build" -- it's the actual bytes production
+   runs, run directly, still disagreeing with production's own recorded
+   output for the same fiber.
+4. **Checked for module-version drift** (deployed `0.10.1` silently patched
+   since the April file was produced): tested a completely different, much
+   more recent production night (`z8@20260414/00346972`, broken fibers
+   473/474, 2 weeks after the original test night). **Same phenomenon
+   reproduces** (fibers 473/474 differ from template by -0.021/-0.024px,
+   smaller magnitude than the b4 case but consistent direction/existence) --
+   rules out "stale historical bug, since fixed" as the explanation.
+5. **Checked for a fiber-range/badamp discrepancy** between my manual
+   `--first-fiber 25 --last-fiber 49` and what a full run would actually
+   compute: `desispec/scripts/specex.py`'s per-bundle fiber-range logic only
+   deviates from the bundle's nominal contiguous range when `'BADAMPS' in
+   hdr` (`specex.py:192`) -- confirmed directly via `fitsio.read_header` that
+   `preproc-b4-00344649.fits.gz` has no `BADAMPS` key at all, so the real run
+   used exactly the same 25-49 range I used manually (also directly
+   confirmed against the real arc log's own recorded `desi_psf_fit` command
+   line for bundle 1, which matches my manual command word-for-word).
+6. **Ran the real, full 20-rank `srun -n 20 desi_compute_psf --mpi`
+   wrapper** (the actual multi-process command production uses, not a
+   single-process reproduction) end-to-end on `b4@20260401/00344649` with
+   `--broken-fibers 36,51,132,156` -- genuine concurrent per-bundle fits,
+   genuine `merge_psf()` merge step, same as `testing/full_ccd_campaign.py`
+   already validates for correctness comparisons. **Still bit-identical to
+   template for fiber 36.** Log confirms fiber 36 appears in bundle 1's
+   "fitted fibers" list at merge time (expected, since STATUS is bundle-wide
+   per finding above) but the actual XTRACE/YTRACE value merged through is
+   the frozen one.
+7. **Traced the exact code path behind the real production log's "MPI ranks
+   81-100 fitting PSF for b4 in job 25" message** (`specex.py:393-394`,
+   inside the `fitframe()` closure used by `desispec.workflow.schedule.Schedule`
+   for batching many cameras across one big multi-camera MPI job) -- confirmed
+   it calls the exact same `main(cmdargs, comm=groupcomm)` used by the
+   standalone `desi_compute_psf --mpi` CLI entrypoint, with a same-size
+   (`group_size=20`) sub-communicator and the identical parsed CLI args
+   recorded in the arc log. Structurally equivalent to attempt 6 above, not
+   a different code path -- rules out "big multi-camera job vs. standalone
+   per-camera job" as the explanation too.
+
+**Bottom line: every angle reproducible from this session -- source code,
+compiled binary, single-bundle, full concurrent 20-rank MPI+merge, a
+completely different production night -- gives the "frozen at template"
+result that Python already implements and that the 2026-07-27 fix was
+originally validated against. Real production's actual recorded output
+disagrees with all of them, by a small (0.02-0.11px) but consistent,
+same-signed amount specific to the explicitly-broken fibers.** This is not
+yet root-caused. Remaining candidates, none tested: (a) something in
+`desi_proc`'s own arc-frame driver *around* the `fitframe()`/`Schedule` call
+not yet located, (b) a real cluster/MPI-runtime non-determinism specific to
+the actual multi-hundred-rank production job that a 20-rank isolated
+reproduction can't trigger, (c) simply not yet finding the right question to
+ask given no access to the actual production job's full command-line/env
+context beyond what the arc log records. User is reaching out to Julien
+Guy directly on this -- good candidate question: does any post-`desi_psf_fit`
+step (before or instead of the plain `merge_psf()` read here) touch
+explicitly-broken fibers' trace values in real production, e.g. an
+across-exposure blend/average or a later recalibration pass keyed to the
+same output filename.
+
+### Files
+No specex code changes this entry (investigation only). Scratch outputs at
+`$SCRATCH/specex/julien_repro_20260824/`: `cpp-private-b4-00344649_bundle1.fits`
+(our build, single-bundle), `cpp-deployed010.1-b4-00344649_bundle1.fits`
+(literal deployed 0.10.1 binary, single-bundle), `cpp-mpi-b4-00344649.fits`
++ `.log` (real 20-rank `desi_compute_psf --mpi` full-camera rerun).
+
+## 2026-08-24 (cont'd) -- trace_prior_deg edge-width=1 result: same saturated trade-off as width=2/4
+
+Completed the width sweep from the entry above. `edge-width=1` (single
+outermost fiber per bundle side, 2 fibers/bundle flagged) on the same
+`b4@20260401/00344649` full-CCD comparison:
+
+| Config | Edge xrms | Edge yrms | Interior xrms | Interior yrms |
+|---|---|---|---|---|
+| baseline | 0.11880 | 0.01377 | 0.00121 | 0.00118 |
+| edge-width=1 | 0.10440 (-12%) | 0.01644 (+19%) | 0.00130 | 0.00125 |
+
+Same ~12% X improvement / Y regression / negligible-interior-cost pattern
+as width=2 and width=4 (previous entry) -- confirms this isn't a width-
+tuning problem, the lever is flat across 1/2/4 fibers per side. Combined
+with the earlier weight-saturation result (1e5 vs 1e6, no further gain),
+**this closes out the trace-prior-based mitigation as explored**: no
+tested width/weight combination avoids the Y trade-off, and none gets past
+roughly a tenth reduction in the X spike. Reconfirms the `fitter.py`
+`SPECEX_TRACE_PRIOR_EDGE_WIDTH` mechanism is a real, working, but
+fundamentally limited lever for this problem -- left in place (env-var
+gated, default off) as documented, not pursued further absent a new idea.
+
+## 2026-08-24 (cont'd) -- Fourth confirmation: an independent, pre-existing standalone C++ rerun also freezes at template
+
+User asked directly what the "real production" C++ file being compared
+against actually was -- confirmed it's genuine matterhorn production output
+(`desi_proc`, real SLURM night-processing job, `specex/0.10.1` deployed
+module, spanning many cameras across one big multi-hundred-rank MPI job --
+not anything this project ran).
+
+That prompted checking a **fourth, independent** data point: this project's
+own pre-existing `07Aug2026-30ccd-campaign` C++ rerun of the same camera
+(`cpp-b4@20260401-00344649.fits`, generated 2026-08-06, weeks before this
+investigation started, via the same standalone `srun -n 20 desi_psf_fit`
+per-bundle pattern `testing/full_ccd_campaign.py` uses -- confirmed via its
+own log, exact same `--in-psf`/`--broken-fibers 36,51,132,156` as
+production). **Also bit-identical to the template for fiber 36** (diff =
+0.00000), same as every other reproduction attempt this session.
+
+This is now 4/4 for "isolated/standalone invocation freezes at template" (our
+build, the literal deployed `.so`, this session's fresh 20-rank rerun, and
+this independent pre-existing campaign rerun) vs. 1/1 for "the real,
+multi-camera production job shows a real, nonzero offset" (both nights
+tested, `20260401` and `20260414`). Strengthens the case that whatever's
+responsible is specific to running inside the genuine, full production job
+context (not the `desi_psf_fit`/`desi_compute_psf` algorithm, not `merge_psf`,
+not MPI concurrency per se, since all of those are exercised identically by
+the standalone 20-rank reruns) -- still not root-caused, still the leading
+open question for Julien.
+
+## 2026-08-24 (cont'd) -- dX bundle-edge spikes: localized to exactly 1 fiber, physically explained, and now attributed specifically to Python's own fit (not shared/C++-side noise)
+
+Continued digging into the periodic dX spikes from the trace-comparison
+plots (Finding 1, 2026-08-23/24 entries), using the clean, broken-fiber-
+uncontaminated pair (`07Aug2026-30ccd-campaign/cpp-b4@20260401-00344649.fits`
+vs this session's fresh `py-b4-00344649.fits`) to avoid the separate
+broken-fiber issue polluting the analysis.
+
+**Step 1 -- C++ vs C++ sanity check.** Plotted `fit-psf-b4-00344649.fits`
+(real production) against `cpp-b4@20260401-00344649.fits` (our own
+independent 07Aug rerun, same algorithm, same inputs, same broken-fibers
+list): **flat zero everywhere except the 4 broken fibers.** Two independent
+runs of the C++ algorithm agree bit-for-bit at every one of the 496 healthy
+fibers, including every bundle-edge fiber that shows a large spike against
+Python. This is an important refinement to the prior "shared architectural
+under-determination" framing: **C++'s own per-fiber trace fit is fully
+deterministic and reproducible at bundle edges** -- the Python-vs-C++
+divergence there is a real, structural difference between the two
+algorithms' answers, not two equally-noisy fits landing on different
+arbitrary points.
+
+**Step 2 -- localized the effect to exactly one fiber per bundle side, not a
+taper.** Aggregated dX (Python vs our clean C++ rerun) by position-within-
+bundle (0-24) across all 20 bundles of b4/00344649:
+
+| position | mean dX | rms dX |
+|---|---|---|
+| 0 (first fiber) | **+0.097** | 0.104 |
+| 1-23 (every interior fiber) | ~0.0000 | ~0.001-0.0015 |
+| 24 (last fiber) | **-0.119** | 0.132 |
+
+Interior fibers sit at the noise floor; only the single first and single
+last fiber of every 25-fiber bundle carry the effect, and the **sign is
+consistent across all 20 bundles** (pos 0 always +, pos 24 always -) --
+this consistency is what rules out "random noise from underdetermination"
+and points to something systematic.
+
+**Step 3 -- found the physical cause of why exactly these fibers.** Checked
+actual physical X-CCD fiber pitch: within-bundle spacing is ~7.2-7.3px;
+spacing across a bundle boundary (fiber 24 of one bundle to fiber 0/25 of
+the next) is **~16.8-17.6px, roughly 2.4x wider** -- a real DESI hardware
+feature (physical slit-block gaps between fiber groups), and in fact the
+exact mechanism `eval_bundle_size()` (`specex_trace.cc:210-230`) uses to
+auto-detect bundle boundaries in the first place (gap > 1.5x median
+spacing). Bundle-boundary fibers are the only ones with asymmetric,
+far-separated neighbor geometry (one close same-bundle neighbor at ~7.2px,
+one far cross-bundle "neighbor" at ~17px, vs. two close neighbors for every
+interior fiber) -- directly explains the sharp, single-fiber-wide
+localization from Step 2.
+
+**Step 4 -- attributed the divergence specifically to Python, not C++,
+using each pipeline's own smooth-extrapolation residual.** For every
+boundary fiber, fit a linear extrapolation from its own bundle's 4 nearest
+interior neighbors (positions 1-4 for pos-0 fibers, 20-23 for pos-24
+fibers) and compared each pipeline's actual boundary value against its own
+prediction:
+
+| | mean residual (own extrap) | rms |
+|---|---|---|
+| C++ @ pos 0 | -0.005 (~zero) | 0.067 |
+| **Python @ pos 0** | **+0.093** | 0.114 |
+| C++ @ pos 24 | -0.043 (small) | 0.165 |
+| **Python @ pos 24** | **-0.162** | 0.238 |
+
+C++ stays close to what its own interior fibers predict at both edges;
+**Python shows a real, systematic, consistently-signed departure from its
+own smooth trend**, and that departure (+0.093 / -0.162) accounts for
+essentially all of the earlier-measured Python-vs-C++ spike (+0.097 /
+-0.119). This flips the framing from "shared, mutually-noisy edge effect"
+to "a real, fixable Python-specific quirk in how boundary fibers are
+fit" -- C++'s per-fiber-independent trace fit apparently handles the
+asymmetric-neighbor-spacing case fine; Python's doesn't.
+
+**Step 5 -- ruled out spot-finding/centroid measurement as the cause.**
+Reran bundle 1 (`--debug-spots`) on both pipelines and compared fiber 25's
+(a pos-0 boundary fiber) actual selected-spot list: same 25-26 spots, same
+wavelengths, and critically **the RAW, pre-fit per-spot xc/yc values are
+bit-for-bit identical** between Python's `.pyrawspots.txt` and C++'s
+`.cpp_cp0_pass1.txt` checkpoint dump (e.g. 284.962/284.955/284.850... match
+exactly on both sides). The final, post-fit `pyspots.txt`/`cppspots_pass4.txt`
+xc values, by contrast, diverge by a wavelength-dependent, non-monotonic
+amount (+0.17px at the blue end, dipping to -0.05px around 4000-4360A,
+back up to +0.15px around 5300-5500A, tapering toward the red) -- a real
+shape difference in the fitted Legendre trace polynomial itself, not a
+rigid offset. **Conclusion: the divergence is introduced specifically
+during the joint trace+PSF optimization, not spot input data** -- both
+pipelines start from identical raw measurements for this fiber.
+
+**Bottom line: this is now a precisely bounded, well-evidenced, genuinely
+open question** -- something about Python's per-fiber trace-polynomial fit
+(`fitter.py`, the `trace`-mode Gauss-Newton solve) behaves differently than
+C++'s equivalent specifically when a fiber's physical neighbor spacing is
+asymmetric (one near, one far), producing a real, non-random departure from
+a smooth trend that C++ doesn't share. Not yet root-caused inside Python's
+own fit code (the natural next step, not started this session -- candidates
+worth checking: whether the shared/bundle-wide PSF-shape design matrix
+terms couple to a fiber's own trace correction differently depending on
+neighbor symmetry, or whether Python's Gauss-Newton solve has different
+conditioning/regularization behavior than C++'s equivalent step for this
+specific case).
+
+### Files
+No specex code changes. New scratch debug-spot dumps at
+`$SCRATCH/specex/julien_repro_20260824/debugspots/` (`py-b4-bundle1*`,
+`cpp-b4-bundle1*`, both with `--debug-spots`, bundle 1 / fibers 25-49 only).
+New plots at `$SCRATCH/specex/plots/`: `plot_traces_b4-00344649-vs-ourcpp_*`
+(Python vs our clean C++ rerun), `plot_traces_b4-00344649-ourcpp-vs-prod_*`
+(our C++ rerun vs real production, isolating the broken-fiber-only
+difference).
+
+## 2026-08-24 (cont'd) -- Broken-fiber trace mystery CLOSED: production runs a post-PSF-fit interpolation step (interpolate_fiber_psf), and the correct comparison file is fit-psf-before-listed-fix-*.fits
+
+Julien Guy resolved it (Slack, 2026-08-24): the broken-fiber trace adjustment
+we could not reproduce is done AFTER the PSF fit, by a separate desispec
+script, not by specex at all:
+
+- Call site: desispec `proc.py` line ~741
+  (https://github.com/desihub/desispec/blob/02bc7e66/py/desispec/scripts/proc.py#L741)
+- The script: `desispec/scripts/interpolate_fiber_psf.py` -- interpolates
+  broken/listed fibers' PSF+trace from adjacent fibers.
+- The pre-interpolation PSF is preserved on disk as
+  `fit-psf-before-listed-fix-<cam>-<expid>.fits` next to `fit-psf-*.fits`
+  in the same exposures directory. THAT is the file any specex-level
+  comparison should use. Julien verified on r2@20251013/00316043 that using
+  it eliminates the large dY difference.
+
+Verified independently on our test case (b4@20260401/00344649, broken
+fibers 36,51,132,156 -- note: an earlier scratch comparison mistakenly used
+[60,92,99,175]; always pull the list via full_ccd_campaign.find_case):
+
+  fiber | maxY: before-template | before-ourC++ | before-python | after-before (the fix)
+     36 |          0.000e+00 |     0.000e+00 |     0.000e+00 |          1.127e-01
+     51 |          0.000e+00 |     0.000e+00 |     0.000e+00 |          8.929e-02
+    132 |          0.000e+00 |     0.000e+00 |     0.000e+00 |          1.193e-01
+    156 |          0.000e+00 |     0.000e+00 |     0.000e+00 |          1.319e-01
+
+- At the broken fibers: before-fix == shifted-input-psf template == our C++
+  rerun == our Python output, all EXACTLY (0.0). Frozen-at-template was
+  always the correct PSF-fit-stage behavior; every one of our 4 independent
+  local confirmations was right.
+- The fix touches ONLY the 4 broken fibers (all other 496 fibers:
+  before == after exactly, X and Y), shifting Y by 0.09-0.13 px -- exactly
+  the 4 outsized dY spikes that started this investigation.
+- Whole-file before-fix vs our own 07Aug C++ rerun: max |dX|=0.0032,
+  |dY|=0.0048 px over all 500 fibers -- ordinary run-to-run fit noise.
+
+Takeaway for all future comparisons vs production: compare against
+`fit-psf-before-listed-fix-*.fits`, NOT `fit-psf-*.fits`, whenever broken
+fibers matter. `fit-psf-*.fits` = before-fix + interpolate_fiber_psf.
+No specex/Python-port change needed; the port's behavior was correct.
+
+## 2026-08-24 (cont'd) -- Triple-checked verdict on "is the trace fit independent per fiber?" (Julien's question): strictly NO -- joint bundle solve with per-fiber parameter blocks; and the recheck surfaced a real C++/Python Hessian difference
+
+Julien pushed back (Slack) on our earlier claim that C++ does a "per-fiber
+independent refit" at specex_psf_fitter.cc:1213-1238, pointing at
+ComputeChi2AB's spot loop (line 512/515) and derivative insertion (~549).
+Per his request we triple-checked: (1) his own source read, (2) our careful
+re-read, (3) an independent fresh-context AI audit with a neutral prompt.
+All three agree. Verdict, with line numbers:
+
+- "The trace is fit independently from fiber to fiber" is STRICTLY FALSE
+  as a description of the production solve, in both C++ and Python. The
+  lines we previously cited (1215-1242) are the *parameter packing* of the
+  joint fit: each fiber's X_vs_W/Y_vs_W Legendre coefficients get their own
+  contiguous block of ONE Params vector (offsets recorded in
+  tmp_trace_x/y_parameter), solved by one cholesky_solve of the full
+  nparTot x nparTot system per Gauss-Newton iteration (line ~1463).
+- The qualified sense in which "per-fiber" is true: the chi2 data term is
+  NEARLY block-diagonal per fiber. ComputeChi2AB builds one gradient vector
+  H per CCD pixel spanning all spots covering that pixel (spot loop 515,
+  trace terms 552-555 into each spot's own fiber's block), then
+  A += w*H*H^T (syr, ~704). Cross-fiber trace-trace Hessian entries are
+  therefore non-zero exactly where core stamps of spots from adjacent
+  fibers overlap the same weighted pixel (~1-2 columns at the ~7.2px
+  interior pitch; gradPos is filled only by the core PixValue term, so
+  out-of-core/tail contributions to trace gradients are zero). Fibers also
+  couple indirectly through the shared spot fluxes in FLUX+TRACE.
+- Trace is NEVER fit jointly with PSF shape in either code's active path:
+  C++ runs TRACE-alone (fit_flux=false, ~2707-2718) then FLUX+TRACE
+  (~2711-2731 loop); the PSF+FLUX+TRACE stage is commented out
+  (~2740-2751). Python's 'trace' mode solves fluxes + trace + continuum
+  with the PSF-shape block excluded (fitter.py:1895) == C++'s FLUX+TRACE.
+  (Python has no separate TRACE-alone frozen-flux stage; known scheduling
+  difference.)
+- C++ DOES have an explicit cross-fiber trace prior (lines 760-886,
+  hardcoded weight 1e8, coeffs of degree >= trace_prior_deg tied to the
+  bundle mean, real off-diagonal fiber-fiber Hessian blocks) -- but
+  trace_prior_deg defaults to 0 (specex_psf_fitter.h:171,
+  specex_pyoptions.h:106) and production desi_psf_fit command lines
+  (checked matterhorn arc logs, 20260401/00344649) do NOT pass
+  --trace-prior-deg. So it is INACTIVE in production; it does not explain
+  C++'s well-behaved bundle-edge fibers.
+- Julien's memory of no independent-fiber mode is right for the live code;
+  the one genuinely independent per-fiber trace fit, specex::Trace::Fit
+  (specex_trace.cc:45-206), has NO call sites -- dead code.
+- fitter.py's get_bundle_block_diagonal_trace_monomials docstring, which
+  repeated our imprecise "independent refit" claim, is now corrected.
+
+NEW (fell out of the recheck, and is now the leading dX-edge-spike
+candidate): a real structural C++/Python difference in the Hessian.
+C++ accumulates A per PIXEL over the summed multi-spot H, so overlapping
+stamps produce inter-spot cross terms (trace_i-trace_j, flux_i-flux_j,
+flux_i-trace_j). Python's _accumulate_bundle_jax computes the gradient B
+from the true joint multi-spot residual (scatter-add over shared pixels --
+exact, same as C++) but assembles A per SPOT (einsum sum_b J_b^T W_b J_b,
+fitter.py:695-697; flux-flux block strictly diagonal, line 695), dropping
+exactly those inter-spot cross terms. Consequences: a fully converged fit
+reaches the same stationary point either way (B exact => B=0 at the same
+chi2 stationary points), but with finite iterations / weakly-constrained
+directions the two iterations can settle differently. A bundle-edge fiber
+is exactly such a direction: it has stamp-overlap coupling on ONE side only
+(C++ keeps that one-sided coupling; Python has none), and the physical
+pitch asymmetry (~7.2px interior vs ~17px across the bundle gap) makes its
+trace-vs-flux/shape conditioning the worst in the bundle. Also ruled out:
+increase_weight_of_side_bands (C++'s "avoid fiber to fiber degeneracy"
+side-band weight boost, SIDE_BAND_WEIGHT_SCALE=10) -- constructor-false and
+explicitly set false at 2792/2982, never enabled; dead code like
+recompute_weight_in_fit. Next step if we pursue the dX spikes further:
+test whether adding the missing inter-spot cross terms (or just the
+flux-trace ones for adjacent fibers) to Python's A pulls the boundary
+fibers onto the smooth trend.
+
+## 2026-08-24 (cont'd) -- Exact per-pixel Hessian (SPECEX_EXACT_HESSIAN=1): implemented, validated, and a clean NULL result on the bundle-edge dX spikes
+
+Tested the leading hypothesis from the ComputeChi2AB re-read: that Python's
+per-spot Hessian assembly (dropping the inter-spot cross terms C++ gets at
+overlapping stamp pixels) is why Python's bundle-boundary fibers drift off
+the smooth trend. Implementation + result:
+
+- New env-gated path in fitter.py's _accumulate_bundle_jax
+  (SPECEX_EXACT_HESSIAN=1, default off = byte-identical old behavior):
+  assembles A = G^T W G with G the true per-pixel gradient matrix --
+  per-spot flux gradients scattered into a (Np+1, Ns) pixel-x-spot matrix,
+  shape/trace Jacobian rows scattered into (Np+1, Nsh), continuum gradient
+  already per-pixel -- exactly C++'s per-pixel A += w*H*H^T structure,
+  full float64. chi2 and B untouched (already exact both paths).
+- Validated by testing/verify_exact_hessian.py (synthetic, unjitted, 13
+  checks, all pass): chi2/B bit-identical across paths; with NO stamp
+  overlap A_exact == A_default to 1.7e-16; with overlap, only the expected
+  cross entries change, A symmetric, flux-flux diag + continuum blocks
+  unchanged; and an INDEPENDENT jax.hessian autodiff reference (through
+  _predict_bundle_jax's forward model, no hand derivatives, no scatter)
+  reproduces the new flux-flux cross term to 1.8e-16.
+- Real-data run: b4@20260401/00344649 bundle 1 (fibers 25-49), 1 GPU,
+  1 worker, 30.7s bundle time, no OOM (footprints 38-52k px; fp64 G
+  matrices fine at reduced worker count).
+- Cross terms are definitely nonzero in real data: h_size_x=8 -> 17px-wide
+  stamps at ~7.2px pitch = ~10px overlap with nearest neighbors (even
+  next-nearest overlap ~2.6px), and the exact-H output does differ from
+  default in the 4th decimal at some interior fibers (proof the path ran).
+
+RESULT -- NULL: vs our C++ reference, boundary fiber 25 dX rms
+0.0982 -> 0.0982 px, fiber 49 0.1171 -> 0.1172 px, dY equally unchanged,
+interior rms unchanged (0.0058 dX / 0.0046 dY). The dropped Hessian cross
+terms are NOT the cause of the boundary-fiber divergence.
+
+Why this null is theoretically coherent in hindsight: B (the gradient) was
+already exact, so both A variants share the same fixed points; and the
+REVERTED convergence-based-trace-exit experiment (see above, 2026-08-0x)
+already showed trace mode fully converges within its iteration budget on
+every case tested. A converged Gauss-Newton answer doesn't depend on the
+Hessian approximation used to reach it.
+
+IMPLICATION (the important part): Python converges to a true stationary
+point of ITS chi2; C++ converges to a stationary point of ITS chi2; so the
+boundary-fiber difference must live in the OBJECTIVE, not the optimizer --
+i.e. one of: (a) the spot SET entering the trace fit at boundary fibers
+(C++'s stricter-SNR trace-specific selection pass is a known unreplicated
+difference -- see the earlier wrms-gap note in fitter.py ~line 1766), (b)
+the weights (C++'s ComputeWeigthImage footprint construction vs Python's
+direct weight-image use), (c) the effective model/DOF at the boundary
+(e.g. C++ updates spot xc/yc from the fitted traces between FLUX+TRACE
+loop passes; Python's anchors stay fixed at selection-time xc_init), or
+(d) remaining schedule differences (C++ runs TRACE-alone with frozen
+independent-fit fluxes before FLUX+TRACE; Python goes straight to joint
+flux+trace). Next step: diff the per-pass spot sets for boundary fiber 25
+between the existing --debug-spots dumps (cppspots_pass1..4 vs
+pyspots_pass1..3) -- membership, not just centroids of common spots.
+
+Code kept (env-gated, off by default); verify_exact_hessian.py kept as the
+validation artifact. Exact-H output at
+/pscratch/sd/c/cdwarner/specex/julien_repro_20260824/py-exactH-b4-00344649_bundle1.fits.
+
+## 2026-08-24 (cont'd) -- Post-null follow-up: spot sets and raw centroids ruled out too; divergence is a wavelength-edge bend at boundary fibers, and Python lands farther from its own spot data
+
+With the optimizer structurally equalized (exact Hessian null above), diffed
+the remaining objective ingredients using the existing --debug-spots dumps
+(b4 bundle 1):
+
+1. SPOT-SET MEMBERSHIP: final selected sets nearly identical (605 spots
+   total in both). f25: C++ keeps one extra spot (wave 5766.017) Python
+   drops; f46: Python keeps one extra (5332.26); f49: sets IDENTICAL
+   (26=26). Since f49 diverges by 0.117px with an identical spot set,
+   selection is NOT the cause.
+2. RAW MEASURED CENTROIDS: bit-identical between pipelines at f25/f30/f49
+   (re-confirmed). The two fits consume the same measurements.
+3. FIT-VS-DATA: distance of each fitted trace from the shared raw
+   centroids (X, rms px):
+     f30 (interior): cpp 0.0432, py 0.0430  -- equal, both pipelines agree
+     f25 (boundary): cpp 0.0340, py 0.0743  -- Python 2.2x farther
+     f49 (boundary): cpp 0.0691, py 0.1568  -- Python 2.3x farther
+   Python's boundary-fiber traces are being pulled AWAY from the spot-
+   centroid data; C++'s stay closer.
+4. WAVELENGTH PROFILE of py-cpp dX: concentrated at the BLUE wavelength
+   edge (w=3531: f25 +0.268, f49 -0.428 -- note both bend INWARD toward
+   the bundle) and secondarily at w~5369 (+0.15/-0.18); near zero
+   mid-range and at the red end. This is polynomial edge-flapping in the
+   deg-6 per-fiber basis where the line coverage is sparsest, expressed
+   only at the two boundary fibers.
+
+Working interpretation: at boundary fibers the highest-order trace terms
+are weakly constrained (one-sided neighbor context + sparse blue-end
+lines); both codes sit on a nearly-flat chi2 direction, and something in
+C++'s path (brent line search, chi2_precision=0.1 early stop, the outer
+re-anchor/reselect loop) keeps it near the start while Python's slides
+farther along the flat direction. Decisive next experiment: CROSS-EVALUATE
+the objectives -- compute Python's own pixel chi2 at C++'s trace solution
+(convert C++'s X_vs_W/Y_vs_W into Python's anchor+correction form and call
+_predict_bundle_jax). If chi2(C++ solution) ~= chi2(Python solution), the
+direction is genuinely flat and the fix is stopping/regularization at
+boundary fibers (not more fitting); if Python's chi2 is clearly lower at
+its own solution, Python's objective (weights/footprint/model) genuinely
+prefers the drifted answer and the difference is in the data term.
+
+## 2026-08-24 (cont'd) -- Chi2 cross-evaluation (queued experiment, now run): the boundary-fiber direction is NOT flat -- C++'s trace scores dramatically worse under Python's own objective, even with flux/continuum exactly re-optimized
+
+Ran the decisive experiment proposed at the end of the previous entry: does
+C++'s bundle-edge trace solution score as well as Python's own under
+Python's own pixel chi2? New env-gated instrumentation in PSF_Fitter.fit()
+(SPECEX_CROSSEVAL_CPP_PSF=<cpp fits path>, SPECEX_CROSSEVAL_BUNDLE=<id>),
+inserted right before the function's final return where best_flux/best_pc/
+best_tc/best_cc and every real fit array (xc_init, yc_init, trace_monomials,
+psf_monomials, sx_g/sy_g/idx_gg, xpix_j/ypix_j, img_d/w_d) are already in
+scope -- deliberately reused rather than reconstructed in a standalone
+script, to eliminate any risk of a subtly-mismatched footprint/weight/
+stamp setup invalidating the comparison.
+
+Method: load C++'s XTRACE/YTRACE for this bundle's fibers, evaluate at
+every selected spot's own (fiber, wavelength) to get a per-spot dx_cpp/
+dy_cpp relative to the SAME xc_init/yc_init anchors Python uses, then
+linear-regress (np.linalg.lstsq) onto Python's own per-fiber trace_monomials
+basis to get tc_cpp -- re-expressing C++'s curve exactly in Python's
+parameterization (both are degree-6 Legendre-in-wavelength; the reprojection
+residual came back EXACTLY 0.0 px on the real post-selection fit, confirming
+this is a lossless change of basis, not an approximation). Hold PSF shape
+frozen at Python's own converged pc (neither pipeline ever fits shape
+jointly with trace, so this is the only fair choice), then compare chi2
+under 3 conditions, with flux/continuum re-optimized via ONE Gauss-Newton
+linear solve where needed (exact, not approximate, since flux/cont enter
+the model linearly given trace+shape fixed -- confirmed this must be a
+STEP added to the linearization point, not treated as the absolute
+solution, matching the main loop's own `flux = flux + alpha*d_p[...]`
+convention; caught and fixed a sign/step bug this way before trusting the
+result). A control (re-solve flux/cont at PYTHON'S OWN trace, same
+mechanism) validates the whole apparatus: it should barely move chi2 if
+the fit already converged.
+
+Real result (b4 bundle 1, fibers 25-49, post spot-selection, 605 spots,
+51811-pixel footprint):
+
+  chi2(python's own trace, own flux/cont)                    =    65771.17   (reduced ~1.27/pix -- well-calibrated)
+  chi2(python's own trace, flux/cont re-solved)     [control] =    63685.38   (delta -2086, ~3% -- confirms near-converged, validates mechanism)
+  chi2(cpp trace, python's own flux/cont)                     =  6409846.95   (delta +6.34M, naive/no refit)
+  chi2(cpp trace, flux/cont EXACTLY re-optimized)             =  1965327.82   (delta +1.90M, reduced ~37.9/pix)
+
+C++'s trace, evaluated under Python's own PSF shape/weights/footprint with
+EXACTLY optimal flux and continuum, still gives ~30x higher chi2 (reduced
+chi2 ~38 vs ~1.27) than Python's own converged answer. This RULES OUT the
+"flat direction, stopping-criterion difference" hypothesis floated at the
+end of the previous entry -- it is not flat. Python's own solution
+genuinely, substantially better explains Python's own pixel data than
+C++'s solution does.
+
+This also rules out (again, independently) spot-selection membership as
+the driver: Python's select_bundle_spots_iterative already matches C++'s
+named strict/loose SNR+min-wave-dist constants exactly (5.0/4A, 3.0/0 --
+fitter.py:1110-1112 docstring), consistent with the earlier finding of
+near-identical final spot sets.
+
+INTERPRETATION -- two live possibilities, not yet distinguished:
+  (a) The two pipelines' OBJECTIVES genuinely differ at these fibers
+      (weights, footprint/dead-column construction, or some other data-term
+      difference not yet identified) -- each pipeline is doing correct
+      Gauss-Newton descent on its OWN (different) objective, and lands on
+      substantially different, each internally well-fit, boundary-fiber
+      answers. Under this story neither trace is simply "wrong."
+  (b) Python's high-order per-fiber trace polynomial (degree 6) is
+      genuinely overfitting sparse, low-SNR blue-wavelength-edge data at
+      the one-sided-neighbor-context boundary fibers -- a real lower chi2
+      achieved by chasing noise, not by finding a more physically correct
+      trace. The wavelength profile from the earlier entry (large py-cpp
+      dX specifically at the blue edge, near zero mid/red) is more
+      consistent with an overfit artifact than with a genuine, smoothly
+      differing physical model.
+  These are not mutually exclusive, and distinguishing them needs either
+  (i) C++'s own chi2 at ITS OWN solution, under ITS OWN objective, to see
+  whether C++ ALSO reaches reduced chi2~1 there (would support (a) if so,
+  since both would be "correct" under their own model) -- requires either
+  instrumented C++ or careful independent reimplementation of C++'s
+  ComputeChi2AB weight/footprint construction; or (ii) a direct audit of
+  where Python's weight array / footprint / dead-column handling could
+  differ from C++'s for these specific boundary-fiber blue-edge spots.
+
+Code kept, env-gated, off by default (SPECEX_CROSSEVAL_CPP_PSF unset).
+Reran at /pscratch/sd/c/cdwarner/specex/julien_repro_20260824/
+py-crosseval-b4-00344649_bundle1.fits and .log.
+
+## 2026-08-24 (cont'd) -- Sanity check on the crosseval "millions" result: C++'s own real chi2 is normal (~1.25), confirming the crosseval measures a genuine mismatch, not a red flag about either pipeline
+
+User's sanity check ("chi2 in the millions looks wrong, I've never seen either
+pipeline report that") was right to flag, and resolved cleanly without any
+recompilation: C++'s verbose logging is ON BY DEFAULT (specex_pyoptions.cc:175,
+unconditional specex_set_verbose(true) -- the CLI's --verbose flag is
+"deprecated, true by default" per its own help text) and specex_psf_fitter.cc:1640
+already logs reduced chi2 every iteration:
+  SPECEX_INFO("... dchi2=" << ... << " chi2pdf = " << *psfChi2/(*npix-Params.size()) << " npar = " << Params.size());
+So no instrumentation was needed -- just grep an existing real C++ log.
+
+Pulled bundle 1's (fibers 25-49) real convergence trace from the existing
+07Aug2026-30ccd-campaign log (cpp-b4@20260401.log, tag "b4-00344649-01"):
+final converged chi2pdf = 1.24974, npar = 797. This is C++'s REAL, actual
+production answer for this exact bundle -- not a hypothetical.
+
+Comparing all three numbers on a consistent per-pixel basis (npar is tiny
+relative to npix~51811, so chi2/(npix-npar) approx= chi2/npix to <1.6%):
+
+  C++ real solution, C++'s own model:        chi2pdf = 1.250
+  Python real solution, Python's own model:  chi2/pixel = 1.269
+  C++'s trace forced into Python's model
+    (the previous entry's "crosseval"):      chi2/pixel = 37.933  (30x higher)
+
+CORRECTED INTERPRETATION: the "millions" (37.9/pixel) number is NOT evidence
+that C++'s trace is bad, and the earlier framing ("Python's own solution is
+much better") was comparing a real solution to an artificial, unfair
+hypothetical, not two real operating points. Both pipelines are completely
+normal and well-behaved at their OWN real converged solutions -- reduced
+chi2 ~1.25-1.27 for both, essentially indistinguishable, at bundle 1. What
+the crosseval actually demonstrates is narrower but still real: swapping
+ONLY the trace (holding PSF SHAPE frozen at the OTHER pipeline's own value)
+breaks something badly. Since shape is never solved jointly with trace
+within a single linear step in EITHER pipeline, but IS optimized in an
+alternating/staged fashion across many outer iterations (trace mode, then
+sigma mode, then full mode, repeating), shape and boundary-fiber trace
+values become indirectly coupled/correlated over the course of each
+pipeline's OWN independent optimization trajectory -- so substituting a
+foreign trace while keeping local shape fixed breaks that pipeline-specific
+correlation, which is enough by itself to explain a large chi2 increase,
+with no need to invoke "Python is wrong" or "Python overfits."
+
+REVISED leading hypothesis: bundle-edge fibers are a genuinely weakly-
+constrained (near-degenerate) direction in BOTH pipelines' objectives --
+both reach an equally good, equally normal chi2pdf~1.25 despite disagreeing
+substantially (~0.1-0.4px) on the actual boundary-fiber trace value. Small
+differences in numerics/schedule/initialization between two independently-
+implemented optimizers are enough to select different points along that
+shallow valley; each is locally well-fit under its own model, but the two
+points are incompatible when combined across pipelines. This is a real,
+if narrower, positive finding (would explain a genuine physical/statistical
+weak-constraint at bundle edges, present in both C++ and Python, rather
+than a Python-specific defect) but is NOT yet proven -- would need e.g. a
+direct look at the Hessian eigenvalues/conditioning at the boundary-fiber
+trace block in each pipeline to confirm the "shallow valley" story
+explicitly, which hasn't been done.
+
+Net effect on prior entries: the "30x worse, ~overfitting" language in the
+previous crosseval entry should be read as superseded by this correction --
+the ~30x number is real and reproducible, but it measures cross-pipeline
+shape/trace mismatch, not one pipeline's trace being objectively worse.
+
+## 2026-08-24 (cont'd) -- Answering "are boundary fibers inherently noisier": yes, modestly (~1.2-1.5x formal sigma), but that alone underexplains the observed divergence by ~10x
+
+User asked directly: is there something structurally different about boundary
+fibers (more curvature? something C++ does differently?), or are the two
+pipelines just landing on different-but-equally-valid answers? Tested three
+concrete, independent mechanisms on b4 bundle 1's real data:
+
+1. TRUE TRACE CURVATURE -- ruled out. Pulled XTRACE/YTRACE Legendre coeffs
+   for all 500 real production fibers (fit-psf-before-listed-fix-b4) and
+   computed a curvature proxy (rms of degree>=2 coefficients) as a function
+   of distance-to-nearest-bundle-edge. Flat to 1.00x at every distance
+   bucket (0..12) and every individual Legendre degree (0-6) -- boundary
+   fibers' real, converged trace shape is NOT more curved than interior
+   fibers'. The earlier "physical fiber pitch"/"asymmetric neighbor
+   spacing" language from prior entries describes STAMP-OVERLAP CONTEXT
+   (relevant to the already-nulled exact-Hessian test), not the trace
+   curve's own physical shape -- worth being precise about the distinction
+   going forward.
+2. DATA DENSITY / SNR -- ruled out. Per-fiber spot counts from the real
+   debug-spot dumps: ~25 spots/fiber and ~5 blue-wavelength(<4000A)
+   spots/fiber, UNIFORM across all 25 fibers of the bundle including both
+   boundary fibers (25:5, 49:5 blue spots, same as everyone else). The arc
+   lamp illuminates the whole slit; boundary fibers get exactly the same
+   calibration-line coverage as interior ones.
+3. FORMAL PARAMETER UNCERTAINTY (Hessian conditioning) -- CONFIRMED, real
+   but modest. New instrumentation (SPECEX_TRACE_UNCERTAINTY_BUNDLE=<id>,
+   env-gated, no C++ reference needed) computes the full marginal
+   covariance (A^-1, ridge-regularized 1e-8*mean(diag) to handle the
+   exactly-singular block from bundle 1's own broken fiber 36) at Python's
+   real converged solution, and extracts sqrt(diag(cov)) for every fiber's
+   trace Legendre coefficients. Clean, monotonic U-shape across the whole
+   bundle (deg0 sigX: 0.0116 at fiber25 -> ~0.0067-0.0070 in the deep
+   interior (fibers 33-38) -> 0.0110 at fiber49), boundary vs deep-interior
+   (fibers 30-44) ratio at every degree:
+     deg0: X=1.53x Y=1.40x   deg1: X=1.47x Y=1.33x   deg2: X=1.23x Y=1.12x
+     deg3: X=1.28x Y=1.15x   deg4: X=1.25x Y=1.12x   deg5: X=1.32x Y=1.19x
+     deg6: X=1.27x Y=1.18x  (deg6 = highest order, matches trace_per_fiber_deg)
+   So YES -- boundary fibers are inherently, measurably less well
+   constrained than deep-interior ones, by a real ~20-50% in formal sigma,
+   consistently at every polynomial degree. (First pass at this summary
+   accidentally averaged fiber 36 -- the broken/ridge-regularized fiber --
+   into the "interior" group, which gave a nonsense inverted ratio; recomputed
+   excluding it, table above is the corrected version.)
+
+BUT: the magnitude doesn't close the gap. Boundary-fiber formal sigma here
+is ~0.02-0.04px (deg4-6); the ACTUALLY OBSERVED C++-vs-Python divergence at
+these same boundary fibers is ~0.1-0.4px (from the earlier per-wavelength
+dX table) -- roughly 5-10x LARGER than what pure statistical noise within
+this Hessian-implied uncertainty band would predict. If the two pipelines
+were simply landing at two independent random draws from the SAME
+underlying (mildly wider) uncertainty distribution, we'd expect a
+disagreement of order sigma, not 5-10x sigma.
+
+CURRENT SYNTHESIS: boundary fibers have a real, confirmed, ~20-50% weaker
+constraint (not curvature-driven, not data-density-driven -- purely a
+Hessian/geometry effect, presumably from losing symmetric neighbor-fiber
+support on one side within the bundle-wide PSF-shape estimate). This is a
+genuine contributing factor but is NOT sufficient on its own to explain the
+full observed divergence -- there is still an additional, larger,
+apparently SYSTEMATIC (not merely noise-amplified) component, consistent
+with the earlier chi2-crosseval finding that trace and PSF shape become
+correlated through each pipeline's own multi-stage (trace mode -> sigma
+mode -> full mode, repeating) optimization trajectory -- i.e. the two
+pipelines' schedules nudge them to different, only-modestly-uncertain
+points along a somewhat-but-not-dramatically shallow direction, amplified
+by whatever specific correlation each pipeline's own iteration path
+happens to induce with its own shape estimate. Not yet fully closed; next
+natural check would be comparing the two pipelines' actual PSF SHAPE
+coefficients (pc) for this bundle directly (both real fits already exist
+as FITS files) to see whether shape itself differs enough, in a way
+correlated with the trace difference, to support this story quantitatively.
+
+Code kept, env-gated (SPECEX_TRACE_UNCERTAINTY_BUNDLE unset by default).
+Run log: /pscratch/sd/c/cdwarner/specex/julien_repro_20260824/py-uncert-b4-bundle1.log
+
+## 2026-08-24 (cont'd) -- Correction: z-band is NOT immune to the bundle-edge dX spike, it's just much smaller (absolute and relative)
+
+User recalled the earlier fiber-249 PSF-shape delta as "z8" -- checked
+against disk and it was actually b4 (psfshape_b4-00316043_fiber249_wl*.png,
+20251013 night); confirmed and corrected. b4's range (3531-5982A) is
+consistent with lambda=3650A; z8's real range (~7440-9824A) is not, so this
+really was a b-band finding, not z-band.
+
+Regenerated z8's trace-comparison plot vs our own 07Aug campaign C++ rerun
+(cpp-z8@20260401-00344649.fits / py-z8@20260401-00344649.fits, both already
+on disk -- no fresh run needed) using the recreated headless
+run_plot_fiber_traces.py wrapper (original copy was lost -- $TMPDIR
+scratchpad is node-local and didn't survive the SSH-drop + node change
+from nid001229/nid001216 to nid001061 this session; trivially recreated).
+Plot confirms visually: one large spike at fiber 0 (the ABSOLUTE first
+fiber of the whole camera -- matches the user's recollection), no obvious
+periodic per-bundle comb pattern to the eye, small dip near fiber 473/474
+(the two broken fibers, now correctly ~0 since this cpp reference is our
+own rerun and never went through interpolate_fiber_psf).
+
+But a direct numeric check (RMS dx/dy per fiber vs our own C++, same
+method used throughout this investigation for b4) shows z8 is NOT actually
+immune -- it has the same qualitative bundle-boundary effect, just much
+smaller:
+
+                          b4                    z8
+  camera-edge fiber 0:    dx=0.117 dy=0.031     dx=0.135 dy=0.108
+  camera-edge fiber 499:  dx=0.204 dy=0.023     dx=0.074 dy=0.007
+  internal boundary mean: dx=0.148 dy=0.036     dx=0.047 dy=0.024
+  interior mean:          dx=0.0043 dy=0.0041   dx=0.0112 dy=0.0136
+  boundary/interior ratio: dx=34.1x dy=8.9x      dx=4.2x
+  broken fibers (473/474 z, 36/51/132/156 b): all exactly 0.0 in both -- confirmed still resolved
+
+Two things going on simultaneously: (1) z8's INTERIOR agreement is itself
+~2.6x looser than b4's (0.0112 vs 0.0043px) -- the two pipelines agree less
+tightly on ordinary z-band fibers even away from bundle edges, plausibly
+tied to z's structurally different fit config (degree-3 PSF-shape
+wavelength Legendre vs degree-1 for b/r, plus z uniquely fits a continuum
+background -- both add real degrees of freedom/coupling not present in
+b/r's fit). (2) z8's boundary-specific EXCESS on top of that baseline is
+real (4.2x) but both smaller in ratio and ~3.2x smaller in absolute
+magnitude (0.047 vs 0.148px) than b4's.
+
+Revised framing for Julien: NOT "z is immune, b/r show the effect" --
+rather "the same bundle-edge effect is present in all three bands, but
+scales with band-specific factors (b4 worst, z8 much attenuated)." This
+is more informative than a binary present/absent split, and itself narrows
+the search: whatever amplifies the boundary effect in b/r is something
+z-band structurally has less of, or compensates for.
+
+## 2026-08-24 (cont'd) -- Reproducibility test on an independent night (20260411/00346401): band ordering (b>r>z) replicates closely, r2 fills in as an intermediate point
+
+Ran a full-CCD b4/r2/z8 trio (testing/full_ccd_campaign.py, real 20-rank C++
+MPI vs Python GPU, --debug-spots) on a genuinely new night/expid, clean by
+the ctecorr pre-screen (calibnight/20260411/ctecorr-20260411.yaml = []),
+distinct from both nights used earlier this session (20260401/00344649,
+20251013/00316043). Same boundary-vs-interior dX/dY RMS methodology as
+before:
+
+           edge_f0_dx  edge_f499_dx  bndry_mean_dx  bndry_mean_dy  interior_dx  interior_dy  ratio_dx  ratio_dy
+  b4          0.1103        0.1809         0.1444         0.0369       0.0049       0.0045     29.66      8.27
+  r2          0.1031        0.0218         0.0900         0.0373       0.0068       0.0092     13.27      4.05
+  z8          0.0984        0.0457         0.0467         0.0201       0.0100       0.0129      4.65      1.56
+
+Compare to 20260401/00344649 (earlier this session): b4 ratio 34.1x/8.9x,
+z8 ratio 4.18x (dx only computed there). CLOSE agreement on an independent
+night -- b4's boundary-mean-dx (0.1444 vs 0.1477) and z8's (0.0467 vs
+0.0467, matching to 4 decimals -- verified NOT a stale-file artifact:
+file mtimes and XTRACE contents confirmed genuinely different, max|diff|
+0.19px). r2, tested here for the first time, sits cleanly BETWEEN b4 and
+z8 in both ratio (13.3x) and absolute magnitude (0.090px) -- a clean
+monotonic band gradient: b (worst) > r > z (least), reproducible across
+two independent nights.
+
+This is an important result in itself: the effect is NOT dominated by
+per-night/per-exposure noise (a specific arc frame's particular line
+strengths, seeing, etc.) -- it's a STABLE property of each band's fit
+CONFIGURATION, since it reproduces so closely across independent nights.
+This directly narrows the search: whatever drives the gradient must trace
+to something structurally different between b/r/z's fit setup, not
+something that would vary night-to-night.
+
+Checked one candidate mechanism -- raw calibration linelist density
+(specex_linelist_desi.txt, independent of any real data) -- and it does
+NOT cleanly explain the b>r>z ordering:
+  b-band [3531-5982A]: 50 lines total, 5 in bluest 10%, 15 in reddest 10%
+  r-band [5632-7802A]: 70 lines total, 9 in bluest 10%, 5 in reddest 10%
+  z-band [7443-9824A]: 67 lines total, 9 in bluest 10%, 6 in reddest 10%
+b-band does have the single sparsest edge decile (5 lines, its blue edge)
+of any band, consistent with it being the worst case and with the
+divergence concentrating at b4's blue edge specifically (matches the
+earlier per-wavelength dX table finding). But r's edges (9/5) are not
+obviously sparser than z's (9/6), so raw line COUNT alone can't explain
+why r is still ~3x worse than z. Effective (SNR-weighted, real-data) line
+density per fiber, not just linelist entry count, would be the fairer next
+check -- not yet done for r2/z8 in this session (only checked for b4
+earlier: ~25 spots/fiber, ~5 blue(<4000A) spots/fiber, uniform across the
+bundle, ruling out density WITHIN a band's own boundary vs interior
+fibers, but not yet compared ACROSS bands).
+
+LEADING STRUCTURAL-DIFFERENCE HYPOTHESIS (not yet tested): b/r default to
+PSF-shape wavelength Legendre degree 1; z defaults to degree 3
+(specex.py's --legendre-deg-wave help text: "3 for z-band, 1 otherwise").
+A shared bundle-wide shape model with only 2 wavelength-basis DOF (degree
+1) has much less room to track any real wavelength-dependent PSF-shape
+variation than z's 4-DOF (degree 3) model; if real shape variation exists
+that a degree-1 model can't capture, that model misspecification has
+nowhere else to go except leak into whatever parameter is least
+constrained elsewhere -- exactly the boundary-fiber trace coefficients
+(already shown to have 1.2-1.5x elevated formal uncertainty). z's richer
+shape model would absorb more of that variation properly, reducing
+leakage into trace. Directly, cheaply testable: rerun b4 (or just bundle 1)
+with --legendre-deg-wave 3 (already a supported CLI override, no code
+change needed) and see whether the boundary dX spike shrinks toward z's
+level. Not yet run.
+
+## 2026-08-24 (cont'd) -- Two more band-config hypotheses cleanly ruled out (shape wavelength degree, continuum fitting); intensity-weighted line density is a much better match to the b>r>z gradient than raw line count
+
+Tested both concrete structural-difference candidates from the previous
+entry directly on b4 (new night 20260411/00346401, full 20-bundle CCD,
+same boundary/interior methodology):
+
+1. --legendre-deg-wave 3 (b4's normal default is 1; z's is 3) -- NULL.
+   boundary mean dx 0.1444 -> 0.1443px, ratio 29.66x -> 29.68x. Confirmed
+   the override actually took effect (log: "legendre-deg-wave: 3"). Reason
+   this HAD to be null, and it's informative on its own: with
+   --trace-per-fiber-deg on by default (all bands, degree 6), Python's
+   'trace' mode fits flux+trace+continuum with PSF SHAPE completely
+   frozen, and 'full' mode (where shape is actually fit) explicitly
+   excludes trace from its own solve -- matching C++, which never solves
+   trace and shape jointly in any active stage. So trace is settled
+   entirely within 'trace' mode, before a richer shape model is ever
+   exercised; there's no structural path for shape richness to feed back
+   into trace's boundary behavior. Rules the mechanism out categorically,
+   not just empirically.
+2. --fit-continuum forced on for b4 (its normal default is off; z's is on)
+   -- also NULL, and reran BOTH C++ and Python with matched
+   --extra=--fit-continuum / --fit-continuum so the comparison stays
+   apples-to-apples. boundary mean dx 0.1444 -> 0.1447px, ratio 29.66x ->
+   29.67x. Continuum genuinely IS solved jointly with trace (unlike
+   shape), so this was the more plausible of the two candidates -- still
+   no effect.
+
+Both of the two concrete, band-conditioned FIT-CONFIGURATION differences
+between b/r and z are now ruled out. The b>r>z gradient is not explained
+by anything in the solver's own setup for these two levers.
+
+NEW, more promising signal: re-did the linelist check from the previous
+entry, this time weighting by the NIST-style relative intensity column
+(specex_linelist_desi.txt's 4th field) instead of raw line count, at each
+band's sparsest (10%) edge:
+
+  b-band blue edge: n=5  sum_intensity=15800   max=9000
+  r-band blue edge: n=9  sum_intensity=26750   max=7000
+  z-band blue edge: n=9  sum_intensity=139100  max=32000
+  (whole-band median intensity: b=1250, r=5000, z=4600)
+
+This lines up MUCH better with the observed divergence ordering than raw
+count did: z's blue edge has ~9x more total intensity than either b's or
+r's, and its single brightest line (32000) dwarfs b's (9000) and r's
+(7000) -- exactly inverse to the b(worst)>r>z(least) divergence ordering.
+b's blue edge is both the sparsest in count AND the faintest in total/peak
+intensity of the three -- doubly disadvantaged.
+
+CAVEAT: this is a theoretical/catalog proxy (NIST relative line strength),
+not a real measured per-fiber SNR -- it doesn't account for actual lamp
+exposure time, real instrument throughput vs wavelength, detector QE, or
+atmospheric-adjacent effects. It's suggestive, well-correlated, and a much
+better match than the earlier count-only check, but not yet a direct
+confirmation. The decisive next test would be pulling REAL measured
+per-fiber SNR/flux at each band's blue edge from the actual pipeline runs
+(not the theoretical catalog) -- not yet done; the existing debug-spot
+dump format (fiber,wave,xc,yc) doesn't carry an SNR column, so this would
+need either a small instrumented rerun or locating flux/eflux in a
+different existing dump.
+
+## 2026-08-24 (cont'd) -- Two things the user's eye caught in the artifact: (1) fiber 0's divergence investigated -- related to but distinct from the internal bundle-boundary effect; (2) the "daylight" in the PSF-shape plots is real (sigma_y mismatch), but is a band-wide shared property, NOT boundary-specific
+
+### (1) z8's fiber-0 spike
+
+Ran a fresh bundle-0 (fibers 0-24) fit on both pipelines for z8/20260411 with
+--debug-spots + SPECEX_TRACE_UNCERTAINTY_BUNDLE=0 (needed --lamp-lines,
+--legendre-deg-wave 3, --fit-continuum explicitly for the standalone C++
+desi_psf_fit call -- the campaign wrapper normally supplies these).
+
+- RAW CENTROIDS: bit-identical between pipelines at fiber 0, fiber 1, and
+  fiber 24 (max|dx|=max|dy|=0.00000) -- same as every fiber checked all
+  session. Not a measurement issue.
+- NO SPECIAL MASKING: no ndead/masked-amp/never-fit flag triggers for
+  fiber 0 -- it's an ordinary, fully-fit fiber.
+- FORMAL UNCERTAINTY (full A^-1, same instrumentation as the earlier
+  boundary-fiber check): fiber 0's deg6 sigma (sigX=0.0470, sigY=0.0462) is
+  noticeably HIGHER than fiber 24's, the bundle's OTHER (internal) boundary
+  fiber (sigX=0.0376, sigY=0.0359) -- about 25% more uncertain. Makes
+  physical sense: fiber 24 still has a neighbor bundle nearby (just past
+  the ~17px gap); fiber 0 has literally nothing beyond it (true CCD/slit
+  edge). But even this elevated sigma (~0.047px) is still ~2x smaller than
+  the actual observed fiber-0 divergence (~0.098-0.135px across bands) --
+  narrower gap than the internal-boundary case (~5-10x) but not fully
+  closed by noise alone either.
+- FIT-VS-OWN-DATA RESIDUAL: Python's fitted trace sits 2.6x farther from
+  its own raw centroids at fiber 0 (rms 0.128px) than C++'s does (0.049px)
+  -- same qualitative signature as the internal boundary fibers (fitter.py's
+  answer diverges from a smooth/expected trend specifically where the
+  parameter is weakly constrained).
+- WAVELENGTH PROFILE -- the one clearly DIFFERENT signature from internal
+  boundaries: py-cpp dX at fiber 0 is large at BOTH ends of the band
+  (w=7339: -0.137, w=9916: -0.106), not just the blue edge. Internal
+  boundary fibers (e.g. fiber 24 here: -0.249 at blue, -0.128 at red;
+  b4's f25/f49 from earlier entries) were blue-edge-dominated. Fiber 0
+  shows a real, roughly symmetric both-ends effect.
+
+READING: fiber 0 shares the SAME basic signature as internal bundle
+boundaries (identical raw data, no special masking, elevated formal
+uncertainty in the same direction, Python's fit sitting farther from its
+own data) -- consistent with it being a MORE EXTREME version of the same
+"loses symmetric neighbor support" mechanism, since it has zero neighbor
+context on one side rather than a distant one. This also explains why
+fiber-0's divergence is roughly BAND-INDEPENDENT (b4/r2/z8 all ~0.10-0.14px
+at fiber 0, vs. the strong b>r>z gradient at INTERNAL boundaries) -- if the
+internal-boundary gradient traces to band-dependent calibration-line
+density (the leading hypothesis from the previous entries), that
+explanation should scale similarly at fiber 0 too, but it doesn't: fiber 0
+looks similarly bad in all three bands. So there may be a second,
+partially independent contribution specific to the true camera edge
+(vignetting, edge-of-slit mechanical effects, or simply the uncertainty
+being SO much higher there that even z's better line density can't
+compensate) on top of the shared boundary mechanism. Not fully resolved;
+the both-edges-of-wavelength wavelength profile is the most concrete open
+thread if this gets picked up again.
+
+### (2) The PSF-shape "daylight" -- real, but not boundary-specific
+
+plot_psf_comparison_using_specter.py's own printed diagnostics (previously
+grep-filtered out of the earlier session's output -- rerun without
+filtering to check) give real sigma ratios (C++/Python) at each fiber:
+
+           fiber25 (boundary)          fiber37 (interior)
+  b4    sigx=1.0002  sigy=1.0161    sigx=0.9986  sigy=1.0165
+  r2    sigx=0.9967  sigy=1.0071    sigx=0.9977  sigy=1.0074
+  z8    sigx=1.0010  sigy=1.0023    sigx=1.0008  sigy=1.0015
+
+sigma_y specifically differs by a real, non-trivial amount -- worst in b4
+(1.6%), less in r2 (0.7%), least in z8 (0.2%) -- the SAME b>r>z ordering as
+the trace-boundary effect. BUT: boundary and interior fiber values are
+essentially IDENTICAL within each band (b4: 1.0161 vs 1.0165; r2: 1.0071
+vs 1.0074; z8: 1.0023 vs 1.0015) -- this makes structural sense, since PSF
+shape is a single model SHARED across all 25 fibers of a bundle (not
+per-fiber like trace), so it can't itself be "worse at boundary fibers."
+
+CONCLUSION: real, band-dependent, but a SEPARATE phenomenon from the
+boundary-fiber trace-position divergence investigated all session --
+not something a boundary/interior comparison would ever surface, since it
+doesn't vary by fiber position at all. Its own b>r>z ordering does
+parallel the trace effect's ordering, which is suggestive of a possibly
+shared ROOT cause (e.g. b-band's generally weaker calibration-line signal,
+per the intensity-weighted linelist finding, degrading BOTH the shared
+shape fit's precision AND the per-fiber boundary trace fit's precision
+independently) rather than one directly causing the other. Not yet traced
+further -- would need its own investigation (is this specific to one
+wavelength, or band-wide at every wavelength? worth checking a red-edge
+wavelength too, matching the earlier "worst at blue edge" note from the
+pre-compaction session).
+
+## 2026-08-25 -- Leakage test run: excluding boundary-fiber spots from 'full' mode's shared shape fit does NOT move the sigma_y mismatch (confirms independence)
+
+Implemented SPECEX_EXCLUDE_BOUNDARY_SHAPE=1 (fitter.py): zeroes only the
+sigma-x/sigma-y/GH shape-Jacobian rows (j_sx/j_sy/j_gh) in
+_accumulate_bundle_jax for spots belonging to a bundle's boundary fibers
+(fmin/fmax), leaving flux, continuum, and the (already-frozen-in-'full'-mode)
+trace Jacobian untouched -- boundary fibers still get their own flux fit
+normally, they just stop contributing to the single PSF-shape model shared
+by all 25 fibers in the bundle. Threaded a new boundary_shape_mask arg
+through all 4 _accumulate_bundle_jax_jit call sites in fit() (a zeros mask
+when the env var is unset, so the argument shape/compile is identical
+either way). Computed once per bundle from spots' fiber membership, right
+where flux/xc_init/etc. are built.
+
+Test: single-bundle refit of b4 bundle 1 (fibers 25-49, night 20260411/
+00346401) with and without the flag ("excluding 40/449" -> "55/614" boundary
+spots across the two joint-fit calls in the run), then
+plot_psf_comparison_using_specter.py's own sigy1/sigy2 diagnostic at
+wl=3650 (blue edge, worst case) for fiber 25 (boundary) and fiber 37
+(interior) against the same cpp-b4@20260411-00346401.fits reference:
+
+           baseline    excl-boundary-shape
+  f25 (boundary)  sigy1/sigy2=1.016057   1.017132
+  f37 (interior)  sigy1/sigy2=1.016479   1.016404
+
+Movement is ~0.05-0.1%, well within run-to-run noise -- essentially zero
+effect. CONCLUSION: clean confirmation that the sigma_y mismatch and the
+boundary-fiber trace-position divergence are NOT causally linked (no real
+leakage path); both remain best explained as independent symptoms of a
+shared upstream cause (leading candidate still the intensity-weighted
+calibration-line-density/band-dependent-signal-strength finding from
+2026-08-24). SPECEX_EXCLUDE_BOUNDARY_SHAPE kept in fitter.py as a permanent
+opt-in diagnostic (default off, zero effect on production behavior) rather
+than reverted, in case it's useful for a future variant of this question.
+
+Plotting note: plot_psf_comparison_using_specter.py's --output/-o flag is
+confirmed dead (matches the 2026-08-24 Slack-thread finding) -- it always
+calls plt.show(), which pops a live window on the display when X11
+forwarding is active rather than saving anything, and blocks/hangs the
+process until the window is closed. Fixed for headless use the same way as
+this session's other wrapper scripts: force MPLBACKEND=Agg, monkeypatch
+plt.show to savefig() each open figure, then exec() the real script's
+source under __name__=='__main__'. Saved this one persistently at
+testing/run_plot_psf_comparison.py (previous wrapper scripts this project
+were node-scratchpad-only and got wiped on every node change -- worth
+keeping a checked-in copy of this one since it's now been rebuilt 3x).
+
+## 2026-08-25 (cont'd) -- Direct confirmation of the calibration-signal-strength hypothesis using REAL measured per-line SNR (not the NIST catalog proxy)
+
+The 2026-08-24 entries left the leading explanation for the b>r>z boundary-
+divergence gradient as a theoretical proxy: NIST catalog line intensity
+summed near each band's blue edge. This entry replaces that proxy with
+real measured data.
+
+Reran bundle 1 (fibers 25-49, the same boundary/interior pair used
+throughout -- f25 boundary, f37 interior) for b4/r2/z8 on 20260411/
+00346401 with --debug-spots, and read each camera's own
+`.pyrawspots_final.txt` (real per-candidate fitted flux/eflux/SNR from
+`fit_candidate_fluxes` against the actual image, at the final
+trace-refined candidate positions -- select_bundle_spots_iterative's real
+output, not a catalog). Computed each fiber's total measurement
+information near the blue edge (wave <= wmin + 15%*(wmax-wmin)) as
+sum(SNR^2) -- the natural Fisher-information-like proxy for how well a
+local polynomial trace fit is constrained there (position precision from a
+set of flux measurements scales ~1/sqrt(sum SNR^2), same logic as
+combining independent centroid measurements).
+
+  band  N_blue(f25)  sumSNR2_blue(f25)   N_blue(f37)  sumSNR2_blue(f37)
+  b4     7            4447.1              7            4169.5
+  r2     12           11335.6             11           10616.7
+  z8     15           58811.0             14           57084.7
+
+Two things confirmed directly: (1) boundary and interior fiber values are
+almost identical within each band (as expected -- calibration-lamp
+illumination is shared across all fibers of a band, this is a band
+property, not a fiber-position property, exactly matching the earlier
+sigma_y-mismatch reasoning); (2) the band ordering b4 << r2 << z8 in both N
+and sum(SNR^2) matches the OBSERVED boundary-divergence-magnitude ordering
+(b4 worst, z8 least) exactly.
+
+Quantitative check against a genuine Cramer-Rao-style prediction
+(dx_boundary ~ 1/sqrt(sum SNR^2 at blue edge)), calibrated to b4's own
+measured boundary-mean-dx (0.1444px, from the 2026-08-24 entry, same
+night/expid):
+
+  band   measured dx   predicted dx (1/sqrt(info) scaling)   %err
+  b4     0.1444        0.1444 (reference)                     --
+  r2     0.0900        0.0904                                +0.5%
+  z8     0.0467        0.0397                                -15.0%
+
+r2's prediction lands within 0.5% of the actual measurement -- essentially
+exact. z8 is off by 15%, in the direction already explained by its own
+documented looser baseline (interior-fiber) C++/Python agreement (2.6x
+looser than b4's even away from bundle edges, tied to z's extra
+legendre-deg-wave=3/continuum-fit degrees of freedom -- see the "z-band is
+NOT immune" entry) -- a real floor on top of the pure information-scaling
+term, not a contradiction of it.
+
+CONCLUSION: the calibration-signal-strength hypothesis is now confirmed
+with real measured data, not just a catalog proxy, and the scaling isn't
+just directionally right but quantitatively close to a physically
+motivated 1/sqrt(information) law for two of three bands. This closes the
+loop opened at the end of the 2026-08-24 session ("direct confirmation... 
+flagged repeatedly as the decisive next test, never executed"). Combined
+with the earlier-established mechanism (boundary fibers are structurally
+more weakly constrained than interior fibers in the joint bundle fit,
+independent of band -- the ~1.2-1.5x formal-uncertainty and
+"loses symmetric neighbor support" findings), the full explanation for the
+b>r>z gradient is: boundary fibers are ALWAYS somewhat weaker than interior
+fibers (geometric/structural, band-independent), and that pre-existing
+weakness gets AMPLIFIED by roughly 1/sqrt(local calibration information)
+specifically at the blue edge, where z-band happens to have ~13x more
+measured signal than b-band.
+
+Tooling: the bundle-1 debug-spots reruns used --workers-per-gpu 1 (single
+bundle, no need to pack) and completed in under 90s per camera on 1 GPU.
+
+## 2026-08-25 (cont'd) -- Cleanup: removed the two confirmed-null experimental branches (SPECEX_EXACT_HESSIAN, SPECEX_EXCLUDE_BOUNDARY_SHAPE)
+
+Both hypotheses are now fully closed (see the two entries directly above),
+with no scenario identified where either would need revisiting -- unlike
+e.g. SPECEX_MATCH_CPP_DEAD_COLUMN, which stays opt-in because it's still an
+open "might become the default" question, these two answered a specific
+question and got a clean no. Removed from py/specex/fitter.py:
+- SPECEX_EXACT_HESSIAN: the alternate G^T W G per-pixel Hessian-assembly
+  branch inside _accumulate_bundle_jax, reverting to the single default
+  per-spot-block assembly unconditionally.
+- SPECEX_EXCLUDE_BOUNDARY_SHAPE: the boundary_shape_mask parameter
+  (threaded through _accumulate_bundle_jax's signature and all 4 call
+  sites in PSF_Fitter.fit()) and its masking logic.
+
+Verified before removing: no SPECEX_* experiment env var is set in the
+current shell, and specex.py's legendre_deg_wave default
+(`3 if band == 'z' else 1`) was never touched by any of this session's
+edits -- the earlier --legendre-deg-wave 3 test on b4 was a CLI-flag
+override on top of the untouched default, run to a separate output path,
+not a code change. Confirmed via `ast.parse` that fitter.py is still
+syntactically valid post-removal.
+
+Left in place (still real, still used, not dead ends): SPECEX_CROSSEVAL_*
+and SPECEX_TRACE_UNCERTAINTY_BUNDLE (the diagnostics that directly
+produced this session's confirmed findings), and io.py's unconditional
+TAILXSCA/TAILYSCA/TAILCORE fix (a genuine correctness fix for Julien's
+specter-based comparison tooling, not an experiment).
+
+testing/verify_exact_hessian.py (untracked) now tests code that no longer
+exists in fitter.py -- left on disk as a historical artifact per this
+project's standing "don't delete without being asked" convention, but it
+will error if run (ImportError on _accumulate_bundle_jax's removed
+boundary_shape_mask-adjacent behavior is not expected, but the
+SPECEX_EXACT_HESSIAN comparison it performs no longer has anything to
+compare against). Flagged to the user; disposition pending.
+
+## 2026-08-25 (cont'd) -- Fiber-0 investigation, next step: checked b2/z2 (2 new spectrographs) -- complicates, does not confirm, the "band-independent ~0.1px" framing
+
+Per the user's request to check other cameras' fiber 0/499 before concluding
+fiber 0 is a clean band-independent true-edge effect, ran bundle 0 and
+bundle 19 (fibers 0-24, 475-499) for b2 and z2 on 20260411/00346401, both
+pipelines (C++ via standalone desi_psf_fit -- correct flags are --arc/
+--in-psf/--out-psf/--lamp-lines, NOT --input-image/--input-psf/--output-psf/
+--lamplines, which segfault silently with rc=139/no log output; Python via
+specex.specex --first-bundle/--last-bundle). Both fibers-of-interest are
+ordinary, fully-fit fibers in both cameras (no broken-fiber overlap), and
+both pipelines converge to normal chi2pdf (~1.2-1.26) with reasonable spot
+counts (653-664) -- not a bug or crash artifact.
+
+Recomputed fiber0/fiber499 dX RMS (100-pt wave grid, bundle_parity_suite.py's
+trace_rms methodology) for ALL FIVE spectrograph x band combinations now
+tested, using each fiber's OWN bundle's local interior mean (fibers 1-23 of
+bundle 0 / 476-498 of bundle 19) as baseline -- a properly apples-to-apples
+comparison the earlier b4/z8/r2-only entries didn't have (those used a
+whole-camera interior average instead):
+
+  spectrograph  fiber0_dx  fiber499_dx  bundle0_int  bundle19_int  f0/int  f499/int
+  b4            0.110      0.181        0.0043       0.0074        25.7x   24.5x
+  r2            0.103      0.022        0.0058       0.0056        17.9x   3.9x
+  z8            0.098      0.046        0.0172       0.0103        5.7x    4.4x
+  b2            0.309      0.080        0.0247       0.0295        12.5x   2.7x
+  z2            0.225      0.244        0.0330       0.0114        6.8x    21.3x
+
+Two things this breaks:
+1. Fiber 0's RAW magnitude is NOT band-independent once a 4th/5th
+   spectrograph is added -- b2 (0.309px) is ~3x the b4/r2/z8 cluster
+   (~0.10px) that motivated the "band-independent ~0.1-0.14px" framing in
+   the first place. The f0/interior RATIO holds up somewhat better
+   (b4 25.7x > r2 17.9x > b2 12.5x > z2 6.8x > z8 5.7x -- roughly
+   band-ordered) but b2 sits out of strict band order (below r2).
+2. Fiber 499 shows NO coherent cross-spectrograph pattern in either raw or
+   ratio form -- z2's ratio (21.3x) is nearly as high as b4's (24.5x),
+   while b2's is the LOWEST of the whole 5-case set (2.7x). If fiber 0 and
+   fiber 499 were simply two instances of the same "true camera edge"
+   effect, they should track together across spectrographs. They don't.
+
+Also newly visible: interior-fiber baseline agreement itself varies a lot
+MORE across spectrographs of the SAME band than previously appreciated --
+b2's bundle-0 interior (0.0247px) is ~5.7x looser than b4's (0.0043px),
+despite both being b-band. The earlier working assumption ("b-band's
+interior agreement is uniformly tight, ~0.005px") was really just a
+property of spectrograph 4's specific exposure/hardware, not b-band in
+general.
+
+READING: the recommended check did NOT confirm fiber 0 is a clean,
+universal, band-independent true-edge phenomenon. It surfaced real
+spectrograph-to-spectrograph variance -- in both the interior noise floor
+and the edge-specific excess -- that the earlier 2-3-spectrograph sample
+was too small to see. Band-dependence may still be A factor (the ratio
+column trends the right direction more often than not), but it's now
+clearly NOT the whole story, and fiber 0 vs. fiber 499's asymmetry
+(structurally the "same" kind of true edge, empirically very different
+behavior) is a new, unexplained wrinkle. NOT YET RESOLVED -- next
+reasonable step would be controlling for spectrograph identity properly
+(same-spectrograph b/r/z triplets, e.g. finish out spectrograph 2's own
+triplet by adding r... already have it; or spectrograph 4/8's missing
+bands) rather than mixing spectrographs across bands, to cleanly separate
+"band effect" from "which physical unit" effect.
+
+Run artifacts: /pscratch/sd/c/cdwarner/specex/fiber0_multiband/
+
+## 2026-08-25 (cont'd) -- The cleanest version of this test was already in hand: spectrograph 2's own b/r/z triplet (b2/r2/z2) rejects "band explains fiber 0" directly
+
+b2 and z2 (just fit above) plus the existing r2 result are ALL the same
+physical spectrograph (unit 2) -- the same 500 fibers, same slit, same
+true camera edge at fiber 0, only the band differs. This is a strictly
+better-controlled test than comparing across different spectrographs
+(b4/r2/z8), since it removes "which physical unit" as a confound entirely.
+
+  camera  fiber0_dx  f0/interior ratio
+  b2      0.309      12.5x
+  r2      0.103      17.9x
+  z2      0.225      6.8x
+
+Neither metric preserves band order. Raw magnitude: b2 > z2 > r2 -- z is
+WORSE than r here, directly breaking b>r>z. Ratio: r2 > b2 > z2 -- b and r
+are swapped from what the blue-edge-signal story (Section 4 of the Julien
+writeup) would predict. CONCLUSION: on this specific spectrograph, band is
+clearly not the primary driver of fiber-0's divergence -- whatever it is,
+it's dominated by something else (spectrograph/hardware-specific, or
+per-exposure-specific) that the band-gradient explanation for the INTERNAL
+bundle-boundary effect (Section 4) does not reach. The internal
+bundle-boundary band-gradient finding stands on its own (reproduced
+cleanly on 2 independent nights, confirmed via real measured SNR); fiber
+0's mechanism is now confirmed to be a genuinely separate, still-open
+question, not simply "the same effect scaled up by less local signal."
+
+## 2026-08-25 (cont'd) -- Persistence-across-nights test: fiber 0 is a STABLE, REPRODUCIBLE effect, not exposure noise -- decisively rules out the band/SNR story for fiber 0 specifically
+
+Reran spectrograph 2's b2/r2/z2 triplet (bundle 0 + bundle 19, same method
+as above) on a second, fully independent night/exposure (20260401/00344649,
+vs. the first test's 20260411/00346401) -- different night, different arc
+exposure, different real calibration-line SNR realization entirely.
+
+  camera  night1_fiber0_dx  night2_fiber0_dx  night1_fiber499_dx  night2_fiber499_dx
+  b2      0.3092            0.3105            0.0798               0.0896
+  r2      0.1031            0.1530            0.0218               0.0551
+  z2      0.2247            0.2274            0.2440               0.2351
+
+b2 and z2's fiber-0 values match to <1% across two independent exposures;
+z2's fiber-499 matches to <4%. r2 moved more (~50% on fiber0, ~2.5x on
+fiber499) but stayed the same order of magnitude, and its own interior
+baseline also shifted a comparable amount night-to-night (int0: 0.0058 ->
+0.0225, a real ~4x swing) -- i.e. r2's movement tracks its own noisier
+baseline, not a fundamentally different edge effect. Both nights
+independently reproduce the same "band order broken" pattern from the
+single-spectrograph test above: raw magnitude b2 > z2 > r2 on BOTH nights.
+
+CONCLUSION: fiber 0's divergence is NOT primarily driven by that specific
+exposure's calibration-line signal strength (which differs substantially
+night to night) -- it is a stable, highly reproducible property tied to
+the physical fiber/spectrograph itself. This decisively separates fiber 0
+from the internal-bundle-boundary effect (Section 4 of the Julien writeup),
+which IS explained by real measured per-exposure calibration SNR and DOES
+vary with it. Fiber 0 (and plausibly fiber 499, at least for z2) looks like
+a genuine geometric or mechanical edge effect -- something about the true
+first/last fiber's position, trace-template geometry, or optical path that
+both pipelines' Gauss-Newton solvers consistently resolve differently,
+regardless of what data is thrown at the fit. This directly confirms the
+"true optical/mechanical edge effect" possibility flagged (but not
+substantiated) in the original 2026-08-24 z8-fiber-0 entry.
+
+NEXT STEP: given this is now a confirmed real, stable, hardware-like
+signature rather than a statistical/data-density story, the natural
+follow-up is inspecting the INPUT PSF template's own trace geometry near
+fiber 0 (not the fit output) across spectrographs -- looking for something
+structurally different in the pre-fit trace model itself (fiber spacing,
+curvature, or any per-spectrograph edge-specific quirk) that a converged
+fit would then be sensitive to in a solver-dependent way.
+
+## 2026-08-25 (cont'd) -- Eigenvalue check on the "hard structural degeneracy" hypothesis for fiber 0: clean NULL
+
+User's question ("is fiber 0 just a similar under-determined fit issue?")
+prompted a sharper hypothesis: fiber 0 might be a HARDER version of the
+under-determination than internal boundary fibers -- a near-singular
+(rather than merely weak) Hessian direction, since it has literally zero
+neighbor on one side rather than a distant one. That would predict a
+qualitatively larger (order-of-magnitude, not 20-50%) elevated eigenvalue
+at fiber 0 specifically, and would also explain the observed
+band-independence and cross-night reproducibility (a near-exact null
+direction doesn't care about that night's photon count).
+
+Extended SPECEX_TRACE_UNCERTAINTY_BUNDLE (still env-gated, default off) to
+eigendecompose each fiber's own full (trace-x + trace-y, 14x14 at
+trace-per-fiber-deg=6) marginal covariance sub-block, not just its
+diagonal -- the largest eigenvalue is the variance along that fiber's own
+single worst-constrained direction, whatever linear combination of
+coefficients that is (catches correlated near-degeneracies the earlier
+axis-aligned sigma table would miss).
+
+Ran on bundle 0 (fibers 0-24, contains the true fiber 0) for both b2 and
+z2 -- the two cameras with the largest, most reproducible fiber-0
+divergence:
+
+  camera  fiber0_max_eig  fiber24_max_eig  interior_mean  fiber0/interior  fiber24/interior
+  b2      0.008387        0.007595         0.004440       1.89x            1.71x
+  z2      0.006023        0.006456         0.003771       1.60x            1.71x
+
+RESULT: fiber 0 and fiber 24 (the SAME bundle's ordinary internal
+boundary) have essentially IDENTICAL formal eigenvalue elevation in both
+cameras -- z2's fiber 24 is even slightly HIGHER than fiber 0's. Both sit
+in the same modest ~1.6-1.9x range already established for internal
+boundary fibers generally (section 4 of the Julien writeup). No
+qualitatively larger degeneracy at fiber 0 -- the "hard structural
+degeneracy" hypothesis is a clean NULL.
+
+READING: this rules out the specific mechanism (fiber 0's zero-neighbor
+geometry directly creating a near-singular Hessian direction that C++/
+Python's solvers then resolve differently). Fiber 0 is NOT more
+under-determined, in the formal-Hessian sense, than an ordinary internal
+boundary fiber -- yet its actual observed divergence is larger (0.10-
+0.31px vs internal boundaries' 0.02-0.18px range) AND far more
+reproducible across nights than internal boundaries' band/SNR-driven
+story would predict. Both of those properties now need an explanation
+that ISN'T "weaker Hessian constraint" in any form tested so far (soft
+signal-driven, or hard structural). Points more strongly toward the
+original alternate candidate: a real, deterministic difference in the
+INPUT (pre-fit) trace template geometry near the true slit edge, or some
+other genuinely non-statistical mechanism -- not yet found. Still open.
+
+## 2026-08-25: Full-CCD breakdown campaign (interior/edge/fiber-0 RMS split) + fiber-0 real-SNR vignetting test: two more nulls, one new complication
+
+Extended `testing/full_ccd_campaign.py` (tracked, maintained entry point) to
+split its existing whole-camera X/Y trace RMS into three buckets per camera,
+computed from the same per-fiber 100-point-wavelength-grid trace comparison
+it already did, just partitioned by fiber category before the RMS reduction:
+  - **interior**: `fiber%25 not in {0,24}`
+  - **edge**: ordinary internal bundle-boundary fibers (`fiber%25 in {0,24}`),
+    excluding the true slit edge
+  - **f0**: the true slit-edge fibers only, `{0, 499}`
+New columns: `xrms_int/yrms_int/xrms_edge/yrms_edge/xrms_f0/yrms_f0`, same
+row format otherwise. Ran a 3-random-camera campaign (one per band, picked
+via `random_case_picker.py` with `--seed $(date +%s)`, all 3 happened to land
+on the same night/expid 20211201/00111640 -- b4, r1, z5):
+
+```
+case  xrms_int yrms_int  xrms_edge yrms_edge   xrms_f0 yrms_f0
+b4     0.0124   0.0145     0.0784   0.0321      0.0904  0.0171
+r1     0.0064   0.0060     0.1002   0.0403      0.0936  0.0658
+z5     0.0197   0.0138     0.2730   0.0420      0.2913  0.0479
+```
+
+Two things this adds to the picture:
+
+1. **Confirms the band gradient is real at the "ordinary edge" level too**,
+   not just interior (edge xrms/yrms both increase b<r<z, tracking the
+   calibration-signal-strength finding from 2026-08-24/25).
+
+2. **Complicates the "fiber 0 always worse than ordinary edge" framing**:
+   b4 and z5 both show fiber-0 xrms > edge xrms (as expected from the
+   earlier b2/z2 per-fiber inspection), but **r1 does not** -- its edge xrms
+   (0.1002) is actually *larger* than its fiber-0 xrms (0.0936). y is more
+   mixed still: b4 has fiber-0 yrms *below* edge yrms, r1 and z5 both have
+   it above. So "fiber 0 diverges more than a normal boundary fiber" is not
+   a universal per-camera rule -- it was true for the two cameras (b2, z2)
+   originally used to establish it, but a 3rd random band/camera breaks it
+   in x and a 4th (r1) breaks it more clearly. Treat any single-camera
+   fiber-0-vs-edge comparison as anecdotal; only the *reproducibility*
+   finding (same camera, different night, matches to <1-4%) is on solid
+   ground -- the magnitude-ordering claims need many more cameras before
+   trusting any general rule.
+
+**Real-SNR vignetting test for fiber 0 (b2, z2, bundle 0, `--debug-spots`
+rerun of night 20260411/00346401): clean NULL.** Read real fitted-flux/SNR
+per candidate line from `.pyrawspots_final.txt` (same methodology as the
+2026-08-24 calibration-signal-strength band confirmation, but per-fiber
+within one bundle instead of per-band). Fiber 0's Σ(SNR²) is 1.00x (b2) and
+1.01x (z2) the bundle's interior mean, with an identical line count to every
+other fiber in the bundle (47 for b2, 70-71 for z2) -- i.e. **no measurable
+throughput/vignetting deficit at fiber 0 at all**. This rules out a
+per-fiber analog of the confirmed per-band calibration-signal-strength
+story: fiber 0 does not get systematically fewer or weaker arc lines than
+its neighbors, so any real trace-fit difference there can't be attributed to
+differing input data quality/quantity between the two pipelines' candidate
+selections.
+
+**Status of fiber-0 investigation after this session's 3 tests (eigenvalue/
+Hessian-conditioning, true-CCD-edge pixel-stamp clipping, real-SNR
+vignetting): all three cleanly ruled out.** Also newly complicated: the
+premise that fiber 0 is *categorically* worse than ordinary edge fibers
+doesn't hold up in x for r1 specifically. Remaining candidate explanations
+are algorithmic/implementation-specific rather than statistical or physical
+-- e.g. something in how the two pipelines' optimizers converge from a
+possibly-imperfect input trace initial guess specifically at the true slit
+edge (untested), or genuine camera-to-camera variability meaning there is no
+single "fiber 0 effect" at all, just ordinary per-camera noise in a
+small-N (2-fiber) bucket that happened to look structured in the two
+cameras first examined. The latter is now a live possibility, not previously
+considered as seriously.
+
+## 2026-08-25 (cont'd): 15-camera breakdown campaign (5/band) -- fiber-0-vs-edge is a Y-specific effect, not X
+
+Extended the earlier 3-camera breakdown campaign to 15 cameras (5 per band,
+`random_case_picker.py --n 5`, excluding the first 3 cases, spread across 11
+distinct camera IDs and 8 different nights -- some camera IDs sampled twice
+on different nights). Also added a per-fiber CSV dump
+(`perfiber-{cam}@{night}-{expid}.csv`: fiber, category, xrms_px, yrms_px) to
+`full_ccd_campaign.py` so the per-fiber structure survives past the
+single-row-per-camera summary. Plotted with a new headless script (Agg
+backend, `$SCRATCH/specex/plots/fiber0_campaign/`, never pops a window):
+per-exposure dx/dy-vs-fiber scatter (15 files), an aggregate box plot of
+interior/edge/f0 X and Y RMS faceted by band, and a paired
+mean-edge-vs-mean-f0 scatter (one point per exposure, dashed y=x line).
+
+**Aggregate box plot (all 15 exposures pooled per band): edge and f0 medians
+are statistically indistinguishable in X, in all three bands** -- this
+confirms the 3-camera campaign's r1 counterexample was not a fluke; at N=15
+"fiber 0 has categorically worse X than an ordinary edge fiber" does not
+hold up.
+
+**But the paired mean-edge-vs-mean-f0 scatter shows a real, sharp asymmetry
+between X and Y that the box plot's marginal view hides**: in X, the 15
+points scatter roughly symmetrically around the y=x line (b6/b0/z6 above,
+r0/r5/z9/z1 below, several right on it) -- genuinely no systematic bias. In
+**Y, all but 2 of the 15 points (r0, r5) sit above the y=x line** -- i.e.
+fiber-0/499's Y trace RMS is higher than its own camera's mean ordinary-edge
+Y RMS in 13/15 independent camera-exposures, a highly non-random pattern
+(binomial p ~ 0.007 for 13+/15 if the true rate were 50/50). **This is the
+sharpest, most reproducible fiber-0 signature found all session -- but it's
+specifically a Y-axis effect, not the X-axis effect the original b2/z2
+inspection (and this session's earlier per-camera checks) had been implicitly
+centered on.** r0 and r5 (both r-band, different nights) are clear, real
+exceptions, not noise -- worth keeping in mind before overfitting a
+"Y-only" story too hard.
+
+One incidental observation worth flagging separately: z4@20221227's
+per-fiber plot shows a strong monotonic X-RMS gradient across the whole
+CCD (~0.15px near fiber 0 down to ~0.05px near fiber 499), well beyond
+anything fiber-0-specific -- a whole-camera effect for that one exposure,
+not investigated further this session, but a reminder that camera/exposure-
+level systematics can be large enough to swamp any single boundary-fiber
+comparison.
+
+**Revised standing framing for fiber 0**: not "categorically worse than an
+edge fiber" (falsified in X at N=15), but "shows a real, highly reproducible
+excess in Y trace RMS specifically, in the large majority but not all
+camera-exposures tested." The three structural/statistical hypotheses tested
+earlier this session (Hessian eigenvalue conditioning, true-CCD-edge pixel
+clipping, real-SNR vignetting) remain null and were never Y/X-selective in
+how they were tested -- worth revisiting specifically through a Y-axis lens
+if this thread continues (e.g. does the eigenvalue check's Y-subblock alone
+show anything the combined X+Y eigenvalue missed?).
+
+## 2026-08-25 (cont'd): X/Y eigenvalue split (null) + signed-offset analysis reveals the real pattern: opposite-sign kinks at every bundle seam
+
+**X/Y eigenvalue split, following up §7's "redo the eigenvalue check per-axis"
+idea**: extended `SPECEX_TRACE_UNCERTAINTY_BUNDLE`'s eigenvalue diagnostic to
+eigendecompose each fiber's X-only and Y-only trace covariance sub-block
+separately (previously only the combined 2x2-block-per-coefficient X+Y
+block was checked). Reran b2/z2 (both show the real Y-excess empirically)
+and r0 (a real exception to it) bundle 0. **Clean null again**: X-only and
+Y-only max-eigenvalue ratios (boundary/interior) are comparable in all three
+cameras -- b2: 1.96x (X) vs 1.80x (Y); z2: 1.90x (X) vs 1.48x (Y); r0: 2.02x
+(X) vs 1.57x (Y). If anything X trends slightly *higher* than Y, the
+opposite of what would explain the observed Y-specific empirical pattern.
+Formal Hessian-based conditioning still cannot explain any of this, sliced
+any way tried. Plot: `$SCRATCH/specex/plots/fiber0_campaign/eigenvalue_xy_split.png`.
+
+**The real question, and the answer: is the boundary-fiber offset a
+consistent bias (same sign every time) or something else?** Prompted by a
+direct question: is fiber 0's C++-minus-Python offset always the same sign?
+What about other boundary-fiber pairs (e.g. fiber 24 vs 25) -- is there a
+"last-of-bundle positive, first-of-next-bundle negative" pattern, or is it
+random? Are there any b/r boundary fibers with no spike at all? Computed the
+**signed** (not RMS) mean C++-minus-Python trace offset per fiber, across
+all 18 completed camera-exposures from both breakdown campaigns (reusing
+their already-written output FITS files, no new fitting needed) --
+`signed_boundary_analysis.py`, kept in scratchpad (one-off).
+
+- **Fiber 0/499 sign is essentially random across exposures**: fiber 0 dx
+  8+/10-, dy 9+/9-; fiber 499 dx 12+/6-, dy 12+/6- (18 independent
+  camera-exposures). Not a fixed-direction bias -- rules out anything like a
+  constant per-pixel calibration/rounding offset at the true edge.
+- **But internal boundary PAIRS show a strong, real anti-correlation**:
+  for every (25k-1, 25k) seam across all 18 exposures (342 pair-instances),
+  the two fibers' signed dx have OPPOSITE sign 271/342 = 79% of the time
+  (dy: 232/342 = 68%) -- far above the 50% chance baseline. **This is the
+  clearest structural signature found all session.** Critically, there's no
+  fixed handedness: "last-fiber positive, first-fiber negative" (130
+  instances) is about as common as the reverse (141) -- so it's not "24 is
+  always positive and 25 is always negative," it's "whichever fiber is
+  which, the *pair* almost always kinks in opposite directions from each
+  other." Consistent with each 25-fiber bundle being fit independently (no
+  cross-bundle continuity constraint in either pipeline) and each bundle's
+  own polynomial extrapolating slightly differently to its own edge fiber
+  -- a real discontinuity ("kink") at every bundle seam, whose overall
+  direction is essentially arbitrary per-seam-per-exposure but whose
+  *anti-correlation within the pair* is a robust, real effect.
+- **No-spike boundary fibers exist but are rare in b/r**: checked all
+  non-z-band exposures' 40 boundary fibers each (fiber%25 in {0,24},
+  |signed dx| and |signed dy| both within 1.5x that exposure's own interior
+  median). Most exposures show 0/40 no-spike boundary fibers (r1, b0, b2 x2,
+  r3, r5, and 2 of 3 r0 exposures) -- essentially every boundary fiber
+  spikes. A handful of exceptions: b4 has 4/40 (fibers 0, 375, 474, 499 --
+  notably fiber 0 itself is one of its own exceptions), b5 has 1/40 (400),
+  b6 has 1/40 (124), one r0 exposure has 1/40 (175). So "no spike" boundary
+  fibers are real but uncommon (~7/440 checked slots), not evidence the
+  effect is inconsistent -- the rule is "boundary fibers spike," with rare
+  individual exceptions rather than any systematic subset that never does.
+- **One subtlety this surfaces**: b4@20211201's fiber 0 has a *tiny* signed
+  mean offset (dx=-0.0008, essentially zero) despite RMS analysis (see the
+  15-camera campaign entry above) showing its X divergence is real and
+  measurable when the wavelength-resolved trace is examined via RMS rather
+  than a single mean. That combination -- near-zero mean, nonzero RMS --
+  means the C++/Python trace difference at that fiber crosses zero somewhere
+  across the wavelength range rather than being a constant additive shift:
+  the divergence there is closer to a difference in trace *curvature/shape*
+  than a rigid offset. Worth remembering before treating "boundary fiber
+  offset" as always the same *kind* of effect.
+
+## 2026-08-25 (cont'd): "worse or just different?" -- caught and fixed a circular ground-truth bug, then got a real (reassuring) answer; confirmed C++ does no boundary smoothing either
+
+**First attempt was flawed, caught before reporting**: tried testing "is
+Python's boundary-fiber X trace worse than C++'s against ground truth" by
+comparing each pipeline's final XTRACE against the `xc`/`yc` fields in
+C++'s own `cppspots_pass4.txt` debug dump (already used for wavelength-
+residual checks in the campaign script). Initial result looked dramatic --
+Python's X residual vs. this "ground truth" was 18.9x worse than C++'s at
+ordinary boundary fibers, 16.1x worse at fiber 0/499 (pooled across all 18
+completed exposures). **Traced the C++ source before trusting this**
+(`src/specex_psf_fitter.cc:2698-2700, 2726-2727, 2814-2815`): `spot->xc =
+psf->Xccd(spot->fiber, spot->wavelength)` -- the debug dump's xc/yc are
+literally re-snapped to **C++'s own current trace-model prediction** after
+every refit iteration, not an independently-measured pixel centroid. Using
+it as "ground truth" is circular in C++'s favor by construction (of course
+C++'s own final trace agrees with a value derived from C++'s own trace) --
+the 18.9x/16.1x numbers are invalid and were never reported to the user.
+Worth remembering: any future use of `cppspots_pass4.txt`'s xc/yc columns
+for anything other than window-centering is suspect for the same reason
+(this also mildly undercuts the earlier wavelength-residual check in the
+15-camera campaign entry -- its py/cpp~1.000x ratio is still probably fine
+since it's a *ratio* between two pipelines measured against the same
+contaminated reference, but shouldn't be treated as a proven absolute-
+accuracy statement either).
+
+**Real test**: measured an independent flux-weighted X centroid directly
+from raw preproc image pixels (ivar-masked, background from the stamp's own
+edge rows), with the search window (±6px X, ±2px Y) anchored to the
+*shared, un-fit input PSF trace* -- identical starting point for both
+pipelines, so window placement cannot favor either one. Ran on 3 exposures
+(b2, r0, z4 @ 20221227/00160253), ~60k lines total, bucketed by fiber
+category. `real_centroid_test.py`, kept in scratchpad.
+
+```
+category   n       cpp_rms   py_rms   py/cpp
+interior   59611   1.158     1.158    1.000x
+edge        4995   1.170     1.118    0.955x
+f0           222   1.464     1.413    0.965x
+```
+
+**Python is NOT worse than C++ against real ground truth -- if anything
+marginally better at boundary/f0 fibers (ratio <1) in this sample.** The
+~1.0-1.8px RMS scale (much larger than either pipeline's own formal
+precision) reflects the crude single-line flux-weighted-centroid method's
+own shot-noise floor, not either pipeline's real trace uncertainty -- but
+since both pipelines are compared against the exact same noisy-but-unbiased
+measurement, the *relative* comparison (the ratio) is meaningful even
+though the absolute RMS isn't a clean "positional accuracy" number. Both
+pipelines also show a small (~+0.05 to +0.10px) positive bias, consistent
+across categories and near-identical between cpp/py -- almost certainly a
+property of the crude centroiding method itself (asymmetric background
+window or PSF wings), not a real pipeline difference, since it appears
+equally in both.
+
+**Does C++ do any cross-bundle boundary smoothing?** Checked directly:
+`desispec`'s `desi_merge_psf` / `desispec.scripts.specex.merge_psf()` (the
+actual function that combines the 20 independently-fit per-bundle PSF files
+into the final camera PSF) does a **pure per-fiber copy** of each bundle's
+own XTRACE/YTRACE rows into the merged output, gated only by each fiber's
+own STATUS. No smoothing, blending, or cross-bundle continuity constraint
+of any kind (`grep -c "smooth\|blend\|neighbor\|average"` on that file's
+merge path: zero hits). **Both pipelines have the identical "independent
+per-bundle fit, naive merge" architecture** -- the opposite-sign kink
+pattern found earlier this session isn't a Python-specific defect, it's a
+structural consequence of an architecture both pipelines share. Since real-
+ground-truth accuracy is equal between them (above), smoothing wouldn't be
+"fixing a Python bug" -- it would be a genuine architectural enhancement
+applicable to *either* pipeline (borrowing cross-bundle statistical
+strength at boundary fibers, which are independently confirmed to be
+under-determined -- see the earlier Hessian/eigenvalue entries), not a
+parity requirement. Flagged as a real, standing idea for future
+consideration, not something to implement casually -- it changes production
+output behavior and would need its own validation against real data before
+being anything more than a proposal.
+
+## 2026-08-25 (cont'd): real, on-by-default algorithmic asymmetry found (trace_prior_deg) -- but doesn't fire at our fiber-0 test cases; independent agent dispatched to search further
+
+In response to "does C++ do anything else different, like heavier priors at
+boundaries" -- found a genuine, currently-active default asymmetry:
+
+- **C++**: `trace_prior_deg` defaults to **0** (off) in real production
+  (`src/specex_pyoptions.h:106`). The cross-fiber trace-coefficient prior
+  mechanism exists in the C++ source (`specex_psf_fitter.cc:759-857`,
+  gated by `trace_prior_deg>0`) but is never enabled in real DESI
+  production runs.
+- **Python**: `trace_prior_deg` defaults to **1** in real production
+  (`fit_ccd_native`'s own default, `fitter.py` ~line 593) -- i.e. Python's
+  own port of this same mechanism (`build_trace_prior_hessian()`,
+  `fitter.py:312-358`) is genuinely on by default, pulling a *flagged*
+  fiber's Legendre-degree>=1 trace coefficients toward the bundle's
+  cross-fiber mean.
+- Confirmed C++'s trace basis degree (`trace_deg_wave=6`,
+  `specex_pyoptions.h:104`) matches Python's `trace_per_fiber_deg=6`
+  default -- same per-fiber degrees of freedom, not a confound.
+- **But**: Python's prior only fires for fibers flagged via an "ndead"
+  threshold (proximity to dead/bad CCD columns, default threshold 500 --
+  see `SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD`), not by bundle-boundary
+  position. Checked real activation log lines (`SPECEX_TRACE_PRIOR_DEG:
+  activating trace prior for...`) across all of this session's saved
+  campaign/test logs: it fires regularly (real dead columns are common
+  enough), but almost always at interior fibers unrelated to any bundle
+  boundary. **It never fired at all for the core b2/z2 fiber-0 bundle-0
+  test cases** used throughout this session's fiber-0 investigation (b2:
+  never fired; z2: fired only for interior fibers 5/6/9/10, nowhere near
+  fiber 0). One coincidental exception found: z1@20250627 (one of the
+  15-camera campaign's exposures) had it fire for fibers 497/498/499 in one
+  bundle -- a real true-edge trigger, but a single coincidental case, not a
+  general pattern.
+- **Verdict so far**: this is a real, documented, currently-active
+  algorithmic difference between the two pipelines' production defaults --
+  worth knowing about in general -- but it does not appear to explain this
+  session's core boundary/fiber-0 divergence findings, since it wasn't
+  active in the specific cases that pattern was characterized on.
+
+Dispatched an independent general-purpose agent (fresh context, not a fork)
+to search `specex_psf_fitter.cc` and `fitter.py` from scratch for any other
+on-by-default asymmetry (weighting, robust/outlier down-weighting,
+convergence criteria, initial-guess construction, any `fiber==fiber_min`/
+`fiber==0`-style special-casing) that could plausibly explain the boundary
+pattern beyond "formally under-determined, amplified by real signal
+strength" -- report pending.
+
+## 2026-08-25 (cont'd): independent-agent audit finds a real, untested lead -- C++'s trace/sigma stages fit a STRICTER spot list than Python's
+
+Dispatched a fresh (non-fork) general-purpose agent to independently audit
+`specex_psf_fitter.cc` and `fitter.py` for any other on-by-default
+algorithmic asymmetry that could explain the boundary-fiber pattern beyond
+"formally under-determined, amplified by signal strength." It found one
+genuinely new, real, and -- critically -- **never actually tested**
+candidate, which I independently verified directly in both source files
+before writing this up (not just trusting the agent's report):
+
+**C++'s TRACE and SIGMA (GHSIGX/GHSIGY) fit stages only ever see a strict
+(SNR&ge;5, min-wavelength-separation 4&Aring;) spot subset. Python's single
+shared spot list used across its entire multi-stage `fit()` call (flux ->
+trace -> sigma -> full) is the LOOSE (SNR&ge;3, no wavelength-separation
+requirement) list throughout.**
+
+- **C++** (`specex_psf_fitter.cc`): `min_snr_non_linear_terms=5`,
+  `min_wave_dist_non_linear_terms=4` (`:2298-2299`) are used for
+  `select_spots()` immediately before every FLUX+TRACE `FitSeveralSpots`
+  call (confirmed directly, e.g. `:2707-2708/2716`) and before every
+  `scheduled_fit_of_sigmas` call (`:2741-2747`, `:2782`). Only *after* the
+  sigma stage is done does it switch to `min_snr_linear_terms=3`,
+  `min_wave_dist_linear_terms=0` (`:2298-2301`, used at `:2823`) for the
+  final shape+flux joint fit -- trace and sigma never see this loose list.
+- **Python** (`fitter.py`): `select_bundle_spots_iterative()` (~:1072-1220)
+  does mirror C++'s strict->loose *housekeeping* passes, but produces one
+  final loose (SNR&ge;3) spot list, handed once to `PSF_Fitter.fit()`
+  (`specex.py:375`). Inside `fit()`, `mode=='trace'`'s `idx` construction
+  (`fitter.py:1895`) only selects which *parameter* rows to update (flux/
+  trace-coeff/continuum) -- there is no spot-subsetting by SNR anywhere in
+  `fit()`, confirmed directly by grep. So Python's trace and sigma stages
+  fit against 10-30% more (SNR 3-5, closely-spaced) spots than C++'s
+  corresponding stages ever do.
+- **On by default, unconditional, in both pipelines** -- not gated by any
+  flag on either side.
+- **Why this is plausible for the boundary pattern specifically**: at a
+  well-constrained interior fiber, a handful of extra marginal-SNR points
+  barely move an already-tight fit. At a boundary fiber -- already
+  independently confirmed this session to be the most weakly-constrained
+  (per-fiber Hessian ratio ~1.2-1.5x interior even outside eigenvalue
+  tests) -- those same extra points have much more leverage on the result,
+  which could explain why the *actual* observed divergence (0.1-0.4px) is
+  5-10x larger than naive Gaussian propagation from formal sigma alone
+  predicts (the still-unexplained residual flagged earlier this session).
+  It also naturally tracks the confirmed b>r>z gradient: b-band has fewer
+  strict-list lines to begin with, so the loose list differs proportionally
+  *more* from the strict one there than in z-band.
+- **Status: real and unreplicated, but genuinely untested.** The agent
+  found this is literally the standing "next hypothesis to test" already
+  flagged in an in-code comment (`fitter.py` ~1755-1768, still present,
+  never acted on) -- earlier sessions only verified final selected spot-SET
+  membership matches between pipelines (a shallower, different claim), never
+  whether the intermediate trace/sigma stages narrow to the strict subset.
+  **Not yet tested against the boundary pattern** -- the natural next step
+  is an experimental rerun that restricts Python's trace/sigma-stage spot
+  list to the strict SNR>=5/4A-separation criteria (matching C++ exactly)
+  and checking whether boundary-fiber divergence shrinks.
+
+Other things the agent checked and closed out (all previously-known/dead,
+re-confirmed with fresh eyes, nothing new):
+- C++'s `compare_spots_chi2_and_mask` outlier/robust rejection is dead code
+  (called only from a commented-out line, `:2024`) -- no robust reweighting
+  live in either pipeline.
+- C++'s bad-fiber neighbor-interpolation-at-`fiber_min`/`fiber_max`
+  (`:2649-2684`) is wrapped in `if(false && ...)` -- permanently dead,
+  consistent with this session's other `if(false&&...)` findings.
+- `chi2_precision` (C++ 0.1 vs Python 0.01) and line-search algorithm
+  differences: already empirically tested this session with clean negative
+  results, correctly not revisited.
+- Noted (documentation accuracy aside, not a live pipeline finding):
+  CLAUDE.md's description of the alternating-solve/joint-trace-shape work
+  may be stale -- `'full'` mode's `idx` already excludes trace terms in the
+  current `fitter.py` (`:1894-1908`), and the relevant commits are in this
+  branch's history despite CLAUDE.md implying otherwise elsewhere. Worth a
+  docs fix at some point, not urgent.
+
+## 2026-08-25: SESSION PAUSE -- node time expired, next-step pointer
+
+Stopped here with ~8 min left on the node (SLURM job 57612290, 4hr
+allocation) -- not enough to implement + run the stage-dependent spot-
+filtering test. **Next session should start directly with this**:
+
+**Implement (env-gated, off by default, like this session's other
+experiments) stage-dependent spot filtering in `PSF_Fitter.fit()`
+(`fitter.py`)**: restrict the spot list used by `mode=='trace'` and
+`mode=='sigma'` to C++'s exact strict criteria (SNR>=5, >=4A from the
+nearest same-fiber selected wavelength -- see `select_spots_cpp`'s existing
+`min_snr_non_linear_terms`/`min_wave_dist_non_linear_terms`-style logic in
+`fitter.py` for the matching constants/pattern to reuse), while leaving
+`mode=='full'` on the existing loose (SNR>=3) list -- mirroring C++'s
+`FitEverything` exactly (`specex_psf_fitter.cc:2298-2301, 2707-2716,
+2741-2782` strict, `:2823` loose-only-for-final-stage). Each candidate spot
+dict already carries its own `snr` (set during housekeeping/
+`select_bundle_spots_iterative`) so the SNR cut is a straight filter; the
+wavelength-separation cut needs a small per-fiber check against neighboring
+*already-selected* wavelengths (same logic shape as `select_spots_cpp`'s
+first pass, second criterion).
+
+**Then test** on the same b2/z2 bundle-0 cases used throughout this
+session's fiber-0 work (paths/broken-fibers already recorded above --
+night 20260411/00346401, or the fiber0_breakdown_campaign_large cases) --
+compare boundary-fiber (and interior, as a control -- should barely move)
+X/Y trace divergence vs. C++ before/after. If it shrinks the boundary/
+fiber-0 divergence meaningfully, this is very likely the real mechanism;
+if not, log the null and it's ruled out same as everything else this
+session.
+
+No code changes were made this segment beyond documentation --
+`git status` should still show only the same files as before (fitter.py,
+io.py, porting-notes.md from earlier in the session; testing/
+full_ccd_campaign.py's per-fiber-category extension). Nothing to clean up.
+
+## 2026-08-26: tested the strict-spots hypothesis (approximate form) -- mixed, non-boundary-specific result, does NOT confirm it
+
+Resumed on a login node with no GPU allocation available via salloc
+(queue backed up); found the login node itself has one idle A100 (40GB,
+~4GB used) and used it directly for a quick single-bundle test -- not a
+full-CCD campaign, kept brief out of consideration for other login-node
+users.
+
+**Scoped the exact hypothesis test first, found a real architectural
+blocker**: C++'s trace/sigma stages solve flux jointly with trace/shape,
+using ONLY the strict-subset spots for that particular linear system; the
+final shape+flux stage then uses the loose set. Python's `fit()` keeps one
+persistent, Ns-sized flux array that's updated via joint Newton steps
+across every stage (flux -> trace -> sigma -> full) -- naively swapping in
+a smaller strict-subset spot list for just the trace/sigma stages breaks
+that array's indexing (Ns changes size between stages). Worked out a
+correct fix (gather the persistent flux array at the strict-subset's
+original indices before the strict-stage Newton solve, scatter the updated
+values back afterward, leaving excluded spots' flux untouched -- exactly
+matching C++'s "unselected spots' flux goes stale during trace/sigma, gets
+refreshed again before the final stage" behavior) but did not implement
+it: it requires real surgery on the core, heavily-tuned iteration loop
+(new geometry-building block, a second accumulate call path, conditional
+Newton-step application) with real risk of a subtle indexing bug in
+delicate code -- decided this needed more implementation time than
+warranted for a first-pass test.
+
+**Ran a cheaper, approximate version instead**: used the existing
+`--force-spots` mechanism to run bundle 0 of b2/z2 (night 20260411/
+00346401, same cases used throughout this session's fiber-0 work) with the
+ENTIRE fit (not just trace/sigma) restricted to C++'s strict criteria
+(SNR>=5, >=4A same-fiber wavelength separation -- `select_spots_cpp` with
+`max_number_of_lines<=0` to get pure first-pass behavior, no second-pass
+line-count pruning), built from the real per-line SNR dumps already on
+disk from an earlier session (`fiber0_vignette/py-{b2,z2}-bundle0_
+bundle00.pyrawspots_final.txt`). 474/1175 spots pass for b2, 1053/1752 for
+z2 -- a substantial reduction in both. Compared resulting XTRACE/YTRACE
+against C++ (same baseline comparison methodology as the rest of this
+session) for fiber 0, fiber 24 (boundary), a few interior fibers, and the
+interior mean:
+
+```
+b2: fiber0  X -0.5%  Y -2.7%   |  boundary(24) X +0.5%  Y ~0%   |  interior_mean X +1.4%  Y +10.6%
+z2: fiber0  X -0.9%  Y +50.8%  |  boundary(24) X -3.1%  Y +31.2% |  interior_mean X -24.2% Y +68.3%
+```
+(positive % = smaller divergence from C++ = improvement; negative = worse)
+
+Both runs converged cleanly (chi2 flat to <0.001% over the last 10
+iterations, no errors) -- not a convergence artifact.
+
+**Verdict: does NOT confirm the hypothesis, at least in this approximate
+form.** The result is real but **not boundary-specific**: in z2, Y
+divergence improved dramatically almost uniformly across interior, edge,
+AND fiber-0 fibers alike (+31% to +91%), while X divergence got
+substantially WORSE almost as uniformly (-0.9% to -155%) -- a broad X/Y
+trade-off from using fewer, higher-SNR spots, not a boundary-fiber-specific
+correction. If the strict-spot-selection hypothesis were the real
+explanation for the boundary/fiber-0 EXCESS divergence specifically, this
+test should have shown boundary/fiber-0 fibers improving *disproportionately
+more* than interior fibers -- instead interior fibers moved by similar or
+larger amounts. b2 showed almost no effect anywhere (both cameras and both
+axes near flat, +/-few percent, noisy). The two test cameras don't even
+agree with each other in magnitude or which axis benefits.
+
+**Caveats, why this isn't fully conclusive either way**: (1) this tests the
+whole-fit-strict approximation, not C++'s real behavior (strict only during
+trace/sigma, loose again for the final shape+flux stage) -- the real,
+correctly-scoped test (described above, not yet implemented) could behave
+differently, since C++'s final loose-list stage might correct exactly the
+kind of X/Y imbalance seen here. (2) Only 2 cameras, both from the same
+night/exposure -- not the breadth of the 15-camera campaign. (3) The clean,
+large, camera-dependent X/Y trade-off found here (especially z2's dramatic
+Y-improvement/X-degradation) is itself a real, interesting, and previously
+unnoticed observation worth its own follow-up regardless of the boundary
+question -- but it's a DIFFERENT finding than "explains boundary/fiber-0
+divergence specifically."
+
+**Net status of the strict-spots hypothesis**: real and unreplicated as a
+pipeline difference (confirmed in source), but this session's first
+empirical test of it doesn't support it as *the* boundary/fiber-0
+explanation -- lowered priority relative to where it stood after the
+independent-agent audit. If revisited, do the real per-stage-restricted
+implementation (not this whole-fit approximation) before drawing a final
+conclusion, since this test's negative result could itself be an artifact
+of over-applying the restriction to the final stage.
+
+## 2026-08-26 (cont'd): implemented and ran the REAL stage-dependent strict-spots test -- confirms the earlier approximate result, hypothesis closed
+
+Implemented the correctly-scoped version of the strict-spots test (env-gated
+`SPECEX_CPP_STAGE_SPOTS`, off by default) in `PSF_Fitter.fit()`
+(`py/specex/fitter.py`), matching C++ exactly: a strict (SNR>=5, >=4A
+same-fiber wavelength separation) spot subset feeds the Newton solve only
+during `'trace'`/`'sigma'` mode iterations; `'flux'`/`'full'` stay on the
+full loose set. Mechanism: renamed the persistent per-spot geometry
+(`flux`, `xc_init`, `yc_init`, `psf_monomials`, `trace_monomials`, `xpix_j`,
+`ypix_j`, `sx_g`, `sy_g`, `idx_gg`, `tx_g`, `tw_g`, `img_d`, `w_d`) to
+`_full`-suffixed at construction; built a second, smaller geometry for the
+strict subset once before the iteration loop (reusing `select_spots_cpp`,
+`get_bundle_footprint`, and the same stamp-indexing/monomial-building code
+as the full-set block); at the top of each loop iteration, rebind the
+short (unsuffixed) names to either the strict or full arrays depending on
+`mode`. `flux` (the one genuinely tricky part, since it's jointly solved
+with trace and persists across stages at Ns-size) is gathered from the
+persistent `flux_full` at the strict subset's original indices right
+before a strict-mode Newton solve and scattered back right after --
+leaving every other spot's flux untouched during trace/sigma, exactly
+matching C++'s real behavior. `chi2` used for best-state tracking/
+printing/convergence checks is always evaluated on the full loose set via
+`_predict_bundle_jax_jit` (comparing chi2 across differently-sized pixel
+footprints would be meaningless) -- confirmed this doesn't affect trace
+coefficients at all regardless, since neither `'sigma'` nor `'full'` mode's
+`idx` ever includes trace terms (trace is exclusively solved during
+`'trace'` mode, then permanently frozen -- the alternating-solve
+architecture from CLAUDE.md's now-corrected description).
+
+**Verified zero behavior change on the default (env unset) path**: reran
+b2 bundle 0 with the flag unset and diffed against the pre-existing
+baseline log byte-for-byte on the `DEBUG: dx_final`/`dy_final` lines --
+identical to 6 decimal places (`dx_final mean=0.016545, dy_final
+mean=0.108093` and `dx_final mean=0.064058, dy_final mean=0.065520`,
+both lines, both runs). The refactor is a pure variable-rename plus an
+inert-when-unset conditional.
+
+**Ran the real test** on b2/z2 bundle 0 (same night/expid/broken-fibers
+used throughout this session's fiber-0 work). Confirmed the mechanism
+fires correctly: prints `473/473`-style near-100% pass rates during the
+(already strict-selected) trace-warmup housekeeping calls inside
+`select_bundle_spots_iterative`, and `474/653` (b2) / `1055/1622` (z2)
+during the real final fit call -- consistent with the earlier session's
+independently-computed strict counts (474/1175 for b2, matching almost
+exactly once accounting for the raw-candidate-vs-final-selected-list
+distinction).
+
+```
+b2: fiber0  X -0.5%  Y -2.7%   |  boundary(24) X +0.5%  Y ~0%   |  interior_mean X +1.4%  Y +10.6%
+z2: fiber0  X -0.7%  Y +50.7%  |  boundary(24) X -3.0%  Y +31.2% |  interior_mean X -23.5% Y +68.4%
+```
+
+**These numbers match the earlier approximate (whole-fit-strict) test to
+within noise** (b2: -0.5/-2.7/+0.5/~0/+1.4/+10.6 vs. the approximation's
+identical values; z2: -0.7/+50.7/-3.0/+31.2/-23.5/+68.4 vs. the
+approximation's -0.9/+50.8/-3.1/+31.2/-24.2/+68.3). **This makes sense in
+retrospect and is not a coincidence**: since `'full'` mode's `idx`
+structurally excludes trace (confirmed above), which spots feed the final
+loose-set stage can never affect the resulting trace coefficients at all
+-- trace is entirely determined during `'trace'` mode, which both the
+approximate and real tests restricted identically. The approximation
+wasn't actually approximate for the trace question specifically; it was
+exact, just with unnecessary (and irrelevant-to-trace) extra restriction
+on the flux/shape stages too.
+
+**Final verdict: the strict-spots hypothesis is closed, does not explain
+the boundary/fiber-0 pattern.** Confirmed with the real, C++-faithful
+implementation, not just the approximation: no boundary-specific
+improvement in either camera -- z2 shows a large, real, but broad X/Y
+trade-off (Y improves ~31-91%, X degrades ~1-155%) affecting interior
+fibers by similar or larger amounts than boundary/fiber-0 fibers; b2 shows
+almost no effect anywhere. Neither test camera shows the "boundary/fiber-0
+disproportionately improves" signature the hypothesis predicted. Combined
+with this session's other closed leads (Hessian eigenvalue conditioning,
+true-CCD-edge pixel clipping, real-SNR vignetting, the X/Y-split
+eigenvalue check, and the independent-agent audit's other checks), no
+mechanism tested so far -- structural, statistical, or now algorithmic --
+explains the boundary/fiber-0 divergence pattern found in the 15-camera
+campaign. The z2 X/Y trade-off itself remains a real, separate,
+unexplained observation worth its own investigation if picked up later.
+
+`SPECEX_CPP_STAGE_SPOTS` is left in `fitter.py`, off by default, as a
+kept (not reverted) diagnostic -- consistent with this session's other
+still-open experimental flags, should this thread ever get revisited.
+
+## 2026-08-26 (cont'd): regularization-difference hypothesis tested and closed -- raw unregularized Cholesky gives bit-identical results; mixed precision confirmed irrelevant
+
+**Motivation**: with the strict-spots hypothesis closed, asked "what else,
+besides under-determination, could explain the boundary pattern" and found
+a real, previously-unexamined structural difference: C++'s actual linear
+solve (`specex_linalg.cc:62` `cholesky_solve` -> LAPACK `dposv`, called from
+`specex_psf_fitter.cc:1463`) is a bare, UNREGULARIZED positive-definite
+Cholesky solve -- no diagonal preconditioning, no ridge/epsilon. On failure
+it sets chi2=1e30 and, since `FitEverything` sets `fatal=true`
+unconditionally, calls `SPECEX_ERROR` (aborts). Python's solve, by
+contrast, always diagonal-preconditions (`A_sub / outer(S,S)`) and adds a
+fixed `1e-8` ridge before solving, unconditionally, every iteration. Given
+this session's own eigenvalue tests already found boundary fibers only
+*softly* ill-conditioned (ratio ~1.2-2x interior, never dramatically
+singular), this is exactly the regime where "always-damped" (Python) vs
+"raw-or-fail" (C++) solver mechanics could plausibly steer two independent
+implementations to different-but-valid answers, distinct from "the data is
+under-determined."
+
+**Free check first**: grepped every C++ log saved this session (~30+ real
+production runs across both breakdown campaigns) for the failure-path debug
+strings (`DEBUG A(`, `FitSeveralSpots failed`, `SPECEX_ERROR`) -- zero hits.
+Confirmed why this is inconclusive on its own: `SPECEX_DEBUG` is gated
+behind a global debug flag (`specex_message.cc`) never set in our real
+invocations, so a failure could have happened silently as long as it didn't
+abort the whole program. But since `fatal=true` in `FitEverything` means a
+real failure *would* abort (`SPECEX_ERROR`), and none of our ~30+ real C++
+runs this session ever crashed, this is still real (if indirect) evidence
+`cholesky_solve` never actually failed on any camera/night tested.
+
+**Direct test**: added `SPECEX_RAW_CHOLESKY` (env-gated, off by default) to
+`PSF_Fitter.fit()`'s Newton-step solve (`fitter.py`, right after the
+existing `A_sub, B_sub` construction) -- replicates C++'s exact solve
+(`np.linalg.cholesky` on the raw, unscaled `A_sub`, which raises
+`LinAlgError` on non-PD exactly like `dposv`'s nonzero status; falls back
+to a zero step and logs clearly on failure, rather than crashing the whole
+Python process, so a real failure could still be observed). Also logs every
+attempt's min/max eigenvalue and condition number regardless of outcome, to
+answer "how close to failing" even when it doesn't. Verified zero behavior
+change on the default (env unset) path first (bit-identical `dx_final`/
+`dy_final` to 6 decimals, both b2 and z2).
+
+Ran on b2/z2 bundle 0 (same cases as every other test this session):
+**zero `LinAlgError` failures across 55 (b2) + 55 (z2) solve attempts**,
+confirming C++'s own solve almost certainly never fails here either (same
+underlying math). Raw condition numbers are large (~1e10-2e11 during
+`'trace'`-mode iterations) but this is dominated by genuine unit/scale
+differences between parameter blocks (flux amplitudes vs. trace
+coefficients vs. continuum coefficients), not true near-singularity --
+diagonal preconditioning (which both the regularized default path applies,
+and which the raw solve deliberately skips to match C++) exists precisely
+to remove this scale artifact, and double-precision Cholesky handles
+cond~1e11 without issue (only degrades meaningfully as cond approaches
+~1e15-16).
+
+**Result: bit-identical (to ~1e-7-1e-8, floating-point-noise level) trace
+coefficients between the raw and regularized solves, uniformly across every
+fiber including 0/1/24** -- e.g. b2 fiber 0's XTRACE coefficients agree to
+8 significant figures between the two solves. **The regularization-
+difference hypothesis is closed: Python's 1e-8 ridge is not the source of
+the C++/Python divergence, at boundary fibers or anywhere else.** Makes
+sense in retrospect: the ridge is applied to the *diagonal-preconditioned*
+matrix (unit diagonal by construction), so a 1e-8 perturbation only matters
+if the preconditioned system's own smallest eigenvalue approaches 1e-8 --
+and this session's earlier eigenvalue tests already established boundary
+fibers are nowhere near that (ratio ~1.2-2x interior, not orders of
+magnitude worse).
+
+**Mixed-precision sanity check** (requested as a final check): reran both
+cameras with `SPECEX_MIXED_PRECISION=0` (forces float64 throughout,
+disabling the default float32 Jacobian). Differences vs. the default
+(mixed-precision-on) run are at the 1e-14 to 1e-15 level -- true
+floating-point noise, at fiber 0/24 specifically and bundle-wide. Confirms
+the existing aggregate validation (chi2 relative error 2.4e-6) extends
+cleanly to the worst-conditioned boundary fibers too; not a contributing
+factor.
+
+**Both `SPECEX_RAW_CHOLESKY` and the mixed-precision check leave this
+session's boundary/fiber-0 divergence completely unexplained by any
+numerical-precision or solver-regularization mechanism tested.** Combined
+with everything else closed this session (structural conditioning,
+true-CCD-edge geometry, real-SNR vignetting, X/Y-split eigenvalues,
+strict-spots stage-dependent selection, now solver regularization and
+precision), the confirmed, positive explanation remains only: boundary
+fibers are modestly under-determined (real, band-independent, ~20-50%
+higher formal uncertainty) amplified by real per-band calibration signal
+strength (real, confirmed, explains r2 to 0.5% and the b>r>z gradient) --
+plus a real, reproducible "kink" from each 25-fiber bundle being fit
+completely independently with no cross-bundle continuity constraint in
+either pipeline (confirmed via `desispec`'s `merge_psf()`). What remains
+open is *why* two solvers landing in the same soft, correctly-conditioned,
+correctly-regularized valley pick different points within it -- every
+mechanical/numerical candidate tested this session has come up empty,
+which increasingly points toward this being a genuine, if narrow,
+multi-modality in the chi2 landscape itself (two comparably-good, physically
+disconnected optima) rather than a single wide basin whose exact location
+is nudged by some as-yet-unfound implementation detail.
+
+`SPECEX_RAW_CHOLESKY` is left in `fitter.py`, off by default, as a kept
+diagnostic alongside `SPECEX_CPP_STAGE_SPOTS`.
+
+## 2026-08-26 (cont'd): spot-set injection test, redone with boundary fibers specifically isolated -- confirms not boundary-specific
+
+**Motivation**: the 2026-07-29 spot-injection precedent (`--force-spots`,
+forcing C++'s exact spot list into Python) tested overall xrms/yrms on a
+single "normal, non-anomalous" case and found only a small residual gap --
+never isolated boundary vs. interior fibers specifically. Redone here to
+close that gap, on the same b2/z2 bundle-0 cases used throughout this
+session.
+
+**First attempt was flawed, caught before drawing conclusions**: built a
+force-spots file from C++'s (fiber, wave) identities using the file's own
+xc/yc columns evaluated fresh from the shared *un-fit* input trace. Chi2
+exploded (1.7M -> converged to 286K, vs. baseline's ~100K) -- this skips
+the "up to 5 trace warm-up iterations" (`select_bundle_spots_iterative`)
+that snap every candidate's xc/yc to a progressively-refined trace *before*
+the real fit ever starts; the raw input-trace prediction alone is a much
+worse anchor than either pipeline actually uses in practice. Discarded.
+
+**Fixed version**: reran C++ with `--debug-spots` (not previously captured
+for this exact night/expid) to get its real final spot list
+(`cppspots_pass4.txt`: 656 lines for b2, 1036 for z2). Matched each C++
+(fiber, wave) to the nearest-wavelength candidate on the same fiber in
+Python's own already-refined candidate pool (`.pyrawspots_final.txt`, on
+disk from earlier this session) -- 100% match rate within 0.5A for both
+cameras, zero dropped. This gives every injected spot a properly-refined
+starting position (matching what either pipeline actually starts its real
+fit from), isolating spot-SET membership as the only thing being tested.
+Converged sanely: final chi2 within 0.3-0.6% of the normal baseline run in
+both cameras (unlike the first attempt).
+
+```
+b2: fiber0  X -0.0%  Y +0.2%   |  boundary(24) X +0.0%  Y +0.0%  |  interior_mean X +0.0%  Y +0.0%
+z2: fiber0  X -1.2%  Y +51.1%  |  boundary(24) X -3.2%  Y +31.0% |  interior_mean X -25.6% Y +68.2%
+```
+
+**b2: clean null** -- under 0.3% change everywhere, including fiber 0 and
+24 specifically. As clean a null as anything found this session.
+
+**z2: a real, large effect, but not boundary-specific** -- and it's the
+*same* pattern (large Y improvement, large X degradation) already found in
+the whole-fit-strict and real stage-dependent-strict spot tests. Not a
+coincidence: C++'s selected count for z2 (1036) is close to the earlier
+"strict" subset's count (1053), so these are very likely overlapping sets
+-- all three manipulations (whole-fit-strict, stage-restricted-strict, and
+now direct C++-set injection) are almost certainly surfacing the *same*
+underlying spot-selection difference between the two pipelines' housekeeping
+for z2 specifically. Critically, fiber 0 and fiber 24 move by amounts fully
+consistent with (not exceeding) interior fibers 1/12/23's swings in this
+same run -- confirming yet again that whatever this z2-specific effect is,
+it's a whole-bundle phenomenon, not a boundary-fiber one.
+
+**Verdict, now tested four independent ways (whole-fit-strict, real
+per-stage-strict, and now direct spot-set injection, in addition to the
+originally-cited 2026-07-29 aggregate check): spot-set/selection
+differences between the two pipelines do not explain the boundary/fiber-0
+divergence pattern.** They can produce a real, sometimes large effect on
+a camera's overall fit (z2), but that effect is not concentrated at
+boundaries in any test run so far. This closes spot selection as a
+candidate mechanism with high confidence.

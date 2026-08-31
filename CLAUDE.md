@@ -48,19 +48,40 @@ transcripts.
     pybind11 extension** (`_libspecex`) used only for old one-off
     comparison scripts (`testing/example_specex.py`,
     `testing/full_analysis.py`) -- not part of the production pipeline.
-  - `fitter.py` -- the actual fit engine: spot selection, the joint
-    bundle fit (`PSF_Fitter.fit()`), trace-prior/dead-column/masked-amp
-    handling. The default `--line-search grid` path is what's actually
-    used in production; the alternate `'brent'`/`'cpp'` line-search modes
-    and their helper `_cpp_brent()` are experimental, kept only for
-    reference (tested correctness-neutral, never the default). Several
-    `SPECEX_*` env vars gate genuinely optional one-off diagnostic code
-    paths (e.g. `SPECEX_DEBUG_MEM`, `SPECEX_FREEZE_GH10`,
-    `SPECEX_MATCH_CPP_DEAD_COLUMN`) -- distinct from `SPECEX_MIXED_PRECISION`,
-    `SPECEX_TRACE_PRIOR_WEIGHT`/`_NDEAD_THRESHOLD`, which are just the
-    internal plumbing for real, on-by-default CLI flags. `_fit_one_spot_jax`
-    is dead code (superseded by the batched `_fit_all_spots_batch`/
-    `_get_spot_stats_jax`), left over from an earlier version.
+  - `fitter.py` -- the actual fit engine: spot selection and the staged
+    bundle fit (`PSF_Fitter.fit()`). Despite the name, this is **not** a
+    single joint solve: `fit()` advances through fixed stages -- `'flux'`
+    (flux + continuum only) -> `'trace'` (adds trace-correction
+    coefficients) -> `'sigma'` (adds GHSIGX/GHSIGY) -> `'full'` (every
+    remaining GH-shape coefficient) -- with trace and GHSIGX/GHSIGY
+    **frozen, never revisited**, once their own stage ends. This
+    structurally mirrors real C++ (`specex_psf_fitter.cc`'s `FitEverything`
+    never solves trace and PSF shape together -- confirmed the one place a
+    combined `fit_trace=true; fit_psf=true` call exists in the C++ source
+    is permanently commented-out dead code) and was merged into this
+    branch from the since-retired `experiment/cpp-alternating-solve` branch
+    (`porting-notes.md`, 2026-07-29 through 2026-08-05) -- there is no
+    separate branch to check out for this anymore, it's simply how `fit()`
+    behaves by default. Production defaults as of that merge:
+    `trace_per_fiber_deg=6` (each fiber gets its own independent
+    7-coefficient trace basis, not a basis shared across the bundle) and
+    `trace_prior_deg=1` (a soft prior pulling a *dead-column-flagged*
+    fiber's degree>=1 trace coefficients toward the bundle's cross-fiber
+    mean -- C++ has the identical mechanism coded but its own CLI default
+    leaves it off in real production, `src/specex_pyoptions.h`; see
+    `porting-notes.md`'s 2026-08-25/26 fiber-0-investigation entries for
+    what this asymmetry does and doesn't explain). The default
+    `--line-search grid` path is what's actually used in production; the
+    alternate `'brent'`/`'cpp'` line-search modes and their helper
+    `_cpp_brent()` are experimental, kept only for reference (tested
+    correctness-neutral, never the default). Several `SPECEX_*` env vars
+    gate genuinely optional one-off diagnostic code paths (e.g.
+    `SPECEX_DEBUG_MEM`, `SPECEX_FREEZE_GH10`, `SPECEX_MATCH_CPP_DEAD_COLUMN`)
+    -- distinct from `SPECEX_MIXED_PRECISION`, `SPECEX_TRACE_PRIOR_WEIGHT`/
+    `_NDEAD_THRESHOLD`, which are just the internal plumbing for real,
+    on-by-default CLI flags. `_fit_one_spot_jax` is dead code (superseded
+    by the batched `_fit_all_spots_batch`/`_get_spot_stats_jax`), left over
+    from an earlier version.
   - `psf.py` -- the Gauss-Hermite PSF model (`GaussHermitePSF`) and the
     per-fiber `PSF`/`PSF_Params` containers. `single_pix_value_np` is a
     dead reference implementation next to the actually-used
