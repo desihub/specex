@@ -2,6 +2,56 @@
 
 This guide documents how to run the ported Python/JAX version of Specex and the various validation scripts used to verify numerical parity with the C++ baseline.
 
+## Quick Start
+
+One-time environment setup, then the three run scopes most people need. Full documentation -- every flag, timing table, and operational gotcha -- is below this section.
+
+```bash
+# Once per session (sets PYTHONPATH/LD_LIBRARY_PATH, loads cudatoolkit)
+source env_setup.sh
+```
+
+### Full night/expid (production scale, all 30 cameras)
+
+```bash
+python testing/run_night.py --night 20260401 --expid 00344649 \
+    --backend python --worker-mode persistent
+```
+
+`--worker-mode persistent` is the current fastest, fully-validated config: **~483-503s/night** (1 node/4 GPUs, warm cache) vs. C++'s **~592-648s** -- see Section 2.3 for the full breakdown and why `--worker-mode` still defaults to the older, slower `subprocess` mode instead of this one. Swap `--backend cpp` for the real production C++/MPI driver, or `--backend cpp-direct` for a `desi_proc`-free C++ baseline (Section 2.3 explains the difference between the three backends).
+
+### One camera (full CCD, all 20 bundles)
+
+```bash
+python -m specex.specex \
+    -a /path/to/preproc-z8-00344649.fits.gz \
+    --in-psf /path/to/shifted-input-psf-z8-00344649.fits \
+    --out-psf $SCRATCH/pyfit-psf-z8-00344649.fits \
+    --broken-fibers 473,474 \
+    --gpu 4 --workers-per-gpu 5
+```
+
+~33-45s warm (Section 2.2). Drop `--broken-fibers` if the camera has none; find the right value with `testing/select_test_case.py` (Section 3).
+
+### One bundle (25 fibers, fast iteration/debugging)
+
+```bash
+python -m specex.specex \
+    -a /path/to/preproc-z8-00344649.fits.gz \
+    --in-psf /path/to/shifted-input-psf-z8-00344649.fits \
+    --out-psf $SCRATCH/pyfit-psf-z8-00344649_05.fits \
+    --first-bundle 5 --last-bundle 5 \
+    --first-fiber 125 --last-fiber 149 \
+    --broken-fibers 473,474 \
+    --gpu 1
+```
+
+A few seconds warm (Section 2.1). `--first-fiber`/`--last-fiber` is optional (25 fibers/bundle = `bundle_id*25` to `bundle_id*25+24`) but keeps the run scoped to exactly the fibers you're inspecting.
+
+No GPU available? Every command above also runs with `--backend cpu` (Section 2.4) -- correctness-equivalent, ~11x slower, no `run_night.py` support yet so loop it per-camera for a full night.
+
+---
+
 ## 0. Environment Creation (One-time setup)
 
 To recreate the environment used for development (`specex_env`):
@@ -143,12 +193,29 @@ python testing/run_night.py --night 20260401 --expid 00344649
 *   `--backend python` runs `python -m specex.specex` once per camera, each **pinned to a dedicated GPU** via `CUDA_VISIBLE_DEVICES` (no GPU sharing across cameras), using a **per-node dynamic work queue** so however many GPUs you have stay busy. Auto-detects node count (from the SLURM allocation) and GPUs/node (`nvidia-smi -L`); one node runs locally, multiple nodes launch via `srun -N1 -n1 -w <hostname>` per node (same pattern validated this session). Does **not** call `desi_proc` at all -- it goes straight to `specex.specex` on the existing preprocessed files.
 *   `--backend cpp-direct` runs the real C++ `desi_compute_psf --mpi` binary once per camera (`--cpp-ranks`, default 20 -- same invocation `testing/full_ccd_campaign.py` already validates single-camera), reading the exact same preprocessed inputs `--backend python` does and writing the same `fit-psf-<cam>-<expid>.{fits,log}` naming, so the two are directly comparable file-for-file. Like `--backend python`, does **not** call `desi_proc` -- no idempotent-preprocessing pass, and no single 101+-rank MPI collective for one bad camera to hang (see 7.2 below). CPU-only; sequential by default (`--cpp-concurrency 1`) for clean per-camera timing. Added 2026-08-11 specifically to get a `desi_proc`-free C++ timing/correctness baseline without its MPI-hang or missing-calib-state failure modes.
 
-**Validated settings per band** (`--workers-per-gpu-{b,r,z}`, i.e. concurrent bundle-fit workers packed onto one GPU for one camera -- override the defaults below if needed):
-| Band | Default | Why |
-|------|---------|-----|
-| b    | 10      | Validated sweet spot, no OOM |
-| r    | 7       | 10 silently OOMs a handful of bundles (`RESOURCE_EXHAUSTED`) on ~6/10 r-band cameras; 7 is clean |
-| z    | 4       | Larger per-fiber design matrix (per-fiber trace default) OOMs at 10 even in isolation |
+**`--worker-mode {subprocess, persistent}`** (default: `subprocess`) controls how `--backend python` executes across cameras:
+*   **`subprocess`** (default): a fresh `python -m specex.specex` process per camera -- the original, most-tested methodology, and still the default for backward compatibility with every prior campaign's numbers.
+*   **`persistent`**: one long-lived worker process per GPU, pulling cameras off a shared queue and calling `fit_ccd_native()` in-process instead of paying interpreter/JAX-import startup cost per camera. Also reuses the per-bundle `multiprocessing.Pool` across a GPU worker's whole stream of cameras (`--no-pool-reuse` to disable, A/B-testing only, no correctness effect). **This is the fastest validated configuration and the recommended choice for any real timing-sensitive run** (see the campaign numbers below) -- it isn't the CLI default only because it's newer and less battle-tested than `subprocess`, not because of any known downside.
+
+**Validated `--workers-per-gpu-{b,r,z}` settings per band** (concurrent bundle-fit workers packed onto one GPU for one camera -- override if needed):
+| Band | `subprocess` default | `persistent` default | Why |
+|------|---------|---------|-----|
+| b    | 10      | 12      | Validated sweet spot, no OOM |
+| r    | 7       | 8       | Naive value silently OOMs a handful of bundles (`RESOURCE_EXHAUSTED`) on some r-band cameras |
+| z    | 4       | 5       | Larger per-fiber design matrix (per-fiber trace default) OOMs on higher values even in isolation |
+
+`persistent` mode's higher per-band values are safe specifically because pool reuse frees up extra GPU memory headroom that per-camera Pool teardown/recreation didn't leave available; don't reuse the `persistent` column's values with `--worker-mode subprocess`.
+
+**Full 10-night campaign, `subprocess` -> `persistent` (30 cameras/night, 1 node/4 GPUs, same 10 nights, correctness held constant to 4 decimal places throughout)**:
+| Configuration | 10-night mean wall time | vs. C++ (592.3s) |
+|---|---|---|
+| C++ (production MPI, single node) | 592.3s | -- |
+| Python, `subprocess` (pre-persistent) | 673.8s | +13.8% (slower) |
+| Python, `persistent`, naive camera-to-GPU split | 579.5s | -2.2% |
+| + bundle-pool reuse | 514.0s | -13.2% |
+| **+ `workers-per-gpu` 12/8/5 (current `persistent`-mode default)** | **483.3s** | **-18.4%** |
+
+A second, independent 10-night set (2026-09-05, bringing the cumulative validated sample to 20 nights) reproduced this: Python `persistent` mean **502.5s warm / 591.2s cold** (first-touch-on-a-fresh-node cost, ~15% higher, consistent across all 10 nights) vs. C++ mean **648.3s**. Correctness across the full 20-night sample: **xrms=0.0120px, yrms≈0.0129px** vs. C++ (see `porting-notes.md`'s 2026-09-02/05 entries for full per-night/per-camera tables). **Before trusting any timing number on this project**, confirm `$HOME` isn't at its NERSC disk quota -- a full quota produces silent per-bundle failures at `rc=0` and inflated wall time, not an obvious error (see `porting-notes.md`, 2026-09-04).
 
 **Multi-node camera splitting:** the default is a naive alternating split (band-diverse but not load-balanced -- there's no timing prior for an arbitrary fresh night/expid). Pass `--lpt-profile cameras.json` (a `{"b0": 69.2, ...}` map of measured per-camera wall times, e.g. parsed from a prior run's own logs) to get an **LPT (longest-processing-time-first) balanced split** instead -- sorts cameras descending by known duration and greedily assigns each to whichever GPU-slot currently has the least total load, closing most of the gap a naive split leaves on the table (the slowest, most variable band, z, otherwise gets queued last with nothing to fill the tail).
 
@@ -159,11 +226,13 @@ python testing/run_night.py --night 20260401 --expid 00344649
 
 Refuses to resolve inside the real production `matterhorn` tree under any of the three tiers -- fails fast rather than writing fit-psf output there. Note `--backend cpp` does **not** participate in tier 2 -- it always manages its own private redux tree under `--outdir`/`--redux-dir`, deliberately ignoring any pre-set `$DESI_SPECTRO_REDUX` so a real production value left in the shell can never get written to.
 
-**Other flags:** `--cameras` (restrict to a subset, default all 30), `--nodes` (default: full SLURM allocation), `--gpus-per-node` (default: auto-detect), `--dry-run` (print planned commands without executing).
+**Other flags:** `--cameras` (restrict to a subset, default all 30), `--nodes` (default: full SLURM allocation), `--gpus-per-node` (default: auto-detect), `--worker-mode {subprocess,persistent}` (default `subprocess`, see above), `--no-pool-reuse` (persistent mode only, A/B-testing), `--footprint-margin` (passthrough to `specex.specex --footprint-margin`, default 7), `--dry-run` (print planned commands without executing).
 
-Measured with this exact tool's predecessor scripts (2026-08-10, before consolidation into `run_night.py`): **13.2 min / 30 cameras** on 1 node/4 GPUs (0 bundle failures); **6.7 min** on 2 nodes/8 GPUs with a naive split, **5.92 min** LPT-rebalanced -- both correctness-verified (xrms/yrms match a rebuilt/official C++ reference to <0.03px mean), and the result generalizes across independent nights/exposures (confirmed on a second night; absolute timing varies by exposure since real exposures differ in total compute needed, but the technique transfers). Always grep worker logs for `WARNING: Bundle` to catch silent per-bundle GPU-OOM failures -- a nonzero process exit code is *not* a reliable failure signal, `fit_ccd_native` logs a warning and keeps merging on a per-bundle failure. If `workers-per-gpu`, the camera set, or the node count change, an `--lpt-profile` needs to be recomputed from a fresh timing profile -- it isn't portable across settings changes, but the profile-then-rebalance *technique* is.
+**The multi-node/LPT numbers below predate `--worker-mode persistent` and were measured under `subprocess` mode only** -- they haven't been separately re-validated with `persistent` mode's per-camera-startup savings stacked on top, so treat "N nodes + LPT" as still using `subprocess` mode until that combination is tested. For single-node runs, `persistent` mode (table above) is faster than any of the multi-node `subprocess` numbers below and doesn't need multiple nodes at all.
 
-Re-measured through the consolidated `run_night.py` itself on 1 node/4 GPUs across 4 independent nights (2026-08-10): 13.2, 11.4, 11.8, 12.3 min, all 30/30 cameras, 0 failures -- confirms the tool's own overhead is negligible and the timing is stable across different exposures/nights at this scale.
+Measured with this exact tool's predecessor scripts (2026-08-10, before consolidation into `run_night.py`, `subprocess`-equivalent methodology): **13.2 min / 30 cameras** on 1 node/4 GPUs (0 bundle failures); **6.7 min** on 2 nodes/8 GPUs with a naive split, **5.92 min** LPT-rebalanced -- both correctness-verified (xrms/yrms match a rebuilt/official C++ reference to <0.03px mean), and the result generalizes across independent nights/exposures (confirmed on a second night; absolute timing varies by exposure since real exposures differ in total compute needed, but the technique transfers). Always grep worker logs for `WARNING: Bundle` to catch silent per-bundle GPU-OOM failures -- a nonzero process exit code is *not* a reliable failure signal, `fit_ccd_native` logs a warning and keeps merging on a per-bundle failure. If `workers-per-gpu`, the camera set, or the node count change, an `--lpt-profile` needs to be recomputed from a fresh timing profile -- it isn't portable across settings changes, but the profile-then-rebalance *technique* is.
+
+Re-measured through the consolidated `run_night.py` itself on 1 node/4 GPUs across 4 independent nights (2026-08-10, `subprocess` mode): 13.2, 11.4, 11.8, 12.3 min, all 30/30 cameras, 0 failures -- confirms the tool's own overhead is negligible and the timing is stable across different exposures/nights at this scale.
 
 ### Clean failure reporting (`--backend python` only)
 
@@ -189,7 +258,7 @@ python -m specex.specex \
 | Scope | GPU | CPU | Slowdown |
 |---|---|---|---|
 | Single bundle, solo | ~23s | ~80s (`--cpu-workers` >= bundle count, no queueing) | ~3.5x |
-| Full night, 30 cameras | 13.2 min (1 node/4 GPUs, pinned `wpg=10 b/7 r/4 z`, Section 2.3) | 147.9 min (1 node, `--cpu-workers 20`, one `python -m specex.specex --backend cpu` call per camera) | ~11.2x |
+| Full night, 30 cameras | 13.2 min (1 node/4 GPUs, `subprocess` mode, pinned `wpg=10 b/7 r/4 z`, Section 2.3) -- or ~8-8.4 min with `--worker-mode persistent` | 147.9 min (1 node, `--cpu-workers 20`, one `python -m specex.specex --backend cpu` call per camera) | ~11.2x (subprocess) / ~17-18x (persistent) |
 
 **`testing/run_night.py` does not have a CPU-only mode** -- its `--backend` choices are `cpp`/`cpp-direct`/`python`, and `python` always assigns each camera a GPU. The 147.9 min full-night CPU number above was measured with a predecessor one-off script (pre-`run_night.py` consolidation) looping `python -m specex.specex --backend cpu --cpu-workers 20` over all 30 cameras sequentially; there's no single documented command for it today -- for a full CPU-only night, write the same kind of loop over Section 3's `select_test_case.py` cases.
 
@@ -201,8 +270,9 @@ CPU is a genuine, correctness-equivalent fallback, not a performance option -- e
 |---|---|---|
 | 2.1 Single bundle | `--gpu 1` | a few seconds |
 | 2.2 Full CCD, one camera | `--gpu 4 --workers-per-gpu 5` | ~33-45s (this section's measurement; band-dependent, see `porting-notes.md`) |
-| 2.3 Full night, 30 cameras, 1 node/4 GPUs | `run_night.py --backend python` | ~11-13 min |
-| 2.3 Full night, 30 cameras, 2 nodes/8 GPUs, LPT-balanced | `run_night.py --backend python --lpt-profile ...` | ~6 min |
+| 2.3 Full night, 30 cameras, 1 node/4 GPUs, `--worker-mode persistent` (recommended) | `run_night.py --backend python --worker-mode persistent` | ~483-503s (8-8.4 min) |
+| 2.3 Full night, 30 cameras, 1 node/4 GPUs, `--worker-mode subprocess` (default) | `run_night.py --backend python` | ~11-13 min |
+| 2.3 Full night, 30 cameras, 2 nodes/8 GPUs, LPT-balanced (`subprocess` mode) | `run_night.py --backend python --lpt-profile ...` | ~6 min |
 | 2.4 Full night, 30 cameras, CPU-only | `specex.specex --backend cpu --cpu-workers 20`, looped per camera (no `run_night.py` support yet) | ~148 min (~11x slower than GPU) |
 
 The very first run in a fresh environment (empty `~/.cache/specex/jax_compilation_cache`) will be several times slower than this table for whichever mode you run first -- that cost only has to be paid once per machine/environment, not once per run.
