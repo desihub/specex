@@ -54,6 +54,8 @@ import argparse
 import subprocess
 import threading
 import queue
+import multiprocessing as mp
+import traceback
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "testing"))
@@ -62,12 +64,22 @@ from select_test_case import parse_log_line
 SCRIPTS_DIR = "/global/cfs/cdirs/desi/spectro/redux/matterhorn/run/scripts/night"
 PRODUCTION_REDUX_ROOT = "/global/cfs/cdirs/desi/spectro/redux/matterhorn"
 ALL_CAMERAS = [f"{b}{s}" for b in "brz" for s in range(10)]
+LAMP_LINES_FILE = os.path.join(REPO, "py", "specex", "data", "specex_linelist_desi.txt")
 
-# Validated per-band worker packing (testing/07Aug2026-30ccd-campaign/pinned30
-# and this session's 2-node follow-up) -- z's larger per-fiber design matrix
-# (trace-per-fiber-deg=6, the production default) OOMs above this; r silently
-# drops bundles (RESOURCE_EXHAUSTED) above 7.
-DEFAULT_WORKERS_PER_GPU = {"b": 10, "r": 7, "z": 4}
+# Validated per-band worker packing. Originally tuned lower (b10/r7/z4,
+# testing/07Aug2026-30ccd-campaign/pinned30 -- subprocess-mode, one Pool
+# spawned fresh per camera) for z's larger per-fiber design matrix
+# (trace-per-fiber-deg=6, the production default) OOMing above that, and r
+# silently dropping bundles (RESOURCE_EXHAUSTED) above 7. Bumped to these
+# values after a 4-night persistent-mode campaign (2026-09-02, --worker-mode
+# persistent + pool-reuse, single 40GB-A100 node) found 0 bundle failures /
+# 0 OOM-retries at b12/r8/z5 across all 4 nights, for an additional ~11.5%
+# mean wall-time win on top of pool-reuse's own ~6.7% -- reflects headroom
+# now available with the persistent worker's post-pool MEM_FRACTION=0.05
+# cap. Untested above these values and untested on subprocess mode -- pass
+# --workers-per-gpu-{b,r,z} to override (e.g. back to 10/7/4) if a future
+# OOM/regression surfaces here.
+DEFAULT_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 5}
 
 
 def find_cases(night, expid, cameras):
@@ -215,7 +227,7 @@ def tail_error(log_path, n=6):
         return []
 
 
-def run_camera_python(cam, case, gpu_id, outdir, wpg_override, dry_run):
+def run_camera_python(cam, case, gpu_id, outdir, wpg_override, dry_run, footprint_margin=None):
     band = cam[0]
     wpg = wpg_override.get(band, DEFAULT_WORKERS_PER_GPU[band])
     # fit-psf-<cam>-<expid>.fits matches desi_proc's/desi_compute_psf's own
@@ -244,6 +256,8 @@ def run_camera_python(cam, case, gpu_id, outdir, wpg_override, dry_run):
            "--out-psf", out_fits, "--gpu", "1", "--workers-per-gpu", str(wpg)]
     if case.get("broken_fibers"):
         cmd += ["--broken-fibers", case["broken_fibers"]]
+    if footprint_margin is not None:
+        cmd += ["--footprint-margin", str(footprint_margin)]
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     if dry_run:
@@ -259,7 +273,7 @@ def run_camera_python(cam, case, gpu_id, outdir, wpg_override, dry_run):
     return cam, dt, rc, n_bundle_fail, err_tail
 
 
-def run_node_python(cameras, cases, n_gpus, outdir, wpg_override, dry_run, results, results_lock):
+def run_node_python(cameras, cases, n_gpus, outdir, wpg_override, dry_run, results, results_lock, footprint_margin=None):
     work_q = queue.Queue()
     for cam in cameras:
         work_q.put(cam)
@@ -270,7 +284,7 @@ def run_node_python(cameras, cases, n_gpus, outdir, wpg_override, dry_run, resul
                 cam = work_q.get_nowait()
             except queue.Empty:
                 return
-            cam, dt, rc, n_bf, err_tail = run_camera_python(cam, cases[cam], gpu_id, outdir, wpg_override, dry_run)
+            cam, dt, rc, n_bf, err_tail = run_camera_python(cam, cases[cam], gpu_id, outdir, wpg_override, dry_run, footprint_margin)
             with results_lock:
                 results.append((cam, dt, rc, n_bf, err_tail))
             flag = f" *** {n_bf} BUNDLE FAILURES ***" if n_bf else ""
@@ -285,6 +299,234 @@ def run_node_python(cameras, cases, n_gpus, outdir, wpg_override, dry_run, resul
     threads = [threading.Thread(target=slot_worker, args=(g,)) for g in range(n_gpus)]
     [t.start() for t in threads]
     [t.join() for t in threads]
+
+
+def _fit_one_camera_inprocess(cam, case, out_fits, log_path, wpg, footprint_margin, bundle_pool=None):
+    """Fit one camera by calling fit_ccd_native() directly, instead of
+    shelling out to a fresh `python -m specex.specex` subprocess -- the
+    persistent-worker path's actual payload. Args mirror specex.py's own
+    main()/argparse defaults exactly (trace_per_fiber_deg=6, trace_prior_deg=1,
+    trace_prior_weight=1e5, trace_prior_ndead_threshold=500,
+    masked_amp_ndead_threshold=8000, max_number_of_lines=200 -- note this is
+    main()'s --max-lines default, NOT fit_ccd_native's own function-signature
+    default of 100 -- footprint_margin from the caller, everything else auto)
+    so a persistent-worker run is bit-for-bit equivalent to the existing
+    subprocess path, not just "close enough". Import of specex.specex is
+    deferred to inside this call (not module level) so CUDA_VISIBLE_DEVICES,
+    set by the caller before the worker's first camera, is honored -- jax
+    latches its visible-device set at first import.
+
+    Returns: (rc, n_bundle_fail) -- rc=0 success, rc=1 failure/exception,
+    rc="SKIPPED" for missing inputs (matching run_camera_python's contract).
+    """
+    missing = [p for p in (case["image"], case["input_psf"]) if not os.path.exists(p)]
+    if missing:
+        with open(log_path, "w") as f:
+            f.write(f"SKIPPED: missing input file(s): {missing}\n")
+        return "SKIPPED", 0
+
+    # Redirect at the OS file-descriptor level (not just sys.stdout) so
+    # fit_ccd_native's own internal spawn-context bundle-worker pool --
+    # separate processes that inherit fds at spawn time -- also lands in
+    # this camera's log file, matching what subprocess.run(stdout=f) gave
+    # the old per-camera-subprocess path for free.
+    from specex.specex import fit_ccd_native
+    old_out, old_err = os.dup(1), os.dup(2)
+    rc = 0
+    with open(log_path, "w") as f:
+        os.dup2(f.fileno(), 1)
+        os.dup2(f.fileno(), 2)
+        try:
+            failed_bundles = fit_ccd_native(
+                arc_file=case["image"], in_psf_file=case["input_psf"], out_psf_file=out_fits,
+                lamp_lines_file=LAMP_LINES_FILE, n_gpus=1, backend="gpu",
+                broken_fibers=case.get("broken_fibers"), sn_threshold=3.0,
+                max_number_of_lines=200, h_size_y=5, workers_per_gpu=wpg,
+                trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=1e5,
+                trace_prior_ndead_threshold=500, masked_amp_ndead_threshold=8000,
+                footprint_margin=footprint_margin, bundle_pool=bundle_pool,
+                bundle_log_path=(log_path if bundle_pool is not None else None),
+            )
+            if failed_bundles:
+                rc = 1
+        except Exception:
+            traceback.print_exc()
+            rc = 1
+        finally:
+            sys.stdout.flush(); sys.stderr.flush()
+            os.dup2(old_out, 1); os.dup2(old_err, 2)
+            os.close(old_out); os.close(old_err)
+
+    with open(log_path) as f:
+        n_bundle_fail = sum(1 for line in f if "WARNING: Bundle" in line)
+    return rc, n_bundle_fail
+
+
+def _gpu_persistent_worker(gpu_id, work_q, results_q, outdir, wpg_override, footprint_margin, pool_reuse=True):
+    """Process target for the persistent-worker path: one long-lived process
+    per GPU that imports jax/specex ONCE (paying the interpreter-startup +
+    module-import cost a single time for the whole night) then pulls
+    cameras off the shared queue until it sees the None sentinel -- as
+    opposed to run_camera_python's design, which pays that cost fresh for
+    every camera via a brand-new subprocess. Measured on 20260401/00344649:
+    ~7-10s of pure launch overhead per camera regardless of band (outer
+    subprocess wall time minus fit_ccd_native's own internally-timed "Total
+    CCD Fit Time"), serialized ~7.5x per GPU lane on a 30-camera/4-GPU
+    night -- this is the thing that overhead was going to.
+
+    CUDA_VISIBLE_DEVICES must be set before the first `import jax` in this
+    process (here, transitively via the first _fit_one_camera_inprocess
+    call's `from specex.specex import fit_ccd_native`) -- set eagerly at
+    worker startup rather than relying on that deferred import.
+
+    XLA_PYTHON_CLIENT_MEM_FRACTION is capped low for the SAME reason: this
+    persistent process's own JAX usage isn't limited to the per-camera
+    bundle-worker child pool (which fit_bundle_task already isolates with
+    its own explicit env overrides, see specex.py) -- fit_ccd_native's
+    post-pool merge/write_python_psf() step runs real jax.numpy ops
+    directly in THIS process, on THIS same physical GPU. Confirmed by a
+    first real test on 20260401/00344649 (8 cameras, 2/GPU): every worker's
+    FIRST camera succeeded cleanly but its SECOND hit partial
+    RESOURCE_EXHAUSTED bundle failures (5-10 of 20 bundles) -- consistent
+    with JAX's BFC allocator growing to ~75% of *whatever's still free* on
+    this process's first GPU touch and never shrinking back, permanently
+    starving every subsequent camera's freshly-spawned bundle pool on the
+    same GPU. Capped at 5% here; fit_bundle_task's own children explicitly
+    re-pin to 75% for their own process regardless of what they inherit
+    from this parent's environment, so real per-bundle compute is
+    unaffected."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
+
+    # Reuse one bundle-worker pool across cameras instead of paying a fresh
+    # spawn+JAX-import cost (measured far larger than this outer process's
+    # own per-camera overhead -- fit_ccd_native's internal _run_batch
+    # otherwise creates and tears down a brand-new Pool of `wpg` processes
+    # on EVERY camera call, even in persistent-worker mode) -- only recreated
+    # on a band transition, since workers_per_gpu differs by band (see
+    # DEFAULT_WORKERS_PER_GPU above, tuned to each band's GPU-memory
+    # footprint) and the shared work queue is filled band-sorted (b's, then
+    # r's, then z's), so a single GPU worker sees at most ~2 real
+    # transitions per night, not one per camera. Confirmed itself worth
+    # ~6.7% mean wall time on a 4-night persistent-mode campaign
+    # (2026-09-02) vs a --no-pool-reuse control on the same nights/node,
+    # stacking with (not substituting for) the DEFAULT_WORKERS_PER_GPU bump
+    # above (~11.5% more) for ~17.5% combined. --no-pool-reuse still exists
+    # to revert to a fresh Pool per camera for future A/B comparisons.
+    # OOM retries inside fit_ccd_native still fall back to
+    # their own temporary reduced-packing pool (see specex.py's _run_batch)
+    # regardless of this pool -- unaffected, still correctness-preserving.
+    ctx = mp.get_context('spawn')
+    pool = None
+    pool_size = None
+    try:
+        while True:
+            item = work_q.get()
+            if item is None:
+                return
+            cam, case = item
+            band = cam[0]
+            wpg = wpg_override.get(band, DEFAULT_WORKERS_PER_GPU[band])
+            if not pool_reuse:
+                # A/B-test path: tear down and recreate every camera,
+                # matching pre-pool-reuse behavior exactly (still goes
+                # through the bundle_pool= plumbing/log-redirect, just
+                # never actually reused across calls).
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+                pool = ctx.Pool(processes=wpg)
+                pool_size = wpg
+            elif pool is None or pool_size != wpg:
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+                pool = ctx.Pool(processes=wpg)
+                pool_size = wpg
+            out_fits = os.path.join(outdir, f"fit-psf-{cam}-{case['expid']}.fits")
+            log_path = os.path.join(outdir, f"fit-psf-{cam}-{case['expid']}.log")
+            t0 = time.time()
+            rc, n_bf = _fit_one_camera_inprocess(cam, case, out_fits, log_path, wpg, footprint_margin, bundle_pool=pool)
+            dt = time.time() - t0
+            err_tail = tail_error(log_path) if rc != 0 else []
+            results_q.put((cam, dt, rc, n_bf, err_tail, gpu_id))
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
+
+
+def run_node_python_persistent(cameras, cases, n_gpus, outdir, wpg_override, dry_run, results, results_lock, footprint_margin=None, pool_reuse=True):
+    """Persistent-worker counterpart to run_node_python: same shared-queue
+    dynamic dispatch (whichever GPU frees up next claims the next camera),
+    but n_gpus long-lived worker PROCESSES instead of n_gpus threads each
+    shelling out to a fresh subprocess per camera. A worker process dying
+    outright (e.g. a CUDA-driver-level crash, not a catchable Python
+    exception -- those are already caught inside _fit_one_camera_inprocess)
+    only loses whatever single camera it was actively running: every other
+    camera stays in the shared queue for a still-alive worker to pick up,
+    so the blast radius is one camera, not the whole night -- preserving
+    the crash-isolation property the subprocess-per-camera design had,
+    just at finer granularity than "the rest of this worker's queue"."""
+    if dry_run:
+        for cam in cameras:
+            case = cases[cam]
+            out_fits = os.path.join(outdir, f"fit-psf-{cam}-{case['expid']}.fits")
+            fm = footprint_margin if footprint_margin is not None else 7
+            print(f"  [DRY RUN] (persistent) {cam}: fit_ccd_native(arc={case['image']}, "
+                  f"in_psf={case['input_psf']}, out_psf={out_fits}, footprint_margin={fm}) [in-process]")
+            results.append((cam, 0.0, 0, 0, []))
+        return
+
+    ctx = mp.get_context("spawn")
+    work_q, results_q = ctx.Queue(), ctx.Queue()
+    for cam in cameras:
+        work_q.put((cam, cases[cam]))
+    for _ in range(n_gpus):
+        work_q.put(None)
+
+    workers = [ctx.Process(target=_gpu_persistent_worker, args=(g, work_q, results_q, outdir, wpg_override, footprint_margin, pool_reuse))
+               for g in range(n_gpus)]
+    [w.start() for w in workers]
+
+    # A caught Python exception inside _fit_one_camera_inprocess still
+    # reports normally via results_q (rc=1). But a hard crash (segfault,
+    # CUDA driver abort) kills the worker process without ever putting a
+    # result -- polling with a timeout, rather than a plain blocking get()
+    # for exactly len(cameras) results, means that loses only the one
+    # in-flight camera instead of hanging this whole night forever waiting
+    # for a result that will never arrive.
+    n_done = 0
+    seen_cams = set()
+    while n_done < len(cameras):
+        try:
+            cam, dt, rc, n_bf, err_tail, gpu_id = results_q.get(timeout=10)
+        except queue.Empty:
+            if not any(w.is_alive() for w in workers):
+                missing = len(cameras) - n_done
+                print(f"WARNING: all persistent workers exited but {missing} camera(s) never reported a result "
+                      f"(worker crash) -- treating as failed and stopping this node's collection.", flush=True)
+                break
+            continue
+        seen_cams.add(cam)
+        n_done += 1
+        with results_lock:
+            results.append((cam, dt, rc, n_bf, err_tail))
+        flag = f" *** {n_bf} BUNDLE FAILURES ***" if n_bf else ""
+        if rc == "SKIPPED":
+            print(f"[{time.strftime('%H:%M:%S')}] {os.uname().nodename} gpu{gpu_id}: {cam} SKIPPED -- {err_tail[0]}", flush=True)
+        else:
+            print(f"[{time.strftime('%H:%M:%S')}] {os.uname().nodename} gpu{gpu_id}: {cam} done in {dt:.1f}s rc={rc}{flag}", flush=True)
+            if rc != 0:
+                for line in err_tail:
+                    print(f"    | {line}", flush=True)
+    for cam in cameras:
+        if cam not in seen_cams:
+            with results_lock:
+                results.append((cam, 0.0, 1, 0, ["worker crashed before reporting a result"]))
+
+    [w.join() for w in workers]
 
 
 def run_backend_python(args, cases):
@@ -320,7 +562,10 @@ def run_backend_python(args, cases):
     if n_nodes == 1 and hosts[0] is None:
         # not in a SLURM job (or single node with no need to srun -w) -- run
         # directly in this process
-        run_node_python(node_splits[0], cases, n_gpus, outdir, wpg_override, args.dry_run, results, results_lock)
+        if args.worker_mode == "persistent":
+            run_node_python_persistent(node_splits[0], cases, n_gpus, outdir, wpg_override, args.dry_run, results, results_lock, args.footprint_margin, pool_reuse=not args.no_pool_reuse)
+        else:
+            run_node_python(node_splits[0], cases, n_gpus, outdir, wpg_override, args.dry_run, results, results_lock, args.footprint_margin)
     else:
         procs = []
         for i in range(n_nodes):
@@ -333,6 +578,12 @@ def run_backend_python(args, cases):
                      "--cameras", ",".join(node_cams)]
             for band, wpg in wpg_override.items():
                 inner += [f"--workers-per-gpu-{band}", str(wpg)]
+            if args.footprint_margin is not None:
+                inner += ["--footprint-margin", str(args.footprint_margin)]
+            if args.worker_mode == "persistent":
+                inner += ["--worker-mode", "persistent"]
+                if args.no_pool_reuse:
+                    inner += ["--no-pool-reuse"]
             if args.dry_run:
                 inner += ["--dry-run"]
             cmd = ["srun", "-N1", "-n1", "-w", hosts[i]] + inner if hosts[i] else inner
@@ -514,6 +765,9 @@ def main():
     ap.add_argument("--workers-per-gpu-b", type=int, default=None)
     ap.add_argument("--workers-per-gpu-r", type=int, default=None)
     ap.add_argument("--workers-per-gpu-z", type=int, default=None)
+    ap.add_argument("--footprint-margin", type=int, default=None, help="Passed through to `python -m specex.specex --footprint-margin` for every camera. Default: None (specex.specex's own default, currently 7). Pass 0 to reproduce pre-fix zero-margin behavior for comparison reruns.")
+    ap.add_argument("--worker-mode", choices=["subprocess", "persistent"], default="subprocess", help="'subprocess' (default): fresh `python -m specex.specex` process per camera, matching every prior campaign's methodology exactly. 'persistent': one long-lived worker process per GPU calling fit_ccd_native() in-process for a stream of cameras, avoiding ~7-10s of per-camera interpreter/JAX-import overhead measured on 20260401/00344649 (~65s/night on a 4-GPU node) -- experimental, not yet validated at the same scale as 'subprocess'.")
+    ap.add_argument("--no-pool-reuse", action="store_true", help="Persistent mode only: disable bundle-worker Pool reuse across cameras, reverting to a fresh Pool per camera (pre-pool-reuse behavior) -- for A/B timing comparisons only, no correctness effect either way.")
     # internal, used to re-invoke this script once per node via srun
     ap.add_argument("--_node-worker", action="store_true", help=argparse.SUPPRESS)
     # --backend cpp only
@@ -537,8 +791,12 @@ def main():
         if args.workers_per_gpu_z is not None: wpg_override["z"] = args.workers_per_gpu_z
         cases = find_cases(args.night, args.expid, cameras)
         results, lock = [], threading.Lock()
-        run_node_python(cameras, cases, args.gpus_per_node or detect_gpus_per_node(),
-                         args.outdir, wpg_override, args.dry_run, results, lock)
+        if args.worker_mode == "persistent":
+            run_node_python_persistent(cameras, cases, args.gpus_per_node or detect_gpus_per_node(),
+                   args.outdir, wpg_override, args.dry_run, results, lock, args.footprint_margin, pool_reuse=not args.no_pool_reuse)
+        else:
+            run_node_python(cameras, cases, args.gpus_per_node or detect_gpus_per_node(),
+                   args.outdir, wpg_override, args.dry_run, results, lock, args.footprint_margin)
         return
 
     if args.backend == "cpp":

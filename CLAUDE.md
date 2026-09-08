@@ -44,10 +44,21 @@ transcripts.
 - **`py/specex/`** -- the Python/JAX port (the actual subject of this branch).
   - `specex.py` -- CLI entry point (`python -m specex.specex`) and the
     process-pool driver (`fit_ccd_native`, `fit_bundle_task`, `main`). Also
-    contains `run_specex()`, a **legacy wrapper around the compiled C++
-    pybind11 extension** (`_libspecex`) used only for old one-off
-    comparison scripts (`testing/example_specex.py`,
-    `testing/full_analysis.py`) -- not part of the production pipeline.
+    contains `run_specex()`, a wrapper around the compiled C++ pybind11
+    extension (`_libspecex`). **Not legacy/one-off** -- confirmed
+    2026-09-06 that this is the actual real-C++-production codepath:
+    desispec's `desi_compute_psf` entry point (`desispec/scripts/specex.py`)
+    does `from specex.specex import run_specex` and calls it directly, so
+    every `--backend cpp`/`cpp-direct` run this project has ever done (via
+    `desi_proc --mpi` or direct invocation) goes through this exact
+    function. It's also still used by the old one-off comparison scripts
+    (`testing/example_specex.py`, `testing/full_analysis.py`), but that's
+    not its only or primary role. `read_preproc_cpp()`/`read_preproc()`
+    (`io.py`) -- the C++ and Python image-loading paths this feeds --
+    apply *identical* masking: `ivar[mask != 0] = 0.0` before either
+    fitter ever runs, so cosmic-ray/bad-pixel exclusion (preproc MASK bit
+    4 etc.) is handled the same way in both backends by construction (see
+    porting-notes.md 2026-09-06).
   - `fitter.py` -- the actual fit engine: spot selection and the staged
     bundle fit (`PSF_Fitter.fit()`). Despite the name, this is **not** a
     single joint solve: `fit()` advances through fixed stages -- `'flux'`

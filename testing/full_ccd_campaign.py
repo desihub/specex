@@ -150,6 +150,7 @@ def main():
     manifest_path = os.path.join(args.outdir, "input_files_manifest.txt")
 
     hdr = (f"{'case':<14} {'night':<9} {'expid':<9} {'nspots_cpp':>10} {'nspots_py':>9} {'xrms_px':>8} {'yrms_px':>8} "
+           f"{'xrms_int':>8} {'yrms_int':>8} {'xrms_edge':>9} {'yrms_edge':>9} {'xrms_f0':>8} {'yrms_f0':>8} "
            f"{'wrms_cpp_A':>10} {'wrms_py_A':>9} {'wstd_cpp_A':>10} {'wstd_py_A':>9} "
            f"{'t_cpp_s':>8} {'t_py_s':>7}")
     print(hdr, flush=True)
@@ -197,14 +198,46 @@ def main():
         cpp_tr, wmin, wmax = load_traces(cpp_fits)
         py_tr, _, _ = load_traces(py_fits)
         grid = np.linspace(wmin, wmax, 100)
-        dx, dy = [], []
+        dx, dy, fiber_ids = [], [], []
         for fib in range(500):
             if fib in broken:
                 continue
             dx.append(np.array(cpp_tr[fib]['X_vs_W'].value(grid)) - np.array(py_tr[fib]['X_vs_W'].value(grid)))
             dy.append(np.array(cpp_tr[fib]['Y_vs_W'].value(grid)) - np.array(py_tr[fib]['Y_vs_W'].value(grid)))
-        dx, dy = np.array(dx), np.array(dy)
+            fiber_ids.append(fib)
+        dx, dy, fiber_ids = np.array(dx), np.array(dy), np.array(fiber_ids)
         xr, yr = float(np.sqrt(np.mean(dx**2))), float(np.sqrt(np.mean(dy**2)))
+
+        # Breakdown by fiber category:
+        #  - true camera edge: fiber 0 or 499 (the true slit edge, distinct
+        #    phenomenon from ordinary bundle boundaries -- see porting-notes.md)
+        #  - bundle edge: internal bundle-boundary fibers (fib%25 in {0,24}),
+        #    excluding the true camera edge
+        #  - interior: everything else
+        is_true_edge = np.isin(fiber_ids, [0, 499])
+        mod25 = fiber_ids % 25
+        is_bundle_edge = ((mod25 == 0) | (mod25 == 24)) & ~is_true_edge
+        is_interior = ~is_true_edge & ~is_bundle_edge
+
+        def _rms(mask):
+            if not mask.any():
+                return float('nan'), float('nan')
+            return float(np.sqrt(np.mean(dx[mask]**2))), float(np.sqrt(np.mean(dy[mask]**2)))
+
+        xr_int, yr_int = _rms(is_interior)
+        xr_edge, yr_edge = _rms(is_bundle_edge)
+        xr_f0, yr_f0 = _rms(is_true_edge)
+
+        # Per-fiber RMS dump (one row per non-broken fiber: its own dx/dy RMS
+        # over the wavelength grid, plus category) -- lets downstream plotting
+        # show per-fiber structure without re-loading the FITS traces.
+        perfiber_path = os.path.join(args.outdir, f"perfiber-{tag}-{expid}.csv")
+        fiber_xrms = np.sqrt(np.mean(dx**2, axis=1)); fiber_yrms = np.sqrt(np.mean(dy**2, axis=1))
+        cat = np.where(is_true_edge, 'f0', np.where(is_bundle_edge, 'edge', 'interior'))
+        with open(perfiber_path, 'w') as pf:
+            pf.write("camera,night,expid,fiber,category,xrms_px,yrms_px\n")
+            for k in range(len(fiber_ids)):
+                pf.write(f"{cam},{night},{expid},{fiber_ids[k]},{cat[k]},{fiber_xrms[k]:.6f},{fiber_yrms[k]:.6f}\n")
 
         spot_files = sorted(glob.glob(os.path.join(os.path.dirname(cpp_fits), f"cpp-{tag}-{expid}_*.cppspots_pass4.txt")))
         if not spot_files:
@@ -242,6 +275,7 @@ def main():
                     n_py += int(m.group(1))
 
         row = (f"{tag:<14} {night:<9} {expid:<9} {n_cpp:>10} {n_py:>9} {xr:>8.4f} {yr:>8.4f} "
+               f"{xr_int:>8.4f} {yr_int:>8.4f} {xr_edge:>9.4f} {yr_edge:>9.4f} {xr_f0:>8.4f} {yr_f0:>8.4f} "
                f"{wrms_cpp:>10.4f} {wrms_py:>9.4f} {wstd_cpp:>10.4f} {wstd_py:>9.4f} "
                f"{t_cpp:>8.1f} {t_py:>7.1f}")
         print(row, flush=True)

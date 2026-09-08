@@ -5879,7 +5879,39 @@ divergence pattern.** They can produce a real, sometimes large effect on
 a camera's overall fit (z2), but that effect is not concentrated at
 boundaries in any test run so far. This closes spot selection as a
 candidate mechanism with high confidence.
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ibers' own RMS error vs truth): **C++ = 0.98/0.97/1.06
+
+## 2026-08-30 -- Bundle-boundary trace divergence CLOSED: root-caused and fixed (footprint margin), validated on ground truth, 19 real production cases, and a full-night campaign
+
+Direct continuation of the 2026-08-23 through 2026-08-26 investigation
+above -- picks up exactly where that left off (spot selection closed as a
+candidate, no confirmed mechanism yet) and finds the actual answer.
+
+### 1. Julien and Stephen locate a genuine ground-truth dataset
+
+Julien found a simulated Lyman-alpha-P1D-study raw arc dataset (night
+`20210101`, expids `07000001`-`07000005`) and regenerated its preproc
+files, seeded with his own earlier C++ fit as a starting-point PSF.
+Stephen Bailey flagged the critical methodological catch: that starting
+PSF is C++'s own fit output, not ground truth, so diffing against it is
+still only a relative comparison. Stephen separately built a cleaner tool
+(`/global/cfs/cdirs/desi/users/sjbailey/dev/arcsim/`, `get_arc_spectrum`
++ `project_arc_spectrum`) that projects a real 1D arc spectrum onto a
+simulated CCD using an *existing fit-psf file as literal ground truth* --
+critically, that truth file is already in our own native XTRACE/YTRACE
+format (a real Matterhorn fit, `fit-psf-{b0,r0,z0}-00311138.fits`, night
+20250914), so there's no spotgrid-vs-gauss-hermite format degeneracy to
+fight (an earlier attempt to use `$DESIMODEL`'s spotgrid-format PSF as
+truth had exactly that problem, never fully resolved). This is the first
+tool in this whole investigation that can answer "which pipeline is
+actually closer to reality" rather than just "how much do the two
+pipelines disagree."
+
+### 2. Ground truth confirms it's Python-specific
+
+Fit both pipelines on the arcsim images (b0/r0/z0), from the identical
+truth-seeded starting guess, diffed directly against the truth trace.
+Edge:interior X-RMS ratio (bundle-boundary fibers' own RMS error vs truth,
+divided by interior fibers' own RMS error vs truth): **C++ = 0.98/0.97/1.06
 across b/r/z -- flat, no boundary degradation at all. Python =
 1.54/1.66/1.96 -- consistently 1.5-2x worse at the boundary than its own
 interior, in every band.** This is the first genuine (non-relative)
@@ -6014,3 +6046,90 @@ an internal bundle seam); the convolved-preproc amplifier test Julien
 staged is still blocked on his end (broken FITS files, missing
 IVAR/MASK/READNOISE/FIBERMAP extensions and header keywords, reported
 back, not this project's bug).
+
+## 2026-09-02 -- Persistent worker mode, bundle-pool reuse, and workers-per-gpu retuning: full 10-night speed campaign, -18.4% vs C++, promoted to code defaults
+
+**Gap in this file, found and closed 2026-09-04**: everything below (and a further month of work: the sigma_y ground-truth investigation against Stephen's arcsim data, the PSF-shape-modularity and call-graph deliverables for Julien/Stephen, and the 2026-09-03/04 fresh 10-night Python+C++ re-campaign) was done and recorded only in a Claude Code session's own memory and in standalone artifacts, never written here -- this file genuinely had no entries for all of September until this one. That gap directly caused a real confusion on 2026-09-04: a fresh session, working from memory alone, conflated this entry's full-10-night speed benchmark with a *different*, correctness-only campaign (section 17 above, "6 of the 10 nights remain queued") and briefly doubted whether the 483.3s figure below was ever a genuine complete run. It was -- see the artifact link below, whose own numbers match this entry exactly. Recording it here now specifically so this file (not just chat memory) is the source of truth for it going forward.
+
+**The optimization, three real code changes, each measured independently on the standing 10-night set** (20260316/00342128, 20260401/00344649, 20220120/00119496, 20240408/00234955, 20241021/00259030, 20250112/00273138, 20251013/00316043, 20251107/00320292, 20250509/00292102, 20240924/00254802), single node / 4 GPU throughout, matching C++'s own production footprint:
+
+1. **`--worker-mode persistent`**: one long-lived worker process per GPU pulling cameras off a shared queue, instead of a fresh `python -m specex.specex` subprocess per camera (the prior, "subprocess", default methodology). Removes per-camera Python/JAX interpreter startup cost.
+2. **Bundle-worker pool reuse** (persistent mode only, on by default, `--no-pool-reuse` to disable): the `mp.Pool` used inside `fit_ccd_native` for per-bundle parallelism is kept alive and reused across a GPU worker's whole stream of cameras, instead of being torn down and recreated for every camera.
+3. **`workers_per_gpu` retuned** from the old 10/7/4 (b/r/z) to **12/8/5**, given the extra memory headroom pool-reuse frees up.
+
+**Full 10-night chain** (mean wall time over all 10 nights, 30 cameras/night):
+
+| Configuration | 10-night mean | vs. C++ (592.3s) |
+|---|---|---|
+| C++ (production MPI, single node) | 592.3s | -- |
+| Python, subprocess (pre-persistent) | 673.8s | +13.8% (slower) |
+| Python, persistent workers, naive camera-to-GPU split | 579.5s | -2.2% (first config to beat C++) |
+| + LPT-balanced split (alternate scheduling on top of the naive-split config, not combined with the two levers below) | 573.4s | -3.2% |
+| + bundle-pool reuse (stacks on the naive-split config, not on LPT) | 514.0s | -13.2% |
+| **+ workers-per-gpu 12/8/5 (stacks on bundle-pool reuse) -- current code default** | **483.3s** | **-18.4%** |
+
+Note the branch structure: LPT-balanced scheduling and the pool-reuse/workers-per-gpu pair are two *alternate* things tried on top of "persistent, naive split" (row 3) -- they were never combined with each other. The 483.3s production default is naive-split + pool-reuse + wpg 12/8/5, **not** naive-split + LPT + pool-reuse + wpg.
+
+**Correctness unchanged across every configuration above**: every one of the 5 rows reproduces the exact same xrms/yrms per night, to 4 decimal places -- none of these levers touch numerics, only how work is scheduled across processes/GPUs. 10-night mean vs. C++: **xrms=0.0120px, yrms=0.0126px** (range: xrms 0.0112-0.0140, yrms 0.0111-0.0167). Worst single camera by mean: z3 (xrms 0.0271px) and z6 (yrms 0.0261px) -- a per-camera characteristic reproduced consistently across all 10 nights, not scheduling noise.
+
+Full writeup with the bar chart, per-night/per-camera correctness tables, dx/dy fiber plots, and the GPU cold-start census: artifact "GPU Warm-Up Ledger", https://claude.ai/code/artifact/2b45e047-4fef-4100-98ef-8a3b24f4c641.
+
+**2026-09-03/04 follow-up, also just backfilled here**: re-ran this exact same 10-night set (both Python and C++) on fresh nodes as part of preparing a simplified final report for Julien/Stephen. Python's fresh run came in at a mean of **577.1s** -- a real, repeatable ~19% slowdown against the 483.3s figure above, using the identical code/lever combination. The JAX persistent-compilation-cache size (~630K files accumulated on the home filesystem) was tested as the leading hypothesis via a controlled A/B and *appeared* to be ruled out at the time (a fresh small cache performed identically to the old large one once first-touch noise was controlled for) -- **this was wrong; see the entry directly below, same day, for the real root cause (a home-directory disk quota, not cache lookup speed) and its confirmed fix.** C++'s fresh run (with `testing/stage_preproc.py` pre-staging real preproc files, the fix for a transient desi_proc preprocessing race hit on the first two nights of that attempt) came in at a mean of 623.9s -- not yet re-tested against the quota fix, unlike the Python side. A fresh correctness comparison of this same 10-night re-run reproduced the 0.0120/0.0126px figures above exactly, and a fresh sigma_y (PSF-shape) check across 180 points (10 nights x 3 cameras x boundary/interior fibers x 3 wavelengths) reproduced the standing 0.2-1.6% band-dependent cpp/py shape residual (mean 0.47%, worst in blue/b at 0.78%, smallest in z at 0.15%) with no regression.
+
+## 2026-09-04 -- Root cause of the 577s/624s timing mystery found: home directory disk quota (inode limit), not cache lookup speed
+
+Direct follow-up to the entry above. The initial hypothesis (JAX's persistent compile cache in `~/.cache/specex/jax_compilation_cache`, ~630K+ files, being slow to look up on a large/small comparison) was tested via an A/B and appeared to rule itself out -- but that test never actually freed real disk space, it only renamed the cache directory (`mv`), which frees no quota since the data still physically exists under the new name.
+
+**The real problem, found by actually clearing space**: the user's NERSC `$HOME` was completely at its disk quota. Confirmed directly -- `touch`/`mkdir` in `$HOME` both failed with "Disk quota exceeded" before any cleanup. A cold-cache run against a freshly-emptied *active* cache directory (with the ~630K-file old cache still sitting nearby under a renamed path, not yet actually deleted) hit `RESOURCE_EXHAUSTED: ... Disk quota exceeded` while trying to write new `xla_gpu_per_fusion_autotune_cache_dir` entries on **16 of 30 cameras** -- each a real bundle failure (`rc=0` despite failures -- yet another instance of the standing "never trust rc==0 alone" lesson from the Python-backend OOM-continuation case), plus real added wall time from JAX's own retry logic. This is the leading candidate explanation for the whole ~15-20% slowdown seen across the 2026-09-03/04 full 10-night campaigns (not proven for every one of those 20 night-runs specifically, but the mechanism and magnitude both fit, and the campaigns' timeframe lines up with the cache having grown past 600K files).
+
+**Fix**: `pip cache purge` (freed 4.4GB / 317 files) was alone enough to restore `$HOME` write access. A `rm -rf` of the old renamed-aside cache directory was also started to reclaim the rest of the space, but proved to be metadata-I/O-bound and very slow on this filesystem (NERSC's default $HOME quota is documented as 40GB / 1,000,000 inodes per user, not independently re-verified here since `myquota` needs a GPFS tool only present on login nodes, not compute nodes) -- left partially complete (~400K/630K files removed) and handed off to run from a login node instead of a GPU-allocation compute node, so its I/O wouldn't contaminate the timing re-test below.
+
+**Confirms the fix**: clean cold/warm A/B on the standing test case (b4/r2/z8's home night, 20260401/00344649) with quota genuinely available:
+- Cold (empty active cache, real headroom): 552.1s, 30/30 cameras, 0 bundle failures.
+- Warm (same cache, now populated): **484.7s**, 30/30 cameras, 0 bundle failures -- matches the 483.3s standing benchmark from the entry above to within 0.3%.
+
+**Standing recommendation**: before trusting any timing campaign's numbers on this project, confirm `$HOME` is actually writable (a disk-quota exhaustion produces `rc=0` "successes" with silent bundle failures and inflated wall time, not an obvious error) and keep the JAX persistent compilation cache pruned or relocated off `$HOME` (e.g. to `$SCRATCH`, which doesn't carry the same per-user inode pressure) rather than letting it grow unbounded.
+
+## 2026-09-05 -- Second independent 10-night set (N=20 cumulative): Python cold/warm + C++ speed, correctness, and sigma_y all reproduce the standing figures
+
+Selected a genuinely new, non-overlapping 10-night/expid set (same CTE-clean-calibnight + full-30-camera-arc-coverage methodology as the original 10; `select_new_10.py`, seeded differently) to bring the cumulative independently-sampled total to 20 unique nights: 20240605/00237445, 20241221/00269372, 20220204/00121312, 20250426/00289841, 20250921/00312210, 20250226/00281184, 20240925/00254940, 20240329/00233136, 20220611/00139276, 20250620/00298652.
+
+**Python speed, cold vs. warm** (persistent-worker+pool-reuse+wpg 12/8/5, current default): cold (fresh node, first touch) mean **591.2s**; warm (immediate rerun, same node/cache) mean **502.5s** -- a consistent ~15% cold-to-warm improvement across all 10 nights individually, no exceptions, matching the cache-warming pattern already established this week. Reran nights 1/2/8 then the remaining 7 separately (across a node restart) with the same result each time.
+
+**C++ speed** (`stage_preproc.py` pre-staged, same methodology as the original 10): mean **648.3s**, all 10 nights rc=0, 0 bundle warnings, watchdog never intervened (one outlier night, 20250226, at 825s, not flagged by the watchdog as a hang).
+
+**Correctness** (xrms/yrms vs. C++, all 30 cameras/night): 10-night mean **xrms=0.0120px, yrms=0.0131px** (range xrms 0.0112-0.0129, yrms 0.0117-0.0147) -- reproduces the original 10-night figures (0.0120/0.0126px) essentially exactly, confirming the footprint-margin fix (2026-09-01) holds on a fully independent sample.
+
+**sigma_y PSF-shape** (b4/r2/z8, boundary/interior fibers, 3 wavelengths, 180 points): mean \|py/cpp-1\|=0.458%, max=1.663%, band breakdown b=0.776%/r=0.454%/z=0.144% -- matches the historical 0.2-1.6% band-dependent pattern exactly.
+
+Net: this second 10-night set fully corroborates the original 10 on timing, correctness, and PSF-shape, with no divergence anywhere. Cumulative N=20 sample now exists across all three metrics.
+
+## 2026-09-06 -- Julien's cosmic-ray/masked-pixel request: code-path audit + concrete empirical test, no C++/Python asymmetry found
+
+Julien (Slack) asked whether C++ and Python handle spots hit by cosmic rays (or a bad column) differently, worried this had never actually been tested. He pointed at a concrete real example: r6/20251013/00316043, fiber 270 @ 6601A, using `preproc[...]["MASK"] & 2**4 > 0` (desispec maskbit 4 = COSMIC) to find it, and a C++ reference fit at `/pscratch/sd/c/cdwarner/specex/cpptest/redux/cdwarner/fit-psf-r6-00316043.fits`. He also correctly predicted more cosmics on r/z (thicker CCDs) than b.
+
+**Reproduced his exact finding**: fiber270@6601A on that exposure has a ~72-pixel cosmic-ray track (MASK bit 4) running diagonally through the spot's 13x13 fit footprint. Checked IVAR at those same pixels: **not already zeroed in the raw preproc file** (IVAR>0 for all 9655 cosmic-flagged pixels image-wide, mean ~0.057) -- so whether cosmics are excluded from the fit depends entirely on what each fitter's own image-loading code does with MASK, not on anything upstream.
+
+**Code-path audit (the main finding)**: traced both `--backend cpp`/`cpp-direct` and `--backend python` all the way to what actually runs.
+- `py/specex/io.py`'s `read_preproc()` (Python path) and `read_preproc_cpp()` (C++ path) are two separate functions but do the **identical** thing: `ivar[mask != 0] = 0.0` before either fitter ever sees the image -- any nonzero MASK bit, cosmic or otherwise, is fully zero-weighted in both.
+- Verified this is really what runs in production, not just a plausible-looking function: `desispec.scripts.specex` (the real `desi_compute_psf` entry point that `desi_proc --mpi` calls for every `--backend cpp` test this project has ever run) does `from specex.specex import run_specex`, resolving directly to this repo's `py/specex/specex.py:run_specex()`, which calls `read_preproc_cpp()`. So the "C++ path" and "Python path" share the exact same masking code, not independent reimplementations that happened to agree.
+- **This means CLAUDE.md's prior description of `run_specex()` as "legacy... not part of the production pipeline" was wrong/misleading** -- fixed in CLAUDE.md 2026-09-06; it's the actual production C++ codepath, just also reused by old comparison scripts.
+
+**Prevalence scan** (b4/r2/z8, all 20 nights already fit this project, sampling each fiber's trace at 40 wavelengths and checking a 7x7px window against the MASK cosmic bit): confirms Julien's r/z-vs-b prediction quantitatively -- mean fibers/exposure with a cosmic hit near a spot: b=3.6, r=18.6, z=18.8 (~5x more on r/z), consistent across all 20 exposures, no exceptions. Not rare: roughly 1 in 25 fibers per single r/z arc exposure. Script: `/pscratch/sd/c/cdwarner/specex/campaign_20260904/cosmic_prevalence_scan.py`.
+
+**Concrete empirical test** (Julien's own proposed method): r6/20251013 has 5 back-to-back arc exposures that night (00316042/43/44/45/46); confirmed 00316042 has no cosmic near fiber270@6601A, so used it as a clean baseline. Fit it fresh in both `--backend cpp-direct` and `--backend python --cameras r6` (single camera each, ~1-2 min, GPU node). Note: the C++ reference file Julien originally pointed at (`cpptest/...`, from an Aug 11 run) predates the 2026-09-04 `TAILXSCA/TAILYSCA/TAILCORE=1.0` fix (git `c5c39a1`) and has `TAILCORE=0` for this fiber, which makes specter's tail-evaluation formula divide 0/0 at the exact center pixel -- a stale-artifact NaN, unrelated to cosmics. Reran a fresh C++ fit for the cosmic exposure (00316043) too so both sides of the comparison use current-code output.
+
+Compared fiber270@6601A's fitted position between the cosmic exposure and the clean exposure, per backend, against a non-cosmic control fiber (100) as a noise floor:
+
+| | \|position shift\|, cosmic exp vs. clean exp |
+|---|---|
+| Python, fiber 270 (cosmic-hit) | 0.0055px |
+| C++, fiber 270 (cosmic-hit) | 0.0050px |
+| Python, fiber 100 (control, no cosmic) | 0.0059px |
+| C++, fiber 100 (control, no cosmic) | 0.0060px |
+
+The cosmic-hit fiber's exposure-to-exposure shift is indistinguishable from (if anything slightly smaller than) the non-cosmic control fiber's, in both backends -- no excess divergence from the cosmic ray, no C++/Python asymmetry. Consistent with, and now directly confirming, the code-path finding above.
+
+**Broadened same-day to 5 more independent cases** (6 total: r6/20251013 plus z8/20251107, r2/20240408, r2/20220120, z8/20250921, z8/20240924 -- 5 different nights, r+z bands, picked as the strongest cosmic-overlap fiber found per night via `find_cosmic_candidates.py` scanning the b4/r2/z8 prevalence-scan cameras). Learned along the way that a single fixed "control fiber" (52) is not a valid universal noise floor -- it showed large exposure-to-exposure shifts (0.09-0.33px) in several of these pairs, apparently a per-fiber/bundle-position effect (likely edge/flexure-related, unconfirmed) unrelated to cosmics, which would have been wrongly read as "cosmic fibers are unusually stable" if taken at face value. Redid it properly (`compare_broaden_v2.py`): for each case, sampled ~64 fibers spread across the whole camera and compared the cosmic-hit fiber's cosmic-vs-clean shift to the *distribution* of all other fibers' shifts in that same image pair, per backend.
+
+Result: the cosmic-hit fiber's percentile within its own image's fiber-shift distribution ranges 14-87% (Python) / 22-81% (C++) across the 6 cases -- solidly inside the typical range every time, never an outlier. Mean ratio of (cosmic-fiber shift / median-other-fiber shift): Python 1.15, C++ 1.07, both close to 1.0. Case-by-case, Python and C++ track each other closely (e.g. 20251107: pctile 14% vs 22%; 20240408: 87% vs 78%; 20220120: 73% vs 81%; 20250921: 37% vs 25%; 20240924: 71% vs 71%) -- no case where one backend shows the cosmic-hit fiber as an outlier while the other doesn't. Confirms and extends the single-case finding: across 6 independent real cosmic-ray hits spanning 5 nights and both r/z bands, cosmic-ray contamination produces no detectable, and certainly no backend-asymmetric, degradation of the fitted PSF/trace.

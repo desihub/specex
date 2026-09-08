@@ -68,7 +68,7 @@ def run_specex(com):
     return retval
 
 # --- New High-Performance Python/JAX Driver ---
-def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=None):
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=None, log_path=None):
     """Fit one 25-fiber bundle in an isolated worker process: run spot selection, the joint PSF/trace fit, and return the per-bundle results dict that fit_ccd_native merges into the final output PSF.
 
     Runs as the target of a `multiprocessing` (spawn-context) worker, so it is
@@ -148,6 +148,28 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 
     Status: ACTIVE (production default path).
     """
+    # Explicit per-task stdout/stderr redirect, only when the caller passes
+    # log_path (currently: testing/run_night.py's persistent-worker mode
+    # only -- see fit_ccd_native's bundle_pool). Every other call site
+    # (the CLI, subprocess-mode workers) relies on this process's fd 1/2
+    # being correctly pre-redirected by whoever spawned it, which is true
+    # exactly because a fresh Pool is normally created *inside* the
+    # caller's own redirected block. A REUSED pool's workers were spawned
+    # once, outside any per-camera redirection, so relying on inherited
+    # fds there would silently route every camera's bundle-level output
+    # (spot-selection debug, per-iteration chi2, PHASE_TIMING) to whatever
+    # file the pool happened to inherit at spawn time instead of that
+    # camera's own log -- confirmed exactly this way in testing. Re-dup2
+    # on every task call (not just once) so a persistent worker's pool
+    # follows it from camera to camera; O_APPEND so this process's fd and
+    # the parent's own (already open) fd to the same path never overwrite
+    # each other's writes.
+    if log_path is not None:
+        _log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.dup2(_log_fd, 1)
+        os.dup2(_log_fd, 2)
+        os.close(_log_fd)
+
     t_entry = time.time()
     # trace_wdeg defaults to wdeg (old behavior) -- see fitter.py's
     # PSF_Fitter.fit() docstring/comment and porting-notes.md's
@@ -174,6 +196,20 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         else:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
         os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+        # Pin explicitly to JAX's own documented default (unchanged behavior
+        # for the normal subprocess-per-camera path) rather than leaving it
+        # unset. A persistent driver process that calls fit_ccd_native()
+        # repeatedly in one long-lived process (testing/run_night.py
+        # --worker-mode persistent) sets this env var LOW for its own
+        # process before its first JAX use, to cap the small amount of GPU
+        # memory its own post-pool write_python_psf() permanently grows
+        # into (BFC allocators don't shrink back, even with PREALLOCATE=
+        # false -- see porting-notes.md's 2026-09-xx persistent-worker
+        # writeup) -- without this explicit override here, that restrictive
+        # setting would otherwise leak into these spawn-context workers too
+        # (they inherit the parent's os.environ at spawn time) and starve
+        # the real per-bundle GPU compute this process exists to do.
+        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.75"
     else:
         # Hard-exclude CUDA from non-GPU workers. Without this, JAX's CUDA
         # plugin still probes/initializes on whatever GPUs are inherited as
@@ -601,7 +637,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                      workers_per_gpu=None, cpu_workers=None, gpu_worker_threads=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
                      trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
                      trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
-                     line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=7):
+                     line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=7, bundle_pool=None, bundle_log_path=None):
     """Fit a full CCD (a configurable bundle range, default all 20) using a multiprocessing pool of fit_bundle_task workers, then merge the results into the output PSF file.
 
     For backend="gpu", multiple worker processes are packed onto each physical
@@ -774,14 +810,23 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         print(f"  CPU thread budget: {available_cores} cores / {n_workers_this} workers = {t} threads/worker", flush=True)
         return t
 
-    def _run_batch(bundle_ids, n_workers_this, cpu_threads_this):
-        """Launch one multiprocessing.Pool batch of fit_bundle_task calls (spawn context) for the given bundle ids and wait for all of them to complete.
+    def _run_batch(bundle_ids, n_workers_this, cpu_threads_this, pool=None):
+        """Launch one batch of fit_bundle_task calls (spawn context) for the given bundle ids and wait for all of them to complete.
 
         Args:
             bundle_ids (list[int]): bundle indices to fit in this batch.
-            n_workers_this (int): pool size for this batch.
+            n_workers_this (int): pool size for this batch (only used to size
+                a freshly-created pool when `pool` is None).
             cpu_threads_this (int or None): per-worker thread budget, from
                 _cpu_threads_for.
+            pool (multiprocessing.pool.Pool or None): a caller-owned,
+                already-spawned pool to reuse (e.g. a persistent worker's
+                long-lived bundle pool -- see testing/run_night.py's
+                --worker-mode persistent) instead of paying spawn+JAX-import
+                cost for a fresh one. Caller retains ownership (never closed
+                here). None (default): create-and-tear-down a fresh pool
+                sized n_workers_this, exactly as before this parameter
+                existed -- unchanged behavior for every other call site.
 
         Returns:
             list[tuple[int, dict]]: one `(bid, result)` pair per bundle, in the
@@ -790,15 +835,17 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         Status: ACTIVE (production default path) -- internal helper closure of
         fit_ccd_native.
         """
-        ctx = mp.get_context('spawn')
-        with ctx.Pool(processes=n_workers_this) as pool:
-            tasks = []
-            for i, bid in enumerate(bundle_ids):
-                gpu_id = i % n_gpus
-                # Use 2s stagger to prevent JIT compilation contention on CPU
-                stagger_s = i * 2.0 if backend == "cpu" else 0.0
-                tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold, footprint_margin))
+        tasks = []
+        for i, bid in enumerate(bundle_ids):
+            gpu_id = i % n_gpus
+            # Use 2s stagger to prevent JIT compilation contention on CPU
+            stagger_s = i * 2.0 if backend == "cpu" else 0.0
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold, footprint_margin, bundle_log_path))
+        if pool is not None:
             return pool.starmap(fit_bundle_task, tasks)
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(processes=n_workers_this) as fresh_pool:
+            return fresh_pool.starmap(fit_bundle_task, tasks)
 
     # Bundles are independent tasks (Pool.starmap queues them dynamically),
     # so a bundle that fails with a GPU OOM can simply be resubmitted in a
@@ -817,7 +864,11 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         cpu_threads_this = _cpu_threads_for(n_workers_this)
         label = "initial" if attempt == 0 else f"OOM-retry {attempt}"
         print(f"Launching {len(pending)} bundles across {n_workers_this} workers ({label}, packing={packing})...", flush=True)
-        chunk_results = _run_batch(pending, n_workers_this, cpu_threads_this)
+        # bundle_pool only covers the common case (attempt 0, full packing);
+        # a rare OOM retry runs at reduced packing, which a fixed-size
+        # persistent pool can't safely emulate (see _run_batch's docstring),
+        # so retries always fall back to a fresh right-sized pool.
+        chunk_results = _run_batch(pending, n_workers_this, cpu_threads_this, pool=(bundle_pool if attempt == 0 else None))
 
         oom_bids = []
         pending = []
