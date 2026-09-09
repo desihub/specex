@@ -39,3 +39,8 @@ src/tests/*
 *.fits
 *.log
 logs/
+
+# Obsolete one-off testing/ scripts, superseded or tied to closed
+# investigations -- kept on disk for reference (2026-09-09 cleanup), never
+# tracked, and never should be.
+testing/obsolete/
