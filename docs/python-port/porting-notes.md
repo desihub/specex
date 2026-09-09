@@ -6153,3 +6153,27 @@ The interesting part was correctly classifying the 14 *not* reachable from `main
 - Only 4 are genuinely dead: `_fit_one_spot_jax` (already known, superseded by the batched spot-fit path), its nested `fit_loop` closure, `GaussHermitePSF.single_pix_value_np` (already known NumPy reference impl), and `hermite_pol_np` (only called by that dead reference impl).
 
 `CLAUDE.md`'s reading list and "Who's involved" section updated to point at the new guide.
+
+## 2026-09-13 -- Stephen's PSF-shape-vs-camera-edge / bad-wavelength-range check: edges confirmed worse in all 3 bands, 4000-5000A hypothesis NOT supported
+
+Stephen asked for a specific check after hearing the general "PSF-shape differences are noisiest in blue, not visible in sim/z-band" framing: does Python-vs-C++ PSF *shape* (not just trace position) get worse specifically at the true edges of each CCD (fiber 0/499, not just internal bundle boundaries -- those were already closed by the footprint-margin fix), per band, and is there a specific wavelength range (his example: 4000-5000A) where it's worse.
+
+**Method**: reused the standing 20260401/00344649 case, all 30 cameras, both backends already fit and on disk (no refit needed) -- `/tmp/.../scratchpad/edge_shape_check.py`. For each camera, evaluated both pipelines' fitted PSF (via `specter.psf.GaussHermitePSF._value`, same pixel-integration technique as `testing/truth_sigma_compare.py`'s `sigma_of()`) at 4 fiber groups x 15 wavelengths spanning that camera's real WAVEMIN/WAVEMAX: `true_edge_low` (fibers 0-4), `true_edge_high` (495-499), `internal_boundary` (two internal bundle seams, 24/25 and 274/275 -- the already-fixed case, for comparison), `interior` (4 mid-bundle fibers spread across the camera). Two metrics per point: `sigy_ratio` (py/cpp second-moment ratio, matching the historical sigma_y convention) and a full-stamp normalized residual RMS (`resid_rms`, directly sensitive to higher-order shape mismatch, not just the 2nd moment). 8100 total (band, fiber, wavelength) points.
+
+**Finding 1 -- true CCD edges are real and band-independent, distinct from the (already-fixed) internal-bundle-boundary issue.** True-edge fibers (0-4, 495-499) show 1.7-2.4x worse shape agreement than interior fibers, in every band, both metrics:
+| Band | true_edge resid_rms mean | interior resid_rms mean | ratio |
+|---|---|---|---|
+| b | 0.099% | 0.054% | 1.84x |
+| r | 0.055% | 0.032% | 1.74x |
+| z | 0.105% | 0.061% | 1.71x |
+
+Consistent with the mechanism already suspected in `current-status.txt`'s "still open" list: the footprint-margin fix (2026-09-01) gives an internal bundle seam extra pixel support by borrowing 7px from *both* neighboring bundles; the camera's absolute first/last fibers only have a neighbor on one side and nothing beyond the CCD edge on the other, so they can't fully benefit from that fix even though it closed the *positional* (xrms/yrms) boundary weakness. Notably, the `internal_boundary` group here (two specific internal seams, not resampled after the fix) is *also* still somewhat elevated relative to interior in shape terms (not just true edges) -- the footprint-margin fix closed the trace-*position* gap at internal boundaries but a smaller residual *shape* effect persists there too. All in absolute terms small (well under 1% at the mean, worst single point 0.68%), consistent with this being a real, structural, low-priority effect, not a correctness blocker.
+
+**Finding 2 -- the 4000-5000A hypothesis is NOT supported; degradation instead tracks the *red* edge of each band's own coverage.** Binning by wavelength (500A bins, all fiber groups combined):
+- b-band (3559-6008A): best bins are 4000-4500A (0.076%) and 4500-5000A (0.079%) -- Stephen's example range is actually *slightly better* than the rest of the band, not worse. Worst bin is the reddest, 6000-6500A (0.163%), with a clear monotonic-ish worsening trend from ~5000A up to the band edge.
+- r-band (5589-7882A): same pattern -- best at 6000-6500A (0.045%), worst at the reddest bin, 7500-8000A (0.063%).
+- z-band (7382-9881A): worst at the reddest bin, 9500-10000A (0.163%), with a smaller secondary rise at the bluest bin (7000-7500A, 0.086%) -- a mild double-edge effect, but still red-edge-dominant.
+
+Direct check of Stephen's specific range (b-band, true-edge fibers only): 4000-5000A mean resid_rms = 0.088%, everywhere else in b-band = 0.107% -- the named range is *better* than average, not worse. **Bottom line for Stephen: there's no isolated bad wavelength range; every band gets modestly worse toward the red edge of its own coverage (plausibly the same fewer/dimmer-calibration-line-density mechanism already documented for overall band correctness -- current-status.txt section 1), and that's on top of, not instead of, the separate true-CCD-edge effect from Finding 1.**
+
+No artifact built for this yet (offered, not requested) -- raw script and JSON results left in this session's scratchpad, not committed (one-off diagnostic, not a maintained tool).

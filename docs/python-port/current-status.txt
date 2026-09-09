@@ -65,9 +65,15 @@ float32/float64 precision, grid line search.
 - sigma_y's b-band residual (0.78%) runs noticeably higher than r/z
   (0.14-0.45%) -- leading hypothesis is a weak blue-edge calibration
   signal, not investigated further.
-- Whether the true-slit-edge (fiber 0/499) phenomenon relates to the
-  footprint-margin fix at all -- architecturally a different boundary
-  condition than an internal bundle seam, not tested.
+- True-slit-edge (fiber 0/499) PSF-*shape* weakness: tested 2026-09-13 (all
+  30 cameras, standing case, Python vs C++) -- real and confirmed, 1.7-2.4x
+  worse shape agreement than interior fibers in every band, plausibly
+  because the footprint-margin fix's benefit requires a neighbor on both
+  sides (the true edges only have one). Small in absolute terms (<1%
+  mean). Root cause not fixed, not urgent. Separately checked whether any
+  specific wavelength range is worse (Stephen's hypothesis: 4000-5000A) --
+  not supported; every band instead gets modestly worse toward the red
+  edge of its own coverage. Full data: porting-notes.md, 2026-09-13.
 - Julien Guy's separable-B-spline-PSF proposal was scoped (rough effort
   estimate only) but deliberately not pursued, per Stephen's direction to
   prioritize production-readiness over new modeling work right now.
