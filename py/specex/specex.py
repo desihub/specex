@@ -7,9 +7,9 @@ import multiprocessing as mp
 from .io import load_python_psf, read_preproc, read_lamp_lines, write_python_psf
 from .fitter import PSF_Fitter, get_bundle_spots, select_bundle_spots_iterative
 
-# --- Original C++ Wrapper (for baseline and legacy tools) ---
+# --- Original C++ Wrapper ---
 
-def run_specex(com):
+def run_specex_cpp(com):
     """Run the original compiled C++ specex engine via the pybind11 `_libspecex` extension, driving it exactly like the C++ `desi_psf_fit` CLI would from a list of argument strings.
 
     Args:
@@ -22,10 +22,21 @@ def run_specex(com):
         `PyFitting.fit_psf()`. If `PyOptions.parse()` itself fails, that
         nonzero return code is returned directly instead.
 
-    Status: LEGACY -- thin wrapper around the compiled C++ extension, used only
-    by old one-off comparison scripts (testing/example_specex.py,
-    testing/full_analysis.py), not the production Python/JAX pipeline
-    (fit_bundle_task/fit_ccd_native/main below).
+    Status: ACTIVE -- the real production C++ codepath (confirmed
+    2026-09-06: `desispec`'s `desi_compute_psf` entry point calls this
+    directly), not a legacy/one-off helper, though it's also still used by
+    the old one-off comparison scripts (`testing/example_specex.py`,
+    `testing/full_analysis.py`). **Renamed from `run_specex` to
+    `run_specex_cpp` on 2026-09-13** at Stephen's direction: any code still
+    doing `from specex.specex import run_specex` (e.g. `desispec`'s current
+    `scripts/specex.py`, as of this writing) will now hit a loud
+    `ImportError` instead of silently continuing to run the old C++-only
+    path -- deliberate, so nobody can integrate this branch without
+    consciously choosing which path (this C++ wrapper, explicitly renamed,
+    or the GPU-native `fit_ccd_native()` below) they actually want. See
+    `docs/python-port/desispec-integration-plan.md`. Not necessarily
+    permanent -- may be renamed back once desispec's own call site is
+    updated to make an explicit choice either way.
     """
     from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
     from .io import read_psf, write_psf
@@ -296,7 +307,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
 
         class Opts:
-            """Minimal stand-in for the C++-side options object, carrying just the two file paths read_preproc/load_python_psf need. Not the same class as main()'s argparse Namespace or run_specex()'s C++ PyOptions.
+            """Minimal stand-in for the C++-side options object, carrying just the two file paths read_preproc/load_python_psf need. Not the same class as main()'s argparse Namespace or run_specex_cpp()'s C++ PyOptions.
 
             Status: ACTIVE (production default path) -- internal helper class of
             fit_bundle_task.
@@ -746,7 +757,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             trace_legendre_deg_wave_x = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else legendre_deg_wave
         if trace_legendre_deg_wave_y is None:
             # b/r default: 2, not 1 -- validated against the real C++ engine
-            # (run_specex(), now working locally -- see docs/python-port/porting-notes.md)
+            # (run_specex_cpp(), now working locally -- see docs/python-port/porting-notes.md)
             # across 6 bundles on both flagged exposures (r2@20250109,
             # r2@20241208): mean yrms 0.2182px -> 0.0686px (68% cut, into
             # normal-case territory). z-band kept coupled to its own wdeg

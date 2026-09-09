@@ -132,14 +132,14 @@ and you're not actually testing the new environment):
     (`.../desiconda/.../code/specex/main/py`, the old pre-port C++-only
     version -- no `fitter.py`/`psf.py`/`math.py` at all), which silently
     shadows this branch's code if you don't put this repo's `py/` first.
-*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
+*   **The C++-wrapper path (`run_specex_cpp()`, `--backend cpp`/`cpp-direct`)
     does NOT work as-is.** The compiled pybind11 extension
     (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
     against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
     can't load it (`ModuleNotFoundError: No module named
-    'specex._libspecex'` the moment `run_specex()` actually tries the
+    'specex._libspecex'` the moment `run_specex_cpp()` actually tries the
     lazy `from ._libspecex import ...`, even though `from specex.specex
-    import run_specex` itself succeeds -- the import is lazy, inside the
+    import run_specex_cpp` itself succeeds -- the import is lazy, inside the
     function body). **Needs a rebuild against this environment's Python/
     toolchain before `--backend cpp` can run under it** -- `cmake`
     (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a

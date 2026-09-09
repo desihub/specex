@@ -57,16 +57,20 @@ Read in this order:
 `GaussHermitePSF` itself is stateless (a pure shape-evaluation model) --
 everything fitted lives on `PSF`/`PSF_Params`, not on `GaussHermitePSF`.
 
-**There is a second, separate entry point**: `specex.py`'s `run_specex()`
-(line 12) wraps the compiled C++ pybind11 extension (`_libspecex`) instead
-of the native Python/JAX path above. `desispec`'s real `desi_compute_psf`
-entry point calls this directly for every `--backend cpp`/`cpp-direct` run
-this project has ever done -- it is real production code, not a leftover
-(`CLAUDE.md`, corrected 2026-09-06), just for the *C++* codepath rather than
-the GPU-native one. It has its own small subtree in `io.py`
-(`read_psf`/`write_psf`/`read_preproc_cpp`/`meta2header`) that `main()`
-never touches -- don't expect those four to show up reachable from `main()`
-below; they're reachable from `run_specex()` instead.
+**There is a second, separate entry point**: `specex.py`'s `run_specex_cpp()`
+(line 12, **renamed from `run_specex` on 2026-09-13** -- see `CLAUDE.md`)
+wraps the compiled C++ pybind11 extension (`_libspecex`) instead of the
+native Python/JAX path above. `desispec`'s real `desi_compute_psf` entry
+point has historically called this directly for every `--backend cpp`/
+`cpp-direct` run this project has ever done -- it is real production code
+for the *C++* codepath, not a leftover, just not the GPU-native one. (Its
+own current `from specex.specex import run_specex` import will now fail
+until it's updated for the rename -- deliberate, see
+`docs/python-port/desispec-integration-plan.md`.) It has its own small
+subtree in `io.py` (`read_psf`/`write_psf`/`read_preproc_cpp`/
+`meta2header`) that `main()` never touches -- don't expect those four to
+show up reachable from `main()` below; they're reachable from
+`run_specex_cpp()` instead.
 
 ## The live-methods table
 
@@ -165,14 +169,14 @@ underlying function; they aren't separate rows.)*
 Not reachable from `main()`, but not dead either -- three genuinely
 different reasons:
 
-- **The C++-wrapper subtree** (`run_specex()`'s own path, see above):
+- **The C++-wrapper subtree** (`run_specex_cpp()`'s own path, see above):
   `read_psf` (`io.py:399`), `write_psf` (`io.py:313`),
   `read_preproc_cpp` (`io.py:456`), `meta2header` (`io.py:10`). Real
   production code for `--backend cpp`/`cpp-direct`, just a different entry
-  point than `main()`. (Their own docstrings currently say "LEGACY" --
-  written before `CLAUDE.md`'s 2026-09-06 correction that `run_specex()`
-  itself is real production, not a leftover; worth a docstring pass if
-  anyone's in there anyway, but not corrected here.)
+  point than `main()`. (Their docstrings said "LEGACY" until 2026-09-13 --
+  written before `CLAUDE.md`'s 2026-09-06 correction that this subtree is
+  real production, not a leftover; fixed alongside the `run_specex` ->
+  `run_specex_cpp` rename.)
 - **CI-test-only** (exercised by the real pytest suites `test_math.py`/
   `test_math_psf.py`/`test_vectorization.py`, per `CLAUDE.md`): `GaussHermitePSF.pix_value`
   (`psf.py:205`), `GaussHermitePSF.pix_value_jnp` (`psf.py:172`),
@@ -180,16 +184,17 @@ different reasons:
   `SparseLegendre2DPol.__init__` (`math.py:243`). Correctness-relevant, just
   not called by the production fit path itself.
 - **Testing-tool-only**: `get_bundle_spots` (`fitter.py:1304`) -- a
-  standalone, non-iterative spot-selection function used by ~15 of the
-  one-off scripts in `testing/` (`compare_psf.py`, `full_analysis.py`,
-  `random_bundle_parity.py`, etc.), but not by the production path, which
-  uses `select_bundle_spots_iterative` instead. Real and actively used,
-  just by ad-hoc comparison tooling rather than `fit_ccd_native`.
+  standalone, non-iterative spot-selection function used by `full_analysis.py`
+  and `validate_all_modes.py` (and several one-off scripts now moved to
+  `testing/obsolete/`, see `how-to-run.md`), but not by the production
+  path, which uses `select_bundle_spots_iterative` instead. Real and
+  actively used, just by ad-hoc comparison tooling rather than
+  `fit_ccd_native`.
 
 ## Confirmed dead code
 
 Only 4 functions in these five files are genuinely unreachable from
-anywhere real (not `main()`, not `run_specex()`, not the CI suites, not
+anywhere real (not `main()`, not `run_specex_cpp()`, not the CI suites, not
 `testing/`):
 
 - `_fit_one_spot_jax` (`fitter.py:1383`) -- superseded by the batched
