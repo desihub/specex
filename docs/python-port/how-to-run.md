@@ -105,6 +105,52 @@ Notes:
 
 **If `--gpu`/`--backend gpu` (the default) is requested but no CUDA-enabled jaxlib is installed**, `python -m specex.specex` now fails immediately with a clear, actionable `RuntimeError` pointing back at this section, rather than either JAX's own opaque `Unknown backend: 'gpu' requested... Platforms present are: cpu` or (worse) silently falling back to CPU and running ~10x slower with no indication anything is wrong. This is deliberate fail-fast behavior, not a bug: since `--gpu` is the default and this is a performance-critical batch pipeline, a silent CPU fallback would be a much nastier trap than a loud failure. Pass `--backend cpu` explicitly if you ever want to run on CPU on purpose.
 
+### Alternative to `specex_env`: a shared DESI environment with JAX (tested 2026-09-13)
+
+Stephen is assembling a shared DESI module environment that bundles JAX,
+as a path toward not needing a personal venv at all for production. Tested
+`source /global/cfs/cdirs/desi/software/desi_environment.sh test-26.9`
+(note: must `deactivate` any active personal venv and `unset PYTHONPATH`
+*before* sourcing it, or the venv's own `python`/`PYTHONPATH` silently wins
+and you're not actually testing the new environment):
+
+*   **The GPU-native Python/JAX path (`main()`/`fit_ccd_native()`, everything
+    in Sections 2-4 below) works with zero code changes.** This environment
+    provides its own Python 3.14.7 (desiconda 20260908-3.0.0), jax/jaxlib
+    0.10.2 (vs. `specex_env`'s 0.10.1), numpy 2.5.3, scipy 1.18.0, astropy
+    8.0.1, fitsio 1.4.2 -- all close to or newer than `specex_env`'s
+    versions -- and `jax.devices()` correctly reports all 4 A100s with no
+    extra setup (no `env_setup.sh`-style `LD_LIBRARY_PATH`/`NVLIBS` dance
+    needed; this environment's own CUDA plumbing already works). A real
+    single-bundle fit (`z8/00344649` bundle 5) ran clean end-to-end,
+    `SPECEX_RESULT: OK 1/1 bundles`. **You still need to prepend this
+    repo's own `py/` to `PYTHONPATH`**
+    (`export PYTHONPATH=/path/to/specex/py:$PYTHONPATH`,
+    same idea as `env_setup.sh`, just without the venv-specific
+    `NVLIBS`/`LD_LIBRARY_PATH` piece, which isn't needed here) --
+    **this environment already bundles its own separate `specex` install**
+    (`.../desiconda/.../code/specex/main/py`, the old pre-port C++-only
+    version -- no `fitter.py`/`psf.py`/`math.py` at all), which silently
+    shadows this branch's code if you don't put this repo's `py/` first.
+*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
+    does NOT work as-is.** The compiled pybind11 extension
+    (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
+    against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
+    can't load it (`ModuleNotFoundError: No module named
+    'specex._libspecex'` the moment `run_specex()` actually tries the
+    lazy `from ._libspecex import ...`, even though `from specex.specex
+    import run_specex` itself succeeds -- the import is lazy, inside the
+    function body). **Needs a rebuild against this environment's Python/
+    toolchain before `--backend cpp` can run under it** -- `cmake`
+    (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a
+    rebuild looks straightforward, just not attempted yet (not needed for
+    the GPU-native path, which is the actual subject of this port).
+*   **Bottom line**: this environment is a viable `specex_env` replacement
+    for the Python/JAX path today, once `PYTHONPATH` is set correctly. The
+    C++ path is the one piece of "readying an environment for production"
+    work still open, and it's independent of anything about this branch's
+    own Python code.
+
 ---
 
 ## 1. Environment Setup (Every session)

@@ -103,6 +103,15 @@ float32/float64 precision, grid line search.
   docs/python-port/); this file condensed from an 18-section chronological
   rebuild to the bottom-line-only snapshot above -- that history is
   porting-notes.md's job, not this file's.
+- 2026-09-13: True-slit-edge PSF-shape effect confirmed real in all 3
+  bands (1.7-2.4x worse than interior); Stephen's 4000-5000A bad-range
+  hypothesis not supported (degradation instead tracks the red edge of
+  each band's coverage) -- see "still open" above and porting-notes.md.
+  Also: the GPU-native Python path was confirmed to run unmodified under
+  Stephen's new shared DESI+JAX environment (`desi_environment.sh
+  test-26.9`) -- see how-to-run.md Section 0. The C++-wrapper path needs
+  its compiled extension rebuilt for that environment's Python 3.14; not
+  done yet.
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and
