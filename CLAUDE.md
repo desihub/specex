@@ -49,6 +49,11 @@ one-line pointer is in the repo-root `README.md` too).
    genuinely dead code. Written for Julien's standing "guide to reading the
    code" ask (see "Who's involved" below) -- keep it in sync if the call
    graph changes materially, but it's a snapshot, not a live-generated doc.
+9. **`docs/python-port/desispec-integration-plan.md`** -- how `desispec`
+   (`../desispec`) calls specex today (20 MPI ranks/camera, 1 bundle each,
+   straight to the C++ wrapper) and a phased plan for a GPU-aware path
+   instead, modeled on `gpu_specter`'s existing extraction-step precedent
+   in `desispec/scripts/proc.py`. A plan, not yet implemented in desispec.
 
 **Do not go looking for local Claude Code session transcripts as a history
 source.** They're per-user, not portable across machines/accounts, and are
