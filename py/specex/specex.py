@@ -926,7 +926,7 @@ def main():
     Fails fast with an actionable RuntimeError if --backend gpu (the default)
     is requested but no GPU-capable JAX platform is available, rather than
     either JAX's own opaque error or a silent, much-slower CPU fallback (see
-    how-to-run.md Section 0). For --backend cpu, applies the same CUDA
+    docs/python-port/how-to-run.md Section 0). For --backend cpu, applies the same CUDA
     isolation to this master process that fit_bundle_task applies to its
     workers, so the master's own post-pool JAX usage (write_python_psf) can't
     touch a GPU a concurrent GPU-backend job is using.
@@ -987,7 +987,7 @@ def main():
         # (b) silently falling back to CPU and running ~10x slower with no
         # indication anything is wrong. --gpu is the default and this is a
         # perf-critical batch pipeline, so a silent fallback would be worse
-        # than a loud failure -- see how-to-run.md Section 0 for the real
+        # than a loud failure -- see docs/python-port/how-to-run.md Section 0 for the real
         # fix (confirmed root cause once: an invalid pip extra name, e.g.
         # "jax[cuda13_pip]", is not a hard error -- pip only *warns* and
         # silently installs a CPU-only jaxlib).
@@ -997,7 +997,7 @@ def main():
                 "--backend gpu (the default) was requested, but no GPU-capable JAX "
                 "platform is available -- jax.devices() found only "
                 f"{sorted(set(d.platform for d in jax.devices()))}. This almost always means "
-                "jaxlib was installed without CUDA support (see how-to-run.md Section 0). "
+                "jaxlib was installed without CUDA support (see docs/python-port/how-to-run.md Section 0). "
                 "Reinstall with `pip install --upgrade \"jax[cuda13]\"` and confirm "
                 "`python -c \"import jax; print(jax.devices())\"` reports a CudaDevice, "
                 "or pass --backend cpu to run on CPU deliberately."

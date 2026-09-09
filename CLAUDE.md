@@ -9,14 +9,14 @@ fast without re-deriving months of investigation from scratch.
 
 ## Read these, in this order
 
-`how-to-run.md` and `env_setup.sh` live at the repo root; everything else
-about the port's history, status, and known edge cases lives under
-`docs/python-port/` -- moved there 2026-09-09 to keep the repo root down to
-just this file, `how-to-run.md`, and `env_setup.sh`.
+Only `env_setup.sh` and this file live at the repo root now; everything
+else about the port -- how to run it, its history, status, and known edge
+cases -- lives under `docs/python-port/` (moved there 2026-09-09/13; a
+one-line pointer is in the repo-root `README.md` too).
 
-1. **`how-to-run.md`** (repo root) -- how to actually run the Python port
-   (single bundle / full CCD / full night, GPU and CPU), environment setup,
-   full CLI reference. Start here for "how do I invoke this."
+1. **`docs/python-port/how-to-run.md`** -- how to actually run the Python
+   port (single bundle / full CCD / full night, GPU and CPU), environment
+   setup, full CLI reference. Start here for "how do I invoke this."
 2. **`docs/python-port/current-status.txt`** -- a dated bottom-line
    snapshot. Good for "where does this project currently stand," but always
    dated -- treat `porting-notes.md`'s most recent entries as more current
@@ -134,8 +134,8 @@ transcripts.
 - **`testing/`** -- validation/comparison tooling, not unit tests in the
   pytest sense (except `test_math.py`, `test_math_psf.py`,
   `test_vectorization.py`, which are real pytest suites CI actually runs).
-  `how-to-run.md` documents which scripts are the current, maintained
-  entry points (`run_night.py`, `select_test_case.py`,
+  `docs/python-port/how-to-run.md` documents which scripts are the
+  current, maintained entry points (`run_night.py`, `select_test_case.py`,
   `instrumentation_analysis.py`, `validate_all_modes.py`,
   `full_ccd_campaign.py`, `compare_correctness.py`, `per_fiber_breakdown.py`,
   `stage_preproc.py`) -- treat any `testing/*.py` not mentioned there as a

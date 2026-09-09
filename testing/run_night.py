@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Single entry point to fit all cameras of a night/expid, switchable
 between the C++ production pipeline and the Python/JAX GPU port via one
-flag (or the SPECEX_BACKEND env var) -- see how-to-run.md Section 4.3.
+flag (or the SPECEX_BACKEND env var) -- see docs/python-port/how-to-run.md Section 2.3.
 
     python testing/run_night.py --night 20260401 --expid 00344649 --backend python
     python testing/run_night.py --night 20260401 --expid 00344649 --backend cpp
@@ -34,7 +34,7 @@ production night/expid). It does not run raw-data preprocessing itself.
                       fit-psf-<cam>-<expid>.fits/.log naming. Does NOT call
                       desi_proc -- no idempotent-preprocessing pass, no
                       whole-job MPI collective for 101+ ranks to hang on if
-                      one camera's input is missing (see how-to-run.md
+                      one camera's input is missing (see docs/python-port/how-to-run.md
                       Section 7). Sequential by default (--cpp-concurrency);
                       CPU-only, safe to run alongside --backend python on
                       the same node (disjoint resources -- see
@@ -173,7 +173,7 @@ DEFAULT_DURATION_HINT = {"b": 90.0, "r": 100.0, "z": 150.0}
 def split_cameras_for_nodes(cameras, n_nodes, lpt_profile):
     """LPT (longest-processing-time-first) balanced split across n_nodes if
     a per-camera timing profile is given (JSON: {"b0": 69.2, ...}, from a
-    prior run's own measured wall times -- see how-to-run.md Section 4.3);
+    prior run's own measured wall times -- see docs/python-port/how-to-run.md Section 2.3);
     otherwise a naive alternating split (band-diverse but not load-balanced,
     since we have no timing prior for an arbitrary fresh night/expid).
 
@@ -761,7 +761,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="Print planned commands without executing them")
     # --backend python only
     ap.add_argument("--gpus-per-node", type=int, default=None, help="Default: auto-detect via nvidia-smi")
-    ap.add_argument("--lpt-profile", help="JSON file of {camera: seconds} from a prior run, for LPT-balanced multi-node splitting (see how-to-run.md). Default: naive alternating split.")
+    ap.add_argument("--lpt-profile", help="JSON file of {camera: seconds} from a prior run, for LPT-balanced multi-node splitting (see docs/python-port/how-to-run.md). Default: naive alternating split.")
     ap.add_argument("--workers-per-gpu-b", type=int, default=None)
     ap.add_argument("--workers-per-gpu-r", type=int, default=None)
     ap.add_argument("--workers-per-gpu-z", type=int, default=None)

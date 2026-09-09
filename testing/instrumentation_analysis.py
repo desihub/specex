@@ -119,7 +119,7 @@ def run_subprocess_fit(mode, arc_file, psf_file, broken_fibers, camera, bundle_i
 
     elif mode in ["py_cpu", "py_gpu"]:
         # Goes through the real `python -m specex.specex` CLI (same entry
-        # point documented in how-to-run.md) rather than calling
+        # point documented in docs/python-port/how-to-run.md) rather than calling
         # PSF_Fitter.fit() directly -- that way this script automatically
         # tracks whatever specex.py's current production defaults are
         # (legendre-deg-wave/fit-continuum auto-detected per band,

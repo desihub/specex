@@ -4,6 +4,10 @@
 
 This repository contains code for PSF measurement in fiber-fed spectrograph for DESI.
 
+**Working on the `python-gpu-port` branch?** See
+[`docs/python-port/how-to-run.md`](docs/python-port/how-to-run.md) for how
+to run the Python/JAX port, and `CLAUDE.md` for everything else about it.
+
 ## Introduction
 
 This package is intended to be used with the [specter](https://github.com/desihub/specter) extraction code.
