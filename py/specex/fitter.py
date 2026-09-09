@@ -467,7 +467,7 @@ def _predict_bundle_jax_pixelwise(flux, psf_coeffs, trace_coeffs, continuum_coef
         each bundle-footprint pixel.
 
     Status: EXPERIMENT, added 2026-08-31 alongside SPECEX_CROSSEVAL_PERFIBER
-    to test whether the chi2 cross-eval gap (porting-notes.md, 2026-08-28
+    to test whether the chi2 cross-eval gap (docs/python-port/porting-notes.md, 2026-08-28
     truth-cross-eval entries) is concentrated at bundle-boundary fibers or
     spread evenly across the bundle.
     """
@@ -552,7 +552,7 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
 
     # psf_monomials and trace_monomials are deliberately separate design
     # matrices (possibly different wavelength degree/Npoly) -- see
-    # PSF_Fitter.fit()'s trace_wdeg parameter and porting-notes.md "trace
+    # PSF_Fitter.fit()'s trace_wdeg parameter and docs/python-port/porting-notes.md "trace
     # correction basis" entries. Before this split they were one shared
     # array, which coupled the PSF-shape and trace-position fits through a
     # shared basis in a way C++ never does (its trace fit is a fully
@@ -573,7 +573,7 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     # has Ns baked into its shape, so a fresh XLA compile happens per
     # distinct Ns either way -- there's no compile-cache reuse the old flat
     # constant was protecting. Measured effect (single-GPU nvidia-smi
-    # profiling, see porting-notes.md "task 22 follow-up"): this removes the
+    # profiling, see docs/python-port/porting-notes.md "task 22 follow-up"): this removes the
     # padding waste cleanly and never costs more than the old flat 2000, but
     # it did NOT reduce the observed process-level GPU memory peak for the
     # dominant ~1500-1600-spot bundle case even at this most-aggressive
@@ -699,7 +699,7 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     # per-pixel per-parameter broadcast products are narrowed. Validated:
     # single-bundle chi2 relative error 2.4e-6, full-CCD wavelength RMS vs
     # line-list truth matches the float64 pipeline to 4 decimals, 71% GPU
-    # memory cut (8657MiB -> 2513MiB/worker) -- see porting-notes.md.
+    # memory cut (8657MiB -> 2513MiB/worker) -- see docs/python-port/porting-notes.md.
     _mp = os.environ.get("SPECEX_MIXED_PRECISION", "1") != "0"
     _jdt = jnp.float32 if _mp else jnp.float64
     f_p_j, m_p_j, m_trace_p_j = f_p.astype(_jdt), m_p.astype(_jdt), m_trace_p.astype(_jdt)
@@ -736,7 +736,7 @@ def _accumulate_bundle_jax(flux, psf_coeffs, trace_coeffs, continuum_coeffs,
     # this port applied the correction unconditionally, every mode, every
     # iteration, for this whole project -- a real, if narrow, C++/Python
     # mismatch. Tested disabling it across a 15-bundle sample
-    # (2026-07-30, porting-notes.md): mean xrms 0.0428->0.0420, mean yrms
+    # (2026-07-30, docs/python-port/porting-notes.md): mean xrms 0.0428->0.0420, mean yrms
     # 0.0466->0.0458 -- a real, modest improvement concentrated in the 2
     # cases with the largest residual*signal product (the disabled term
     # scaled with (w*res)^2 * signal, so bundles with small residuals were
@@ -865,7 +865,7 @@ def get_bundle_footprint(psf, spots, fiber_min, fiber_max, weight=None):
     # boundary fiber's chi2/weight construction can see cross-bundle flux
     # leakage. Python's envelope above was zero-margin, bundle-own-fibers-
     # only, which root-caused the bundle-boundary trace divergence between
-    # the two pipelines (porting-notes.md, 2026-09-01): a zero-margin
+    # the two pipelines (docs/python-port/porting-notes.md, 2026-09-01): a zero-margin
     # footprint silently discarded real boundary-fiber pixel data before the
     # fit ever saw it. Validated against real ground truth (arcsim) and 19
     # sim+production cases with zero exceptions -- promoted to the
@@ -1083,7 +1083,7 @@ def generate_bundle_candidates(psf, fiber_min, fiber_max, lamp_lines, image_shap
             # coincidence and corrupting --trace-per-fiber-deg's per-fiber
             # polynomial fit for every fiber in the bundle, not just the 1-3
             # fibers the spurious candidate actually appears on (see
-            # porting-notes.md's 2026-08-05 b2@20260401/b6@20250125
+            # docs/python-port/porting-notes.md's 2026-08-05 b2@20260401/b6@20250125
             # investigation). C++ never has this problem because this check
             # runs unconditionally, independent of --trace-per-fiber-deg.
             if wave < x_vs_w.xmin or wave > x_vs_w.xmax: continue
@@ -1512,7 +1512,7 @@ def _get_spot_stats_jax(image, weight, cand_xc, cand_yc, gh_params, degree, hsiz
     # Pad the candidate batch to a power-of-2 bucket so JAX reuses one
     # compiled shape across bundles/cameras instead of recompiling for every
     # distinct raw-candidate count (campaign-wide these range ~1100-1800 and
-    # collapse into a single bucket -- see porting-notes.md "power-of-2
+    # collapse into a single bucket -- see docs/python-port/porting-notes.md "power-of-2
     # shape bucketing"). Safe by construction: fit_spot is vmapped, so each
     # padding row is fit fully independently and cannot influence any real
     # candidate's result -- padding rows are simply sliced off below.
@@ -1589,7 +1589,7 @@ class PSF_Fitter:
                 they're held at zero).
             trace_wdeg, trace_wdeg_x, trace_wdeg_y (int or None): trace-correction
                 wavelength degree, shared or per-axis; each defaults down to wdeg
-                if unset (see porting-notes.md's r2@20250109 investigation for why
+                if unset (see docs/python-port/porting-notes.md's r2@20250109 investigation for why
                 trace and PSF-shape degrees are decoupled).
             trace_per_fiber_deg (int or None): if set, use a block-diagonal-by-
                 fiber trace basis at this degree instead of the shared
@@ -1634,7 +1634,7 @@ class PSF_Fitter:
         if trace_prior_deg is None and os.environ.get("SPECEX_TRACE_PRIOR_DEG"):
             trace_prior_deg = int(os.environ["SPECEX_TRACE_PRIOR_DEG"])
         # Default 1e5, not C++'s literal 1e8 -- the weight sweep run
-        # alongside the ndead-gating work (porting-notes.md, 2026-08-05)
+        # alongside the ndead-gating work (docs/python-port/porting-notes.md, 2026-08-05)
         # found 1e8 measurably over-smooths even the fibers it's meant to
         # fix relative to 1e5/1e6 (more collateral pull on a bad bundle's
         # healthy fibers, no extra benefit to the bad fiber itself), and
@@ -1644,7 +1644,7 @@ class PSF_Fitter:
         # benefit as any higher weight tested.
         trace_prior_weight = float(os.environ.get("SPECEX_TRACE_PRIOR_WEIGHT", 1e5))
         # trace_wdeg (a shared X/Y default) falls back to wdeg -- see
-        # porting-notes.md's r2@20250109 investigation. trace_wdeg_x/
+        # docs/python-port/porting-notes.md's r2@20250109 investigation. trace_wdeg_x/
         # trace_wdeg_y independently override it per axis, falling back to
         # trace_wdeg in turn -- added after finding X didn't need (and was
         # mildly destabilized by) the same extra wavelength curvature that
@@ -1662,7 +1662,7 @@ class PSF_Fitter:
         # narrowed range then clips get_bundle_footprint's trace envelope,
         # dropping the excluded fibers' own pixels from the fit entirely --
         # root cause of the r2@20250109 footprint-size anomaly in
-        # porting-notes.md (Python: 66506 px vs C++: 121360 px for the same
+        # docs/python-port/porting-notes.md (Python: 66506 px vs C++: 121360 px for the same
         # forced spot list; fixed here gives 113242, matching C++ to ~7%,
         # the residual being get_bundle_footprint's own missing x-margin).
         fmin, fmax = min(s['fiber'] for s in spots), max(s['fiber'] for s in spots)
@@ -1671,7 +1671,7 @@ class PSF_Fitter:
         # docstring) -- must run on the RAW weight, before
         # apply_dead_column_mask broadens it. Opt-in for now, same pattern
         # as SPECEX_MATCH_CPP_FLUX_CLAMP, pending a correctness check on the
-        # known hard bundles (porting-notes.md, 2026-08-04).
+        # known hard bundles (docs/python-port/porting-notes.md, 2026-08-04).
         if os.environ.get("SPECEX_MATCH_CPP_DEAD_COLUMN"):
             n_before = len(spots)
             spots = filter_dead_column_spots(spots, weight)
@@ -1702,7 +1702,7 @@ class PSF_Fitter:
             # EXPERIMENT (SPECEX_TRACE_PRIOR_EDGE_WIDTH, 2026-08-24): a second,
             # independent gating criterion alongside ndead -- flag the first/
             # last N fibers of the bundle (bundle-boundary position, not a
-            # data-quality diagnostic). Motivated by porting-notes.md's
+            # data-quality diagnostic). Motivated by docs/python-port/porting-notes.md's
             # 2026-08-24 entry: C++-vs-Python trace disagreement in b/r bands
             # shows sharp periodic spikes exactly at bundle boundaries (every
             # 25 fibers), absent in z (dense lines + continuum fit leaves
@@ -1732,7 +1732,7 @@ class PSF_Fitter:
         # Pixel-footprint padding: pad the pixel dimension fed to the JIT
         # calls below to a power-of-2 bucket (real footprints range ~33k-
         # 125k pixels campaign-wide and collapse into 2 buckets -- see
-        # porting-notes.md "power-of-2 shape bucketing"). idx_g's
+        # docs/python-port/porting-notes.md "power-of-2 shape bucketing"). idx_g's
         # out-of-footprint sentinel must equal Np_pad (not Np): the JIT
         # functions gate "valid" as flat_idx < Np, computed internally from
         # the padded array's own (Np_pad) length, so the sentinel has to
@@ -1779,7 +1779,7 @@ class PSF_Fitter:
         flux_full = jnp.array([s['flux'] for s in spots]); xc_init_full, yc_init_full = jnp.array([s['xc_init'] for s in spots]), jnp.array([s['yc_init'] for s in spots])
         psf_monomials_full = get_bundle_monomials_jnp(self.psf, bundle_id, spots, wdeg=wdeg)
         # trace_per_fiber_deg (stage 1 of the full per-fiber redesign, see
-        # porting-notes.md) swaps the shared low-degree basis for a
+        # docs/python-port/porting-notes.md) swaps the shared low-degree basis for a
         # block-diagonal-by-fiber one -- each fiber gets its own
         # (trace_per_fiber_deg+1) wavelength columns with zero cross-fiber
         # sharing, matching C++'s per-fiber independent trace refit's
@@ -1810,7 +1810,7 @@ class PSF_Fitter:
         # pc0/asym_gh_rows support the anti-drift correction below: a
         # near-null Hessian direction mixes the trace correction with the
         # GH-i-0/GH-0-j ("pure x"/"pure y", i.e. antisymmetric-in-one-axis)
-        # shape terms (see porting-notes.md's b-band anomaly writeup --
+        # shape terms (see docs/python-port/porting-notes.md's b-band anomaly writeup --
         # correlation of -0.93 between the leading trace_x coefficient and
         # GH-1-0). C++ never encounters this at all (it never solves trace
         # and PSF shape jointly), so there's nothing to port structurally;
@@ -1843,7 +1843,7 @@ class PSF_Fitter:
         # tested, so the extra iterations (typically 8-11, one case ~20)
         # bought nothing. Cost ~1.5x more wall time for zero benefit.
         # Reverted cleanly; the wrms gap is not an iteration-budget problem
-        # -- see porting-notes.md for the next hypothesis to test instead
+        # -- see docs/python-port/porting-notes.md for the next hypothesis to test instead
         # (the unreplicated stricter-SNR trace-specific selection pass
         # C++ uses, not iteration count).
 
@@ -1863,7 +1863,7 @@ class PSF_Fitter:
         # e.g. :2707-2716/2741-2782); only the FINAL shape+flux stage widens
         # to the loose (SNR>=3) list (:2823). This branch's fit() has always
         # used one shared loose spot list across every stage -- confirmed
-        # nothing here re-subsets by SNR (porting-notes.md, 2026-08-25/26).
+        # nothing here re-subsets by SNR (docs/python-port/porting-notes.md, 2026-08-25/26).
         # Off by default. When on, builds a second, smaller bundle geometry
         # (footprint/stamp-indexing/monomials) restricted to that strict
         # subset, swapped in for 'trace'/'sigma' iterations below via a
@@ -1946,7 +1946,7 @@ class PSF_Fitter:
         # pure-cost no-benefit change for the shared basis (9-14 params,
         # always converges within the fixed 3 iterations) -- this scopes the
         # extension to only the ~350-param per-fiber basis (2026-08-04
-        # regression finding, porting-notes.md), which does NOT reliably
+        # regression finding, docs/python-port/porting-notes.md), which does NOT reliably
         # converge from zero-init in 3 iterations. Non-per-fiber runs keep
         # the exact fixed-3-iteration schedule (min_it == max_it == 3 below).
         mode = 'flux'
@@ -2014,7 +2014,7 @@ class PSF_Fitter:
             # filters out GHSIGX/GHSIGY/GHNSIG/tail terms by name, so they
             # are *never* free at the same time as the higher-order GH
             # terms in any single least-squares solve. A prior attempt
-            # (see porting-notes.md, same date) only warm-started
+            # (see docs/python-port/porting-notes.md, same date) only warm-started
             # GHSIGX/GHSIGY from a separate strict-selected pre-fit but
             # then let 'full' mode re-solve them jointly with everything
             # else anyway -- a coefficient-level comparison against cached
@@ -2090,7 +2090,7 @@ class PSF_Fitter:
             # mode excludes trace entirely instead of solving trace+shape
             # jointly -- matches C++'s real structure exactly (it never
             # solves trace and PSF shape together at all; trace is finalized
-            # in its own stage and never revisited -- see porting-notes.md's
+            # in its own stage and never revisited -- see docs/python-port/porting-notes.md's
             # b-band degeneracy investigation). Trace is fit only during
             # 'trace' mode (i=2..4) and stays frozen for the remainder of
             # the fit, same as C++ freezing it after its own TRACE stage.
@@ -2318,7 +2318,7 @@ class PSF_Fitter:
             # that direction is structurally unreachable here, matching
             # C++ exactly, and damping would just be inert dead weight.
             # Left commented (not deleted) so a diff against the main
-            # branch stays easy to read. See main branch / porting-notes.md
+            # branch stays easy to read. See main branch / docs/python-port/porting-notes.md
             # for the live version of this fix.
             # if mode == 'full':
             #     pc = pc.at[asym_gh_rows].set(pc0[asym_gh_rows] + 0.9 * (pc[asym_gh_rows] - pc0[asym_gh_rows]))
@@ -2349,7 +2349,7 @@ class PSF_Fitter:
             # "converged" after a single, barely-evaluated full-mode step.
             # Confirmed: r2@20250109 bundle 16 stopped after 6 iterations at
             # a *worse* chi2 than trace_wdeg=1's 13-iteration result: see
-            # porting-notes.md.
+            # docs/python-port/porting-notes.md.
             if mode == 'full' and prev_mode == 'full' and jnp.abs(old_chi2 - chi2) < self.chi2_precision: break
 
             # Stage advancement (flux -> trace -> sigma -> full). stage_iter
@@ -2399,7 +2399,7 @@ class PSF_Fitter:
         # EXPERIMENT (SPECEX_CROSSEVAL_CPP_PSF/_BUNDLE, 2026-08-24): does
         # C++'s bundle-edge trace solution score BETTER or the SAME under
         # Python's own pixel chi2 objective? Motivated by the exact-Hessian
-        # null result (porting-notes.md) -- with the optimizer structurally
+        # null result (docs/python-port/porting-notes.md) -- with the optimizer structurally
         # equalized, a genuine difference must live in the objective/data
         # term, not the solve. Substitute C++'s trace curve for this
         # bundle's fibers (re-expressed in Python's own per-fiber Legendre
@@ -2479,7 +2479,7 @@ class PSF_Fitter:
             # bundle chi2 numbers above can't say WHERE the gap lives --
             # every bundle has its own 2 boundary fibers baked into the
             # total, so a similar gap on a different bundle (tested
-            # porting-notes.md 2026-08-28) doesn't distinguish "boundary
+            # docs/python-port/porting-notes.md 2026-08-28) doesn't distinguish "boundary
             # fibers are uniquely bad" from "the chi2 landscape is sharp
             # for every fiber regardless of position". Attribute each
             # footprint pixel to its nearest fiber's trace center (tx_g,
@@ -2515,7 +2515,7 @@ class PSF_Fitter:
         # converged Hessian at its own solution. Computed AFTER ruling out
         # elevated true curvature (checked directly against real production
         # XTRACE/YTRACE coefficients: boundary vs interior ratio 1.00x at
-        # every Legendre degree, porting-notes.md) and lower data density
+        # every Legendre degree, docs/python-port/porting-notes.md) and lower data density
         # (checked directly against debug-spot dumps: boundary fibers get
         # the same ~25 spots/fiber and ~5 blue-wavelength(<4000A) spots/
         # fiber as interior ones) -- so if boundary fibers really are
@@ -2596,7 +2596,7 @@ class PSF_Fitter:
 
             # FOLLOW-UP (2026-08-25 cont'd): the combined X+Y block above
             # averages over axis -- a real X/Y asymmetry in the *observed*
-            # divergence (see porting-notes.md's 15-camera campaign: fiber 0
+            # divergence (see docs/python-port/porting-notes.md's 15-camera campaign: fiber 0
             # shows a real, reproducible excess in Y specifically but not X)
             # would be invisible to a diagnostic whose largest eigenvalue is
             # free to be along either axis. Redo the same eigendecomposition

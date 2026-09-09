@@ -132,14 +132,14 @@ def write_python_psf(filename, bundle_results, input_template):
             # auto-detection); carried through bundle_results since the writer
             # has no other way to know what basis pc/tc were fit in. trace_wdeg
             # is a separate, independently-sized basis for tc (defaults to
-            # wdeg when not set -- see porting-notes.md's r2@20250109
+            # wdeg when not set -- see docs/python-port/porting-notes.md's r2@20250109
             # investigation for why pc and tc can now differ here).
             wdeg_b = res.get('wdeg', 3); nz_b = get_sparse_nz(xdeg_b, wdeg_b)
             rf = 2 * (np.arange(fmin, fmax + 1) - fmin) / (fmax - fmin) - 1
             poly_f = np.stack([legendre_pol_jnp(i, rf) for i in range(xdeg_b + 1)], axis=0)
             trace_per_fiber_deg = res.get('trace_per_fiber_deg')
             if trace_per_fiber_deg is not None:
-                # Stage 1 of the full per-fiber redesign (see porting-notes.md):
+                # Stage 1 of the full per-fiber redesign (see docs/python-port/porting-notes.md):
                 # tc[0]/tc[1] are (n_fibers*(deg+1),) block-diagonal-by-fiber
                 # coefficient vectors, not a shared basis -- reshape to
                 # (n_fibers, deg+1) and add each fiber's own coefficients
@@ -180,7 +180,7 @@ def write_python_psf(filename, bundle_results, input_template):
                 # here makes downstream tools that evaluate the tail formula
                 # unconditionally (e.g. specter's gausshermite.py, used by
                 # Julien's plot_psf_comparison_using_specter.py) divide by
-                # zero -- see porting-notes.md 2026-08-23.
+                # zero -- see docs/python-port/porting-notes.md 2026-08-23.
                 if param_names[row] in ('TAILXSCA', 'TAILYSCA', 'TAILCORE'): psf_table['COEFF'][row, fmin:fmax+1, 0] = 1.0
             # Name mapping for GH terms. Must match the fitter's pc row order
             # exactly: the full (deg+1)^2-1 grid excluding only (0,0), same
@@ -216,7 +216,7 @@ def write_python_psf(filename, bundle_results, input_template):
         # trace and GH-shape rows, STATUS=-1) for both the explicit-broken
         # case (z8@20260401 fibers 473/474, z3@20260401 fiber 368,
         # b8@20221121 fibers 348/473/474) and the masked-amp case
-        # (r8@20211028 fibers 0-254) -- see porting-notes.md's 2026-08-14
+        # (r8@20211028 fibers 0-254) -- see docs/python-port/porting-notes.md's 2026-08-14
         # writeup. Runs after the normal per-bundle write above (when it
         # ran at all) so it always wins for these specific fibers,
         # regardless of what the broadcast correction wrote elsewhere in
@@ -241,7 +241,7 @@ def write_python_psf(filename, bundle_results, input_template):
     # that code) -- the neighbor-flagging is a deliberate difference from
     # specex#91's own version (which only flags the crossing pair itself)
     # and from this project's own prior behavior (flag the whole bundle,
-    # or crash the whole camera) -- see porting-notes.md's 2026-08-14
+    # or crash the whole camera) -- see docs/python-port/porting-notes.md's 2026-08-14
     # writeup. This is the NON-fatal-accuracy case: trace values are left
     # exactly as fitted, only STATUS changes. Never-fit fibers (STATUS=-1
     # already, from the block above) are excluded on both sides of the

@@ -9,27 +9,37 @@ fast without re-deriving months of investigation from scratch.
 
 ## Read these, in this order
 
-1. **`how-to-run.md`** -- how to actually run the Python port (single bundle /
-   full CCD / full night, GPU and CPU), environment setup, full CLI reference.
-   Start here for "how do I invoke this."
-2. **`current-status.txt`** -- a dated bottom-line snapshot (written
-   2026-07-21, with a later pointer at the top to its own section 14/15 as the
-   most current finding). Good for "where does this project currently stand,"
-   but always dated -- treat `porting-notes.md`'s most recent entries as more
-   current than anything here if they conflict.
-3. **`edge-cases.md`** -- quick-reference index of known non-standard
-   inputs/divergence modes (bad amps, missing preproc files, fiber-crossing
-   regions, etc.), each with a one-paragraph summary and a pointer into
-   `porting-notes.md` for the full story.
-4. **`porting-notes.md`** -- the real source of truth: an append-only,
-   chronological session log of every investigation, bug, fix, and
-   measurement across the whole port (3500+ lines). Don't read it front to
-   back -- `grep` it by topic/filename/date. This is where the actual
-   evidence for any claim in the three docs above lives.
-5. **`guide_fits_output.md`** -- the output PSF FITS file format (extensions,
-   columns, what STATUS values mean).
-6. **`python-vs-cpp-diff.txt`** -- a standing reference diff/comparison
-   artifact used by some of the `testing/` parity scripts.
+`how-to-run.md` and `env_setup.sh` live at the repo root; everything else
+about the port's history, status, and known edge cases lives under
+`docs/python-port/` -- moved there 2026-09-09 to keep the repo root down to
+just this file, `how-to-run.md`, and `env_setup.sh`.
+
+1. **`how-to-run.md`** (repo root) -- how to actually run the Python port
+   (single bundle / full CCD / full night, GPU and CPU), environment setup,
+   full CLI reference. Start here for "how do I invoke this."
+2. **`docs/python-port/current-status.txt`** -- a dated bottom-line
+   snapshot. Good for "where does this project currently stand," but always
+   dated -- treat `porting-notes.md`'s most recent entries as more current
+   than anything here if they conflict.
+3. **`docs/python-port/edge-cases.md`** -- quick-reference index of known
+   non-standard inputs/divergence modes (bad amps, missing preproc files,
+   fiber-crossing regions, etc.), each with a one-paragraph summary and a
+   pointer into `porting-notes.md` for the full story.
+4. **`docs/python-port/porting-notes.md`** -- the real source of truth: an
+   append-only, chronological session log of every investigation, bug, fix,
+   and measurement across the whole port (6000+ lines). Don't read it front
+   to back -- `grep` it by topic/filename/date. This is where the actual
+   evidence for any claim in the other docs here lives.
+5. **`docs/python-port/guide_fits_output.md`** -- the output PSF FITS file
+   format (extensions, columns, what STATUS values mean).
+6. **`docs/python-port/python-vs-cpp-diff.txt`** -- a standing reference
+   diff/comparison summary (timing + correctness + the concrete algorithmic
+   differences between the two backends), used by some of the `testing/`
+   parity scripts and kept current as new campaigns land.
+7. **`docs/python-port/algorithm-paper-map.md`** -- maps the algorithms in
+   Julien Guy's specex paper (`2209.14482v2.pdf`, repo root) to where they're
+   implemented in both `src/` (C++) and `py/specex/` (Python), including
+   where/why the port's behavior deviates from a literal reading of either.
 
 **Do not go looking for local Claude Code session transcripts as a history
 source.** They're per-user, not portable across machines/accounts, and are
@@ -58,7 +68,7 @@ transcripts.
     apply *identical* masking: `ivar[mask != 0] = 0.0` before either
     fitter ever runs, so cosmic-ray/bad-pixel exclusion (preproc MASK bit
     4 etc.) is handled the same way in both backends by construction (see
-    porting-notes.md 2026-09-06).
+    docs/python-port/porting-notes.md 2026-09-06).
   - `fitter.py` -- the actual fit engine: spot selection and the staged
     bundle fit (`PSF_Fitter.fit()`). Despite the name, this is **not** a
     single joint solve: `fit()` advances through fixed stages -- `'flux'`
@@ -71,7 +81,7 @@ transcripts.
     combined `fit_trace=true; fit_psf=true` call exists in the C++ source
     is permanently commented-out dead code) and was merged into this
     branch from the since-retired `experiment/cpp-alternating-solve` branch
-    (`porting-notes.md`, 2026-07-29 through 2026-08-05) -- there is no
+    (`docs/python-port/porting-notes.md`, 2026-07-29 through 2026-08-05) -- there is no
     separate branch to check out for this anymore, it's simply how `fit()`
     behaves by default. Production defaults as of that merge:
     `trace_per_fiber_deg=6` (each fiber gets its own independent
@@ -80,7 +90,7 @@ transcripts.
     fiber's degree>=1 trace coefficients toward the bundle's cross-fiber
     mean -- C++ has the identical mechanism coded but its own CLI default
     leaves it off in real production, `src/specex_pyoptions.h`; see
-    `porting-notes.md`'s 2026-08-25/26 fiber-0-investigation entries for
+    `docs/python-port/porting-notes.md`'s 2026-08-25/26 fiber-0-investigation entries for
     what this asymmetry does and doesn't explain). The default
     `--line-search grid` path is what's actually used in production; the
     alternate `'brent'`/`'cpp'` line-search modes and their helper

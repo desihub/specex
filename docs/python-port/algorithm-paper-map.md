@@ -1,6 +1,6 @@
 # Paper-to-code map: Guy et al. (2023) &rarr; specex
 
-This maps the algorithms described in [Guy et al. 2023](2209.14482v2.pdf)
+This maps the algorithms described in [Guy et al. 2023](../../2209.14482v2.pdf)
 ("The Spectroscopic Data Processing Pipeline for the Dark Energy
 Spectroscopic Instrument", arXiv:2209.14482) to where they're implemented in
 this repo, for both the original C++ (`src/`) and the Python/JAX port
@@ -11,7 +11,7 @@ section at the end for the paper's other pipeline stages and where (if
 anywhere) they live.
 
 For *why* the Python port's numbers occasionally differ from a literal
-reading of the paper or the C++ code, `porting-notes.md` (repo root,
+reading of the paper or the C++ code, `porting-notes.md` (same folder,
 chronological session log) has the full investigation and evidence trail for
 every deviation noted below -- this document gives the pointer, not the
 argument.

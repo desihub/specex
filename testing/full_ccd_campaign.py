@@ -107,7 +107,7 @@ def run_cpp_and_py_concurrent(case, cpp_fits, py_fits, cpp_log, py_log):
 
     Poll both independently rather than cpp_proc.wait() then py_proc.wait()
     in sequence -- now that the persistent JAX compilation cache + power-
-    of-2 shape padding (see porting-notes.md) often make Python finish
+    of-2 shape padding (see docs/python-port/porting-notes.md) often make Python finish
     *before* C++, a strict wait()-then-wait() ordering silently caps t_py
     at whatever t_cpp was: py_proc.wait() on an already-finished process
     returns instantly, but time.time() - t0_py at that point measures "how
@@ -210,7 +210,7 @@ def main():
 
         # Breakdown by fiber category:
         #  - true camera edge: fiber 0 or 499 (the true slit edge, distinct
-        #    phenomenon from ordinary bundle boundaries -- see porting-notes.md)
+        #    phenomenon from ordinary bundle boundaries -- see docs/python-port/porting-notes.md)
         #  - bundle edge: internal bundle-boundary fibers (fib%25 in {0,24}),
         #    excluding the true camera edge
         #  - interior: everything else

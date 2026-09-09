@@ -166,7 +166,7 @@ def detect_gpus_per_node(default=4):
 # queue when no real --lpt-profile is available -- not meant to be an
 # accurate absolute estimate, just enough to stop z (the heaviest, most
 # variable band) from being queued dead last. Roughly matches typical
-# wpg=10 b/7 r/4 z per-camera times (see porting-notes.md).
+# wpg=10 b/7 r/4 z per-camera times (see docs/python-port/porting-notes.md).
 DEFAULT_DURATION_HINT = {"b": 90.0, "r": 100.0, "z": 150.0}
 
 
@@ -186,7 +186,7 @@ def split_cameras_for_nodes(cameras, n_nodes, lpt_profile):
     heaviest, most variable band -- there's no lighter b/r work left to
     overlap a straggling z camera against, and the whole node's wall time
     is gated by z's own tail. This is the exact single-node instance of the
-    cross-node tail-starvation pattern porting-notes.md's 2026-08-10 LPT
+    cross-node tail-starvation pattern docs/python-port/porting-notes.md's 2026-08-10 LPT
     session found and fixed at the multi-node level; fixing it here too
     (uses the real profile if given, else DEFAULT_DURATION_HINT) closes it
     for the single-node case as well, where it was previously untouched --
@@ -629,7 +629,7 @@ def run_backend_cpp(args):
     """Shells out to the real production driver, desi_proc --mpi, into a
     private SPECPROD (never the real 'matterhorn' production tree). Rank
     count follows the validated single/multi-node formula from
-    porting-notes.md (-N1<->n101 ~11min, -N3<->n301 ~7min -- ranks =
+    docs/python-port/porting-notes.md (-N1<->n101 ~11min, -N3<->n301 ~7min -- ranks =
     100*nodes + 1; 600 total bundles / (ranks-1) workers divides evenly for
     any node count on this formula)."""
     n_nodes = args.nodes or 1

@@ -172,7 +172,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
 
     t_entry = time.time()
     # trace_wdeg defaults to wdeg (old behavior) -- see fitter.py's
-    # PSF_Fitter.fit() docstring/comment and porting-notes.md's
+    # PSF_Fitter.fit() docstring/comment and docs/python-port/porting-notes.md's
     # r2@20250109 investigation for why this is a separate knob rather
     # than always reusing wdeg (the PSF-shape correction's degree).
     # trace_wdeg_x/trace_wdeg_y further override it per axis -- added
@@ -204,7 +204,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # process before its first JAX use, to cap the small amount of GPU
         # memory its own post-pool write_python_psf() permanently grows
         # into (BFC allocators don't shrink back, even with PREALLOCATE=
-        # false -- see porting-notes.md's 2026-09-xx persistent-worker
+        # false -- see docs/python-port/porting-notes.md's 2026-09-xx persistent-worker
         # writeup) -- without this explicit override here, that restrictive
         # setting would otherwise leak into these spawn-context workers too
         # (they inherit the parent's os.environ at spawn time) and starve
@@ -243,7 +243,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # themselves -- confirmed directly as the root cause of a real
         # Perlmutter hybrid-allocation pilot going ~3x below its own
         # achievable per-worker throughput while also slowing a concurrent
-        # GPU job by 1.56x (see porting-notes.md, 2026-07-21). Scale each
+        # GPU job by 1.56x (see docs/python-port/porting-notes.md, 2026-07-21). Scale each
         # worker's thread budget to roughly (available cores / worker
         # count) so N workers collectively stay within the node's real
         # core count instead of each claiming all of them.
@@ -260,7 +260,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     # cache) -- this driver spawns a fresh process per bundle, so without
     # this every worker pays a full JIT-compile cost from scratch even when
     # an identical (function, array-shape) pair was already compiled by an
-    # earlier bundle/camera in the same campaign. Validated in porting-notes.md
+    # earlier bundle/camera in the same campaign. Validated in docs/python-port/porting-notes.md
     # "JAX persistent compilation cache" -- ~43% faster end-to-end wall time
     # on a warm cache in isolated single-bundle testing, with the previously
     # documented "final joint fit is slower in Python than C++" finding
@@ -270,7 +270,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     # Mixed precision (float32 Jacobian in the joint-fit accumulate step,
-    # float64 everywhere else) is the default -- see porting-notes.md
+    # float64 everywhere else) is the default -- see docs/python-port/porting-notes.md
     # "Mixed precision, tested exactly as directed" for validation (single-
     # bundle chi2 relative error 2.4e-6, full-CCD wavelength RMS matches the
     # float64 pipeline to 4 decimal places, 71% GPU memory cut). Pass
@@ -342,7 +342,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # Detect fibers with essentially no real data anywhere along their
         # trace (a masked/dead CCD amp, not the milder single-bad-column
         # case the trace-prior ndead gate already handles) -- see
-        # find_masked_amp_fibers' docstring and porting-notes.md's
+        # find_masked_amp_fibers' docstring and docs/python-port/porting-notes.md's
         # 2026-08-14 writeup. These are excluded from candidate generation
         # below exactly like an explicitly-broken fiber, and get the same
         # "propagate the input starting-guess PSF, flag STATUS=-1" write-
@@ -429,7 +429,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # gets copied in) leaves its XTRACE/YTRACE output row as literal
         # zero. Matched here rather than left to silently interpolate a
         # plausible-looking but never-actually-validated position from
-        # neighboring fibers (see porting-notes.md's b3@20241208 bundle-2
+        # neighboring fibers (see docs/python-port/porting-notes.md's b3@20241208 bundle-2
         # fiber-65 writeup) -- downstream consumers presumably rely on
         # this all-zero convention to recognize an untrustworthy fiber.
         # Threshold is <2, not strictly 0: C++'s own selection runs an
@@ -449,7 +449,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # entirely and its XTRACE/YTRACE row is left completely untouched
         # at the *input* template's value (confirmed bit-for-bit identical
         # to the input PSF, both for z8@20260401 fibers 473/474 and
-        # z3@20260401 fiber 368 -- see porting-notes.md) -- it is NOT
+        # z3@20260401 fiber 368 -- see docs/python-port/porting-notes.md) -- it is NOT
         # zeroed the way a dynamically-discovered zero-spot fiber is
         # (that's the mask=3/resize(0) case above). Excluding a fiber from
         # candidate generation naturally drops its spot count to 0, which
@@ -486,7 +486,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # takes precedence. C++'s own bundle footprint extends up to 7px past
         # fiber_min/fiber_max on each side (specex_psf_fitter.cc:1043-1058);
         # Python's was zero-margin, which root-caused the bundle-boundary
-        # trace divergence (porting-notes.md, 2026-09-01) -- 7 is now the
+        # trace divergence (docs/python-port/porting-notes.md, 2026-09-01) -- 7 is now the
         # production default, matching C++, not an experimental opt-in.
         if footprint_margin is not None:
             os.environ["SPECEX_FOOTPRINT_MARGIN"] = str(footprint_margin)
@@ -607,7 +607,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             # Meaningless (ignored by write_python_psf) when
             # trace_per_fiber_deg is set instead.
             'trace_wdeg': None if trace_per_fiber_deg is not None else trace_wdeg_shared_abs,
-            # Stage 1 of the full per-fiber redesign (see porting-notes.md):
+            # Stage 1 of the full per-fiber redesign (see docs/python-port/porting-notes.md):
             # tells write_python_psf to use the per-fiber (not
             # broadcast-across-fibers) write-back path.
             'trace_per_fiber_deg': trace_per_fiber_deg,
@@ -668,7 +668,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         workers_per_gpu (int or None): concurrent bundle-fit workers packed
             onto each GPU; default (None) auto-selects 5, or 3 for z-band when
             trace_per_fiber_deg is active (its larger per-fiber design matrix
-            is prone to GPU OOM at 5 -- see porting-notes.md).
+            is prone to GPU OOM at 5 -- see docs/python-port/porting-notes.md).
         cpu_workers (int or None): concurrent worker processes for
             backend="cpu"; defaults to n_gpus.
         gpu_worker_threads (int or None): diagnostic thread cap forced on each
@@ -734,7 +734,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             # z-band's larger per-fiber design matrix (~350 params/bundle)
             # combined with its higher spot density hits GPU
             # RESOURCE_EXHAUSTED at 5 workers/GPU specifically -- see
-            # porting-notes.md's 2026-08-05 OOM investigation. 3/GPU fully
+            # docs/python-port/porting-notes.md's 2026-08-05 OOM investigation. 3/GPU fully
             # avoids it (validated OOM-free across all 10 z-band cases in
             # the definitive 30-CCD campaign) at a modest packing cost.
             workers_per_gpu = 3 if (band == 'z' and trace_per_fiber_deg is not None) else 5
@@ -746,7 +746,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             trace_legendre_deg_wave_x = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else legendre_deg_wave
         if trace_legendre_deg_wave_y is None:
             # b/r default: 2, not 1 -- validated against the real C++ engine
-            # (run_specex(), now working locally -- see porting-notes.md)
+            # (run_specex(), now working locally -- see docs/python-port/porting-notes.md)
             # across 6 bundles on both flagged exposures (r2@20250109,
             # r2@20241208): mean yrms 0.2182px -> 0.0686px (68% cut, into
             # normal-case territory). z-band kept coupled to its own wdeg
@@ -769,13 +769,13 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         packing = workers_per_gpu  # bundle-fit workers packed onto each GPU
         # Normally unset -- GPU-backend workers' host-side NumPy/BLAS calls
         # (the selection/housekeeping phase, ~70% of a bundle's wall time,
-        # see porting-notes.md) default to unconstrained thread counts,
+        # see docs/python-port/porting-notes.md) default to unconstrained thread counts,
         # unlike --backend cpu workers which always get a computed budget
         # below. --gpu-worker-threads lets this be forced explicitly, to
         # test whether that default threading is (a) load-bearing for
         # per-worker speed or (b) pure oversubscription noise that's
         # crowding out any concurrent CPU-backend work -- see the 2026-08-09
-        # profiling session in porting-notes.md.
+        # profiling session in docs/python-port/porting-notes.md.
         gpu_thread_cap = gpu_worker_threads
         if gpu_thread_cap is not None:
             print(f"  GPU-worker thread cap: {gpu_thread_cap} threads/worker (forced via --gpu-worker-threads)", flush=True)
@@ -949,27 +949,27 @@ def main():
     parser.add_argument("--last-fiber", type=int, help="Last fiber to fit")
     parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header).")
     parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, both axes at once (independent of --legendre-deg-wave's PSF-shape degree). Overridden per-axis by --trace-legendre-deg-wave-x/-y if either is also given. Default: auto per axis -- see those flags' help.")
-    parser.add_argument("--trace-legendre-deg-wave-x", type=int, default=None, help="Legendre degree for the trace-position X basis only (default: auto -- same as --legendre-deg-wave, i.e. unchanged from the pre-decoupling behavior; X was found not to need the extra curvature Y does -- see porting-notes.md's r2@20250109 investigation)")
-    parser.add_argument("--trace-legendre-deg-wave-y", type=int, default=None, help="Legendre degree for the trace-position Y basis only (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; validated against the real C++ engine -- see porting-notes.md's r2@20250109 investigation)")
-    parser.add_argument("--trace-per-fiber-deg", type=int, default=6, help="Replaces the shared trace basis with a block-diagonal-by-fiber one at this wavelength degree (6 matches the input PSF's own native trace degree, and C++'s per-fiber parameter count), paired with an ndead-gated cross-fiber trace-coefficient prior (see --trace-prior-* below). DEFAULT AS OF 2026-08-05: on at degree 6 -- validated on a definitive 30-CCD isolated-cache campaign (porting-notes.md), 30/30 cases improved on both xrms (-37.5%% mean) and yrms (-60.7%% mean) vs the old shared-basis default, for a ~9%% timing cost. Pass 0 to fall back to the old shared trace_legendre_deg_wave_x/y basis.")
-    parser.add_argument("--trace-prior-deg", type=int, default=1, help="Legendre degree at/above which --trace-per-fiber-deg's per-fiber coefficients are pulled toward the bundle's cross-fiber consensus (C++'s trace prior, specex_psf_fitter.cc, ported and ndead-gated -- see porting-notes.md). Only active when --trace-per-fiber-deg is on. Default 1 (each fiber's own physical position, degree 0, stays fully independent; only higher-order shape terms are regularized). Pass a negative value to disable the prior entirely while keeping per-fiber trace on.")
-    parser.add_argument("--trace-prior-weight", type=float, default=1e5, help="Trace-prior penalty weight (C++'s own hardcoded value, 1e8, was found to measurably harm healthy bundles when applied blanket-style -- see porting-notes.md's weight sweep). Only matters for fibers flagged by --trace-prior-ndead-threshold.")
+    parser.add_argument("--trace-legendre-deg-wave-x", type=int, default=None, help="Legendre degree for the trace-position X basis only (default: auto -- same as --legendre-deg-wave, i.e. unchanged from the pre-decoupling behavior; X was found not to need the extra curvature Y does -- see docs/python-port/porting-notes.md's r2@20250109 investigation)")
+    parser.add_argument("--trace-legendre-deg-wave-y", type=int, default=None, help="Legendre degree for the trace-position Y basis only (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; validated against the real C++ engine -- see docs/python-port/porting-notes.md's r2@20250109 investigation)")
+    parser.add_argument("--trace-per-fiber-deg", type=int, default=6, help="Replaces the shared trace basis with a block-diagonal-by-fiber one at this wavelength degree (6 matches the input PSF's own native trace degree, and C++'s per-fiber parameter count), paired with an ndead-gated cross-fiber trace-coefficient prior (see --trace-prior-* below). DEFAULT AS OF 2026-08-05: on at degree 6 -- validated on a definitive 30-CCD isolated-cache campaign (docs/python-port/porting-notes.md), 30/30 cases improved on both xrms (-37.5%% mean) and yrms (-60.7%% mean) vs the old shared-basis default, for a ~9%% timing cost. Pass 0 to fall back to the old shared trace_legendre_deg_wave_x/y basis.")
+    parser.add_argument("--trace-prior-deg", type=int, default=1, help="Legendre degree at/above which --trace-per-fiber-deg's per-fiber coefficients are pulled toward the bundle's cross-fiber consensus (C++'s trace prior, specex_psf_fitter.cc, ported and ndead-gated -- see docs/python-port/porting-notes.md). Only active when --trace-per-fiber-deg is on. Default 1 (each fiber's own physical position, degree 0, stays fully independent; only higher-order shape terms are regularized). Pass a negative value to disable the prior entirely while keeping per-fiber trace on.")
+    parser.add_argument("--trace-prior-weight", type=float, default=1e5, help="Trace-prior penalty weight (C++'s own hardcoded value, 1e8, was found to measurably harm healthy bundles when applied blanket-style -- see docs/python-port/porting-notes.md's weight sweep). Only matters for fibers flagged by --trace-prior-ndead-threshold.")
     parser.add_argument("--trace-prior-ndead-threshold", type=int, default=500, help="A fiber's C++-style dead-pixel count (ndead) above this triggers the trace prior for that fiber only; fibers below it are completely unaffected (bit-identical to no-prior). 500 comfortably separates normal fibers (ndead ~20-120) from the known bad cases (ndead ~2300-17500).")
-    parser.add_argument("--masked-amp-ndead-threshold", type=int, default=8000, help="A fiber's ndead above this, PLUS a contiguous run of >=3 such fibers, marks it as overlapping a masked/dead CCD amp (no real data at all, not the milder single-bad-column case --trace-prior-ndead-threshold handles) -- the fiber is excluded from the fit entirely, its input starting-guess PSF is propagated unchanged, and its STATUS is set to -1, matching real C++'s own observed behavior. FIRST-PASS HEURISTIC: calibrated against one real case (r8@20211028/00106399's amp-A mask, see porting-notes.md's 2026-08-14 writeup) -- treat as tunable, not load-bearing precision.")
-    parser.add_argument("--footprint-margin", type=int, default=7, help="Pixels each bundle's pixel footprint extends past its own fiber_min/fiber_max trace center on each side, before the fit ever sees the data (get_bundle_footprint, fitter.py). Matches C++'s own ComputeWeigthImage margin (specex_psf_fitter.cc:1043-1058, 'half distance between center of ext. fibers of adjacent bundles') -- default 7 root-causes and closes the bundle-boundary trace divergence (porting-notes.md, 2026-09-01): a zero-margin footprint was silently discarding real boundary-fiber pixel data. Pass 0 to reproduce the old zero-margin behavior; any positive value is accepted.")
+    parser.add_argument("--masked-amp-ndead-threshold", type=int, default=8000, help="A fiber's ndead above this, PLUS a contiguous run of >=3 such fibers, marks it as overlapping a masked/dead CCD amp (no real data at all, not the milder single-bad-column case --trace-prior-ndead-threshold handles) -- the fiber is excluded from the fit entirely, its input starting-guess PSF is propagated unchanged, and its STATUS is set to -1, matching real C++'s own observed behavior. FIRST-PASS HEURISTIC: calibrated against one real case (r8@20211028/00106399's amp-A mask, see docs/python-port/porting-notes.md's 2026-08-14 writeup) -- treat as tunable, not load-bearing precision.")
+    parser.add_argument("--footprint-margin", type=int, default=7, help="Pixels each bundle's pixel footprint extends past its own fiber_min/fiber_max trace center on each side, before the fit ever sees the data (get_bundle_footprint, fitter.py). Matches C++'s own ComputeWeigthImage margin (specex_psf_fitter.cc:1043-1058, 'half distance between center of ext. fibers of adjacent bundles') -- default 7 root-causes and closes the bundle-boundary trace divergence (docs/python-port/porting-notes.md, 2026-09-01): a zero-margin footprint was silently discarding real boundary-fiber pixel data. Pass 0 to reproduce the old zero-margin behavior; any positive value is accepted.")
     parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
     parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
-    parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see porting-notes.md's OOM investigation). Pass explicitly to override.")
+    parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see docs/python-port/porting-notes.md's OOM investigation). Pass explicitly to override.")
     parser.add_argument("--cpu-workers", type=int, help="Concurrent worker processes for --backend cpu (default: --gpu count)")
-    parser.add_argument("--gpu-worker-threads", type=int, default=None, help="Force an OMP/BLAS/XLA thread cap on each --backend gpu worker's host-side (CPU) computation, mirroring --backend cpu's own auto-computed budget. Default: unconstrained (each worker's BLAS calls may claim all visible threads). Diagnostic flag for probing whether GPU-worker host threading is load-bearing or pure oversubscription -- see porting-notes.md.")
+    parser.add_argument("--gpu-worker-threads", type=int, default=None, help="Force an OMP/BLAS/XLA thread cap on each --backend gpu worker's host-side (CPU) computation, mirroring --backend cpu's own auto-computed budget. Default: unconstrained (each worker's BLAS calls may claim all visible threads). Diagnostic flag for probing whether GPU-worker host threading is load-bearing or pure oversubscription -- see docs/python-port/porting-notes.md.")
     parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
     parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
     parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
     parser.add_argument("--max-lines", type=int, default=200, help="Maximum number of lines to keep per bundle")
     parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
     parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
-    parser.add_argument("--double-precision", action="store_true", help="Force full float64 precision for the joint-fit Jacobian (default: mixed float32/float64 -- see porting-notes.md; validated equivalent accuracy, ~71%% less GPU memory/worker)")
-    parser.add_argument("--line-search", type=str, default="grid", choices=["grid", "brent", "cpp"], help="EXPERIMENTAL: the final joint fit's per-iteration step-size search. 'grid' (default): the long-standing coarse 3-point [0.2,0.5,1.0] search. 'brent': a continuous but NOT C++-faithful search, kept for reference. 'cpp': a faithful replica of C++'s actual algorithm (mode-dependent skip logic + a direct Numerical Recipes brent() port, see specex_psf_fitter.cc/specex_brent.cc). Both 'brent' and 'cpp' tested negative (no xrms/yrms change on 2 hard + 2 normal bundles) -- see porting-notes.md.")
+    parser.add_argument("--double-precision", action="store_true", help="Force full float64 precision for the joint-fit Jacobian (default: mixed float32/float64 -- see docs/python-port/porting-notes.md; validated equivalent accuracy, ~71%% less GPU memory/worker)")
+    parser.add_argument("--line-search", type=str, default="grid", choices=["grid", "brent", "cpp"], help="EXPERIMENTAL: the final joint fit's per-iteration step-size search. 'grid' (default): the long-standing coarse 3-point [0.2,0.5,1.0] search. 'brent': a continuous but NOT C++-faithful search, kept for reference. 'cpp': a faithful replica of C++'s actual algorithm (mode-dependent skip logic + a direct Numerical Recipes brent() port, see specex_psf_fitter.cc/specex_brent.cc). Both 'brent' and 'cpp' tested negative (no xrms/yrms change on 2 hard + 2 normal bundles) -- see docs/python-port/porting-notes.md.")
     parser.add_argument("--debug-spots", action="store_true", help="Write per-pass spot-selection debug dump files (.pyrawspots.txt, .pyspots_pass*.txt, .pyrawspots_final.txt, .pyspots.txt, .refined_centroids_debug.txt), the direct Python analog of C++'s --debug-spots. Off by default -- adds I/O overhead (one set of files per bundle worker) with no effect on the fitted output.")
 
     args = parser.parse_args()
@@ -1018,7 +1018,7 @@ def main():
         # real concurrent CPU+GPU production use this touches CUDA while
         # concurrent GPU-backend jobs have already exhausted GPU memory --
         # confirmed directly to crash with CUDA_ERROR_OUT_OF_MEMORY on all
-        # visible devices (see porting-notes.md), and the prime suspect for
+        # visible devices (see docs/python-port/porting-notes.md), and the prime suspect for
         # an earlier session's CPU+GPU hybrid deadlock (same code path, a
         # hang instead of a crash is plausible under different CUDA-driver
         # contention timing).
@@ -1063,7 +1063,7 @@ def main():
     if failed_bundles:
         # Previously this always exited 0 even when bundles were silently
         # dropped from the output -- rc==0 alone was never sufficient to
-        # confirm a real success (see porting-notes.md's OOM investigation).
+        # confirm a real success (see docs/python-port/porting-notes.md's OOM investigation).
         # A non-zero exit here lets callers (run_night.py, desi_proc) tell
         # a genuine failure apart from success without grepping logs.
         sys.exit(1)

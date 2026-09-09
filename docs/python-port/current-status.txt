@@ -4,9 +4,23 @@ Full detail and evidence trail for everything below lives in porting-notes.md
 (append-only, chronological, grep it by topic keyword for the raw session logs).
 Standing test case throughout: night 20260401, expid 00344649, unless noted.
 
-*** LATEST (2026-08-30): see section 17. The bundle-boundary trace
+*** LATEST (2026-09-09): see section 18. Cumulative validated sample now
+*** N=20 independent nights (10 original + 10 fresh): Python (persistent-
+*** worker mode) at **502.5s warm / 591.2s cold** vs C++'s **648.3s** mean
+*** (~18% faster warm), correctness **xrms=0.0120px/yrms=0.0129px** vs C++,
+*** holding steady across both independently-sampled halves. A dedicated
+*** cosmic-ray/masked-pixel audit (Julien's request) found no C++/Python
+*** asymmetry and corrected a real doc error (`run_specex()` was
+*** mischaracterized as "legacy"; it's the actual production C++ codepath).
+*** Julien's separable-B-spline-PSF idea was scoped (rough effort estimate
+*** only, not attempted) per Stephen's explicit direction to prioritize
+*** production-readiness over new modeling work right now. Sections 1-17
+*** below are the historical build-up and are still accurate as history,
+*** but treat section 18 as the current bottom line.
+
+*** SUPERSEDED (2026-08-30): see section 17. The bundle-boundary trace
 *** divergence -- present since the earliest days of this port, root-caused
-*** exactly this session -- is CLOSED. Root cause: Python's per-bundle pixel
+*** that session -- was CLOSED. Root cause: Python's per-bundle pixel
 *** footprint was clipped at zero margin, silently discarding real
 *** boundary-fiber pixel data C++ deliberately includes (a 7px margin into
 *** the neighboring bundle's territory). Fixed and now the production
@@ -15,9 +29,8 @@ Standing test case throughout: night 20260401, expid 00344649, unless noted.
 *** the first time in this port's history, on 9 simulated cameras and 19
 *** real production cases with zero exceptions. Sections 1-16 below are the
 *** historical build-up (including section 16's own two "hard cases," one
-*** of which -- the r9@20220120 bundle-boundary amplification -- this
-*** section fully explains) and are still accurate as history, but treat
-*** section 17 as the current bottom line.
+*** of which -- the r9@20220120 bundle-boundary amplification -- that
+*** section fully explains) and are still accurate as history.
 
 *** SUPERSEDED (2026-08-05): see section 15. `python-gpu-port` (this branch) is
 *** now at commit a173d47, pushed to origin -- per-fiber trace + the ndead-
@@ -1102,3 +1115,137 @@ true-slit-edge (fiber 0/499) phenomenon relates to this fix at all (not
 tested -- architecturally a different boundary condition than an internal
 bundle seam); Julien's convolved-preproc amplifier-test data is still
 broken on his end (blocked, reported, not this project's bug).
+
+===============================================================================
+18. PERSISTENT-WORKER SPEEDUP, CUMULATIVE N=20-NIGHT VALIDATION, COSMIC-RAY
+    AUDIT FOR JULIEN, AND A DOC-ACCURACY FIX (2026-09-02 through 2026-09-09)
+===============================================================================
+Follow-up to section 17: the 6 queued nights got rerun (as part of a second,
+fully independent 10-night set below), a real speed win landed and was
+promoted to a code default, and a specific correctness question from Julien
+got a definitive answer. Full evidence trail for everything in this section:
+porting-notes.md's 2026-09-02, 09-04, 09-05, and 09-06 entries.
+
+**Speed: persistent-worker mode + bundle-pool reuse, -18.4% vs C++ (2026-09-02).**
+Three code changes to `testing/run_night.py`/`py/specex/specex.py`, each
+measured independently on the standing 10-night set:
+  (a) `--worker-mode persistent` -- one long-lived worker process per GPU
+      pulling cameras off a shared queue, instead of a fresh
+      `python -m specex.specex` subprocess per camera (removes per-camera
+      interpreter/JAX-import startup cost);
+  (b) bundle-worker Pool reuse across a GPU worker's whole camera stream
+      (persistent mode only, on by default, `--no-pool-reuse` to disable);
+  (c) `workers_per_gpu` retuned from 10/7/4 (b/r/z) to 12/8/5, given the
+      extra memory headroom (b) frees up.
+Stacked together (naive camera-to-GPU split + pool reuse + wpg 12/8/5, now
+`run_night.py`'s own `--worker-mode persistent` default settings): 10-night
+mean **483.3s** vs. C++'s 592.3s (**-18.4%**, first configuration to beat
+C++ on this project). Correctness unchanged to 4 decimal places across every
+intermediate configuration tested -- these are pure scheduling levers, not
+numerics changes. `--worker-mode` itself still defaults to the older,
+slower `subprocess` mode in the CLI (newer, less battle-tested, not because
+of any known downside) -- pass `--worker-mode persistent` explicitly.
+
+**Root cause of a real ~15-20% timing regression: NERSC $HOME disk quota,
+not JAX cache size (2026-09-04).** A same-methodology rerun of the 10-night
+speed campaign landed at 577.1s instead of 483.3s. The initial hypothesis
+(JAX's persistent compile cache, grown to 630K+ files, slow to look up) was
+tested via an A/B and appeared to rule itself out -- but that test only
+`mv`'d the cache aside, which frees no disk quota. Actually clearing space
+found the real cause: `$HOME` was completely at its NERSC quota, causing
+`RESOURCE_EXHAUSTED` disk-quota failures on 16/30 cameras of a test run --
+each a real bundle failure at `rc=0` (yet another instance of "never trust
+rc==0 alone"), not just added retry latency. Fix: `pip cache purge` plus
+pruning the old JAX cache restored `$HOME` headroom; a clean cold/warm A/B
+with real headroom landed at 552.1s cold / **484.7s warm**, matching the
+483.3s benchmark to within 0.3%. **Standing recommendation: before trusting
+any timing number on this project, confirm `$HOME` is actually writable,
+and keep the JAX persistent compilation cache pruned or relocated off
+`$HOME`** (e.g. to `$SCRATCH`).
+
+**Cumulative N=20-night validation (2026-09-05).** A second, fully
+independent 10-night/expid set (same CTE-clean-calibnight + full-30-camera-
+arc-coverage selection methodology, different seed) reproduces the original
+10 nights on every metric, closing out the "6 nights not yet rerun" item
+from section 17:
+  - Python speed (persistent+pool-reuse+wpg 12/8/5): **502.5s warm / 591.2s
+    cold** mean (a consistent ~15% cold-to-warm gap, no exceptions).
+  - C++ speed (`stage_preproc.py`-staged, same methodology): **648.3s**
+    mean, 10/10 nights rc=0, 0 bundle warnings.
+  - Correctness vs. C++: **xrms=0.0120px, yrms=0.0131px** (range xrms
+    0.0112-0.0129, yrms 0.0117-0.0147) -- reproduces the original 10-night
+    figures (0.0120/0.0126px) essentially exactly, confirming the
+    footprint-margin fix (section 17) holds on a fully independent sample.
+  - sigma_y (PSF-shape) check (b4/r2/z8, boundary/interior fibers, 3
+    wavelengths, 180 points): mean \|py/cpp-1\|=0.458%, band breakdown
+    b=0.776%/r=0.454%/z=0.144% -- matches the historical 0.2-1.6%
+    band-dependent pattern exactly. **Still open, unexplained**: why the
+    b-band residual runs noticeably higher than r/z (leading hypothesis:
+    weak blue-edge calibration signal, not investigated further).
+  Cumulative totals across both 10-night sets (N=20 unique nights): mean
+  xrms=0.0120px, yrms≈0.0129px vs. C++, Python ~18% faster warm with
+  `--worker-mode persistent`. Full tables in
+  `docs/python-port/python-vs-cpp-diff.txt` section 4.
+
+**Julien's cosmic-ray/masked-pixel question: no C++/Python asymmetry, and a
+real doc-accuracy fix (2026-09-06).** Julien asked whether the two backends
+handle cosmic-ray-hit spots differently, worried it had never been tested,
+and pointed at a concrete real example (r6/20251013/00316043, fiber
+270@6601A). Two independent lines of evidence, both negative (no
+divergence found):
+  - **Code-path audit**: `py/specex/io.py`'s `read_preproc()` (Python path)
+    and `read_preproc_cpp()` (C++ path) apply the *identical* masking
+    (`ivar[mask != 0] = 0.0`) before either fitter ever runs -- confirmed
+    this is really what production calls, not just a plausible-looking
+    function: `desispec.scripts.specex` (the real `desi_compute_psf` entry
+    point) does `from specex.specex import run_specex` and calls it
+    directly. **This means `CLAUDE.md`'s prior description of
+    `run_specex()` as "legacy... not part of the production pipeline" was
+    wrong -- fixed in `CLAUDE.md`, 2026-09-06.** It's the actual production
+    C++ codepath, also reused by old comparison scripts, not the reverse.
+  - **Empirical test, broadened to 6 cases** (5 nights, r+z bands -- the
+    bands with ~5x more cosmic-hit fibers per exposure than b, per a
+    20-night prevalence scan: b=3.6/r=18.6/z=18.8 fibers/exposure): for
+    each case, compared the cosmic-hit fiber's exposure-to-exposure
+    position shift to the full distribution of ~64 other fibers' shifts in
+    the same image pair. Result: the cosmic-hit fiber's percentile within
+    that distribution ranges 14-87% (Python) / 22-81% (C++) -- solidly
+    typical every time, never an outlier, and Python/C++ track each other
+    closely case by case. Mean ratio of (cosmic-fiber shift / median-other-
+    fiber shift): Python 1.15, C++ 1.07. (Methodology note: an earlier pass
+    using one fixed "control fiber" gave misleading results due to a real
+    per-fiber/bundle-position noise-floor effect unrelated to cosmics --
+    caught and corrected before reporting; see porting-notes.md 2026-09-06.)
+  Full writeup, code-path audit, and both empirical passes: artifact
+  "Cosmic Rays Don't Break Either Fitter",
+  https://claude.ai/code/artifact/ddfbdb52-09ad-4994-87b2-0321192a8067.
+
+**Julien's separable B-spline PSF idea: scoped, not pursued (2026-09-07).**
+Julien separately proposed replacing the Gauss-Hermite PSF basis with a
+separable B-spline basis (`f_ij(x,y,xc,yc) = B_i(x-xc)*B_j(y-yc)`, plus an
+optional warping refinement). Scoped only -- effort estimate and rough
+shape of the change, not attempted -- per Stephen's explicit direction to
+prioritize "good enough" production-readiness over new modeling work right
+now. Notably, `specter` (the package real DESI spectral extraction reads
+output PSFs through) supports exactly 5 native PSF types, none of them a
+separable B-spline, so pursuing this would also need either a specter
+change or a from-scratch extraction-side implementation -- a real cost
+beyond the fitting side alone. Scoping detail in the same artifact as the
+cosmic-ray writeup above.
+
+**Also this window**: a companion brief report combining both 10-night
+campaigns into the N=20 summary Stephen asked for (artifact "20-Night
+Scorecard", https://claude.ai/code/artifact/aea36ef6-2e20-45b0-8819-f64739143632);
+and a repo cleanup (2026-09-09) moving this file and its siblings
+(`edge-cases.md`, `guide_fits_output.md`, `porting-notes.md`,
+`python-vs-cpp-diff.txt`, `algorithm-paper-map.md`) from the repo root into
+`docs/python-port/`, and removing the stale, pre-footprint-fix
+`10night_30ccd_campaign_summary.txt`. `how-to-run.md`, `env_setup.sh`, and
+`CLAUDE.md` are the only docs remaining at the repo root.
+
+**Still open**: the b-band sigma_y residual (section above); whether the
+true-slit-edge (fiber 0/499) phenomenon relates to the footprint-margin fix
+(carried over from section 17, still not tested); Julien's B-spline idea
+(scoped, not implemented, deliberately deferred); Julien's convolved-preproc
+amplifier-test data was fixed on his end and retested clean (2026-08-31,
+see section 17's artifact) -- no longer open.

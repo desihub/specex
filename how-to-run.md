@@ -124,7 +124,7 @@ This sets `PYTHONPATH` to include the local `py` directory, points `LD_LIBRARY_P
 
 All modes go through the same entry point, `python -m specex.specex` (or the `fit_ccd_native()` function directly). What changes is scope: a single bundle, one camera's full CCD, or all 30 cameras of an exposure.
 
-**Before you start timing anything, read this:** the *first* `python -m specex.specex` invocation in a fresh environment (or after a `~/.cache/specex/jax_compilation_cache` wipe) pays JAX's JIT-compilation cost on top of the real fit -- expect it to be several times slower than every run after it. `porting-notes.md`'s persistent compilation cache means that cost is paid once, not once per run: once a given (function, array-shape) pair has been compiled anywhere on this filesystem, every later run reuses it. So "cold" vs "warm" below isn't about caching your specific inputs, it's about whether *any* prior run has already compiled the shapes this run needs. Don't judge real throughput off a first run.
+**Before you start timing anything, read this:** the *first* `python -m specex.specex` invocation in a fresh environment (or after a `~/.cache/specex/jax_compilation_cache` wipe) pays JAX's JIT-compilation cost on top of the real fit -- expect it to be several times slower than every run after it. `docs/python-port/porting-notes.md`'s persistent compilation cache means that cost is paid once, not once per run: once a given (function, array-shape) pair has been compiled anywhere on this filesystem, every later run reuses it. So "cold" vs "warm" below isn't about caching your specific inputs, it's about whether *any* prior run has already compiled the shapes this run needs. Don't judge real throughput off a first run.
 
 ### 2.1 Mode 1: Single Bundle (25 fibers)
 
@@ -189,7 +189,7 @@ python testing/run_night.py --night 20260401 --expid 00344649
 
 **Scope:** this fits an *already-preprocessed* exposure (`preproc-*.fits.gz` + `shifted-input-psf-*.fits` must already exist -- true for any real matterhorn production night/expid). It is not a `desi_proc` replacement:
 
-*   `--backend cpp` runs the real production driver, `desi_proc --mpi`, which does its own preprocessing (idempotent -- skips it if outputs already exist) then calls the C++ `desi_psf_fit` binary per camera via MPI ranks. One `srun` call; scales via `--nodes` using the validated rank formula (`100*nodes + 1` -- `-N1`/`-n101` measured ~11 min, `-N3`/`-n301` measured ~7 min, see `porting-notes.md`). Output goes to a **private** `$DESI_SPECTRO_REDUX/$SPECPROD` tree (`--redux-dir`/`--specprod`, default under `--outdir`), never the real production `matterhorn` tree.
+*   `--backend cpp` runs the real production driver, `desi_proc --mpi`, which does its own preprocessing (idempotent -- skips it if outputs already exist) then calls the C++ `desi_psf_fit` binary per camera via MPI ranks. One `srun` call; scales via `--nodes` using the validated rank formula (`100*nodes + 1` -- `-N1`/`-n101` measured ~11 min, `-N3`/`-n301` measured ~7 min, see `docs/python-port/porting-notes.md`). Output goes to a **private** `$DESI_SPECTRO_REDUX/$SPECPROD` tree (`--redux-dir`/`--specprod`, default under `--outdir`), never the real production `matterhorn` tree.
 *   `--backend python` runs `python -m specex.specex` once per camera, each **pinned to a dedicated GPU** via `CUDA_VISIBLE_DEVICES` (no GPU sharing across cameras), using a **per-node dynamic work queue** so however many GPUs you have stay busy. Auto-detects node count (from the SLURM allocation) and GPUs/node (`nvidia-smi -L`); one node runs locally, multiple nodes launch via `srun -N1 -n1 -w <hostname>` per node (same pattern validated this session). Does **not** call `desi_proc` at all -- it goes straight to `specex.specex` on the existing preprocessed files.
 *   `--backend cpp-direct` runs the real C++ `desi_compute_psf --mpi` binary once per camera (`--cpp-ranks`, default 20 -- same invocation `testing/full_ccd_campaign.py` already validates single-camera), reading the exact same preprocessed inputs `--backend python` does and writing the same `fit-psf-<cam>-<expid>.{fits,log}` naming, so the two are directly comparable file-for-file. Like `--backend python`, does **not** call `desi_proc` -- no idempotent-preprocessing pass, and no single 101+-rank MPI collective for one bad camera to hang (see 7.2 below). CPU-only; sequential by default (`--cpp-concurrency 1`) for clean per-camera timing. Added 2026-08-11 specifically to get a `desi_proc`-free C++ timing/correctness baseline without its MPI-hang or missing-calib-state failure modes.
 
@@ -215,7 +215,7 @@ python testing/run_night.py --night 20260401 --expid 00344649
 | + bundle-pool reuse | 514.0s | -13.2% |
 | **+ `workers-per-gpu` 12/8/5 (current `persistent`-mode default)** | **483.3s** | **-18.4%** |
 
-A second, independent 10-night set (2026-09-05, bringing the cumulative validated sample to 20 nights) reproduced this: Python `persistent` mean **502.5s warm / 591.2s cold** (first-touch-on-a-fresh-node cost, ~15% higher, consistent across all 10 nights) vs. C++ mean **648.3s**. Correctness across the full 20-night sample: **xrms=0.0120px, yrms≈0.0129px** vs. C++ (see `porting-notes.md`'s 2026-09-02/05 entries for full per-night/per-camera tables). **Before trusting any timing number on this project**, confirm `$HOME` isn't at its NERSC disk quota -- a full quota produces silent per-bundle failures at `rc=0` and inflated wall time, not an obvious error (see `porting-notes.md`, 2026-09-04).
+A second, independent 10-night set (2026-09-05, bringing the cumulative validated sample to 20 nights) reproduced this: Python `persistent` mean **502.5s warm / 591.2s cold** (first-touch-on-a-fresh-node cost, ~15% higher, consistent across all 10 nights) vs. C++ mean **648.3s**. Correctness across the full 20-night sample: **xrms=0.0120px, yrms≈0.0129px** vs. C++ (see `docs/python-port/porting-notes.md`'s 2026-09-02/05 entries for full per-night/per-camera tables). **Before trusting any timing number on this project**, confirm `$HOME` isn't at its NERSC disk quota -- a full quota produces silent per-bundle failures at `rc=0` and inflated wall time, not an obvious error (see `docs/python-port/porting-notes.md`, 2026-09-04).
 
 **Multi-node camera splitting:** the default is a naive alternating split (band-diverse but not load-balanced -- there's no timing prior for an arbitrary fresh night/expid). Pass `--lpt-profile cameras.json` (a `{"b0": 69.2, ...}` map of measured per-camera wall times, e.g. parsed from a prior run's own logs) to get an **LPT (longest-processing-time-first) balanced split** instead -- sorts cameras descending by known duration and greedily assigns each to whichever GPU-slot currently has the least total load, closing most of the gap a naive split leaves on the table (the slowest, most variable band, z, otherwise gets queued last with nothing to fill the tail).
 
@@ -262,14 +262,14 @@ python -m specex.specex \
 
 **`testing/run_night.py` does not have a CPU-only mode** -- its `--backend` choices are `cpp`/`cpp-direct`/`python`, and `python` always assigns each camera a GPU. The 147.9 min full-night CPU number above was measured with a predecessor one-off script (pre-`run_night.py` consolidation) looping `python -m specex.specex --backend cpu --cpu-workers 20` over all 30 cameras sequentially; there's no single documented command for it today -- for a full CPU-only night, write the same kind of loop over Section 3's `select_test_case.py` cases.
 
-CPU is a genuine, correctness-equivalent fallback, not a performance option -- expect roughly an order of magnitude slower at production scale. **Don't try to combine CPU and GPU workers on the same node to "help" a GPU run go faster**: this was tested extensively (six distinct concurrency/pinning designs, `porting-notes.md`'s CPU+GPU hybrid investigation) and every design either left the GPU run unaffected at best or measurably slowed it down (up to ~3.6x on the cameras that overlapped) -- CPU-side host compute contends with the GPU workers' own host-side work for memory bandwidth. Pure-GPU-pinned is the standing, validated production recommendation; use CPU-only when there's truly no GPU, not alongside one.
+CPU is a genuine, correctness-equivalent fallback, not a performance option -- expect roughly an order of magnitude slower at production scale. **Don't try to combine CPU and GPU workers on the same node to "help" a GPU run go faster**: this was tested extensively (six distinct concurrency/pinning designs, `docs/python-port/porting-notes.md`'s CPU+GPU hybrid investigation) and every design either left the GPU run unaffected at best or measurably slowed it down (up to ~3.6x on the cameras that overlapped) -- CPU-side host compute contends with the GPU workers' own host-side work for memory bandwidth. Pure-GPU-pinned is the standing, validated production recommendation; use CPU-only when there's truly no GPU, not alongside one.
 
 ### Runtime guidelines (warm JIT cache, all modes)
 
 | Mode | Recommended flags | Typical warm time |
 |---|---|---|
 | 2.1 Single bundle | `--gpu 1` | a few seconds |
-| 2.2 Full CCD, one camera | `--gpu 4 --workers-per-gpu 5` | ~33-45s (this section's measurement; band-dependent, see `porting-notes.md`) |
+| 2.2 Full CCD, one camera | `--gpu 4 --workers-per-gpu 5` | ~33-45s (this section's measurement; band-dependent, see `docs/python-port/porting-notes.md`) |
 | 2.3 Full night, 30 cameras, 1 node/4 GPUs, `--worker-mode persistent` (recommended) | `run_night.py --backend python --worker-mode persistent` | ~483-503s (8-8.4 min) |
 | 2.3 Full night, 30 cameras, 1 node/4 GPUs, `--worker-mode subprocess` (default) | `run_night.py --backend python` | ~11-13 min |
 | 2.3 Full night, 30 cameras, 2 nodes/8 GPUs, LPT-balanced (`subprocess` mode) | `run_night.py --backend python --lpt-profile ...` | ~6 min |
@@ -363,7 +363,7 @@ python -m specex.specex -h
 | `--gpu` | 4 | Number of GPUs to use (spreads bundles across them on the current node) |
 | `--workers-per-gpu` | auto (5, or 3 for z-band when per-fiber trace is active) | Concurrent bundle-fit worker processes per GPU. See Section 2.3's table for the validated per-band values (10 b / 7 r / 4 z) used in production-scale multi-camera runs. |
 | `--cpu-workers` | `--gpu` count | Concurrent worker processes for `--backend cpu` |
-| `--gpu-worker-threads` | unconstrained | Diagnostic: force an OMP/BLAS/XLA thread cap on each GPU-backend worker's host-side computation. Confirmed *not* load-bearing for the CPU+GPU hybrid-scheduling investigation (see porting-notes.md) -- left in as a diagnostic knob, no effect on a normal run. |
+| `--gpu-worker-threads` | unconstrained | Diagnostic: force an OMP/BLAS/XLA thread cap on each GPU-backend worker's host-side computation. Confirmed *not* load-bearing for the CPU+GPU hybrid-scheduling investigation (see `docs/python-port/porting-notes.md`) -- left in as a diagnostic knob, no effect on a normal run. |
 | `--double-precision` | off (mixed float32/float64) | Force full float64 for the joint-fit Jacobian. Validated equivalent accuracy; mixed precision uses ~71% less GPU memory/worker. |
 
 **Spot selection:**
@@ -438,7 +438,7 @@ Confirmed on `20211028/00106396`: no arc log exists anywhere in production for t
 
 ## 8. Comparing C++ vs Python: Common Scripts
 
-Three small scripts, used together to get a true apples-to-apples C++ vs Python comparison for a night/expid (see porting-notes.md's 2026-08-11/12 entry for the full campaign this workflow produced -- 10 nights, mean xrms=0.0277px/yrms=0.0163px, C++ ~8% faster on a single CPU node vs a single 4-GPU node).
+Three small scripts, used together to get a true apples-to-apples C++ vs Python comparison for a night/expid. This is the same methodology behind the cumulative 20-night campaign in Section 2.3 above (current figures: xrms=0.0120px/yrms≈0.0129px, Python ~18% faster with `--worker-mode persistent`) -- see `docs/python-port/porting-notes.md`'s 2026-08-11/12 entry for the original 10-night campaign this workflow was built for (superseded numbers, from before the 2026-09-01 footprint-margin fix; kept for history, not current figures) and its 2026-09-02/05 entries for the current ones.
 
 ### 8.1 `testing/stage_preproc.py` -- make a real `--backend cpp` run skip its own (buggy/incomplete) preprocessing
 
@@ -477,4 +477,4 @@ python testing/per_fiber_breakdown.py --night 20241021 --expid 00259030 --camera
     --cpp-base /pscratch/.../cpptest/desiproc2 --specprod cdwarner --top 20
 ```
 
-Prints the top-N fibers by yrms and by xrms, with their bundle number (`fiber // 25`) -- a cluster of top offenders at literal bundle-boundary positions (first/last of a 25-fiber bundle) is the signature of the known bundle-boundary weakness (porting-notes.md section 1.3(a) in `python-vs-cpp-diff.txt`), not a new bug.
+Prints the top-N fibers by yrms and by xrms, with their bundle number (`fiber // 25`). A cluster of top offenders at literal bundle-boundary positions (first/last of a 25-fiber bundle) was the signature of the bundle-boundary trace divergence -- root-caused and closed by the `--footprint-margin` fix (`docs/python-port/porting-notes.md`, 2026-09-01; see `docs/python-port/python-vs-cpp-diff.txt` section 1.3(a) for the before/after), so seeing that pattern again on current code points to a regression, not the old known issue.

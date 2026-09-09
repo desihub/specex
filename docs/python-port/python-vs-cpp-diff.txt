@@ -1,13 +1,19 @@
 ===============================================================================
 PYTHON vs C++ SPECEX: ALGORITHMIC DIFFERENCES -- CURRENT STATE
 ===============================================================================
-Branch: python-gpu-port. Rewritten 2026-08-11 to describe what is true TODAY
-only -- legacy findings, superseded numbers, and the investigation trail that
-led here have been removed from this file on purpose. This is meant to be a
-quick read. For the full story of how each item below was found, tested, and
-what the numbers looked like at each stage over the past month, see
-porting-notes.md (git-tracked, append-only, the authoritative detailed
-record) and current-status.txt.
+Branch: python-gpu-port. Originally rewritten 2026-08-11 to describe what was
+true then only -- legacy findings, superseded numbers, and the investigation
+trail that led there were removed from this file on purpose, and that intent
+still holds. Updated 2026-09-09: the single biggest correctness item this
+file used to carry (1.3(a), the bundle-boundary trace weakness) was
+root-caused and fixed on 2026-09-01 and has moved to section 2; the
+executive summary's correctness figures and a new timing summary now
+reflect the cumulative 20-night campaign (2026-09-02 through 09-05); and a
+cosmic-ray/masked-pixel question from Julien Guy was audited and added to
+section 2 as confirmed-identical. This is still meant to be a quick read.
+For the full story of how each item below was found, tested, and what the
+numbers looked like at each stage, see porting-notes.md (git-tracked,
+append-only, the authoritative detailed record) and current-status.txt.
 
 Every item below was found by directly reading both C++
 (src/specex_psf_fitter.cc and neighbors) and Python (py/specex/fitter.py)
@@ -16,23 +22,39 @@ source, then testing the effect empirically, not just reasoning about it.
 ===============================================================================
 EXECUTIVE SUMMARY
 ===============================================================================
-Aggregate correctness, current shipped defaults, measured across 6
-independent full-night/expid campaigns (30 cameras each) plus several
-flagged problem cases: **mean xrms ~0.024-0.030px, mean yrms ~0.015-0.018px**
-per night, per-camera max typically 0.02-0.06px. This reflects real
-architectural parity work landed 2026-08-05 (per-fiber-independent trace
-fitting + a selective cross-fiber regularization prior + a selection-stage
-bug fix, see section 2) -- before that work, typical bundles ran ~0.02-0.06px
-with a real ~10% tail up to ~0.10-0.15px; that tail is gone as a general
-statistical pattern. What remains is a short list of individually-named,
-root-caused hard cases (section 1.3), not a vague "some bundles are just
-hard" spread.
+**Correctness**, current shipped defaults, cumulative over 20 independent
+full-night/expid campaigns (30 cameras each, two non-overlapping 10-night
+sets sampled a month apart, 2026-08-11/12 and 2026-09-02/05): **mean
+xrms=0.0120px, mean yrms=0.0129px** vs. C++, per-night range xrms
+0.0112-0.0140px / yrms 0.0111-0.0167px. This reflects two real architectural
+fixes: per-fiber-independent trace fitting + a selective cross-fiber
+regularization prior + a selection-stage bug fix (2026-08-05), and the
+bundle-boundary footprint-margin fix (2026-09-01, see section 2) that cut
+whole-CCD mean xrms/yrms roughly in half again on top of that. What remains
+is a short list of individually-named, root-caused hard cases (section 1.3),
+not a vague "some bundles are just hard" spread. sigma_y (PSF-shape)
+agreement, checked separately (b4/r2/z8, boundary/interior fibers, 3
+wavelengths): mean \|py/cpp-1\|=0.458%, band-dependent (b=0.776%,
+r=0.454%, z=0.144% -- the b-band residual is real but small and not yet
+explained).
+
+**Timing**, same 20-night sample, 1 node/4 A100 GPUs (Python) vs. 1 CPU node
+(C++), both real production configurations: Python with
+`--worker-mode persistent` (the fastest validated configuration, see
+how-to-run.md section 2.3) runs **502.5s warm / 591.2s cold** mean per
+30-camera night vs. C++'s **648.3s** mean -- **Python ~18-23% faster**,
+consistent across both 10-night halves. Python's older, still-default
+`--worker-mode subprocess` path is slower than C++ (~674s on the original
+10-night set) -- the speed advantage is specifically a `persistent`-mode
+result, not free with any invocation. See section 5 for the timing-only
+breakdown and section 2 for what changed to get here.
 
 Everything still genuinely different between the two pipelines is in section
 1. Section 2 is what used to be different and is now matched/resolved --
 kept here only as a one-line index into porting-notes.md, not restated.
 Section 3 is C++ machinery confirmed dead/unused in real production on
-either side, listed once so nobody re-investigates it.
+either side, listed once so nobody re-investigates it. Section 5 is the
+timing-only summary referenced above.
 
 ===============================================================================
 1. CURRENTLY LIVE DIFFERENCES
@@ -73,13 +95,13 @@ help or are neutral to fit quality everywhere checked. Not planned to be
 -------------------------------------------------------------------------------
 This is the flip side of section 2's biggest architectural win: fully
 independent per-fiber trace parameters (now the default) mean a fiber with
-bad local data has nothing to borrow stability from. Two forms:
-  (a) Literal bundle-boundary fibers (first/last of each 25-fiber bundle)
-      show a small, bounded, systematic weakness (typically 0.05-0.2px,
-      never catastrophic), seen across many b/r bundles.
-  (b) A small number of individual fibers with severe local data problems
-      don't fully recover even with the ndead-gated trace-consensus prior
-      active:
+bad local data has nothing to borrow stability from. (An earlier, generic-
+looking symptom of this -- literal bundle-boundary fibers running
+systematically worse than interior ones -- turned out to have its own
+specific, now-fixed root cause; see section 2's footprint-margin entry, not
+here.) What remains is a small number of individual fibers with severe
+local data problems that don't fully recover even with the ndead-gated
+trace-consensus prior active:
         - z5@20220408 bundle 6, fiber 163: ndead=11829 (an order of
           magnitude above its neighbors), xrms ~0.43-0.53px under current
           defaults -- a genuine data floor, not something reweighting fixes.
@@ -187,8 +209,29 @@ xrms/yrms identical to 4 decimals. Not a source of the residual gap.
 - Signal-dependent (Poisson) weight correction: Python was applying a
   correction C++'s own code can never execute (gated behind a flag never set
   true in real production) -- removed, a genuine bug fix.
-- Footprint envelope margin: Python now pads a bundle's pixel footprint the
-  same ~7px C++ does; measured zero effect on the fit itself, pure parity.
+- Footprint envelope margin: Python's per-bundle pixel footprint was
+  zero-margin, silently discarding real boundary-fiber pixel data that
+  C++'s own `ComputeWeigthImage` deliberately includes (a 7px margin into
+  the neighboring bundle's territory) -- this, not a shared structural
+  cost, was the actual cause of the bundle-boundary trace weakness this
+  file used to list under 1.3(a). Fixed 2026-09-01 (`--footprint-margin`,
+  default 7, now matches C++); validated against genuine ground truth
+  (not just C++-as-baseline) on 9 simulated cameras + 19 real production
+  cases, zero exceptions, and cut whole-CCD mean xrms/yrms roughly in half
+  again on top of the 2026-08-05 trace-fitting fix. (An earlier, much
+  smaller-effect footprint experiment on 2026-08-06 had wrongly suggested
+  this had "zero effect" -- that test predated both the edge/interior
+  fiber-position bucketing and the ground-truth comparison this fix was
+  actually validated against, so it was measuring the wrong thing.)
+- Cosmic-ray / masked-pixel exclusion: confirmed identical on both sides by
+  construction, not just by observed effect -- `read_preproc()` (Python)
+  and `read_preproc_cpp()` (C++) both zero IVAR at every nonzero MASK bit
+  before either fitter ever runs, and both paths go through this repo's
+  own `run_specex()`/`io.py`, not independent reimplementations that
+  happened to agree. Audited 2026-09-06 in response to a specific question
+  from Julien Guy; empirically confirmed across 6 independent real
+  cosmic-ray-hit cases (5 nights, r+z bands) with no excess divergence and
+  no C++/Python asymmetry in either backend.
 - Dead/near-dead fiber write-back convention: Python's FITS writer now
   matches C++'s literal all-zero XTRACE/YTRACE row for fibers with <2
   surviving spots.
@@ -221,6 +264,39 @@ This write-time artifact accounts for the large majority of that number, on
 both pipelines' own self-comparison, not just the cross-pipeline one. Use
 xrms/yrms (direct trace-vs-trace file comparison) for anything that matters
 -- it never touches this artifact.
+
+===============================================================================
+5. TIMING (current defaults, cumulative 20-night sample)
+===============================================================================
+Not an algorithmic difference (nothing here affects the fitted numbers --
+see section 2's footprint-margin/pool-reuse entries for confirmation that
+none of these levers touch correctness), but tracked here since it's the
+other half of "how do the two pipelines currently compare." One node, 4
+A100 GPUs (Python) vs. one CPU node, ~100 MPI ranks (C++); both real
+production configurations (`--worker-mode persistent` for Python, see
+how-to-run.md section 2.3).
+
+  Configuration                          10-night mean   vs. C++ (592.3s)
+  --------------------------------------  --------------  -----------------
+  C++ (production MPI, single node)       592.3s          --
+  Python, --worker-mode subprocess        673.8s          +13.8% (slower)
+  Python, --worker-mode persistent,
+    naive split                           579.5s          -2.2%
+  + bundle-pool reuse                      514.0s          -13.2%
+  + workers-per-gpu 12/8/5 (current
+    persistent-mode default)               483.3s          -18.4%
+
+A second, independent 10-night set (2026-09-05) reproduced this: Python
+`persistent` mean 502.5s warm / 591.2s cold vs. C++ mean 648.3s (~18-23%
+faster warm). Correctness held constant to 4 decimal places across every
+row of the table above -- these are pure process-scheduling changes
+(persistent workers, pool reuse, worker-count retuning), not numerics.
+`--worker-mode` still defaults to the older, slower `subprocess` mode in
+the CLI; pass `--worker-mode persistent` explicitly to get the numbers
+above. Before trusting any timing number on this project, confirm the
+NERSC `$HOME` filesystem isn't at its disk quota -- a full quota produces
+silent per-bundle failures at `rc=0` and inflated wall time, not an
+obvious error (porting-notes.md, 2026-09-04).
 
 ===============================================================================
 For exact numbers at each stage of this investigation, every ruled-out
