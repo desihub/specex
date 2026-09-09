@@ -40,6 +40,15 @@ just this file, `how-to-run.md`, and `env_setup.sh`.
    Julien Guy's specex paper (`2209.14482v2.pdf`, repo root) to where they're
    implemented in both `src/` (C++) and `py/specex/` (Python), including
    where/why the port's behavior deviates from a literal reading of either.
+8. **`docs/python-port/code-reading-guide.md`** -- where to start reading
+   `py/specex/`, the two real entry points (`main()`'s GPU-native path vs.
+   `run_specex()`'s C++-wrapper path), and a live-methods table (55
+   functions reachable from `main()`, generated from a fresh AST call-graph
+   walk, not hand-maintained) distinguishing the production hot path from
+   real-but-not-production code (CI-test-only, testing-tool-only) and
+   genuinely dead code. Written for Julien's standing "guide to reading the
+   code" ask (see "Who's involved" below) -- keep it in sync if the call
+   graph changes materially, but it's a snapshot, not a live-generated doc.
 
 **Do not go looking for local Claude Code session transcripts as a history
 source.** They're per-user, not portable across machines/accounts, and are
@@ -141,3 +150,6 @@ Stephen and Julien Guy (specex's original C++ author) are reviewing this
 branch. Julien's two standing asks for the port going forward are (1) a guide
 to reading the code so he can follow the port's structure, and (2) a very
 complete test suite -- both open, ongoing work, not one-shot deliverables.
+A first version of (1) exists: `docs/python-port/code-reading-guide.md`
+(2026-09-09) -- keep it current as the code evolves rather than treating it
+as done.
