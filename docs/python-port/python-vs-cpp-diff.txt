@@ -1,19 +1,13 @@
 ===============================================================================
 PYTHON vs C++ SPECEX: ALGORITHMIC DIFFERENCES -- CURRENT STATE
 ===============================================================================
-Branch: python-gpu-port. Originally rewritten 2026-08-11 to describe what was
-true then only -- legacy findings, superseded numbers, and the investigation
-trail that led there were removed from this file on purpose, and that intent
-still holds. Updated 2026-09-09: the single biggest correctness item this
-file used to carry (1.3(a), the bundle-boundary trace weakness) was
-root-caused and fixed on 2026-09-01 and has moved to section 2; the
-executive summary's correctness figures and a new timing summary now
-reflect the cumulative 20-night campaign (2026-09-02 through 09-05); and a
-cosmic-ray/masked-pixel question from Julien Guy was audited and added to
-section 2 as confirmed-identical. This is still meant to be a quick read.
-For the full story of how each item below was found, tested, and what the
-numbers looked like at each stage, see porting-notes.md (git-tracked,
-append-only, the authoritative detailed record) and current-status.txt.
+Branch: python-gpu-port. Describes what is true TODAY only -- legacy
+findings, superseded numbers, and investigation trails are deliberately
+left out; this is meant to be a quick read, kept current as new campaigns
+land (last: 2026-09-09). For the full story of how each item below was
+found and tested, see porting-notes.md (git-tracked, append-only, the
+authoritative detailed record) and current-status.txt (the even-shorter
+bottom line).
 
 Every item below was found by directly reading both C++
 (src/specex_psf_fitter.cc and neighbors) and Python (py/specex/fitter.py)
@@ -64,30 +58,27 @@ timing-only summary referenced above.
 -------------------------------------------------------------------------------
 Even with every difference below accounted for, Python and C++ still land on
 slightly different (both individually reasonable) answers for where a
-fiber's trace sits. Best current explanation: two independently-implemented
-least-squares solvers converging to different local optima in a slightly
-degenerate parameter space, correlated with how far a bundle's true trace
-has drifted from its calibration starting guess (r=0.81) -- not a
-discoverable bug, though some of what used to look like "hard to converge"
-turned out to be genuine CCD data-quality issues on specific fibers/cameras
-instead (see 1.3). This is the one item in this document that isn't fixed,
-matched, or isolated to a specific named cause -- everything else was tested
-as a candidate explanation for it and ruled out, fixed, or found to be its
-own separate, now-understood effect.
+fiber's trace sits on some bundles. Best explanation: two independently-
+implemented least-squares solvers converging to different local optima in a
+slightly degenerate parameter space, correlated with how far a bundle's
+trace has drifted from its calibration starting guess -- not a discoverable
+bug (some of what used to look like "hard to converge" turned out to be
+genuine data-quality issues on specific fibers instead, see 1.3). The one
+item here that isn't fixed, matched, or isolated to a named cause --
+everything else was tested as a candidate explanation and ruled out.
 
 1.2 Extra-spot selection: Python selects more spots than C++
 -------------------------------------------------------------------------------
 Consistently ~3% more in z-band, 15-25% more in some r-band cases.
-Root-caused to a handful of specific wavelength lines (dominant offender:
-8670.33A, also 9354.8, 7490.93/7440.95, 9356.79, 7516.72A) whose per-spot
-flux comes out 1-70% brighter in Python than C++ across many fibers at once
--- not random noise. Interacts with C++'s selection algorithm, which
-aggregates S/N per-wavelength-bin across ALL fibers in a bundle, so a
-marginal line's selection status can flip for many fibers simultaneously.
-The deeper per-line flux discrepancy was never fully chased down (diminishing
-returns), but the practical effect is benign: the extra spots consistently
-help or are neutral to fit quality everywhere checked. Not planned to be
-"fixed" -- no evidence it should be.
+Root-caused to a handful of specific wavelength lines whose per-spot flux
+comes out 1-70% brighter in Python than C++ across many fibers at once --
+not random noise (full line list: porting-notes.md). Interacts with C++'s
+selection algorithm, which aggregates S/N per-wavelength-bin across ALL
+fibers in a bundle, so one marginal line's selection status can flip for
+many fibers simultaneously. The deeper per-line flux discrepancy was never
+fully chased down, but the practical effect is benign: the extra spots
+consistently help or are neutral to fit quality everywhere checked. Not
+planned to be "fixed" -- no evidence it should be.
 
 1.3 Per-fiber-independent trace fitting has no cross-fiber sharing, so a
     fiber with poor/asymmetric local data support does worse under it than
@@ -95,27 +86,22 @@ help or are neutral to fit quality everywhere checked. Not planned to be
 -------------------------------------------------------------------------------
 This is the flip side of section 2's biggest architectural win: fully
 independent per-fiber trace parameters (now the default) mean a fiber with
-bad local data has nothing to borrow stability from. (An earlier, generic-
-looking symptom of this -- literal bundle-boundary fibers running
-systematically worse than interior ones -- turned out to have its own
-specific, now-fixed root cause; see section 2's footprint-margin entry, not
-here.) What remains is a small number of individual fibers with severe
-local data problems that don't fully recover even with the ndead-gated
-trace-consensus prior active:
+bad local data has nothing to borrow stability from. (The generic-looking
+form of this -- bundle-boundary fibers running worse than interior ones --
+turned out to be its own separate, now-fixed footprint-margin issue; see
+section 2, not here.) What remains is a small number of individual fibers,
+out of ~15,000 fit per 30-camera night, with severe local data problems
+that don't fully recover even with the ndead-gated trace-consensus prior:
         - z5@20220408 bundle 6, fiber 163: ndead=11829 (an order of
-          magnitude above its neighbors), xrms ~0.43-0.53px under current
-          defaults -- a genuine data floor, not something reweighting fixes.
-        - z6@20250628 bundle 10, fiber 260: NOT ndead-flagged (below the
-          500 threshold) yet still ~9x worse under per-fiber trace than
-          baseline (xrms 0.053->0.53px) -- root cause not found, open,
-          low priority.
-        - z7@20250822/00307725, fiber 251 (the known fiber-trace-overlap
-          case): ndead=2907, xrms=1.68px, yrms=3.35px -- reproduces
-          essentially identically in C++ and Python, consistent with a
-          genuine geometry/overlap issue in the data itself, not a
-          pipeline bug.
-  Each of these is one named fiber out of ~15,000 fit per 30-camera night,
-  each with an identified proximate cause -- not a generic tail.
+          magnitude above its neighbors), xrms ~0.43-0.53px -- a genuine
+          data floor, not something reweighting fixes.
+        - z6@20250628 bundle 10, fiber 260: NOT ndead-flagged, yet still
+          ~9x worse under per-fiber trace than baseline -- root cause not
+          found, open, low priority.
+        - z7@20250822/00307725, fiber 251 (known fiber-trace-overlap
+          case): xrms=1.68px, yrms=3.35px -- reproduces essentially
+          identically in C++ and Python, a genuine geometry issue in the
+          data itself, not a pipeline bug.
 
 1.4 ndead diagnostic formula mismatch
 -------------------------------------------------------------------------------
@@ -210,28 +196,20 @@ xrms/yrms identical to 4 decimals. Not a source of the residual gap.
   correction C++'s own code can never execute (gated behind a flag never set
   true in real production) -- removed, a genuine bug fix.
 - Footprint envelope margin: Python's per-bundle pixel footprint was
-  zero-margin, silently discarding real boundary-fiber pixel data that
-  C++'s own `ComputeWeigthImage` deliberately includes (a 7px margin into
-  the neighboring bundle's territory) -- this, not a shared structural
-  cost, was the actual cause of the bundle-boundary trace weakness this
-  file used to list under 1.3(a). Fixed 2026-09-01 (`--footprint-margin`,
-  default 7, now matches C++); validated against genuine ground truth
-  (not just C++-as-baseline) on 9 simulated cameras + 19 real production
-  cases, zero exceptions, and cut whole-CCD mean xrms/yrms roughly in half
-  again on top of the 2026-08-05 trace-fitting fix. (An earlier, much
-  smaller-effect footprint experiment on 2026-08-06 had wrongly suggested
-  this had "zero effect" -- that test predated both the edge/interior
-  fiber-position bucketing and the ground-truth comparison this fix was
-  actually validated against, so it was measuring the wrong thing.)
+  zero-margin, silently discarding real boundary-fiber pixel data C++'s
+  `ComputeWeigthImage` deliberately includes (a 7px margin into the
+  neighboring bundle's territory) -- the actual cause of the bundle-
+  boundary trace weakness this file used to list under 1.3(a). Fixed
+  2026-09-01 (`--footprint-margin`, default 7, now matches C++); validated
+  against genuine ground truth on 9 simulated + 19 real production cases,
+  zero exceptions, cutting whole-CCD mean xrms/yrms roughly in half again
+  on top of the 2026-08-05 trace-fitting fix.
 - Cosmic-ray / masked-pixel exclusion: confirmed identical on both sides by
-  construction, not just by observed effect -- `read_preproc()` (Python)
-  and `read_preproc_cpp()` (C++) both zero IVAR at every nonzero MASK bit
-  before either fitter ever runs, and both paths go through this repo's
-  own `run_specex()`/`io.py`, not independent reimplementations that
-  happened to agree. Audited 2026-09-06 in response to a specific question
-  from Julien Guy; empirically confirmed across 6 independent real
-  cosmic-ray-hit cases (5 nights, r+z bands) with no excess divergence and
-  no C++/Python asymmetry in either backend.
+  construction -- `read_preproc()`/`read_preproc_cpp()` both zero IVAR at
+  every nonzero MASK bit before either fitter runs, via the same shared
+  `io.py` code both backends call. Audited 2026-09-06 for Julien Guy;
+  confirmed empirically across 6 real cosmic-ray-hit cases with no excess
+  divergence and no C++/Python asymmetry.
 - Dead/near-dead fiber write-back convention: Python's FITS writer now
   matches C++'s literal all-zero XTRACE/YTRACE row for fibers with <2
   surviving spots.
