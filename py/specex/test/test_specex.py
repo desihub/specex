@@ -1,6 +1,6 @@
 # Test of whether specex runs without crashing
 
-from specex.specex import run_specex_cpp
+from specex.specex import run_specex
 import specex.io
 import sys
 import os
@@ -49,6 +49,6 @@ class TestSpecex(unittest.TestCase):
              '--first-bundle', '4', '--last-bundle', '4', '--first-fiber', first_fiber, '--last-fiber', last_fiber,
              '--legendre-deg-wave', '3','--fit-continuum','--debug']
 
-        run_specex_cpp(com)
+        run_specex(com)
 
         self.assertTrue(os.path.exists(self.outpsf))

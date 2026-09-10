@@ -25,13 +25,11 @@ python setup.py	install	--prefix .
 ## Using specex for DESI
 
 Access to the C++ fitter from python is through a wrapper
-`specex.specex.run_specex_cpp` (on the `python-gpu-port` branch --
-**renamed from `run_specex` on 2026-09-13**, see `CLAUDE.md`; a Python/JAX
-GPU-native fitter also exists on this branch, see
-`docs/python-port/how-to-run.md`):
+`specex.specex.run_specex` (on the `python-gpu-port` branch, a Python/JAX
+GPU-native fitter also exists, see `docs/python-port/how-to-run.md`):
 
 ```python
-from specex.specex import run_specex_cpp
+from specex.specex import run_specex
 
 com = ['desi_psf_fit']
 com.extend(['-a',
@@ -44,7 +42,7 @@ com.extend(['--first-fiber', '0'])
 com.extend(['--last-fiber', '24'])
 com.extend(['--legendre-deg-wave', '1'])
 
-retval = run_specex_cpp(com)
+retval = run_specex(com)
 ```
 
 This should produce a file `fit-psf-b1-00068217-00.fits` in the same directory.

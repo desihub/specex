@@ -17,7 +17,7 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
         broken_fiber_list.
 
     Status: DEAD -- adapted from upstream specex#91; imported by
-    specex.run_specex_cpp() (as specex_psf_qa) but the one call site there is
+    specex.run_specex() (as specex_psf_qa) but the one call site there is
     commented out. io.py's write_python_psf has its own independently-adapted
     inline reimplementation of this same trace-crossing check (STATUS=4
     flagging), which is what actually runs in the production pipeline.
@@ -56,12 +56,12 @@ def specex_psf_qa(opts):
         opts: an options object with `.output_fits_filename` (str, PSF file
             path) and `.broken_fibers_string` (str, comma-separated fiber IDs)
             attributes -- matches the C++ pybind11 PyOptions interface used by
-            specex.run_specex_cpp().
+            specex.run_specex().
 
     Returns:
         int: failcount from trace_psf_qa.
 
-    Status: DEAD -- see trace_psf_qa; the one call site (specex.run_specex_cpp())
+    Status: DEAD -- see trace_psf_qa; the one call site (specex.run_specex())
     has this call commented out.
     """
     psf_filename = opts.output_fits_filename

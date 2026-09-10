@@ -146,19 +146,21 @@ invoked fresh per exposure -- a real desispec/workflow architecture
 question, well beyond specex's own scope, and not needed for a first
 rollout given the disk-cache already captures most of the benefit.
 
-## Current state, not just a future plan: desispec's C++ path is broken on this branch right now
+## A tried-and-reverted forcing-function rename (2026-09-13)
 
-As of 2026-09-13, `../desispec`'s `scripts/specex.py` still does
-`from specex.specex import run_specex` -- the exact name this branch
-renamed to `run_specex_cpp` that same day (deliberate, see `CLAUDE.md`).
-That means `desi_compute_psf`/`desi_psf_fit` (and therefore
+Briefly renamed `run_specex` -> `run_specex_cpp` (`py/specex/specex.py`)
+the same day this plan was written, so that `../desispec`'s current,
+unpatched `from specex.specex import run_specex` would fail loudly
+instead of silently keeping the old C++-only path alive -- a forcing
+function for whoever eventually does Phase 1 below. In practice this
+immediately broke `desi_compute_psf`/`desi_psf_fit` (and therefore
 `--backend cpp`/`cpp-direct` in `run_night.py`, and
-`testing/full_ccd_campaign.py`'s C++ side) all fail immediately with an
-`ImportError` on this branch until `../desispec` is patched -- see
-`docs/python-port/how-to-run.md`'s callout in Section 2.3 for the
-one-off workaround used to keep doing local C++ comparisons in the
-meantime. This isn't a downstream consequence of Phase 1 below; it's true
-today, independent of whether Phase 1 is ever implemented.
+`testing/full_ccd_campaign.py`'s C++ side) on this branch, which was
+still actively needed for ongoing testing/validation work -- so it was
+reverted the same day. **The rename is still the intended mechanism for
+when the real desispec integration below actually happens** -- it's a
+useful, deliberate trip wire at that point, just premature while this
+branch is still mid-testing with `../desispec` unpatched.
 
 ## Open questions this plan doesn't answer yet
 
@@ -174,7 +176,7 @@ today, independent of whether Phase 1 is ever implemented.
   real test on a GPU-allocated desi_proc job, not just reasoning about it.
 - **The C++ wrapper's own environment portability** (`docs/python-port/how-to-run.md`
   Section 0) is a separate, parallel readiness question -- not blocking
-  this plan, since Phase 1 bypasses `run_specex_cpp()` entirely for the GPU
+  this plan, since Phase 1 bypasses `run_specex()` entirely for the GPU
   path, but worth tracking if the C++ path needs to keep working
   side-by-side in the same environment.
 - This plan does not attempt to estimate desi_proc-layer wall-clock

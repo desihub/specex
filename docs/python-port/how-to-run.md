@@ -132,14 +132,14 @@ and you're not actually testing the new environment):
     (`.../desiconda/.../code/specex/main/py`, the old pre-port C++-only
     version -- no `fitter.py`/`psf.py`/`math.py` at all), which silently
     shadows this branch's code if you don't put this repo's `py/` first.
-*   **The C++-wrapper path (`run_specex_cpp()`, `--backend cpp`/`cpp-direct`)
+*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
     does NOT work as-is.** The compiled pybind11 extension
     (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
     against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
     can't load it (`ModuleNotFoundError: No module named
-    'specex._libspecex'` the moment `run_specex_cpp()` actually tries the
+    'specex._libspecex'` the moment `run_specex()` actually tries the
     lazy `from ._libspecex import ...`, even though `from specex.specex
-    import run_specex_cpp` itself succeeds -- the import is lazy, inside the
+    import run_specex` itself succeeds -- the import is lazy, inside the
     function body). **Needs a rebuild against this environment's Python/
     toolchain before `--backend cpp` can run under it** -- `cmake`
     (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a
@@ -234,8 +234,6 @@ python testing/run_night.py --night 20260401 --expid 00344649
 ```
 
 **Scope:** this fits an *already-preprocessed* exposure (`preproc-*.fits.gz` + `shifted-input-psf-*.fits` must already exist -- true for any real matterhorn production night/expid). It is not a `desi_proc` replacement:
-
-> **`--backend cpp` and `--backend cpp-direct` are currently broken on this branch as of 2026-09-13.** Both ultimately call `desi_compute_psf`/`desi_psf_fit`, which goes through `desispec.scripts.specex.main()` -- and that still does `from specex.specex import run_specex`, the exact import broken by this session's `run_specex` -> `run_specex_cpp` rename (`CLAUDE.md`, deliberate, forces the real desispec integration in `desispec-integration-plan.md` to happen consciously rather than silently). This affects your local `../desispec` checkout, not just a hypothetical future one. Until that's patched: either edit your local `../desispec/py/desispec/scripts/specex.py` to import `run_specex_cpp` instead, or bypass it entirely by calling `run_specex_cpp()` directly in a bundle loop + `desispec.scripts.specex.merge_psf()` (see `docs/python-port/porting-notes.md`'s 2026-09-13 entry for a worked example) -- much slower (single-process, no MPI parallelism) but correct. `--backend python` is completely unaffected.
 
 *   `--backend cpp` runs the real production driver, `desi_proc --mpi`, which does its own preprocessing (idempotent -- skips it if outputs already exist) then calls the C++ `desi_psf_fit` binary per camera via MPI ranks. One `srun` call; scales via `--nodes` using the validated rank formula (`100*nodes + 1` -- `-N1`/`-n101` measured ~11 min, `-N3`/`-n301` measured ~7 min, see `docs/python-port/porting-notes.md`). Output goes to a **private** `$DESI_SPECTRO_REDUX/$SPECPROD` tree (`--redux-dir`/`--specprod`, default under `--outdir`), never the real production `matterhorn` tree.
 *   `--backend python` runs `python -m specex.specex` once per camera, each **pinned to a dedicated GPU** via `CUDA_VISIBLE_DEVICES` (no GPU sharing across cameras), using a **per-node dynamic work queue** so however many GPUs you have stay busy. Auto-detects node count (from the SLURM allocation) and GPUs/node (`nvidia-smi -L`); one node runs locally, multiple nodes launch via `srun -N1 -n1 -w <hostname>` per node (same pattern validated this session). Does **not** call `desi_proc` at all -- it goes straight to `specex.specex` on the existing preprocessed files.
