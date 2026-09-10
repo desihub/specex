@@ -77,10 +77,15 @@ float32/float64 precision, grid line search.
   coverage, both ends not just red): does NOT disappear in the noiseless
   sim -- if anything stronger and more symmetric there (r-band: 0.20%/
   0.18% at the two edges vs 0.03% mid-band). Survives with zero noise, so
-  probably NOT SNR-driven -- leading hypothesis is the wavelength
-  Legendre basis's own reduced constraint near its fitted domain's edges
-  (a standard polynomial-regression property), not tested directly yet.
-  Both small in absolute terms, neither a correctness blocker. Full data:
+  probably NOT SNR-driven. Tested the leading hypothesis directly
+  (raising the wavelength Legendre degree from b/r's default of 1):
+  made things ~10-30x *worse* overall, ruling out "just under-
+  parametrized," though the U-shape persisted at both degrees. Revised
+  hypothesis -- sparse/irregular candidate-line sampling near each
+  band's edges, not raw polynomial-domain-edge math -- doesn't cleanly
+  explain b-band's own red edge (its worst bin has the *most* catalog
+  lines, not the fewest). Genuinely still open. Both small in absolute
+  terms, neither a correctness blocker. Full data:
   porting-notes.md, 2026-09-13 (two entries).
 - Julien Guy's separable-B-spline-PSF proposal was scoped (rough effort
   estimate only) but deliberately not pursued, per Stephen's direction to
@@ -128,7 +133,12 @@ float32/float64 precision, grid line search.
   `cpp-direct`) working against the current, unpatched `../desispec`
   checkout during this branch's ongoing test/validation phase -- the
   rename is still the plan for when the real desispec integration
-  happens, just deferred rather than done mid-testing.
+  happens, just deferred rather than done mid-testing. Added the edge/
+  wavelength findings to the "GPU Warm-Up Ledger" artifact and trimmed
+  its older narrative sections. Tested the wavelength-edge hypothesis
+  directly (raising b/r's Legendre wavelength degree from 1) -- made
+  things worse, not better, ruling out simple under-parametrization;
+  root cause still open (see "still open" above).
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and
