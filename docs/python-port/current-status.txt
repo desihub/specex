@@ -65,36 +65,36 @@ float32/float64 precision, grid line search.
 - sigma_y's b-band residual (0.78%) runs noticeably higher than r/z
   (0.14-0.45%) -- leading hypothesis is a weak blue-edge calibration
   signal, not investigated further.
-- Two distinct CCD-edge PSF-*shape* effects, tested 2026-09-13, likely two
-  distinct causes:
+- Two distinct CCD-edge PSF-*shape* effects, tested 2026-09-13 (numbers
+  below are the corrected values, after fixing an input-file mixup caught
+  and resolved the same day -- see porting-notes.md), likely two distinct
+  causes:
   (a) True-slit-edge (fiber 0/499): real on real data (all 30 cameras,
-  Python 1.7-2.4x worse than interior in every band) but does NOT
-  reproduce against noiseless arcsim ground truth (Python ratio
-  0.41-1.00x, flat/reversed) -- supports a real-data/SNR cause, not a
-  Python structural bug. (C++ does show a small residual effect even in
-  sim, 1.17-1.44x, unexplained, low priority.)
+  Python 1.7-2.4x worse than interior in every band) but much smaller
+  against noiseless arcsim ground truth (Python ratio 0.93x/1.59x/1.27x,
+  b/r/z) -- supports a real-data/SNR cause, not a Python structural bug.
   (b) Wavelength-domain edges (worse near the edges of each band's own
   coverage, both ends not just red): does NOT disappear in the noiseless
-  sim -- if anything stronger and more symmetric there (r-band: 0.20%/
-  0.18% at the two edges vs 0.03% mid-band). Survives with zero noise, so
-  probably NOT SNR-driven. Tested the leading hypothesis directly
-  (raising the wavelength Legendre degree from b/r's default of 1):
-  made things ~10-30x *worse* overall, ruling out "just under-
-  parametrized," though the U-shape persisted at both degrees. Revised
-  hypothesis -- sparse/irregular candidate-line sampling near each
-  band's edges, not raw polynomial-domain-edge math -- doesn't cleanly
-  explain b-band's own red edge (its worst bin has the *most* catalog
-  lines, not the fewest). Genuinely still open. Both small in absolute
-  terms, neither a correctness blocker. Full data:
-  porting-notes.md, 2026-09-13 (two entries).
-- C++'s own fit is not perfectly run-to-run reproducible at the sigma_y
-  precision level (~0.1-0.2%): a fresh arcsim C++ refit's fitted GHSIGY
-  Legendre coefficients differ meaningfully from the original Aug-28
-  reference's, despite near-identical trace positions. Not yet explained
-  (candidate cause: thread/BLAS numerics between MPI and the
-  single-process workaround used to generate the fresh refit). Blocks a
-  clean "is Python closer to truth more often, in aggregate" answer until
-  resolved -- Python-vs-truth-directly findings are unaffected.
+  sim -- confirmed with corrected input too, clean U-shape every band
+  (e.g. r-band: 0.081%/0.073% at the two edges vs 0.032% mid-band).
+  Survives with zero noise, so probably NOT SNR-driven. Tested the
+  leading hypothesis directly (raising the wavelength Legendre degree
+  from b/r's default of 1): made things ~10-30x *worse* overall, ruling
+  out "just under-parametrized," though the U-shape persisted at both
+  degrees. Revised hypothesis -- sparse/irregular candidate-line sampling
+  near each band's edges, not raw polynomial-domain-edge math -- doesn't
+  cleanly explain b-band's own red edge (its worst bin has the *most*
+  catalog lines, not the fewest). Genuinely still open. Both small in
+  absolute terms, neither a correctness blocker. Full data:
+  porting-notes.md, 2026-09-13 (several entries).
+- (Resolved 2026-09-13, same day found) What looked like a C++ run-to-run
+  reproducibility issue (~0.1-0.2% sigma_y differences between two
+  "identical" arcsim refits) was a wrong-input-file bug on this session's
+  own part -- the arcsim directory has two different preproc realizations
+  per camera and the fresh refit used the wrong one. Confirmed C++ is
+  bit-for-bit reproducible once the correct input is used. Redone
+  correctly: Python closer to truth 65% overall (b=35%, r=80%, z=80%),
+  closely matching the original claim. Resolved, no longer open.
 - Julien Guy's separable-B-spline-PSF proposal was scoped (rough effort
   estimate only) but deliberately not pursued, per Stephen's direction to
   prioritize production-readiness over new modeling work right now.
