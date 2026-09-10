@@ -87,6 +87,14 @@ float32/float64 precision, grid line search.
   lines, not the fewest). Genuinely still open. Both small in absolute
   terms, neither a correctness blocker. Full data:
   porting-notes.md, 2026-09-13 (two entries).
+- C++'s own fit is not perfectly run-to-run reproducible at the sigma_y
+  precision level (~0.1-0.2%): a fresh arcsim C++ refit's fitted GHSIGY
+  Legendre coefficients differ meaningfully from the original Aug-28
+  reference's, despite near-identical trace positions. Not yet explained
+  (candidate cause: thread/BLAS numerics between MPI and the
+  single-process workaround used to generate the fresh refit). Blocks a
+  clean "is Python closer to truth more often, in aggregate" answer until
+  resolved -- Python-vs-truth-directly findings are unaffected.
 - Julien Guy's separable-B-spline-PSF proposal was scoped (rough effort
   estimate only) but deliberately not pursued, per Stephen's direction to
   prioritize production-readiness over new modeling work right now.
