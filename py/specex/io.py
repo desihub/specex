@@ -483,6 +483,37 @@ def read_preproc_cpp(opts):
     hdr = meta2header(ddata['meta'])
     return spx.PyImage(ddata['image'], ddata['ivar'], ddata['mask'], ddata['rdnoise'], hdr)
 
+def get_desi_linelist_file():
+    """Resolve the default DESI arc-lamp line list file's path, without needing the caller to know where it's installed.
+
+    Same resolution `desispec.scripts.specex` already uses for the C++
+    path: an explicit `$SPECEXDATA` override first, else the file installed
+    alongside this package's own `data/` directory (`importlib.resources`,
+    works whether this package is a `pip install`, an editable install, or
+    a plain `PYTHONPATH`-prepended checkout like this branch's own
+    `env_setup.sh` sets up).
+
+    Returns:
+        str: absolute path to `specex_linelist_desi.txt`. Not guaranteed to
+        exist (e.g. a corrupted install) -- callers that need to fail fast
+        on a missing file should check `os.path.exists()` themselves, as
+        `py/specex/test/test_specex.py` does.
+
+    Status: ACTIVE -- was previously duplicated ad hoc inline in `main()`
+    (`specex.py`) via a hand-rolled `os.path.dirname` climb; added here
+    2026-09-13 as a single reusable helper, matching the more robust
+    `importlib.resources` approach `desispec.scripts.specex` already used
+    independently. `main()` still has its own inline version (not switched
+    over in this pass, to avoid touching the CLI's argument-parsing flow
+    for an unrelated fix) -- prefer this function for any new code.
+    """
+    if "SPECEXDATA" in os.environ:
+        specexdata = os.environ["SPECEXDATA"]
+    else:
+        from importlib import resources
+        specexdata = resources.files("specex").joinpath("data")
+    return os.path.join(str(specexdata), "specex_linelist_desi.txt")
+
 def read_lamp_lines(filename):
     """Parse a lamp line list file (whitespace-separated `name wave score` per line, '#'-prefixed comments and blank/malformed lines skipped) into candidate-generation input.
 

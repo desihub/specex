@@ -187,18 +187,32 @@ class GaussHermitePSF:
             jnp.ndarray: shape (n_pix,) for a single spot, or (n_spots, n_pix) for
             a batch.
 
-        Status: ACTIVE (production default path).
+        Status: CI-TEST-ONLY -- not called by the production fit path
+        (`fit_ccd_native`/`fit_bundle_task`/`PSF_Fitter.fit`, which all call
+        `single_pix_value_jnp` directly via `_predict_bundle_jax`/
+        `_fit_all_spots_batch`), but real: exercised by the pytest suites
+        `testing/test_math_psf.py` and `testing/test_vectorization.py`,
+        which CI actually runs (see `docs/python-port/code-reading-guide.md`).
         """
         is_scalar = jnp.ndim(xc) == 0
         if is_scalar:
+            if jnp.ndim(xpix) == 0:
+                # Single spot, single pixel -- nothing to vmap over (vmap
+                # requires rank >= 1 along the mapped axis; a bare scalar
+                # xpix/ypix has rank 0). Call the scalar kernel directly.
+                return GaussHermitePSF.single_pix_value_jnp(xc, yc, xpix, ypix, params, degree)
             return vmap(GaussHermitePSF.single_pix_value_jnp, in_axes=(None, None, 0, 0, None, None))(xc, yc, xpix, ypix, params, degree)
         else:
             def spot_pix(xc_s, yc_s, p_s):
                 """Evaluate single_pix_value_jnp for one spot's (xc_s, yc_s, p_s) over the shared pixel-stamp grid, vmapped by the caller over the batch axis.
 
-                Status: ACTIVE (production default path) -- internal helper closure of
-                pix_value_jnp's batched-input branch.
+                Status: CI-TEST-ONLY -- internal helper closure of
+                pix_value_jnp's batched-input branch, see its docstring.
                 """
+                if jnp.ndim(xpix) == 0:
+                    # Same rank-0 case as the is_scalar branch above, just
+                    # for a batch of spots evaluated at a single pixel.
+                    return GaussHermitePSF.single_pix_value_jnp(xc_s, yc_s, xpix, ypix, p_s, degree)
                 return vmap(GaussHermitePSF.single_pix_value_jnp, in_axes=(None, None, 0, 0, None, None))(xc_s, yc_s, xpix, ypix, p_s, degree)
             return vmap(spot_pix)(xc, yc, params)
 
@@ -213,11 +227,17 @@ class GaussHermitePSF:
                 regardless of this flag's value.
 
         Returns:
-            np.ndarray: PSF values, see pix_value_jnp.
+            float or np.ndarray: a plain Python float for fully scalar
+            (xc, yc, xpix, ypix) input (matching `isinstance(..., float)`,
+            as `testing/test_vectorization.py` checks), else an
+            `np.ndarray` -- see `pix_value_jnp`'s docstring for shapes.
 
-        Status: ACTIVE (production default path).
+        Status: CI-TEST-ONLY, see pix_value_jnp's docstring.
         """
-        return np.array(GaussHermitePSF.pix_value_jnp(jnp.array(xc), jnp.array(yc), jnp.array(xpix), jnp.array(ypix), jnp.array(params), self.degree))
+        result = np.array(GaussHermitePSF.pix_value_jnp(jnp.array(xc), jnp.array(yc), jnp.array(xpix), jnp.array(ypix), jnp.array(params), self.degree))
+        if result.ndim == 0:
+            return float(result)
+        return result
 
 class PSF_Params:
     """Per-bundle PSF-fit parameter/state container: which fibers the bundle spans, the fitted 2D polynomial models for each shape parameter, and continuum-fit state.
