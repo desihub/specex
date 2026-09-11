@@ -9,7 +9,7 @@ from .fitter import PSF_Fitter, get_bundle_spots, select_bundle_spots_iterative
 
 # --- Original C++ Wrapper ---
 
-def run_specex(com):
+def run_specex_cpp(com):
     """Run the original compiled C++ specex engine via the pybind11 `_libspecex` extension, driving it exactly like the C++ `desi_psf_fit` CLI would from a list of argument strings.
 
     Args:
@@ -26,17 +26,20 @@ def run_specex(com):
     2026-09-06: `desispec`'s `desi_compute_psf` entry point calls this
     directly), not a legacy/one-off helper, though it's also still used by
     the old one-off comparison scripts (`testing/example_specex.py`,
-    `testing/full_analysis.py`). **Briefly renamed to `run_specex_cpp` on
-    2026-09-13, then reverted back to `run_specex` the same day** at
-    Stephen's direction, to keep local C++-comparison testing (`--backend
-    cpp`/`cpp-direct`, `testing/full_ccd_campaign.py`) working against the
-    current, unpatched `../desispec` checkout during this branch's ongoing
-    test/validation phase. The rename itself (forcing any code still doing
-    `from specex.specex import run_specex` to fail loudly instead of
-    silently running the old C++-only path) is still the intended plan for
-    the real desispec integration -- see
-    `docs/python-port/desispec-integration-plan.md` -- just deferred until
-    that integration is actually being done, not sprung on ongoing testing.
+    `testing/full_analysis.py`). **Renamed from `run_specex` to
+    `run_specex_cpp` on 2026-09-13, briefly reverted the same day** (to
+    keep local C++-comparison testing working against the current,
+    unpatched `../desispec` checkout during this branch's ongoing
+    test/validation phase), **then redone on 2026-09-11** at Stephen's
+    direction now that this branch's own validation work is finished and
+    it's been pushed for review. `../desispec`'s current
+    `from specex.specex import run_specex` is now unpatched and will fail
+    loudly (`ImportError`) the moment anything tries the old C++-only path
+    through it -- deliberate: forces the real desispec integration (see
+    `docs/python-port/desispec-integration-plan.md`) to make an explicit
+    choice (keep calling the C++ wrapper, now under this name, or switch to
+    the GPU-native `fit_ccd_native()` path) instead of drifting along
+    unnoticed.
     """
     from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
     from .io import read_psf, write_psf
@@ -307,7 +310,7 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
 
         class Opts:
-            """Minimal stand-in for the C++-side options object, carrying just the two file paths read_preproc/load_python_psf need. Not the same class as main()'s argparse Namespace or run_specex()'s C++ PyOptions.
+            """Minimal stand-in for the C++-side options object, carrying just the two file paths read_preproc/load_python_psf need. Not the same class as main()'s argparse Namespace or run_specex_cpp()'s C++ PyOptions.
 
             Status: ACTIVE (production default path) -- internal helper class of
             fit_bundle_task.
@@ -757,7 +760,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             trace_legendre_deg_wave_x = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else legendre_deg_wave
         if trace_legendre_deg_wave_y is None:
             # b/r default: 2, not 1 -- validated against the real C++ engine
-            # (run_specex(), now working locally -- see docs/python-port/porting-notes.md)
+            # (run_specex_cpp(), now working locally -- see docs/python-port/porting-notes.md)
             # across 6 bundles on both flagged exposures (r2@20250109,
             # r2@20241208): mean yrms 0.2182px -> 0.0686px (68% cut, into
             # normal-case territory). z-band kept coupled to its own wdeg

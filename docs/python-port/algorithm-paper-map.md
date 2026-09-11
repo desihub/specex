@@ -174,7 +174,7 @@ discuss (it's a methods/performance paper, not an ops-hardening one):
   C++ baseline this port targets. `py/specex/qa.py`'s `trace_psf_qa()`/
   `specex_psf_qa()` are the *original* PR #91-style functions this was
   adapted from, but they are themselves dead code in this repo -- imported
-  by the C++-wrapper path (`run_specex()`, `specex.py`) but never
+  by the C++-wrapper path (`run_specex_cpp()`, `specex.py`) but never
   actually called there (the call site is commented out).
 - **Trace-consensus prior**: C++ *does* have a trace-prior mechanism
   (`specex_psf_fitter.cc:759-857`, gated by `--trace-prior-deg`, penalizing

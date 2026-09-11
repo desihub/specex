@@ -28,6 +28,8 @@ python testing/run_night.py --night 20260401 --expid 00344649 \
 
 `--worker-mode persistent` is the current fastest, fully-validated config: **~483-503s/night** (1 node/4 GPUs, warm cache) vs. C++'s **~592-648s** -- see Section 2.3 for the full breakdown and why `--worker-mode` still defaults to the older, slower `subprocess` mode instead of this one. Swap `--backend cpp` for the real production C++/MPI driver, or `--backend cpp-direct` for a `desi_proc`-free C++ baseline (Section 2.3 explains the difference between the three backends).
 
+JAX caches compiled GPU code under `~/.cache/specex/jax_compilation_cache` by default -- the *first* run under any given jaxlib version pays a real one-time compile cost (~25 min/night cold vs. the ~8 min above once warm); set `JAX_COMPILATION_CACHE_DIR` to point it elsewhere, e.g. `$SCRATCH`, if `$HOME`'s inode quota is a concern.
+
 **Where the output goes** (no `--out-psf` above -- this mode writes one `fit-psf-<cam>-<expid>.fits` + `.log` per camera, resolved automatically, printed at the end as `output: <dir>/`): 1. `--outdir <path>`, if given, wins outright. 2. Else, if `$DESI_SPECTRO_REDUX` is set, `$DESI_SPECTRO_REDUX/$SPECPROD/exposures/<night>/<expid>/` (`$SPECPROD` defaults to `$USER`) -- matches `desi_proc`'s/`--backend cpp`'s own layout, so both backends land in the same place. 3. Otherwise, `$SCRATCH/specex/run_night_<night>_<expid>/`. Refuses to resolve inside the real production redux tree, explicit `--outdir` or not. Full logic: `resolve_python_run_dir()`, `testing/run_night.py:119-141`.
 
 ### One camera (full CCD, all 20 bundles)
@@ -149,14 +151,14 @@ python -c "import jax; print(jax.__version__); print(jax.devices())"
     old unprotected cold start too (which was 1509.2s even when it didn't
     fail outright) -- it isn't burning time on OOM retries that often fail
     anyway. Full investigation: `porting-notes.md`, 2026-09-10.
-*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
+*   **The C++-wrapper path (`run_specex_cpp()`, `--backend cpp`/`cpp-direct`)
     does NOT work as-is.** The compiled pybind11 extension
     (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
     against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
     can't load it (`ModuleNotFoundError: No module named
-    'specex._libspecex'` the moment `run_specex()` actually tries the
+    'specex._libspecex'` the moment `run_specex_cpp()` actually tries the
     lazy `from ._libspecex import ...`, even though `from specex.specex
-    import run_specex` itself succeeds -- the import is lazy, inside the
+    import run_specex_cpp` itself succeeds -- the import is lazy, inside the
     function body). **Needs a rebuild against this environment's Python/
     toolchain before `--backend cpp` can run under it** -- `cmake`
     (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a

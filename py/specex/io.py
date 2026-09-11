@@ -18,8 +18,8 @@ def meta2header(meta):
         specex._libspecex.MapStringString: the C++-side header object.
 
     Status: ACTIVE (C++-wrapper path) -- only called by read_preproc_cpp,
-    itself only used by specex.run_specex(). Real production code for
-    the C++ codepath, not unused legacy (see run_specex()'s own
+    itself only used by specex.run_specex_cpp(). Real production code for
+    the C++ codepath, not unused legacy (see run_specex_cpp()'s own
     docstring); just a different entry point than the GPU-native path.
     """
     import specex._libspecex as spx
@@ -325,7 +325,7 @@ def write_psf(pyps, opts, pyio):
         None. Writes `opts.output_fits_filename` as a side effect.
 
     Status: ACTIVE (C++-wrapper path) -- only called by
-    specex.run_specex(). Real production code for the C++ codepath,
+    specex.run_specex_cpp(). Real production code for the C++ codepath,
     not unused legacy; just a different entry point than the GPU-native
     path.
     """
@@ -412,7 +412,7 @@ def read_psf(opts, pyps):
         None. Mutates `pyps` in place.
 
     Status: ACTIVE (C++-wrapper path) -- only called by
-    specex.run_specex(). Real production code for the C++ codepath,
+    specex.run_specex_cpp(). Real production code for the C++ codepath,
     not unused legacy; just a different entry point than the GPU-native
     path.
     """
@@ -471,7 +471,7 @@ def read_preproc_cpp(opts):
         C++-extension-ready.
 
     Status: ACTIVE (C++-wrapper path) -- only called by
-    specex.run_specex(). Real production code for the C++ codepath,
+    specex.run_specex_cpp(). Real production code for the C++ codepath,
     not unused legacy; just a different entry point than the GPU-native
     path.
     """

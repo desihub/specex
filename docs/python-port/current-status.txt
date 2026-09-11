@@ -163,9 +163,9 @@ float32/float64 precision, grid line search.
   loudly instead of silently using the C++-only path), then reverted the
   same day to keep local C++-comparison testing (`--backend cpp`/
   `cpp-direct`) working against the current, unpatched `../desispec`
-  checkout during this branch's ongoing test/validation phase -- the
-  rename is still the plan for when the real desispec integration
-  happens, just deferred rather than done mid-testing. Added the edge/
+  checkout during this branch's ongoing test/validation phase --
+  **redone 2026-09-11, see below, now that this branch's validation
+  is finished and it's been pushed.** Added the edge/
   wavelength findings to the "GPU Warm-Up Ledger" artifact and trimmed
   its older narrative sections. Tested the wavelength-edge hypothesis
   directly (raising b/r's Legendre wavelength degree from 1) -- initially
@@ -199,6 +199,16 @@ float32/float64 precision, grid line search.
   something other than its default (-1, unbounded) -- relevant if/when a
   shared multi-user cache is stood up for production. Full data:
   porting-notes.md, 2026-09-10 (several entries).
+- 2026-09-11: Branch pushed for review. Redid item 5's rename
+  (`run_specex` -> `run_specex_cpp`, `py/specex/specex.py` and every real
+  call site/doc reference) now that this branch's own test/validation
+  phase is finished -- deferred, not abandoned, per the 2026-09-13 entry
+  above. `../desispec`'s unpatched `from specex.specex import run_specex`
+  now fails loudly (`ImportError`) instead of silently running the old
+  C++-only path, forcing the real desispec integration
+  (desispec-integration-plan.md) to make an explicit choice. Only
+  remaining item before the PR (item 6) is confirming this rename hasn't
+  broken anything on this branch's own side.
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and

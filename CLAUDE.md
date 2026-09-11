@@ -42,7 +42,7 @@ one-line pointer is in the repo-root `README.md` too).
    where/why the port's behavior deviates from a literal reading of either.
 8. **`docs/python-port/code-reading-guide.md`** -- where to start reading
    `py/specex/`, the two real entry points (`main()`'s GPU-native path vs.
-   `run_specex()`'s C++-wrapper path), and a live-methods table (55
+   `run_specex_cpp()`'s C++-wrapper path), and a live-methods table (55
    functions reachable from `main()`, generated from a fresh AST call-graph
    walk, not hand-maintained) distinguishing the production hot path from
    real-but-not-production code (CI-test-only, testing-tool-only) and
@@ -68,24 +68,25 @@ transcripts.
 - **`py/specex/`** -- the Python/JAX port (the actual subject of this branch).
   - `specex.py` -- CLI entry point (`python -m specex.specex`) and the
     process-pool driver (`fit_ccd_native`, `fit_bundle_task`, `main`). Also
-    contains `run_specex()`, a wrapper around the compiled C++ pybind11
+    contains `run_specex_cpp()`, a wrapper around the compiled C++ pybind11
     extension (`_libspecex`). **Not legacy/one-off** -- confirmed
     2026-09-06 that this is the actual real-C++-production codepath, not a
     leftover: every `--backend cpp`/`cpp-direct` run this project has ever
     done (via `desi_proc --mpi` or direct invocation) goes through this
     exact function, and it's also still used by the old one-off comparison
     scripts (`testing/example_specex.py`, `testing/full_analysis.py`).
-    **Briefly renamed to `run_specex_cpp` on 2026-09-13, then reverted the
-    same day** at Stephen's direction, to keep local C++-comparison
-    testing (`--backend cpp`/`cpp-direct`, `full_ccd_campaign.py`) working
-    against the current, unpatched `../desispec` checkout during this
-    branch's ongoing test/validation phase -- see
-    `docs/python-port/desispec-integration-plan.md`. The rename (forcing
+    **Renamed from `run_specex` on 2026-09-13, briefly reverted the same
+    day** (to keep local C++-comparison testing -- `--backend cpp`/
+    `cpp-direct`, `full_ccd_campaign.py` -- working against the current,
+    unpatched `../desispec` checkout during this branch's ongoing
+    test/validation phase), **then redone 2026-09-11** at Stephen's
+    direction now that this branch's validation is finished and it's been
+    pushed for review -- see `docs/python-port/desispec-integration-plan.md`.
     `desispec`'s current, unchanged `from specex.specex import
-    run_specex` to fail loudly instead of silently running the old
-    C++-only path) is still the intended plan for when the real desispec
-    integration happens, just deferred rather than sprung on ongoing
-    testing. `read_preproc_cpp()`/`read_preproc()`
+    run_specex` now fails loudly (`ImportError`) instead of silently
+    running the old C++-only path -- deliberate: forces the real desispec
+    integration to make an explicit choice instead of drifting along
+    unnoticed. `read_preproc_cpp()`/`read_preproc()`
     (`io.py`) -- the C++ and Python image-loading paths this feeds --
     apply *identical* masking: `ivar[mask != 0] = 0.0` before either
     fitter ever runs, so cosmic-ray/bad-pixel exclusion (preproc MASK bit
