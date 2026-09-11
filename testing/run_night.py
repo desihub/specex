@@ -79,7 +79,75 @@ LAMP_LINES_FILE = os.path.join(REPO, "py", "specex", "data", "specex_linelist_de
 # cap. Untested above these values and untested on subprocess mode -- pass
 # --workers-per-gpu-{b,r,z} to override (e.g. back to 10/7/4) if a future
 # OOM/regression surfaces here.
+#
+# IMPORTANT: that 4-night validation ran with an already-warm JAX
+# compilation cache throughout (night 1 warmed it, nights 2-4 reused it).
+# Confirmed 2026-09-10: on a genuinely COLD cache (the first-ever run under
+# a given jaxlib version -- e.g. a fresh JAX_COMPILATION_CACHE_DIR, or a
+# brand-new desiconda/jaxlib release), z-band at packing=5 hits real GPU
+# RESOURCE_EXHAUSTED bundle failures that persist even through specex.py's
+# existing OOM-retry floor of packing=1 -- reproduced twice, independent of
+# env_setup.sh or which filesystem the cache lives on (see
+# docs/python-port/porting-notes.md, 2026-09-10). b/r showed no such
+# failures even fully cold, so only z-band is reduced below. Likely cause:
+# JIT compilation itself needs more transient GPU memory than warm
+# execution (XLA autotunes multiple candidate kernels), and z-band's
+# per-bundle footprint is already the closest to the edge of the three
+# bands even when warm (see the z:3-vs-5 note in specex.py's own
+# --workers-per-gpu default).
 DEFAULT_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 5}
+COLD_CACHE_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 3}  # 2026-09-10: retesting after fixing the coldness-snapshot bug (see _gpu_persistent_worker) that let z4 silently slip back to packing=5 mid-run in the first 3 vs. 2 comparison
+# One full warm night populates ~80,000 cache entries (docs/python-port/porting-notes.md,
+# 2026-09-10); this threshold just needs to distinguish "basically empty"
+# from "has real history" -- deliberately not trying to predict exactly
+# which shapes THIS run needs, which would mean replicating JAX's own
+# per-program cache-key hash (fragile, version-coupled).
+COLD_CACHE_ENTRY_THRESHOLD = 2000
+
+
+def _resolve_jax_cache_dir():
+    """Mirrors specex.py's own JAX_COMPILATION_CACHE_DIR resolution
+    (specex.py:280-281) so this file can check the same directory specex.py
+    will actually use, without importing specex.py's GPU-only module body
+    just to ask it a filesystem question."""
+    default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
+    return os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
+
+
+def _cache_is_cold(threshold=COLD_CACHE_ENTRY_THRESHOLD):
+    """True if the JAX compilation cache this run will use looks
+    unpopulated -- a plain, uncached check (one os.listdir) each call.
+
+    Callers with a "mid-run" of their own (a persistent worker processing
+    many cameras) should call this ONCE and reuse the result, not call it
+    fresh per camera -- see _gpu_persistent_worker's own comment for why a
+    per-camera re-check is actively wrong (sibling workers' unrelated
+    progress makes the shared directory look "warm" long before any given
+    worker's own upcoming cameras have had their specific shapes
+    compiled)."""
+    try:
+        return len(os.listdir(_resolve_jax_cache_dir())) < threshold
+    except OSError:
+        return True  # doesn't exist yet -- definitely cold
+
+
+def _workers_per_gpu_for(band, wpg_override, cold=None):
+    """The one place both run modes (subprocess and persistent) resolve
+    workers-per-gpu from -- explicit --workers-per-gpu-<band> always wins;
+    otherwise picks the cold- or warm-cache default per band. See
+    COLD_CACHE_WORKERS_PER_GPU above for why this distinction exists.
+
+    `cold`: pass an already-decided coldness snapshot (persistent-worker
+    mode does this -- see its own docstring for why re-checking per camera
+    is actively wrong) or leave None to check fresh right now (the
+    subprocess path's one-shot-per-camera-process case, where there's no
+    "mid-run" to get wrong)."""
+    if band in wpg_override:
+        return wpg_override[band]
+    if cold is None:
+        cold = _cache_is_cold()
+    profile = COLD_CACHE_WORKERS_PER_GPU if cold else DEFAULT_WORKERS_PER_GPU
+    return profile[band]
 
 
 def find_cases(night, expid, cameras):
@@ -229,7 +297,7 @@ def tail_error(log_path, n=6):
 
 def run_camera_python(cam, case, gpu_id, outdir, wpg_override, dry_run, footprint_margin=None):
     band = cam[0]
-    wpg = wpg_override.get(band, DEFAULT_WORKERS_PER_GPU[band])
+    wpg = _workers_per_gpu_for(band, wpg_override)
     # fit-psf-<cam>-<expid>.fits matches desi_proc's/desi_compute_psf's own
     # real output naming (see run_backend_cpp's printed output path below)
     # -- was bare "{cam}.fits", which didn't line up with anything C++
@@ -417,9 +485,24 @@ def _gpu_persistent_worker(gpu_id, work_q, results_q, outdir, wpg_override, foot
     # OOM retries inside fit_ccd_native still fall back to
     # their own temporary reduced-packing pool (see specex.py's _run_batch)
     # regardless of this pool -- unaffected, still correctness-preserving.
+    # Coldness is snapshotted ONCE here, before any camera in this worker's
+    # queue has run -- deliberately NOT re-checked per camera. Re-checking
+    # was tried and is actively wrong: the shared cache directory's total
+    # entry count climbs fast because *sibling* GPU workers' own cameras
+    # are compiling concurrently, so a per-camera check flips to "warm"
+    # within the first camera or two even though THIS worker's own
+    # upcoming cameras' specific shapes (data-dependent on their own spot
+    # counts, per the 2026-09-10 "normal shapes" investigation) were never
+    # actually touched by anyone. Confirmed 2026-09-10: with a per-camera
+    # re-check, z4 (the ~7th z-band camera dispatched) still lost 2/20
+    # bundles to OOM, because the global count had already crossed the
+    # threshold from z0-z3's unrelated progress on other GPUs, silently
+    # handing z4 the full (unsafe-while-cold) packing again.
+    is_cold = _cache_is_cold()
     ctx = mp.get_context('spawn')
     pool = None
     pool_size = None
+    warned_cold = False
     try:
         while True:
             item = work_q.get()
@@ -427,7 +510,14 @@ def _gpu_persistent_worker(gpu_id, work_q, results_q, outdir, wpg_override, foot
                 return
             cam, case = item
             band = cam[0]
-            wpg = wpg_override.get(band, DEFAULT_WORKERS_PER_GPU[band])
+            reduced = (band not in wpg_override and is_cold
+                       and COLD_CACHE_WORKERS_PER_GPU[band] != DEFAULT_WORKERS_PER_GPU[band])
+            if reduced and not warned_cold:
+                print(f"  gpu{gpu_id}: cold JAX cache detected (<{COLD_CACHE_ENTRY_THRESHOLD} entries at worker "
+                      f"startup) -- using conservative workers-per-gpu ({COLD_CACHE_WORKERS_PER_GPU[band]} vs "
+                      f"the usual {DEFAULT_WORKERS_PER_GPU[band]}) for {band}-band for this whole run", flush=True)
+                warned_cold = True
+            wpg = _workers_per_gpu_for(band, wpg_override, cold=is_cold)
             if not pool_reuse:
                 # A/B-test path: tear down and recreate every camera,
                 # matching pre-pool-reuse behavior exactly (still goes

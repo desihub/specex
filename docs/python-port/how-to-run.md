@@ -7,9 +7,17 @@ This guide documents how to run the ported Python/JAX version of Specex and the 
 One-time environment setup, then the three run scopes most people need. Full documentation -- every flag, timing table, and operational gotcha -- is below this section.
 
 ```bash
-# Once per session (sets PYTHONPATH/LD_LIBRARY_PATH, loads cudatoolkit)
-source env_setup.sh
+# Once per session -- the shared DESI+JAX environment (26.9 or later;
+# no env_setup.sh, no personal venv needed)
+source /global/cfs/cdirs/desi/software/desi_environment.sh 26.9
+
+# Running from a git checkout (not an installed release)? Prepend this
+# repo's own py/ so it isn't shadowed by the environment's bundled,
+# pre-port specex install:
+export PYTHONPATH=/path/to/your/specex/py:$PYTHONPATH
 ```
+
+Do **not** also `source env_setup.sh` alongside this -- that script's `LD_LIBRARY_PATH`/NVLIBS tuning is for the older `specex_env` venv path (Section 0) and conflicts with this environment's own, already-complete CUDA plumbing (confirmed 2026-09-10: layering both caused severe GPU-memory-management failures under real production load -- `RESOURCE_EXHAUSTED`/`CUDA_ERROR_OUT_OF_MEMORY` crashes and permanently-incomplete output on several cameras; the same night/expid ran clean, 30/30 cameras, with 26.9 alone). Still using a personal `specex_env`? See Section 0 below -- `env_setup.sh` is only for that path.
 
 ### Full night/expid (production scale, all 30 cameras)
 
@@ -19,6 +27,8 @@ python testing/run_night.py --night 20260401 --expid 00344649 \
 ```
 
 `--worker-mode persistent` is the current fastest, fully-validated config: **~483-503s/night** (1 node/4 GPUs, warm cache) vs. C++'s **~592-648s** -- see Section 2.3 for the full breakdown and why `--worker-mode` still defaults to the older, slower `subprocess` mode instead of this one. Swap `--backend cpp` for the real production C++/MPI driver, or `--backend cpp-direct` for a `desi_proc`-free C++ baseline (Section 2.3 explains the difference between the three backends).
+
+**Where the output goes** (no `--out-psf` above -- this mode writes one `fit-psf-<cam>-<expid>.fits` + `.log` per camera, resolved automatically, printed at the end as `output: <dir>/`): 1. `--outdir <path>`, if given, wins outright. 2. Else, if `$DESI_SPECTRO_REDUX` is set, `$DESI_SPECTRO_REDUX/$SPECPROD/exposures/<night>/<expid>/` (`$SPECPROD` defaults to `$USER`) -- matches `desi_proc`'s/`--backend cpp`'s own layout, so both backends land in the same place. 3. Otherwise, `$SCRATCH/specex/run_night_<night>_<expid>/`. Refuses to resolve inside the real production redux tree, explicit `--outdir` or not. Full logic: `resolve_python_run_dir()`, `testing/run_night.py:119-141`.
 
 ### One camera (full CCD, all 20 bundles)
 
@@ -53,6 +63,125 @@ No GPU available? Every command above also runs with `--backend cpu` (Section 2.
 ---
 
 ## 0. Environment Creation (One-time setup)
+
+### Recommended: the shared DESI environment (26.9 or later)
+
+Every release of the shared DESI module environment from **26.9 onward
+bundles JAX (with CUDA support) already installed** -- production doesn't
+need a personal venv at all. **As of 2026-09-10, this is the recommended
+path** -- promoted from "alternative" after a full 30-camera
+persistent-worker-mode run confirmed it matches `specex_env` exactly, once
+set up correctly (see the `env_setup.sh` warning below, which is the one way
+to get this wrong):
+
+```bash
+source /global/cfs/cdirs/desi/software/desi_environment.sh 26.9
+# must `deactivate` any active personal venv and `unset PYTHONPATH` *before*
+# sourcing it, or the venv's own python/PYTHONPATH silently wins and you're
+# not actually using this environment
+
+# Verify JAX is properly installed and sees all 4 A100s:
+python -c "import jax; print(jax.__version__); print(jax.devices())"
+# expect something like: 0.10.2  [CudaDevice(id=0), CudaDevice(id=1), CudaDevice(id=2), CudaDevice(id=3)]
+# if it instead prints CPU devices or raises, something upstream of specex
+# (module load order, a leftover PYTHONPATH/venv) is wrong -- fix that
+# before troubleshooting anything specex-specific.
+```
+
+*   **The GPU-native Python/JAX path (`main()`/`fit_ccd_native()`, everything
+    in Sections 2-4 below, including `run_night.py`'s `--worker-mode
+    persistent`) works with zero code changes.** This environment
+    provides its own Python 3.14.7 (desiconda 20260908-3.0.0), jax/jaxlib
+    0.10.2 (vs. `specex_env`'s 0.10.1), numpy 2.5.3, scipy 1.18.0, astropy
+    8.0.1, fitsio 1.4.2 -- all close to or newer than `specex_env`'s
+    versions -- and `jax.devices()` correctly reports all 4 A100s with no
+    extra setup (no `env_setup.sh`-style `LD_LIBRARY_PATH`/`NVLIBS` dance
+    needed; this environment's own CUDA plumbing already works). A real
+    single-bundle fit (`z8/00344649` bundle 5) ran clean end-to-end,
+    `SPECEX_RESULT: OK 1/1 bundles`. **You still need to prepend this
+    repo's own `py/` to `PYTHONPATH`**
+    (`export PYTHONPATH=/path/to/specex/py:$PYTHONPATH`,
+    same idea as `env_setup.sh`, just without the venv-specific
+    `NVLIBS`/`LD_LIBRARY_PATH` piece, which isn't needed here) --
+    **this environment already bundles its own separate `specex` install**
+    (`.../desiconda/.../code/specex/main/py`, the old pre-port C++-only
+    version -- no `fitter.py`/`psf.py`/`math.py` at all), which silently
+    shadows this branch's code if you don't put this repo's `py/` first.
+*   **Do not also `source env_setup.sh`.** Confirmed 2026-09-10: sourcing
+    `env_setup.sh` *on top of* `26.9` (its `LD_LIBRARY_PATH`/NVLIBS
+    tuning is specific to `specex_env`'s pip-installed `jax-cuda13`
+    wheels, and conflicts with this environment's own, already-complete
+    CUDA plumbing) caused severe GPU-memory-management failures under
+    real load: a full 30-camera `--worker-mode persistent` run hit
+    hundreds of `CUDA_ERROR_OUT_OF_MEMORY`/`RESOURCE_EXHAUSTED` errors per
+    camera, with some cameras (z-band) permanently losing bundles (`FAILED
+    4/20 bundles`) and others crashing outright with no output at all. The
+    *same* night/expid, same node, same job, run again with `26.9`
+    alone (no `env_setup.sh`) -- 30/30 cameras clean, 0 bundle failures.
+    This is not a bug in 26.9 itself; it's purely a "don't layer two
+    different CUDA toolchains' `LD_LIBRARY_PATH` on top of each other"
+    mistake, easy to make since `env_setup.sh` used to be a required step.
+*   **First run in a fresh environment pays a real JIT-compile cold-start
+    cost, same as `specex_env` always has (Section 2's cold-vs-warm note),
+    just bigger the first time anyone uses a brand-new jaxlib version.**
+    `~/.cache/specex/jax_compilation_cache`'s entries are keyed by jaxlib
+    version, so the *very first* `26.9` run (jax/jaxlib 0.10.2) has
+    zero cache hits even on a filesystem with months of `specex_env`
+    (jax/jaxlib 0.10.1) history sitting right next to it. Not a 26.9
+    problem, just a one-time tax per jaxlib version -- see the note below
+    on a shared, pre-warmed cache for production.
+*   **A genuinely cold cache could also cause real GPU OOM bundle
+    failures with `--worker-mode persistent` -- fixed 2026-09-10, `run_night.py`
+    handles this automatically now, nothing to pass.** JIT compilation
+    needs more transient GPU memory than warm execution, and z-band's
+    tuned default (5 concurrent workers/GPU, Section 2.3) can exceed
+    available memory when several are cold-compiling at once -- reproduced
+    with real bundle losses on a fresh cache, independent of `env_setup.sh`
+    or which filesystem the cache lives on. `run_night.py` now detects a
+    cold cache (a simple file-count heuristic, checked once per persistent
+    worker at startup) and drops z-band to 3 workers/GPU until it warms up,
+    then uses the normal tuned value once it has (an explicit
+    `--workers-per-gpu-z` still overrides either). Validated clean (0
+    bundle failures) on two independent fresh-cache 30-camera runs:
+    **1135.4s (18.9 min) cold -> 466.9s (7.8 min) warm**, the warm number
+    matching `specex_env`'s own validated persistent-worker baseline
+    (Section 2.3) almost exactly. The fix is faster on average than the
+    old unprotected cold start too (which was 1509.2s even when it didn't
+    fail outright) -- it isn't burning time on OOM retries that often fail
+    anyway. Full investigation: `porting-notes.md`, 2026-09-10.
+*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
+    does NOT work as-is.** The compiled pybind11 extension
+    (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
+    against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
+    can't load it (`ModuleNotFoundError: No module named
+    'specex._libspecex'` the moment `run_specex()` actually tries the
+    lazy `from ._libspecex import ...`, even though `from specex.specex
+    import run_specex` itself succeeds -- the import is lazy, inside the
+    function body). **Needs a rebuild against this environment's Python/
+    toolchain before `--backend cpp` can run under it** -- `cmake`
+    (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a
+    rebuild looks straightforward, just not attempted yet (not needed for
+    the GPU-native path, which is the actual subject of this port).
+*   **Bottom line**: this environment is a full `specex_env` replacement
+    for the Python/JAX path, GPU-native and persistent-worker mode both,
+    once `PYTHONPATH` is set correctly and `env_setup.sh` is left out of
+    it. `specex_env` (below) remains a fine fallback, e.g. for local
+    development off Perlmutter. The C++ path is the one piece of "readying
+    an environment for production" work still open, and it's independent
+    of anything about this branch's own Python code. Open item: a
+    shared, pre-warmed JAX compilation cache (not each user's own
+    `$HOME`) so new users don't pay the cold-start time cost above at all
+    -- not yet set up, see `porting-notes.md` 2026-09-10 for the "normal
+    shapes" footprint this would need to cover (the cold start is now safe
+    either way per the OOM fix above, this is purely about speed). If a
+    shared, multi-writer cache is stood up: JAX's own cross-process file
+    lock protecting concurrent cache writes only activates when
+    `jax_compilation_cache_max_size` is set to something other than its
+    default (`-1`, unbounded) -- confirmed by reading `jax/_src/lru_cache.py`
+    directly, not just inferred. Set a finite value on the shared directory
+    before opening it up to concurrent users.
+
+### Alternative: your own `specex_env` venv
 
 To recreate the environment used for development (`specex_env`):
 
@@ -105,52 +234,6 @@ Notes:
 
 **If `--gpu`/`--backend gpu` (the default) is requested but no CUDA-enabled jaxlib is installed**, `python -m specex.specex` now fails immediately with a clear, actionable `RuntimeError` pointing back at this section, rather than either JAX's own opaque `Unknown backend: 'gpu' requested... Platforms present are: cpu` or (worse) silently falling back to CPU and running ~10x slower with no indication anything is wrong. This is deliberate fail-fast behavior, not a bug: since `--gpu` is the default and this is a performance-critical batch pipeline, a silent CPU fallback would be a much nastier trap than a loud failure. Pass `--backend cpu` explicitly if you ever want to run on CPU on purpose.
 
-### Alternative to `specex_env`: a shared DESI environment with JAX (tested 2026-09-13)
-
-Stephen is assembling a shared DESI module environment that bundles JAX,
-as a path toward not needing a personal venv at all for production. Tested
-`source /global/cfs/cdirs/desi/software/desi_environment.sh test-26.9`
-(note: must `deactivate` any active personal venv and `unset PYTHONPATH`
-*before* sourcing it, or the venv's own `python`/`PYTHONPATH` silently wins
-and you're not actually testing the new environment):
-
-*   **The GPU-native Python/JAX path (`main()`/`fit_ccd_native()`, everything
-    in Sections 2-4 below) works with zero code changes.** This environment
-    provides its own Python 3.14.7 (desiconda 20260908-3.0.0), jax/jaxlib
-    0.10.2 (vs. `specex_env`'s 0.10.1), numpy 2.5.3, scipy 1.18.0, astropy
-    8.0.1, fitsio 1.4.2 -- all close to or newer than `specex_env`'s
-    versions -- and `jax.devices()` correctly reports all 4 A100s with no
-    extra setup (no `env_setup.sh`-style `LD_LIBRARY_PATH`/`NVLIBS` dance
-    needed; this environment's own CUDA plumbing already works). A real
-    single-bundle fit (`z8/00344649` bundle 5) ran clean end-to-end,
-    `SPECEX_RESULT: OK 1/1 bundles`. **You still need to prepend this
-    repo's own `py/` to `PYTHONPATH`**
-    (`export PYTHONPATH=/path/to/specex/py:$PYTHONPATH`,
-    same idea as `env_setup.sh`, just without the venv-specific
-    `NVLIBS`/`LD_LIBRARY_PATH` piece, which isn't needed here) --
-    **this environment already bundles its own separate `specex` install**
-    (`.../desiconda/.../code/specex/main/py`, the old pre-port C++-only
-    version -- no `fitter.py`/`psf.py`/`math.py` at all), which silently
-    shadows this branch's code if you don't put this repo's `py/` first.
-*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
-    does NOT work as-is.** The compiled pybind11 extension
-    (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
-    against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
-    can't load it (`ModuleNotFoundError: No module named
-    'specex._libspecex'` the moment `run_specex()` actually tries the
-    lazy `from ._libspecex import ...`, even though `from specex.specex
-    import run_specex` itself succeeds -- the import is lazy, inside the
-    function body). **Needs a rebuild against this environment's Python/
-    toolchain before `--backend cpp` can run under it** -- `cmake`
-    (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a
-    rebuild looks straightforward, just not attempted yet (not needed for
-    the GPU-native path, which is the actual subject of this port).
-*   **Bottom line**: this environment is a viable `specex_env` replacement
-    for the Python/JAX path today, once `PYTHONPATH` is set correctly. The
-    C++ path is the one piece of "readying an environment for production"
-    work still open, and it's independent of anything about this branch's
-    own Python code.
-
 ---
 
 ## 1. Environment Setup (Every session)
@@ -158,11 +241,11 @@ and you're not actually testing the new environment):
 Before running any scripts, ensure your environment is set up correctly on Perlmutter.
 
 ```bash
-# From the project root
-source env_setup.sh
+source /global/cfs/cdirs/desi/software/desi_environment.sh 26.9
+export PYTHONPATH=/path/to/your/specex/py:$PYTHONPATH   # git checkout only
 ```
 
-This sets `PYTHONPATH` to include the local `py` directory, points `LD_LIBRARY_PATH` at the pip-installed NVIDIA CUDA libraries JAX needs, and loads the `cudatoolkit` module if on a compute node.
+This is the recommended path as of 2026-09-10 (Section 0's "Recommended" subsection has the full story and the validated numbers) -- no personal venv, no `env_setup.sh`. If you're instead using a personal `specex_env` venv (Section 0), run `source env_setup.sh` from the project root instead: it sets `PYTHONPATH` to include the local `py` directory, points `LD_LIBRARY_PATH` at the pip-installed NVIDIA CUDA libraries JAX needs, and loads the `cudatoolkit` module -- none of which the shared environment needs or wants layered on top of it.
 
 ---
 
@@ -262,6 +345,8 @@ python testing/run_night.py --night 20260401 --expid 00344649
 | **+ `workers-per-gpu` 12/8/5 (current `persistent`-mode default)** | **483.3s** | **-18.4%** |
 
 A second, independent 10-night set (2026-09-05, bringing the cumulative validated sample to 20 nights) reproduced this: Python `persistent` mean **502.5s warm / 591.2s cold** (first-touch-on-a-fresh-node cost, ~15% higher, consistent across all 10 nights) vs. C++ mean **648.3s**. Correctness across the full 20-night sample: **xrms=0.0120px, yrms≈0.0129px** vs. C++ (see `docs/python-port/porting-notes.md`'s 2026-09-02/05 entries for full per-night/per-camera tables). **Before trusting any timing number on this project**, confirm `$HOME` isn't at its NERSC disk quota -- a full quota produces silent per-bundle failures at `rc=0` and inflated wall time, not an obvious error (see `docs/python-port/porting-notes.md`, 2026-09-04).
+
+That 591.2s "cold" figure is a milder kind of cold than Section 0's -- a fresh *node* reusing an already-populated JAX compilation cache on the same filesystem, not a genuinely empty cache directory. A truly empty cache (first run ever under a given jaxlib version, or a fresh `JAX_COMPILATION_CACHE_DIR`) costs much more -- ~1135s -- and, before 2026-09-10, could fail outright with GPU OOM on z-band. `run_night.py` now detects and handles that case automatically (drops z-band to 3 workers/GPU until its own cache warms up); see Section 0's "Recommended" subsection for the full story and numbers.
 
 **Multi-node camera splitting:** the default is a naive alternating split (band-diverse but not load-balanced -- there's no timing prior for an arbitrary fresh night/expid). Pass `--lpt-profile cameras.json` (a `{"b0": 69.2, ...}` map of measured per-camera wall times, e.g. parsed from a prior run's own logs) to get an **LPT (longest-processing-time-first) balanced split** instead -- sorts cameras descending by known duration and greedily assigns each to whichever GPU-slot currently has the least total load, closing most of the gap a naive split leaves on the table (the slowest, most variable band, z, otherwise gets queued last with nothing to fill the tail).
 

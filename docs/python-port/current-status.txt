@@ -79,14 +79,37 @@ float32/float64 precision, grid line search.
   (e.g. r-band: 0.081%/0.073% at the two edges vs 0.032% mid-band).
   Survives with zero noise, so probably NOT SNR-driven. Tested the
   leading hypothesis directly (raising the wavelength Legendre degree
-  from b/r's default of 1): made things ~10-30x *worse* overall, ruling
-  out "just under-parametrized," though the U-shape persisted at both
-  degrees. Revised hypothesis -- sparse/irregular candidate-line sampling
-  near each band's edges, not raw polynomial-domain-edge math -- doesn't
-  cleanly explain b-band's own red edge (its worst bin has the *most*
-  catalog lines, not the fewest). Genuinely still open. Both small in
-  absolute terms, neither a correctness blocker. Full data:
-  porting-notes.md, 2026-09-13 (several entries).
+  from b/r's default of 1 to 3): only a mild effect once redone with the
+  correct input file -- absolute residual up ~15-50%, edge:interior ratio
+  actually narrows slightly (b 1.30x->1.24x, r 1.47x->1.23x) rather than
+  the ~10-30x blowup first reported (that number is retracted). Degree
+  isn't the fix, and the U-shape persists at both degrees, but this rules
+  out "under-parametrized" much more weakly than first thought.
+  **2026-09-09: tested whether this is even Python-specific -- it isn't.**
+  C++'s own arcsim fit (confirmed-correct input) shows the identical
+  edges-worse-than-middle pattern against the same truth, and is worse
+  at it than Python in b/r (edge:mid ratio b=1.95x/r=4.04x for C++ vs.
+  1.77x/2.29x for Python; z is the one band where Python's *relative*
+  jump is bigger, but its absolute edge residual still beats C++'s
+  there too). Reframes this from "possible Python bug" to "shared
+  structural property of the wavelength-Legendre approach both
+  pipelines use" -- consistent with edge-of-domain variance inflation,
+  a standard property of global polynomial regression, independent of
+  SNR or candidate-line count. Exact mechanism (basis edge-variance vs.
+  candidate-line spacing vs. something else) still unconfirmed.
+  **Sparse-candidate-line-sampling hypothesis now retired**: checked
+  spacing/regularity, not just count, in b-band's own red-edge bin --
+  it's the *densest and most evenly-spaced* bin in the whole band (mean
+  spacing 17.7A vs. 47.9-82.7A elsewhere, most regular CV), yet still
+  one of the worst-residual bins. Directly contradicts under-constrained
+  sampling as the cause. Combined with the C++-shares-it finding, the
+  only hypothesis still standing (not proven) is a structural property
+  of fitting a global Legendre polynomial basis in wavelength -- edge-
+  of-domain predictive-variance inflation, a known property of that
+  kind of regression independent of local data density. Both effects
+  small in absolute terms, neither a correctness blocker. Full data:
+  porting-notes.md, 2026-09-13 and 2026-09-09 (degree-sweep correction,
+  C++-shares-it finding, sparse-sampling retirement).
 - (Resolved 2026-09-13, same day found) What looked like a C++ run-to-run
   reproducibility issue (~0.1-0.2% sigma_y differences between two
   "identical" arcsim refits) was a wrong-input-file bug on this session's
@@ -130,7 +153,8 @@ float32/float64 precision, grid line search.
   each band's coverage) -- see "still open" above and porting-notes.md.
   Also: the GPU-native Python path was confirmed to run unmodified under
   Stephen's new shared DESI+JAX environment (`desi_environment.sh
-  test-26.9`) -- see how-to-run.md Section 0. The C++-wrapper path needs
+  26.9`, renamed from `test-26.9` once it graduated) -- see how-to-run.md
+  Section 0. The C++-wrapper path needs
   its compiled extension rebuilt for that environment's Python 3.14; not
   done yet. Investigated how desispec calls specex today and wrote a
   phased GPU-integration plan (desispec-integration-plan.md). Briefly
@@ -144,9 +168,37 @@ float32/float64 precision, grid line search.
   happens, just deferred rather than done mid-testing. Added the edge/
   wavelength findings to the "GPU Warm-Up Ledger" artifact and trimmed
   its older narrative sections. Tested the wavelength-edge hypothesis
-  directly (raising b/r's Legendre wavelength degree from 1) -- made
-  things worse, not better, ruling out simple under-parametrization;
-  root cause still open (see "still open" above).
+  directly (raising b/r's Legendre wavelength degree from 1) -- initially
+  looked much worse, not better; **retracted and redone 2026-09-09** once
+  a same-day input-file bug (see C++-reproducibility entry, same date)
+  was found to also have affected this test -- corrected result is a
+  much milder, inconclusive effect, not the dramatic degradation first
+  reported; root cause still open (see "still open" above).
+- 2026-09-10: Full validation of the shared `26.9` environment for
+  `run_night.py --worker-mode persistent` (not just the single-bundle path
+  checked the day before) -- warm, it matches `specex_env`'s validated
+  baseline almost exactly (466.9-487.8s vs. 483-503s). Along the way, found
+  and fixed a real bug: on a genuinely COLD JAX compilation cache (first
+  run under a new jaxlib version, or a fresh `JAX_COMPILATION_CACHE_DIR`),
+  z-band's persistent-worker default of 5 workers/GPU could hit real GPU
+  `RESOURCE_EXHAUSTED` bundle failures -- JIT compilation needs more
+  transient GPU memory than warm execution, and concurrent cold-compiling
+  workers can exceed it. `testing/run_night.py` now auto-detects a cold
+  cache (a simple total-file-count heuristic on the cache directory,
+  snapshotted once per persistent worker at startup, not re-checked
+  per-camera -- an initial per-camera-recheck version had a real bug where
+  sibling workers' own progress made the check falsely report "warm" for a
+  camera whose own specific shapes were never actually compiled) and drops
+  z-band to 3 workers/GPU until warm. Validated clean: 0 bundle failures
+  across two independent fresh-cache runs at 1043.8s(buggy)/1135.4s(fixed)
+  vs. naive packing=5's 1509.2s-with-luck or outright failures otherwise --
+  the fix is also faster on average, not just safer, since it isn't
+  burning time on doomed OOM retries. Also confirmed (via the JAX source,
+  not just testing): the persistent compilation cache's own cross-process
+  file-lock only activates when `jax_compilation_cache_max_size` is set to
+  something other than its default (-1, unbounded) -- relevant if/when a
+  shared multi-user cache is stood up for production. Full data:
+  porting-notes.md, 2026-09-10 (several entries).
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and
