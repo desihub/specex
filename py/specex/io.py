@@ -3,9 +3,14 @@ import numpy as np
 import fitsio
 from fitsio import FITS, FITSHDR
 from datetime import datetime
-from .psf import PSF, PSF_Params
-from .math import SparseLegendre2DPol, Legendre1DPol, legendre_pol_jnp
-from .fitter import get_sparse_nz
+# NOTE: deliberately no top-level `from .psf import ...`/`from .math import
+# ...`/`from .fitter import ...` here -- all three pull in JAX transitively
+# (.psf needs it at class-definition time for GaussHermitePSF's own @jit
+# decorator). This file's C++-wrapper subtree (read_psf/write_psf/
+# read_preproc_cpp/meta2header, used by specex.py's run_specex()) never
+# touches PSF/PSF_Params/Legendre1DPol/legendre_pol_jnp/get_sparse_nz at
+# all -- only the GPU-native functions below (load_python_psf/
+# write_python_psf) do, so they import what they need locally instead.
 
 def meta2header(meta):
     """Convert a plain Python dict of FITS header metadata into the C++ extension's MapStringString header type (specex._libspecex), quoting strings and stripping trailing '.0' from float-looking values the way C++'s own header formatting does.
@@ -53,6 +58,8 @@ def load_python_psf(filename, opts):
 
     Status: ACTIVE (production default path).
     """
+    from .psf import PSF, PSF_Params
+    from .math import Legendre1DPol
     f = fitsio.FITS(filename)
     psf = PSF()
     xt_hdr = f['XTRACE'].read_header()
@@ -105,6 +112,8 @@ def write_python_psf(filename, bundle_results, input_template):
     Status: ACTIVE (production default path).
     """
     import fitsio
+    from .math import Legendre1DPol, legendre_pol_jnp
+    from .fitter import get_sparse_nz
     fin = fitsio.FITS(input_template)
     xtrace_out = fin['XTRACE'].read().astype(np.float64)
     ytrace_out = fin['YTRACE'].read().astype(np.float64)

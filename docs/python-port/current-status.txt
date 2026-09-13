@@ -214,6 +214,22 @@ float32/float64 precision, grid line search.
   the intended mechanism for the real desispec integration whenever that
   actually happens, just not active right now. `run_specex` is the live
   name as of this entry.
+- 2026-09-13 (continued): **Found and fixed a real backward-compatibility
+  gap**, while drafting a PR description for Stephen (target: desispec's
+  `daily` branch) that needed to honestly answer "would merging this break
+  desispec." It would have: `specex.py`'s top-level `.io`/`.fitter` imports
+  pulled in JAX transitively (`.fitter` -> `.psf`, `.io` -> `.math`), so
+  `from specex.specex import run_specex` -- exactly what
+  `desispec.scripts.specex` does today -- silently required `jax`/`jaxlib`
+  to be installed, something `main`'s own `specex.py` has never needed.
+  Fixed by making every JAX-touching import lazy/local (`specex.py`,
+  `io.py`, `math.py` -- `psf.py`/`fitter.py` themselves untouched, no
+  behavior change to the GPU-native path). Verified for real, not just
+  reasoned about: monkeypatched `import jax`/`jax.*` to raise, confirmed
+  `run_specex` and the C++-wrapper `io.py` functions still import cleanly;
+  separately, with JAX present, full pytest suite green and a real
+  single-bundle GPU-native fit still runs end-to-end correctly. Full
+  writeup: porting-notes.md, 2026-09-13 (continued).
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and

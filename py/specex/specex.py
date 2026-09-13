@@ -4,8 +4,19 @@ import time
 import numpy as np
 import multiprocessing as mp
 
-from .io import load_python_psf, read_preproc, read_lamp_lines, write_python_psf
-from .fitter import PSF_Fitter, get_bundle_spots, select_bundle_spots_iterative
+# NOTE: deliberately no top-level `from .io import ...`/`from .fitter import
+# ...` here (both pull in JAX transitively -- .fitter -> .psf -> jax at
+# class-definition time). `run_specex()` below (the C++-wrapper path) has no
+# JAX dependency at all on `main` and must not gain one just by being
+# importable -- confirmed 2026-09-13: `desispec`'s `from specex.specex import
+# run_specex` needs to keep working in any environment that has the compiled
+# C++ extension but not JAX. The GPU-native functions below (`fit_bundle_task`,
+# `fit_ccd_native`) import what they need locally instead, same pattern as
+# run_specex()'s own lazy `_libspecex`/`.io`/`.qa` imports just below.
+# `get_bundle_spots` (re-exported for `testing/full_analysis.py` and friends,
+# never called from this module itself) is handled via module `__getattr__`
+# at the bottom of this file rather than a function-local import, since
+# nothing in this file's own control flow calls it.
 
 # --- Original C++ Wrapper ---
 
@@ -290,18 +301,27 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     try:
         import jax
         import jax.numpy as jnp
-        # NOTE: env-var-based cache config (JAX_COMPILATION_CACHE_DIR etc.)
-        # is too late here -- .psf imports jax.numpy at module level, which
-        # this multiprocessing 'spawn' worker triggers while resolving this
-        # very function *before* its body runs, so JAX's own config is
-        # already locked in by the time any os.environ write below would
-        # take effect. Use the jax.config API directly instead, which is
-        # read fresh at the point of the call.
+        # Explicit jax.config API calls, not an os.environ write, for the
+        # cache dir/min-size settings below -- JAX reads its own config at
+        # first use, which for THIS process is the `import jax` line right
+        # above; an os.environ write after that point would already be too
+        # late for anything that reads config eagerly at import time, so the
+        # config API (read fresh at the point of the call, not cached at
+        # import) is the robust choice regardless of import ordering.
         jax.config.update("jax_compilation_cache_dir", cache_dir)
         jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
         jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
         if backend != "gpu":
             jax.config.update("jax_platforms", "cpu")
+        # Lazy, deliberately not at this module's top level (see the note
+        # by this file's own imports): .io -> .math and .fitter -> .psf both
+        # pull in JAX transitively, and this is a fresh 'spawn' worker
+        # process, so importing them here (after the GPU/thread isolation
+        # env vars above, before anything that needs them below) is exactly
+        # equivalent to having them at module level for this function's own
+        # purposes, just without forcing run_specex() to need JAX too.
+        from .io import read_preproc, load_python_psf, read_lamp_lines
+        from .fitter import select_bundle_spots_iterative, PSF_Fitter
         t_jax_import = time.time()
         print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
 
@@ -921,6 +941,7 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     # desi_compute_psf on sky/arc reference lines -- desi_compute_psf itself
     # never produces it, so there is nothing to replicate here.
     if bundle_results and out_psf_file:
+        from .io import write_python_psf  # lazy -- see this file's top-of-file note
         write_python_psf(out_psf_file, bundle_results, in_psf_file)
 
     n_total = len(all_bundles)
@@ -1080,3 +1101,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def __getattr__(name):
+    """Module-level lazy attribute resolution (PEP 562) -- only for names this
+    file re-exports but never calls itself. `get_bundle_spots` (fitter.py) is
+    a testing-tool-only spot-selection helper (`testing/full_analysis.py`,
+    `testing/validate_all_modes.py` import it as `from specex.specex import
+    get_bundle_spots`) with no call site in this file's own control flow, so
+    it can't be made lazy the same way as fit_bundle_task/fit_ccd_native's
+    function-local imports above -- there's no enclosing function body to put
+    it in. This keeps `from specex.specex import get_bundle_spots` working
+    unchanged (still needs JAX, same as always -- fitter.py itself does) while
+    `import specex.specex` alone still doesn't.
+
+    Status: ACTIVE (production default path) -- the mechanism, not a fallback
+    for a real error; only fires for names not already found as normal module
+    attributes, i.e. exactly the deliberately-deferred ones.
+    """
+    if name == "get_bundle_spots":
+        from .fitter import get_bundle_spots
+        return get_bundle_spots
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

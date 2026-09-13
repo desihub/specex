@@ -1,5 +1,13 @@
 import numpy as np
-import jax.numpy as jnp
+# NOTE: deliberately no top-level `import jax.numpy as jnp` -- this file
+# mixes NumPy-only functions (legendre_pol, hermite_pol_np, Legendre1DPol's
+# storage/value/monomials/invert) with JAX-backed twins (legendre_pol_jnp,
+# hermite_pol_jnp, Legendre1DPol.derivative, SparseLegendre2DPol). Keeping
+# this module importable without JAX matters because io.py's C++-wrapper
+# subtree (read_psf/write_psf, used by specex.py's run_specex()) must not
+# gain a JAX dependency just by living in the same package -- see specex.py's
+# own top-of-file note for the full chain. Each JAX-backed function/method
+# below imports jax.numpy locally instead of at module level.
 
 def legendre_pol(degree, x):
     """Evaluate the Legendre polynomial of the given degree at x, NumPy-backed.
@@ -52,6 +60,7 @@ def legendre_pol_jnp(degree, x):
     Status: ACTIVE (production default path) -- used inside the JIT-compiled
     fit machinery (fitter.py) and SparseLegendre2DPol.monomials.
     """
+    import jax.numpy as jnp
     if degree == 0: return jnp.ones_like(x)
     if degree == 1: return x
     if degree == 2: return 0.5 * (3 * x**2 - 1.)
@@ -81,6 +90,7 @@ def hermite_pol_jnp(degree, x):
     Status: ACTIVE (production default path) -- used by the Gauss-Hermite PSF
     basis (psf.py) inside JIT-compiled code.
     """
+    import jax.numpy as jnp
     if degree == 0: return jnp.ones_like(x)
     if degree == 1: return x
     h_prev2 = jnp.ones_like(x)
@@ -189,6 +199,7 @@ class Legendre1DPol:
 
         Status: ACTIVE (production default path).
         """
+        import jax.numpy as jnp
         rx = 2 * (x - self.xmin) / (self.xmax - self.xmin) - 1
         drx_dx = 2.0 / (self.xmax - self.xmin)
         
@@ -251,6 +262,7 @@ class SparseLegendre2DPol:
 
         Status: ACTIVE (production default path).
         """
+        import jax.numpy as jnp
         self.xdeg = xdeg
         self.xmin = xmin
         self.xmax = xmax
@@ -271,9 +283,10 @@ class SparseLegendre2DPol:
 
         Status: ACTIVE (production default path).
         """
+        import jax.numpy as jnp
         rx = 2 * (x - self.xmin) / (self.xmax - self.xmin) - 1
         ry = 2 * (y - self.ymin) / (self.ymax - self.ymin) - 1
-        
+
         mx = [legendre_pol_jnp(i, rx) for i in range(self.xdeg + 1)]
         my = [legendre_pol_jnp(j, ry) for j in range(self.ydeg + 1)]
         
@@ -295,5 +308,6 @@ class SparseLegendre2DPol:
 
         Status: ACTIVE (production default path).
         """
+        import jax.numpy as jnp
         m = self.monomials(x, y)
         return jnp.dot(self.coeff, m)
