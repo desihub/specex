@@ -204,11 +204,16 @@ float32/float64 precision, grid line search.
   call site/doc reference) now that this branch's own test/validation
   phase is finished -- deferred, not abandoned, per the 2026-09-13 entry
   above. `../desispec`'s unpatched `from specex.specex import run_specex`
-  now fails loudly (`ImportError`) instead of silently running the old
+  failed loudly (`ImportError`) instead of silently running the old
   C++-only path, forcing the real desispec integration
-  (desispec-integration-plan.md) to make an explicit choice. Only
-  remaining item before the PR (item 6) is confirming this rename hasn't
-  broken anything on this branch's own side.
+  (desispec-integration-plan.md) to make an explicit choice.
+- 2026-09-13: **Reverted the rename again**, back to `run_specex`, at
+  direct request -- to let it keep running as normal rather than staying
+  a live trip wire. Third round-trip on this rename now (2026-09-13
+  renamed/reverted; 2026-09-11 redone; 2026-09-13 reverted again); still
+  the intended mechanism for the real desispec integration whenever that
+  actually happens, just not active right now. `run_specex` is the live
+  name as of this entry.
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and

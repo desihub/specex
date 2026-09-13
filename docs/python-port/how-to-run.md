@@ -151,14 +151,14 @@ python -c "import jax; print(jax.__version__); print(jax.devices())"
     old unprotected cold start too (which was 1509.2s even when it didn't
     fail outright) -- it isn't burning time on OOM retries that often fail
     anyway. Full investigation: `porting-notes.md`, 2026-09-10.
-*   **The C++-wrapper path (`run_specex_cpp()`, `--backend cpp`/`cpp-direct`)
+*   **The C++-wrapper path (`run_specex()`, `--backend cpp`/`cpp-direct`)
     does NOT work as-is.** The compiled pybind11 extension
     (`py/specex/_libspecex.cpython-313-x86_64-linux-gnu.so`) is built
     against `specex_env`'s CPython 3.13 ABI; this environment's Python 3.14
     can't load it (`ModuleNotFoundError: No module named
-    'specex._libspecex'` the moment `run_specex_cpp()` actually tries the
+    'specex._libspecex'` the moment `run_specex()` actually tries the
     lazy `from ._libspecex import ...`, even though `from specex.specex
-    import run_specex_cpp` itself succeeds -- the import is lazy, inside the
+    import run_specex` itself succeeds -- the import is lazy, inside the
     function body). **Needs a rebuild against this environment's Python/
     toolchain before `--backend cpp` can run under it** -- `cmake`
     (4.4.3) and `g++` (via `PrgEnv-gnu/8.7.0`) are both present, so a

@@ -146,31 +146,33 @@ invoked fresh per exposure -- a real desispec/workflow architecture
 question, well beyond specex's own scope, and not needed for a first
 rollout given the disk-cache already captures most of the benefit.
 
-## The forcing-function rename: tried, reverted, then redone (2026-09-13 / 2026-09-11)
+## The forcing-function rename: tried, reverted, redone, reverted again
 
-Briefly renamed `run_specex` -> `run_specex_cpp` (`py/specex/specex.py`)
-the same day this plan was written, so that `../desispec`'s current,
-unpatched `from specex.specex import run_specex` would fail loudly
-instead of silently keeping the old C++-only path alive -- a forcing
-function for whoever eventually does Phase 1 below. In practice this
-immediately broke `desi_compute_psf`/`desi_psf_fit` (and therefore
-`--backend cpp`/`cpp-direct` in `run_night.py`, and
-`testing/full_ccd_campaign.py`'s C++ side) on this branch, which was
-still actively needed for ongoing testing/validation work -- so it was
-reverted the same day, with the rename kept as the intended plan for
-once that testing phase was actually done.
+Renamed `run_specex` -> `run_specex_cpp` (`py/specex/specex.py`) three
+separate times now, each time for the same underlying reason -- so that
+`../desispec`'s current, unpatched `from specex.specex import run_specex`
+would fail loudly instead of silently keeping the old C++-only path alive,
+a forcing function for whoever eventually does Phase 1 below -- and
+reverted it back to `run_specex` twice, each time because it broke
+`desi_compute_psf`/`desi_psf_fit` (and therefore `--backend cpp`/
+`cpp-direct` in `run_night.py`, and `testing/full_ccd_campaign.py`'s C++
+side) on this branch, which was still needed for ordinary local
+C++-comparison use:
 
-**Redone 2026-09-11**, once this branch's own validation work (item 3's
-`26.9` environment testing, the cold-cache OOM fix, all the PSF-shape
-investigation) was finished and the branch pushed for review. `run_specex`
-is `run_specex_cpp` again, for real this time, across every call site and
-doc reference in this repo. `../desispec`'s own copy is deliberately left
-untouched -- its `from specex.specex import run_specex` now raises
-`ImportError` the moment `desi_compute_psf`/`desi_psf_fit` tries the
-C++-only path through this branch, which is the whole point: it forces
-whoever picks up Phase 1 below to make an explicit choice (patch that
-import to `run_specex_cpp`, or switch to the GPU-native `fit_ccd_native()`
-path instead) rather than silently keep working unmodified.
+1. **2026-09-13** (the day this plan was written): renamed, then reverted
+   the same day -- this branch's own test/validation phase was still
+   actively using the C++-comparison path.
+2. **2026-09-11**: redone, once that validation work (item 3's `26.9`
+   environment testing, the cold-cache OOM fix, all the PSF-shape
+   investigation) was finished and the branch pushed for review.
+3. **2026-09-13** (today): reverted again, explicitly to let it keep
+   running as normal.
+
+`run_specex` is the live name again as of this writing. **The rename is
+still the intended mechanism for when the real desispec integration below
+actually happens** -- it's a useful, deliberate trip wire at that point --
+just not while ordinary use of the C++-comparison path still needs the old
+name to work.
 
 ## Open questions this plan doesn't answer yet
 
