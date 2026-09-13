@@ -18,10 +18,10 @@ two non-overlapping 10-night sets, 2026-08-11/12 and 2026-09-02/05):
   - Correctness vs. C++: mean xrms=0.0120px, mean yrms=0.0129px (range xrms
     0.0112-0.0140px, yrms 0.0111-0.0167px).
   - Timing: with --worker-mode persistent (the fastest validated
-    configuration -- not yet the CLI default, see how-to-run.md section
-    2.3), 502.5s warm / 591.2s cold mean per 30-camera night vs. C++'s
-    648.3s -- Python ~18-23% faster. The still-default --worker-mode
-    subprocess path is slower than C++ (~674s).
+    configuration -- the CLI default since 2026-09-13, see how-to-run.md
+    section 2.3), 502.5s warm / 591.2s cold mean per 30-camera night vs.
+    C++'s 648.3s -- Python ~18-23% faster. The older --worker-mode
+    subprocess path (no longer the default) is slower than C++ (~674s).
   - PSF-shape (sigma_y) agreement: mean 0.46%, band-dependent (b=0.78%,
     r=0.45%, z=0.14%) -- consistent with the general pattern that b-band
     correctness trails r/z everywhere it's been measured, because b-band's
@@ -230,6 +230,20 @@ float32/float64 precision, grid line search.
   separately, with JAX present, full pytest suite green and a real
   single-bundle GPU-native fit still runs end-to-end correctly. Full
   writeup: porting-notes.md, 2026-09-13 (continued).
+- 2026-09-13 (continued): **`--worker-mode persistent` promoted to the
+  default** for `run_night.py --backend python` (was `subprocess`) --
+  it's faster than C++ where `subprocess` alone isn't, and this week gave
+  it its most rigorous testing yet (two environments, cold/warm cache,
+  a real bug found and fixed in it, see above). Caught and fixed a real
+  bug the flip would otherwise have introduced: the multi-node dispatch
+  path only forwarded `--worker-mode persistent` to spawned node-worker
+  subprocesses conditionally, so an explicit `--worker-mode subprocess`
+  would have been silently lost for any multi-node run once persistent
+  became the default -- now always forwarded explicitly. `how-to-run.md`
+  updated throughout (Quick Start, Section 2.3's mode description/table,
+  the multi-node/LPT caveat now explicitly says to pass
+  `--worker-mode subprocess` for that untested combination). Full
+  writeup: porting-notes.md, 2026-09-13 (continued, same session).
 
 ===============================================================================
 For everything else -- full evidence trails, every ruled-out hypothesis, and

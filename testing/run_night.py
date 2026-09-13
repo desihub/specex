@@ -670,10 +670,15 @@ def run_backend_python(args, cases):
                 inner += [f"--workers-per-gpu-{band}", str(wpg)]
             if args.footprint_margin is not None:
                 inner += ["--footprint-margin", str(args.footprint_margin)]
-            if args.worker_mode == "persistent":
-                inner += ["--worker-mode", "persistent"]
-                if args.no_pool_reuse:
-                    inner += ["--no-pool-reuse"]
+            # Always forward explicitly -- the inner _node-worker process
+            # parses its own args with this same argparser, so if this were
+            # only forwarded conditionally (as it was before persistent
+            # became the default), an outer `--worker-mode subprocess`
+            # would silently be lost and the inner process would fall back
+            # to its own (now-persistent) default instead.
+            inner += ["--worker-mode", args.worker_mode]
+            if args.worker_mode == "persistent" and args.no_pool_reuse:
+                inner += ["--no-pool-reuse"]
             if args.dry_run:
                 inner += ["--dry-run"]
             cmd = ["srun", "-N1", "-n1", "-w", hosts[i]] + inner if hosts[i] else inner
@@ -856,7 +861,7 @@ def main():
     ap.add_argument("--workers-per-gpu-r", type=int, default=None)
     ap.add_argument("--workers-per-gpu-z", type=int, default=None)
     ap.add_argument("--footprint-margin", type=int, default=None, help="Passed through to `python -m specex.specex --footprint-margin` for every camera. Default: None (specex.specex's own default, currently 7). Pass 0 to reproduce pre-fix zero-margin behavior for comparison reruns.")
-    ap.add_argument("--worker-mode", choices=["subprocess", "persistent"], default="subprocess", help="'subprocess' (default): fresh `python -m specex.specex` process per camera, matching every prior campaign's methodology exactly. 'persistent': one long-lived worker process per GPU calling fit_ccd_native() in-process for a stream of cameras, avoiding ~7-10s of per-camera interpreter/JAX-import overhead measured on 20260401/00344649 (~65s/night on a 4-GPU node) -- experimental, not yet validated at the same scale as 'subprocess'.")
+    ap.add_argument("--worker-mode", choices=["subprocess", "persistent"], default="persistent", help="'persistent' (default since 2026-09-13): one long-lived worker process per GPU calling fit_ccd_native() in-process for a stream of cameras, avoiding ~7-10s of per-camera interpreter/JAX-import overhead. The fastest validated configuration (~483-503s/night warm vs. C++'s ~592-648s, 18-23%% faster) and the most heavily tested at this point -- multiple full-night campaigns, two environments (specex_env and the shared DESI+JAX module), and a real cold-JAX-cache GPU-OOM bug found and fixed in it (see docs/python-port/porting-notes.md, 2026-09-10). 'subprocess': fresh `python -m specex.specex` process per camera -- the older default, slower than C++ (~674s/night); kept for anyone who wants the simpler, more battle-tested-by-tenure crash-isolation model of a brand-new process per camera.")
     ap.add_argument("--no-pool-reuse", action="store_true", help="Persistent mode only: disable bundle-worker Pool reuse across cameras, reverting to a fresh Pool per camera (pre-pool-reuse behavior) -- for A/B timing comparisons only, no correctness effect either way.")
     # internal, used to re-invoke this script once per node via srun
     ap.add_argument("--_node-worker", action="store_true", help=argparse.SUPPRESS)
