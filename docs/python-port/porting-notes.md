@@ -6429,3 +6429,28 @@ The cpp run used `main(comm=None)` -- the non-MPI single-process fallback, fitti
 **Real module-naming discrepancy found**: `module avail desimodules` shows `desimodules/test-26.9` (and `test-26.9a`) -- there is no plain `desimodules/26.9` yet. This project's own docs (`how-to-run.md`, `CLAUDE.md`, etc.) already dropped the `test-` prefix per earlier direct instruction, anticipating Stephen would rename the module "once it graduated" -- that hasn't happened at the module-system level as of this entry. Per direct instruction: keep the docs saying `26.9` (the intended, eventual name) but added an explicit note to `how-to-run.md`'s Quick Start that the *current* real module name is `test-26.9`, to flip trivially once the rename actually lands.
 
 Not committed as of this entry (desispec work lives in a separate repo/branch, `specex-use-gpu`) -- see that repo's own commit for the actual change, once made.
+
+## 2026-09-14 (continued) -- Real MPI test of run_gpu() found a genuine blocker: Cray MPICH PMI collision. PR held pending a fix.
+
+Per direct instruction, tested the one remaining gap flagged in the `run_gpu()` commit: the real MPI invocation path (`desispec.scripts.specex.run_gpu(comm, cmds, cameras)` called with a live `mpi4py.MPI.COMM_WORLD`, matching exactly how `desi_proc`'s `run()` call site would invoke it) had only been tested with `comm=None` up to this point.
+
+**Result: it breaks.** A real 4-rank `srun -n4` test (rank 0 does the real b0 fit, ranks 1-3 return immediately and wait at a final `Barrier()`, matching `run_gpu()`'s own design) crashed with a Cray MPICH PMI bootstrap failure:
+```
+_pmi_mmap_tmp: Warning bootstrap barrier failed: num_syncd=1, pes_this_node=4, timeout=180 secs
+MPICH ERROR ... Fatal error in internal_Init_thread: Other MPI error
+```
+`fit_ccd_native()`'s own `multiprocessing.Pool` (spawn context, 20 bundle-fit workers) is the trigger -- something in that worker pool, once running, corrupts the real MPI ranks' own PMI state. The existing C++ path (`run_specex()`) never spawns subprocesses itself, so it has no exposure to this at all -- confirmed new to this integration, not a pre-existing risk.
+
+**Investigated, ruled out one by one** (each as its own isolated `multiprocessing.spawn` test under the same real 4-rank `srun` environment):
+- Plain `import jax` in a spawned child: clean, no crash.
+- Plain `fitsio.FITS(...).read()` of a real preproc file in a spawned child: clean.
+- `fitsio` read + `jax` computation combined, single worker: clean.
+- 20 *concurrent* workers doing `fitsio` read + trivial `jnp` op, with proper `CUDA_VISIBLE_DEVICES`/`XLA_PYTHON_CLIENT_PREALLOCATE`/`MEM_FRACTION` isolation matching `fit_bundle_task`'s real setup: clean, all 20 finish correctly.
+- A single spawned child running the **real** `fit_bundle_task()` end to end (real JIT compilation, real chi2 convergence, full staged fit) for one bundle: clean.
+- Stripping `PMI_*` env vars from `os.environ` before spawning the pool (the standard fix for "multiprocessing child re-triggers `MPI_Init`"): **did not help** -- identical crash recurred. This rules out simple env-var inheritance as the (sole) mechanism; the `_pmi_mmap_tmp`/`_pmi_mmap_init` naming suggests Cray's intra-node PMI bootstrap discovery may not be purely environment-based.
+
+**So: neither "the real code" nor "real concurrency" alone reproduces it -- only the combination (20 real, concurrent fits) does.** Current leading hypothesis, not yet confirmed: CPU starvation, not a library-level collision. `fit_bundle_task`'s thread-limiting logic (`OMP_NUM_THREADS` etc.) is gated `if backend != "gpu"` -- for `backend="gpu"` (what `run_gpu()` always uses), zero thread-capping happens, so 20 concurrent workers' CPU-bound spot-selection + XLA JIT-compilation phases can each try to claim many/all of the node's cores, potentially starving the real MPI ranks (sharing the same node) of the CPU time they need to service their own periodic PMI bootstrap/barrier communication within Cray MPICH's timeout window. **Circumstantial support**: the crash happened at 180s±a few seconds after launch in *both* independent real-MPI runs -- suspiciously exactly matching the `timeout=180 secs` in the error itself. **Not yet confirmed**: a CPU-load check taken shortly *after* the second crash showed only ~26/128 cores busy (load avg 22.84, total %CPU sum 2630%) -- not obviously saturated, but this snapshot was taken after the crash and subsequent process cleanup, not at the moment of crash, so it neither confirms nor rules out the hypothesis.
+
+**Status: open, PR held.** Sent a summary to Stephen (his reply: hasn't hit this combination -- mixing `multiprocessing` and MPI -- before either, "usually worked in one or the other because of issues playing nice together"). Next step when resuming: a live/continuous CPU-load monitor spanning the actual crash moment (not a post-hoc snapshot) to properly test the starvation hypothesis; if confirmed, the fix is likely adding real thread-capping to `fit_bundle_task`'s GPU-backend path too (currently CPU-only), sized to leave headroom for the MPI ranks sharing the node. Test scripts (all scratchpad, not committed): `test_mpi_run_gpu.py`, `test_minimal_jax_in_mp.py`, `test_20workers_jax_in_mp.py`, `test_fitsio_in_mp.py`, `test_20workers_fitsio_jax_isolated.py`, `test_single_real_bundle_in_mp.py`.
+
+The ineffective `PMI_*`-stripping code was left in place in `run_gpu()` (`../desispec`, `specex-use-gpu` branch, uncommitted) -- harmless on its own, but insufficient alone; needs revisiting once the real mechanism is confirmed, either replaced or kept alongside whatever the actual fix turns out to be.
