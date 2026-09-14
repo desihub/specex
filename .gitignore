@@ -14,6 +14,8 @@ build*
 
 # Python packaging
 py/specex.egg-info
+# in-tree install prefix, e.g. `python setup.py install --prefix install`
+install/
 
 # compiled files
 src/apps/*
