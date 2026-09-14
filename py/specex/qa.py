@@ -1,6 +1,7 @@
 from desispec.io.xytraceset import read_xytraceset
 from desiutil.log import get_logger
 import numpy as np
+from astropy.io import fits
 
 def trace_psf_qa(psf_filename, broken_fiber_list):
     """
@@ -11,21 +12,28 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
         broken_fiber_list: string, comma separated list of broken fibers
 
     Returns:
-        failcount: int, number of neighboring fibers with overlapping traces
-                   where neither is on in broken_fiber_list
+        failcount: int, number of neighboring fiber pairs with overlapping traces
+                   where neither is in broken_fiber_list
+        bad_fibers: sorted list of unique fiber indices (0-based relative to
+                    FIBERMIN) involved in overlapping traces where neither fiber
+                    is in broken_fiber_list
     """
 
     log = get_logger()
 
+    # %500 matches the normalization the fitter applies to the same string
+    # (see broken_fibers in src/specex_pyfitting.cc) so that a caller passing
+    # global fiber IDs is interpreted identically here and there.
     if len(broken_fiber_list) > 0:
-        brokenfibers = list(map(int,broken_fiber_list.split(",")))
+        brokenfibers = [int(f) % 500 for f in broken_fiber_list.split(",")]
     else:
         brokenfibers = []
 
     fibertraces = read_xytraceset(psf_filename)
     ww = np.arange(fibertraces.wavemin, fibertraces.wavemax)
-    
-    failcount=0
+
+    failcount = 0
+    bad_fibers = []
     for fiber in range(0,fibertraces.nspec-1):
         correct = np.all(fibertraces.x_vs_wave(fiber+1, ww) > fibertraces.x_vs_wave(fiber, ww))
         if not correct:
@@ -36,17 +44,29 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
             if fiber not in brokenfibers and fiber+1 not in brokenfibers:
                 log.error("overlapping traces for fibers {} and {} in {}".format(fiber, fiber+1, psf_filename))
                 failcount += 1
+                bad_fibers.append(fiber)
+                bad_fibers.append(fiber+1)
+                log.debug(f'Fibers {fiber} and {fiber+1} are flagged as bad')
+    log.info(f'Failcount is {failcount}')
 
-    return failcount
+    # one fiber can overlap both neighbors, so drop the repeats
+    return failcount, sorted(set(bad_fibers))
 
 def specex_psf_qa(opts):
-
+    log=get_logger()
     # trace QA
     psf_filename = opts.output_fits_filename
     broken_fiber_list = opts.broken_fibers_string
 
-    failcount = 0
+    failcount, bad_fibers = trace_psf_qa(psf_filename, broken_fiber_list)
+    if len(bad_fibers)>0:
+        log.info(f'Setting Status of Bad Fibers {bad_fibers} to 4 in PSF file {psf_filename}')
+        with fits.open(psf_filename, mode='update',memmap=False) as file:
+            index = np.where(file['PSF'].data["PARAM"]=="STATUS")[0][0]
+            for fiber in bad_fibers:
+                file['PSF'].data["COEFF"][index][fiber, 0] = 4
+            log.debug(f'Bad fibers {bad_fibers} have been set to 4 in PSF file {psf_filename}')
+            file.flush()
 
-    failcount += trace_psf_qa(psf_filename, broken_fiber_list)
-
+    log.info(f'QA complete for PSF file {psf_filename} with failcount {failcount} and bad fibers {bad_fibers}')
     return failcount
