@@ -14,14 +14,18 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
     Returns:
         failcount: int, number of neighboring fiber pairs with overlapping traces
                    where neither is in broken_fiber_list
-        bad_fibers: set of fiber indices (0-based relative to FIBERMIN) involved
-                    in overlapping traces where neither fiber is in broken_fiber_list
+        bad_fibers: sorted list of unique fiber indices (0-based relative to
+                    FIBERMIN) involved in overlapping traces where neither fiber
+                    is in broken_fiber_list
     """
 
     log = get_logger()
 
+    # %500 matches the normalization the fitter applies to the same string
+    # (see broken_fibers in src/specex_pyfitting.cc) so that a caller passing
+    # global fiber IDs is interpreted identically here and there.
     if len(broken_fiber_list) > 0:
-        brokenfibers = list(map(int,broken_fiber_list.split(",")))
+        brokenfibers = [int(f) % 500 for f in broken_fiber_list.split(",")]
     else:
         brokenfibers = []
 
@@ -45,7 +49,8 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
                 log.debug(f'Fibers {fiber} and {fiber+1} are flagged as bad')
     log.info(f'Failcount is {failcount}')
 
-    return failcount, bad_fibers
+    # one fiber can overlap both neighbors, so drop the repeats
+    return failcount, sorted(set(bad_fibers))
 
 def specex_psf_qa(opts):
     log=get_logger()
