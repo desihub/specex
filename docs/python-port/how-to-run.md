@@ -17,6 +17,8 @@ source /global/cfs/cdirs/desi/software/desi_environment.sh 26.9
 export PYTHONPATH=/path/to/your/specex/py:$PYTHONPATH
 ```
 
+**Naming note (2026-09-14, still true):** the module system's real, current name for this release is still `desimodules/test-26.9`, *not* plain `desimodules/26.9` -- `desi_environment.sh 26.9` will fail with `Lmod ... unknown module` until Stephen actually renames it at the system level. Use `desi_environment.sh test-26.9` for now; every `26.9` reference in this doc means the same release and should flip trivially once the rename lands.
+
 Do **not** also `source env_setup.sh` alongside this -- that script's `LD_LIBRARY_PATH`/NVLIBS tuning is for the older `specex_env` venv path (Section 0) and conflicts with this environment's own, already-complete CUDA plumbing (confirmed 2026-09-10: layering both caused severe GPU-memory-management failures under real production load -- `RESOURCE_EXHAUSTED`/`CUDA_ERROR_OUT_OF_MEMORY` crashes and permanently-incomplete output on several cameras; the same night/expid ran clean, 30/30 cameras, with 26.9 alone). Still using a personal `specex_env`? See Section 0 below -- `env_setup.sh` is only for that path.
 
 ### Full night/expid (production scale, all 30 cameras)
