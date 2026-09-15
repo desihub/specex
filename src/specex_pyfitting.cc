@@ -87,8 +87,10 @@ int specex::PyFitting::fit_psf(
     specex_set_message_prefix(mess.str());
   }
 
-  // copy to local psf pointer
-  specex::PSF_p psf = pyps.psf;
+    // copy to local psf pointer
+    specex::PSF_p psf = pyps.psf;
+    psf->output_psf_filename = opts.output_fits_filename;
+
 
   SPECEX_INFO("using lamp lines file " << opts.lamp_lines_filename);
 
@@ -141,6 +143,7 @@ int specex::PyFitting::fit_psf(
     fitter.psf->psf_error               = opts.psf_error;
     fitter.corefootprint_weight_bst     = opts.psf_core_wscale;
     fitter.write_tmp_results            = opts.write_tmp_results;
+    fitter.debug_spots                  = opts.debug_spots;
     fitter.trace_prior_deg              = opts.trace_prior_deg;
 
 #ifdef EXTERNAL_TAIL

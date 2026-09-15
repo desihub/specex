@@ -3,16 +3,24 @@ from desiutil.log import get_logger
 import numpy as np
 
 def trace_psf_qa(psf_filename, broken_fiber_list):
-    """
-    QA PSF by reporting overlapping fiber traces.
+    """Check an output PSF FITS file for neighboring fiber pairs whose fitted X-position traces cross (fiber i+1's trace not everywhere above fiber i's, over the shared wavelength range), logging a warning for broken-fiber-involving crossings and an error for unexpected ones.
 
     Args:
-        psf_filename: string, input PSF file
-        broken_fiber_list: string, comma separated list of broken fibers
+        psf_filename (str): path to the output PSF FITS file to check (read
+            via desispec's read_xytraceset).
+        broken_fiber_list (str): comma-separated broken fiber IDs; crossings
+            involving one of these are logged as warnings, not counted as
+            failures.
 
     Returns:
-        failcount: int, number of neighboring fibers with overlapping traces
-                   where neither is on in broken_fiber_list
+        int: failcount, the number of crossing pairs where neither fiber is in
+        broken_fiber_list.
+
+    Status: DEAD -- adapted from upstream specex#91; imported by
+    specex.run_specex() (as specex_psf_qa) but the one call site there is
+    commented out. io.py's write_python_psf has its own independently-adapted
+    inline reimplementation of this same trace-crossing check (STATUS=4
+    flagging), which is what actually runs in the production pipeline.
     """
 
     log = get_logger()
@@ -42,6 +50,20 @@ def trace_psf_qa(psf_filename, broken_fiber_list):
 def specex_psf_qa(opts):
 
     # trace QA
+    """Run trace_psf_qa on the PSF file/broken-fiber list named in a C++-style options object.
+
+    Args:
+        opts: an options object with `.output_fits_filename` (str, PSF file
+            path) and `.broken_fibers_string` (str, comma-separated fiber IDs)
+            attributes -- matches the C++ pybind11 PyOptions interface used by
+            specex.run_specex().
+
+    Returns:
+        int: failcount from trace_psf_qa.
+
+    Status: DEAD -- see trace_psf_qa; the one call site (specex.run_specex())
+    has this call commented out.
+    """
     psf_filename = opts.output_fits_filename
     broken_fiber_list = opts.broken_fibers_string
 

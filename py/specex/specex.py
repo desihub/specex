@@ -1,18 +1,79 @@
+import os
+import sys
+import time
+import collections
 import numpy as np
-from specex._libspecex import (PyOptions,PyIO,PyPrior,PyPSF,PyFitting,VectorString)
-from specex.io import (read_preproc, write_psf, read_psf)
-from specex.qa import (specex_psf_qa)
+import multiprocessing as mp
+
+# Below this many cores visible to the CURRENT process (os.sched_getaffinity,
+# not the node's raw CPU count), fit_ccd_native() treats itself as running
+# inside a confined cpuset (e.g. one MPI rank's slice of a shared node under
+# `srun -n4`) rather than a standalone full node, and throttles backend="gpu"
+# worker concurrency/threading accordingly. 64 is half of Perlmutter's
+# 128-core GPU nodes -- comfortably above any real confined-rank slice size
+# (32 cores, observed 2026-09-14 under a 4-rank `srun`) and comfortably below
+# the 128 cores a normal unconfined run sees, so it can't accidentally fire
+# for the validated standalone production path. See fit_ccd_native's own
+# comment at its use site for the full story (docs/python-port/porting-notes.md,
+# 2026-09-14 MPI/run_gpu() cpuset audit).
+_CONFINED_CPUSET_CORE_THRESHOLD = 64
+
+# NOTE: deliberately no top-level `from .io import ...`/`from .fitter import
+# ...` here (both pull in JAX transitively -- .fitter -> .psf -> jax at
+# class-definition time). `run_specex()` below (the C++-wrapper path) has no
+# JAX dependency at all on `main` and must not gain one just by being
+# importable -- confirmed 2026-09-13: `desispec`'s `from specex.specex import
+# run_specex` needs to keep working in any environment that has the compiled
+# C++ extension but not JAX. The GPU-native functions below (`fit_bundle_task`,
+# `fit_ccd_native`) import what they need locally instead, same pattern as
+# run_specex()'s own lazy `_libspecex`/`.io`/`.qa` imports just below.
+# `get_bundle_spots` (re-exported for `testing/full_analysis.py` and friends,
+# never called from this module itself) is handled via module `__getattr__`
+# at the bottom of this file rather than a function-local import, since
+# nothing in this file's own control flow calls it.
+
+# --- Original C++ Wrapper ---
 
 def run_specex(com):
+    """Run the original compiled C++ specex engine via the pybind11 `_libspecex` extension, driving it exactly like the C++ `desi_psf_fit` CLI would from a list of argument strings.
+
+    Args:
+        com (list[str]): CLI-style argument strings for the C++ `desi_psf_fit`
+            binary (e.g. ``['-a', arc_path, '--in-psf', in_psf_path, ...]``),
+            parsed by the C++ extension's own `PyOptions.parse()`.
+
+    Returns:
+        int: the C++ fitter's return code (0 = success), as returned by
+        `PyFitting.fit_psf()`. If `PyOptions.parse()` itself fails, that
+        nonzero return code is returned directly instead.
+
+    Status: ACTIVE -- the real production C++ codepath (confirmed
+    2026-09-06: `desispec`'s `desi_compute_psf` entry point calls this
+    directly), not a legacy/one-off helper, though it's also still used by
+    the old one-off comparison scripts (`testing/example_specex.py`,
+    `testing/full_analysis.py`). **Renamed to `run_specex_cpp` and back
+    to `run_specex` twice now** (2026-09-13: renamed, reverted same day;
+    2026-09-11: redone once this branch's own validation work was
+    finished and pushed; 2026-09-13: reverted again, this time to let it
+    keep running as normal against `../desispec`'s current, unpatched
+    `from specex.specex import run_specex`). The rename (forcing that
+    import to fail loudly instead of silently running the old C++-only
+    path) is still the intended mechanism for when the real desispec
+    integration (`docs/python-port/desispec-integration-plan.md`) actually
+    happens -- just not while this name is still needed for ordinary use.
+    """
+    from ._libspecex import (PyOptions, PyIO, PyPrior, PyPSF, PyFitting, VectorString)
+    from .io import read_psf, write_psf
+    from .qa import specex_psf_qa
+    import fitsio
 
     # instantiate specex C++ objects exposed to python        
-    opts = PyOptions() # input options
-    pyio = PyIO()      # IO options and methods
-    pypr = PyPrior()   # Gaussian priors
-    pyps = PyPSF()     # psf data
-    pyft = PyFitting() # psf fitting
+    opts = PyOptions() 
+    pyio = PyIO()      
+    pypr = PyPrior()   
+    pyps = PyPSF()     
+    pyft = PyFitting() 
     
-    # copy com to opaque pybind VectorString object spxargs
     spxargs = VectorString()
     for strs in com:
         spxargs.append(strs)
@@ -22,24 +83,1629 @@ def run_specex(com):
     if retval != 0: return retval
 
     # read psf
-    read_psf(opts,pyps)
+    read_psf(opts, pyps)
 
-    # set input psf bools
     pyio.set_inputpsf(opts,pyps)
-
-     # set Gaussian priors
     pypr.set_priors(opts)
-
-    # read preproc
-    pymg = read_preproc(opts) 
     
-    # fit psf 
+    # We need read_preproc to return a C++ PyImage for the C++ fitter
+    from .io import read_preproc_cpp
+    pymg = read_preproc_cpp(opts) 
+    
     retval = pyft.fit_psf(opts,pyio,pypr,pymg,pyps) 
     
     # write psf 
     write_psf(pyps,opts,pyio)        
 
     # do QA
-    retval += specex_psf_qa(opts)
+    # retval += specex_psf_qa(opts)
 
     return retval
+
+# --- New High-Performance Python/JAX Driver ---
+def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend="gpu", broken_fibers=None, sn_threshold=3.0, h_size_y=None, stagger_s=0.0, force_spots_path=None, max_number_of_lines=100, raw_spots_path=None, wdeg=3, fit_continuum=True, double_precision=False, trace_wdeg=None, trace_wdeg_x=None, trace_wdeg_y=None, trace_per_fiber_deg=None, cpu_threads_per_worker=None, line_search='grid', trace_prior_deg=None, trace_prior_weight=None, trace_prior_ndead_threshold=None, debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=None, log_path=None):
+    """Fit one 25-fiber bundle in an isolated worker process: run spot selection, the joint PSF/trace fit, and return the per-bundle results dict that fit_ccd_native merges into the final output PSF.
+
+    Runs as the target of a `multiprocessing` (spawn-context) worker, so it is
+    also responsible for all GPU/CPU backend isolation (CUDA_VISIBLE_DEVICES,
+    JAX platform config, persistent JIT-compilation cache, thread limits)
+    itself -- JAX must be configured before its own first import, which
+    happens fresh in every spawned process.
+
+    Args:
+        bid (int): bundle index (0-19); this bundle's fiber range is
+            [bid*25, bid*25+24].
+        gpu_id (int): GPU index (within CUDA_VISIBLE_DEVICES if the parent
+            already restricted it, else global) this worker pins itself to
+            when backend="gpu".
+        arc_file (str): path to the preprocessed arc image FITS file.
+        in_psf_file (str): path to the input (shifted) PSF FITS file supplying
+            starting-guess trace/PSF-shape coefficients.
+        out_psf_file (str): path the final merged CCD PSF will eventually be
+            written to; used here only to derive this bundle's own per-bundle
+            checkpoint/debug filenames (e.g. `_bundle05.fits`), never written
+            to directly by this function.
+        lamp_lines_file (str): path to the lamp line list used for spot
+            candidate generation.
+        backend (str): "gpu" or "cpu"; selects the JAX backend and the
+            corresponding isolation strategy.
+        broken_fibers (str or None): comma-separated fiber IDs to exclude from
+            the fit entirely (propagated from the input PSF unchanged).
+        sn_threshold (float): S/N threshold for spot selection.
+        h_size_y (int or None): override for the PSF stamp half-size in Y;
+            None keeps the input PSF's own value.
+        stagger_s (float): seconds to sleep before starting, used to stagger
+            concurrent CPU-backend workers and reduce JIT-compilation
+            contention.
+        force_spots_path (str or None): path to a fixed `fiber,wave,xc,yc`
+            spot list to fit instead of running spot selection.
+        max_number_of_lines (int): cap on lines kept per bundle during spot
+            selection.
+        raw_spots_path: unused -- accepted for signature compatibility but
+            never referenced in the function body.
+        wdeg (int): Legendre wavelength degree for the PSF-shape correction.
+        fit_continuum (bool): whether to fit a per-bundle continuum
+            background.
+        double_precision (bool): force full float64 for the joint-fit
+            Jacobian (default mixed float32/float64 if False).
+        trace_wdeg, trace_wdeg_x, trace_wdeg_y (int or None): trace-position
+            wavelength degree, shared or per-axis; trace_wdeg_x/y each
+            default to trace_wdeg, which itself defaults to wdeg.
+        trace_per_fiber_deg (int or None): if set, use a block-diagonal-by-
+            fiber trace basis at this degree instead of the shared
+            trace_wdeg_x/y basis.
+        cpu_threads_per_worker (int or None): per-process thread cap
+            (OMP_NUM_THREADS etc.); applies to both backends as of
+            2026-09-14 (previously backend="cpu" only -- see the thread-
+            count-limiting comment in this function body for why
+            backend="gpu" needs it too under a cpuset-confined caller,
+            e.g. an MPI rank).
+        line_search (str): final joint fit's per-iteration step-size search
+            mode -- 'grid' (default/production), 'brent', or 'cpp'.
+        trace_prior_deg (int or None): degree at/above which per-fiber trace
+            coefficients are pulled toward the bundle's cross-fiber consensus.
+        trace_prior_weight (float or None): trace-prior penalty weight,
+            propagated to PSF_Fitter.fit() via the SPECEX_TRACE_PRIOR_WEIGHT
+            env var.
+        trace_prior_ndead_threshold (int or None): ndead threshold gating the
+            trace prior, propagated via SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD.
+        debug_spots (bool): write per-pass spot-selection debug dump files.
+        masked_amp_ndead_threshold (int): ndead threshold (with a contiguous-
+            run requirement) for detecting a masked/dead CCD amp.
+
+    Returns:
+        tuple[int, dict]: `(bid, result)`. On success, `result` contains
+        `psf_coeffs`, `trace_coeffs`, `continuum_coeffs`, `wdeg`,
+        `trace_wdeg`, `trace_per_fiber_deg`, `zero_spot_fibers`,
+        `explicitly_broken_fibers`, `masked_amp_fibers`, `chi2`, and the
+        final selected spots' `s_fiber`/`s_wave`/`s_flux` arrays. If every
+        fiber in the bundle is excluded (broken/masked-amp), `result` is
+        `{'skip_bundle': True, 'masked_amp_fibers': ..., 'explicitly_broken_fibers': ...}`
+        instead. On failure, `result` is `{'error': ..., 'traceback': ...,
+        'is_oom': bool}` (never raises -- exceptions are caught and reported
+        so one bad bundle doesn't kill the worker pool).
+
+    Status: ACTIVE (production default path).
+    """
+    # Explicit per-task stdout/stderr redirect, only when the caller passes
+    # log_path (currently: testing/run_night.py's persistent-worker mode
+    # only -- see fit_ccd_native's bundle_pool). Every other call site
+    # (the CLI, subprocess-mode workers) relies on this process's fd 1/2
+    # being correctly pre-redirected by whoever spawned it, which is true
+    # exactly because a fresh Pool is normally created *inside* the
+    # caller's own redirected block. A REUSED pool's workers were spawned
+    # once, outside any per-camera redirection, so relying on inherited
+    # fds there would silently route every camera's bundle-level output
+    # (spot-selection debug, per-iteration chi2, PHASE_TIMING) to whatever
+    # file the pool happened to inherit at spawn time instead of that
+    # camera's own log -- confirmed exactly this way in testing. Re-dup2
+    # on every task call (not just once) so a persistent worker's pool
+    # follows it from camera to camera; O_APPEND so this process's fd and
+    # the parent's own (already open) fd to the same path never overwrite
+    # each other's writes.
+    if log_path is not None:
+        _log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.dup2(_log_fd, 1)
+        os.dup2(_log_fd, 2)
+        os.close(_log_fd)
+
+    t_entry = time.time()
+    # trace_wdeg defaults to wdeg (old behavior) -- see fitter.py's
+    # PSF_Fitter.fit() docstring/comment and docs/python-port/porting-notes.md's
+    # r2@20250109 investigation for why this is a separate knob rather
+    # than always reusing wdeg (the PSF-shape correction's degree).
+    # trace_wdeg_x/trace_wdeg_y further override it per axis -- added
+    # after finding X didn't need (and was mildly destabilized by) the
+    # same extra curvature that fixed Y.
+    trace_wdeg = wdeg if trace_wdeg is None else trace_wdeg
+    trace_wdeg_x = trace_wdeg if trace_wdeg_x is None else trace_wdeg_x
+    trace_wdeg_y = trace_wdeg if trace_wdeg_y is None else trace_wdeg_y
+    if stagger_s > 0:
+        time.sleep(stagger_s)
+        
+    # STRICT ISOLATION: Set before ANY JAX imports in this process.
+    # If the parent already restricted CUDA_VISIBLE_DEVICES, map gpu_id
+    # within that restriction instead of clobbering it, so multiple driver
+    # instances can be pinned to disjoint GPUs from the outside.
+    if backend == "gpu":
+        existing = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if existing:
+            devs = existing.split(',')
+            os.environ["CUDA_VISIBLE_DEVICES"] = devs[gpu_id % len(devs)]
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+        # Pin explicitly to JAX's own documented default (unchanged behavior
+        # for the normal subprocess-per-camera path) rather than leaving it
+        # unset. A persistent driver process that calls fit_ccd_native()
+        # repeatedly in one long-lived process (testing/run_night.py
+        # --worker-mode persistent) sets this env var LOW for its own
+        # process before its first JAX use, to cap the small amount of GPU
+        # memory its own post-pool write_python_psf() permanently grows
+        # into (BFC allocators don't shrink back, even with PREALLOCATE=
+        # false -- see docs/python-port/porting-notes.md's 2026-09-xx persistent-worker
+        # writeup) -- without this explicit override here, that restrictive
+        # setting would otherwise leak into these spawn-context workers too
+        # (they inherit the parent's os.environ at spawn time) and starve
+        # the real per-bundle GPU compute this process exists to do.
+        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.75"
+    else:
+        # Hard-exclude CUDA from non-GPU workers. Without this, JAX's CUDA
+        # plugin still probes/initializes on whatever GPUs are inherited as
+        # visible even with JAX_PLATFORM_NAME=cpu, so concurrent CPU-backend
+        # workers collide with each other (and with real GPU workers) over
+        # GPU memory and crash with CUDA_ERROR_OUT_OF_MEMORY.
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        # With no devices visible, the CUDA plugin's own version-check probe
+        # (cuInit via cuda_device_count()) fails with CUDA_ERROR_NO_DEVICE --
+        # harmless (JAX falls back to CPU regardless) but logged as an ERROR
+        # with a full traceback. This is JAX's own supported switch to skip
+        # that probe outright instead of just hiding its output.
+        os.environ["JAX_SKIP_CUDA_CONSTRAINTS_CHECK"] = "1"
+        # JAX_PLATFORM_NAME (set below) is deprecated and, on this JAX
+        # version, no longer consulted by backend selection at all -- only
+        # JAX_PLATFORMS (plural) is. Without restricting to it, skipping the
+        # constraints check above lets the CUDA plugin register successfully,
+        # and JAX then genuinely tries to initialize 'cuda' as a real backend
+        # (it's highest-priority), which fails hard with a real GPU present
+        # but hidden by CUDA_VISIBLE_DEVICES="" -- turning the harmless log
+        # noise into a fatal crash instead. Set via jax.config below, not
+        # os.environ here -- see the jax_compilation_cache_dir note below for
+        # why an os.environ write in this function body is already too late.
+    # Thread-count limiting -- must also happen before any JAX import, and
+    # (as of 2026-09-14) applies to BOTH backends, not just backend="cpu".
+    # Without this, JAX's CPU/XLA backend (and whatever BLAS it delegates
+    # to) defaults to claiming *all* available hardware threads per
+    # process. With N concurrent workers each independently trying to grab
+    # every thread, the result is severe intra-node oversubscription/
+    # thrashing among the workers themselves -- confirmed directly as the
+    # root cause of a real Perlmutter hybrid-allocation pilot going ~3x
+    # below its own achievable per-worker throughput while also slowing a
+    # concurrent GPU job by 1.56x (see docs/python-port/porting-notes.md,
+    # 2026-07-21). Scale each worker's thread budget to roughly (available
+    # cores / worker count) so N workers collectively stay within the
+    # node's real core count instead of each claiming all of them.
+    #
+    # Originally gated `backend != "gpu"` only, on the (correct, for a
+    # bare-node run) assumption that GPU-backend workers' host-side
+    # NumPy/BLAS calls aren't worth throttling since the GPU is the
+    # bottleneck. That assumption breaks down when fit_ccd_native() is
+    # itself called from inside an MPI rank that SLURM has confined to a
+    # narrow cpuset slice (e.g. one quarter of a node's cores under
+    # `srun -n4`): multiprocessing's 'spawn' children inherit the calling
+    # process's cpuset, so ALL of a camera's ~20 GPU-backend workers end up
+    # crammed onto that SAME narrow slice as the MPI rank itself, each
+    # running fully CPU-bound during spot selection (~70% of a bundle's
+    # wall time) with no thread cap at all -- confirmed 2026-09-14 as the
+    # proximate cause of a real ~180s-after-pool-launch Cray MPICH PMI
+    # bootstrap-barrier crash (`desispec.scripts.specex.run_gpu()` under
+    # real multi-rank MPI): the rank's own cpuset slice runs at sustained
+    # ~70-90% utilization for the crash's entire ~180s window while the
+    # OTHER ranks' slices sit almost idle, i.e. node-wide load stays
+    # moderate (loadavg ~20-23/128) even as the one slice hosting both the
+    # MPI rank and its worker pool is saturated -- see
+    # docs/python-port/porting-notes.md, 2026-09-14 MPI/run_gpu() cpuset
+    # audit. fit_ccd_native() now derives a real thread-and-concurrency
+    # budget from os.sched_getaffinity(0) for backend="gpu" too (see its
+    # `available_cores` / gpu_thread_cap wiring) instead of leaving this
+    # permanently unconstrained.
+    if cpu_threads_per_worker is not None:
+        n_threads_str = str(max(1, int(cpu_threads_per_worker)))
+        for _env_key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            os.environ[_env_key] = n_threads_str
+        os.environ["XLA_FLAGS"] = (
+            os.environ.get("XLA_FLAGS", "")
+            + f" --xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={n_threads_str}"
+        ).strip()
+    os.environ["JAX_PLATFORM_NAME"] = backend
+    # Persistent JAX/XLA compilation cache (analogous to CuPy's .cubin disk
+    # cache) -- this driver spawns a fresh process per bundle, so without
+    # this every worker pays a full JIT-compile cost from scratch even when
+    # an identical (function, array-shape) pair was already compiled by an
+    # earlier bundle/camera in the same campaign. Validated in docs/python-port/porting-notes.md
+    # "JAX persistent compilation cache" -- ~43% faster end-to-end wall time
+    # on a warm cache in isolated single-bundle testing, with the previously
+    # documented "final joint fit is slower in Python than C++" finding
+    # reversing once warm (Python becomes ~3.2x faster on that phase).
+    # Respects an operator-set JAX_COMPILATION_CACHE_DIR if present.
+    default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
+    cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
+    os.makedirs(cache_dir, exist_ok=True)
+    # Mixed precision (float32 Jacobian in the joint-fit accumulate step,
+    # float64 everywhere else) is the default -- see docs/python-port/porting-notes.md
+    # "Mixed precision, tested exactly as directed" for validation (single-
+    # bundle chi2 relative error 2.4e-6, full-CCD wavelength RMS matches the
+    # float64 pipeline to 4 decimal places, 71% GPU memory cut). Pass
+    # --double-precision on the CLI to force full float64 if ever needed.
+    os.environ["SPECEX_MIXED_PRECISION"] = "0" if double_precision else "1"
+    
+    try:
+        import jax
+        import jax.numpy as jnp
+        # Explicit jax.config API calls, not an os.environ write, for the
+        # cache dir/min-size settings below -- JAX reads its own config at
+        # first use, which for THIS process is the `import jax` line right
+        # above; an os.environ write after that point would already be too
+        # late for anything that reads config eagerly at import time, so the
+        # config API (read fresh at the point of the call, not cached at
+        # import) is the robust choice regardless of import ordering.
+        jax.config.update("jax_compilation_cache_dir", cache_dir)
+        jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+        jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+        if backend != "gpu":
+            jax.config.update("jax_platforms", "cpu")
+        # Lazy, deliberately not at this module's top level (see the note
+        # by this file's own imports): .io -> .math and .fitter -> .psf both
+        # pull in JAX transitively, and this is a fresh 'spawn' worker
+        # process, so importing them here (after the GPU/thread isolation
+        # env vars above, before anything that needs them below) is exactly
+        # equivalent to having them at module level for this function's own
+        # purposes, just without forcing run_specex() to need JAX too.
+        from .io import read_preproc, load_python_psf, read_lamp_lines
+        from .fitter import select_bundle_spots_iterative, PSF_Fitter
+        t_jax_import = time.time()
+        print(f"PHASE_TIMING bundle={bid} jax_import={t_jax_import - t_entry:.2f}s", flush=True)
+
+        class Opts:
+            """Minimal stand-in for the C++-side options object, carrying just the two file paths read_preproc/load_python_psf need. Not the same class as main()'s argparse Namespace or run_specex()'s C++ PyOptions.
+
+            Status: ACTIVE (production default path) -- internal helper class of
+            fit_bundle_task.
+            """
+            def __init__(self):
+                """Store the arc image and input PSF file paths from the enclosing fit_bundle_task call.
+
+                Status: ACTIVE (production default path).
+                """
+                self.arc_image_filename = arc_file
+                self.input_psf_filename = in_psf_file
+        opts = Opts()
+
+        ddata = read_preproc(opts)
+        image = ddata['image'].T
+        weight = ddata['ivar'].T
+
+        psf = load_python_psf(in_psf_file, opts)
+        if h_size_y is not None:
+            psf.h_size_y = h_size_y
+
+        # Add output path for spot/debug-checkpoint writing. Suffixed with
+        # the bundle id (matching C++'s own `_NN` per-bundle checkpoint
+        # naming, e.g. cppspots_pass4) -- NOT used for the actual merged
+        # FITS output (that's written once, separately, by fit_ccd_native
+        # via write_python_psf(out_psf_file, ...) after all bundle workers
+        # return). Without this suffix, every bundle worker in a multi-
+        # bundle/full-CCD run derives the exact same checkpoint filenames
+        # from the shared out_psf_file and clobbers every other bundle's
+        # spot list -- confirmed 2026-08-04: a 20-bundle full-CCD run's
+        # final .pyspots.txt contained only one bundle's ~25 fibers, not
+        # all 500, silently (no error, just whichever bundle's worker
+        # finished writing last "wins").
+        psf.output_psf_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.fits')
+        psf.debug_spots = debug_spots
+
+        lamp_lines = read_lamp_lines(lamp_lines_file)
+        t_io = time.time()
+        print(f"PHASE_TIMING bundle={bid} image_psf_io={t_io - t_jax_import:.2f}s", flush=True)
+
+        f_min, f_max = bid * 25, (bid + 1) * 25 - 1
+
+        # Detect fibers with essentially no real data anywhere along their
+        # trace (a masked/dead CCD amp, not the milder single-bad-column
+        # case the trace-prior ndead gate already handles) -- see
+        # find_masked_amp_fibers' docstring and docs/python-port/porting-notes.md's
+        # 2026-08-14 writeup. These are excluded from candidate generation
+        # below exactly like an explicitly-broken fiber, and get the same
+        # "propagate the input starting-guess PSF, flag STATUS=-1" write-
+        # time treatment (io.py's write_python_psf).
+        from .fitter import find_masked_amp_fibers
+        masked_amp_fibers, _ = find_masked_amp_fibers(psf, f_min, f_max, weight, ndead_threshold=masked_amp_ndead_threshold)
+        if masked_amp_fibers:
+            print(f"  MASKED-AMP DETECTION: {len(masked_amp_fibers)} fiber(s) in bundle {bid} flagged as "
+                  f"no-data (ndead>{masked_amp_ndead_threshold}, contiguous run): {sorted(masked_amp_fibers)}", flush=True)
+        explicit_broken_set = set()
+        if broken_fibers:
+            explicit_broken_set = {int(f) for f in str(broken_fibers).split(",") if f.strip()}
+        candidate_exclude_fibers = explicit_broken_set | masked_amp_fibers
+
+        # If EVERY fiber in this bundle is excluded (a bundle fully inside
+        # a masked amp, or an all-broken bundle), there's nothing left to
+        # fit -- select_bundle_spots_iterative would return an empty spot
+        # list and hit the "no spots" error path below, wrongly reporting
+        # a genuine no-op (whole bundle correctly propagated from input) as
+        # a bundle failure. Short-circuit cleanly instead: write_python_psf
+        # already does the right thing for a bundle_results entry with no
+        # pc/tc/chi2 at all, as long as 'skip_bundle' tells it to skip the
+        # normal per-bundle correction-write block entirely and fall
+        # straight through to the explicitly_broken_fibers/masked_amp_fibers
+        # pass-through + STATUS=-1 restoration (which doesn't need pc/tc).
+        if set(range(f_min, f_max + 1)) <= candidate_exclude_fibers:
+            print(f"  Bundle {bid}: all {f_max - f_min + 1} fibers excluded (broken/masked-amp) -- "
+                  f"no fit performed, propagating input PSF for the whole bundle.", flush=True)
+            return bid, {
+                'skip_bundle': True,
+                'masked_amp_fibers': sorted(masked_amp_fibers),
+                'explicitly_broken_fibers': sorted(explicit_broken_set),
+            }
+
+        if force_spots_path:
+            # Load spots from file: fiber,wave,xc,yc
+            spots = []
+            with open(force_spots_path, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) < 4: continue
+                    s = {'fiber': int(parts[0]), 'wave': float(parts[1]), 'xc_init': float(parts[2]), 'yc_init': float(parts[3])}
+                    # Pre-calculate stamp boundaries to avoid KeyError in fitter.get_bundle_footprint
+                    s['stamp_imin'] = int(np.floor(s['xc_init'] + 0.5)) - psf.h_size_x
+                    s['stamp_imax'] = int(np.floor(s['xc_init'] + 0.5)) + psf.h_size_x + 1
+                    s['stamp_jmin'] = int(np.floor(s['yc_init'] + 0.5)) - psf.h_size_y
+                    s['stamp_jmax'] = int(np.floor(s['yc_init'] + 0.5)) + psf.h_size_y + 1
+                    spots.append(s)
+            print(f"  Forcing {len(spots)} spots from {force_spots_path}", flush=True)
+            
+            # C++ spots files don't have flux; we must estimate it to initialize the fitter
+            # We do this by running the internal spot stats tool once.
+            import jax.numpy as jnp
+            from .fitter import _get_spot_stats_jax
+            c_xc = jnp.array([s['xc_init'] for s in spots])
+            c_yc = jnp.array([s['yc_init'] for s in spots])
+            gh_all = jnp.array([psf.gh_params(s['fiber'], s['wave']) for s in spots])
+            housekeeping_hsize_x = min(3, psf.h_size_x); housekeeping_hsize_y = min(3, psf.h_size_y)
+            fluxes, snrs, chi2s, efluxes = _get_spot_stats_jax(jnp.array(image), jnp.array(weight), c_xc, c_yc, gh_all, psf.gh_psf.degree, housekeeping_hsize_x, housekeeping_hsize_y)
+            fluxes = np.array(fluxes)
+            for i in range(len(spots)):
+                spots[i]['flux'] = float(fluxes[i])
+        else:
+            # Mirrors C++ FitEverything's housekeeping/selection phase: multi-pass
+            # reselection from the full candidate list with a trace warm-up loop.
+            spots = select_bundle_spots_iterative(psf, f_min, f_max, lamp_lines,
+                                                   image, weight, bid,
+                                                   broken_fibers=candidate_exclude_fibers,
+                                                   max_number_of_lines=max_number_of_lines,
+                                                   wdeg=wdeg, fit_continuum=fit_continuum)
+
+        t_select = time.time()
+        print(f"PHASE_TIMING bundle={bid} selection={t_select - t_io:.2f}s", flush=True)
+
+        if not spots:
+            return bid, {"error": "No spots found for bundle"}
+
+        # A fiber with (near-)zero surviving spots in the final selection is
+        # genuinely unconstrained -- C++ detects exactly this condition
+        # (specex_psf_fitter.cc:2594-2596, "No selected spot for fiber",
+        # trace.mask=3) and excludes that fiber from the trace fit
+        # entirely, which (specex_psf_proc.cc:49,58 -- coeff2d starts
+        # zero-initialized and the fiber's now-empty coeff array never
+        # gets copied in) leaves its XTRACE/YTRACE output row as literal
+        # zero. Matched here rather than left to silently interpolate a
+        # plausible-looking but never-actually-validated position from
+        # neighboring fibers (see docs/python-port/porting-notes.md's b3@20241208 bundle-2
+        # fiber-65 writeup) -- downstream consumers presumably rely on
+        # this all-zero convention to recognize an untrustworthy fiber.
+        # Threshold is <2, not strictly 0: C++'s own selection runs an
+        # earlier, stricter pass specifically for trace-fitting (not
+        # replicated here, which only has one, broader, final pass), so a
+        # fiber can have literally 0 spots by C++'s count while Python's
+        # broader pass finds exactly 1 -- seen directly on z3@20260401
+        # bundle 14/fiber 368 (a single spot at the very top wavelength
+        # edge). A single spot can't independently validate any
+        # wavelength-dependent trace behavior regardless of which pass
+        # found it -- it's the same "too thin to trust" case C++ zeros,
+        # just not always caught by an exact spot-count match to C++'s own
+        # (unreplicated) selection stages.
+        # Explicitly-listed --broken-fibers are a *different* case from a
+        # dynamically-discovered zero-spot fiber, and C++ treats them
+        # differently too: a broken fiber is simply excluded from the fit
+        # entirely and its XTRACE/YTRACE row is left completely untouched
+        # at the *input* template's value (confirmed bit-for-bit identical
+        # to the input PSF, both for z8@20260401 fibers 473/474 and
+        # z3@20260401 fiber 368 -- see docs/python-port/porting-notes.md) -- it is NOT
+        # zeroed the way a dynamically-discovered zero-spot fiber is
+        # (that's the mask=3/resize(0) case above). Excluding a fiber from
+        # candidate generation naturally drops its spot count to 0, which
+        # would otherwise wrongly pull it into the zeroing set below; skip
+        # it here so it's left alone and inherits the input value exactly
+        # like C++ does.
+        explicitly_broken = explicit_broken_set
+        spot_fiber_counts = {}
+        for s in spots:
+            spot_fiber_counts[s['fiber']] = spot_fiber_counts.get(s['fiber'], 0) + 1
+        # masked_amp_fibers excluded here too -- like explicitly_broken,
+        # they were kept out of candidate generation entirely (see
+        # candidate_exclude_fibers above), so they'd otherwise be wrongly
+        # swept into the zero-spot/literal-zero-trace convention below
+        # instead of their own pass-through/STATUS=-1 treatment
+        # (write_python_psf).
+        zero_spot_fibers = [fib for fib in range(f_min, f_max + 1)
+                             if spot_fiber_counts.get(fib, 0) < 2
+                             and fib not in explicitly_broken
+                             and fib not in masked_amp_fibers]
+
+        # trace_prior_weight/trace_prior_ndead_threshold are read by fit()
+        # via os.environ (see SPECEX_TRACE_PRIOR_WEIGHT/NDEAD_THRESHOLD in
+        # fitter.py) rather than as direct parameters -- set them here, in
+        # this already-spawned worker process, right before the call, so a
+        # CLI-supplied value takes precedence over the env-only default.
+        if trace_prior_weight is not None:
+            os.environ["SPECEX_TRACE_PRIOR_WEIGHT"] = str(trace_prior_weight)
+        if trace_prior_ndead_threshold is not None:
+            os.environ["SPECEX_TRACE_PRIOR_NDEAD_THRESHOLD"] = str(trace_prior_ndead_threshold)
+        # footprint_margin: same pattern -- get_bundle_footprint (fitter.py)
+        # reads SPECEX_FOOTPRINT_MARGIN via os.environ rather than a direct
+        # parameter; set here in the already-spawned worker so the CLI value
+        # takes precedence. C++'s own bundle footprint extends up to 7px past
+        # fiber_min/fiber_max on each side (specex_psf_fitter.cc:1043-1058);
+        # Python's was zero-margin, which root-caused the bundle-boundary
+        # trace divergence (docs/python-port/porting-notes.md, 2026-09-01) -- 7 is now the
+        # production default, matching C++, not an experimental opt-in.
+        if footprint_margin is not None:
+            os.environ["SPECEX_FOOTPRINT_MARGIN"] = str(footprint_margin)
+
+        fitter = PSF_Fitter(psf)
+        chi2, pc, tc, cc, final_flux, xc_final, yc_final, spots = fitter.fit(image, weight, spots, bid, max_iter=50, wdeg=wdeg, fit_continuum=fit_continuum, trace_wdeg=trace_wdeg, trace_wdeg_x=trace_wdeg_x, trace_wdeg_y=trace_wdeg_y, trace_per_fiber_deg=trace_per_fiber_deg, line_search=line_search, trace_prior_deg=trace_prior_deg)
+        # Reassigning `spots` here (not just capturing it under a new name)
+        # is deliberate: everything below this line -- x_orig/y_orig,
+        # trace_monomials_abs, the `spots[i]['xc_init'] = ...` refresh loop,
+        # pyspots.txt writing, final_selected -- assumes 1:1 correspondence
+        # with xc_final/yc_final by index/length. fit() may return a SHORTER
+        # list than it was given (SPECEX_MATCH_CPP_DEAD_COLUMN can drop
+        # spots), so every downstream use must see that same list, not the
+        # original pre-fit one -- see fitter.fit()'s return-statement
+        # comment for the real crash this fixes.
+        t_finalfit = time.time()
+        print(f"PHASE_TIMING bundle={bid} final_joint_fit={t_finalfit - t_select:.2f}s", flush=True)
+
+        # --- Recompute trace_coeffs as the true correction relative to the
+        # *original input* trace, fit directly to the final absolute
+        # positions (xc_final/yc_final). fitter.fit()'s own `tc` only
+        # captures the residual relative to xc_init (the anchor held fixed
+        # during the joint fit) -- if xc_init already deviates from the
+        # input trace (e.g. after selection's trace-warmup snapping, or
+        # when using --force-spots with externally supplied positions),
+        # that deviation would otherwise be silently dropped when
+        # write_python_psf() adds `tc` onto the input trace to build the
+        # output XTRACE/YTRACE.
+        from .fitter import get_bundle_monomials_jnp, get_sparse_nz, get_bundle_block_diagonal_trace_monomials
+        x_orig = np.array([psf.x_ccd(s['fiber'], s['wave']) for s in spots])
+        y_orig = np.array([psf.y_ccd(s['fiber'], s['wave']) for s in spots])
+        res_x = np.array(xc_final) - x_orig
+        res_y = np.array(yc_final) - y_orig
+        if trace_per_fiber_deg is not None:
+            # Block-diagonal by fiber (stage 1 of the full per-fiber
+            # redesign) -- both axes already share the exact same
+            # full-width basis (no freeze-masking, unlike the shared-basis
+            # path below), so this is a plain lstsq per axis, no
+            # prefix/padding bookkeeping needed.
+            trace_monomials_abs = np.array(get_bundle_block_diagonal_trace_monomials(psf, bid, spots, trace_per_fiber_deg))
+            tc_x_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_x, rcond=None)
+            tc_y_abs, _, _, _ = np.linalg.lstsq(trace_monomials_abs, res_y, rcond=None)
+        else:
+            # trace_wdeg_x/trace_wdeg_y (not wdeg) -- this recompute rebuilds tc
+            # from scratch against the absolute final positions, so it must use
+            # the same basis PSF_Fitter.fit() actually optimized trace_coeffs
+            # in, not the (possibly different) PSF-shape basis. x and y can
+            # have different degrees (see fitter.py's freeze-mask comment for
+            # why): build one shared design matrix at the higher of the two
+            # degrees, lstsq each axis against only its own leading-column
+            # prefix (get_sparse_nz(1, d) is a strict prefix of any higher
+            # degree's), then zero-pad the shorter one back up to the shared
+            # width so tc stays a plain (2, N) array like every other caller
+            # (write_python_psf included) expects.
+            trace_wdeg_shared_abs = max(trace_wdeg_x, trace_wdeg_y)
+            trace_monomials_abs = np.array(get_bundle_monomials_jnp(psf, bid, spots, wdeg=trace_wdeg_shared_abs))
+            npoly_x_abs = len(get_sparse_nz(1, trace_wdeg_x)); npoly_y_abs = len(get_sparse_nz(1, trace_wdeg_y))
+            tc_x_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_x_abs], res_x, rcond=None)
+            tc_y_fit, _, _, _ = np.linalg.lstsq(trace_monomials_abs[:, :npoly_y_abs], res_y, rcond=None)
+            npoly_shared_abs = trace_monomials_abs.shape[1]
+            tc_x_abs = np.zeros(npoly_shared_abs); tc_x_abs[:npoly_x_abs] = tc_x_fit
+            tc_y_abs = np.zeros(npoly_shared_abs); tc_y_abs[:npoly_y_abs] = tc_y_fit
+        tc = np.stack([tc_x_abs, tc_y_abs], axis=0)
+
+        # --- C++ Parity: Update spots with refined model centroids ---
+        # The C++ implementation snaps final spots to the model PSF position
+        # We need to preserve the original raw values for the debug file
+        raw_centroids = [(s['xc_init'], s['yc_init']) for s in spots]
+        
+        # Use the xc_final/yc_final already computed by the fitter
+        for i in range(len(spots)):
+            spots[i]['xc_init'] = float(xc_final[i])
+            spots[i]['yc_init'] = float(yc_final[i])
+
+        # CRITICAL: Overwrite pyspots.txt with refined centroids.
+        # get_bundle_spots wrote the raw selection; we must update it with fit results.
+        if debug_spots and hasattr(psf, 'output_psf_path') and psf.output_psf_path:
+            spots_path = psf.output_psf_path.replace('.fits', '.pyspots.txt')
+            with open(spots_path, 'w') as f:
+                for s in spots:
+                    f.write(f"{s['fiber']},{s['wave']:.15f},{s['xc_init']:.15f},{s['yc_init']:.15f}\n")
+
+        # Debug export: verify that xc_final/yc_final differ from initial raw values
+        # (same per-bundle clobbering issue as psf.output_psf_path above -- fixed the same way)
+        if debug_spots:
+            debug_path = out_psf_file.replace('.fits', f'_bundle{bid:02d}.refined_centroids_debug.txt')
+            with open(debug_path, 'w') as f:
+                for i in range(len(spots)):
+                    f.write(f"spot {i}: raw({raw_centroids[i][0]:.15f}, {raw_centroids[i][1]:.15f}) -> refined({float(xc_final[i]):.15f}, {float(yc_final[i]):.15f})\n")
+
+        # We no longer re-run selection with the refined centroids as a second pass.
+        # This matches the iterative snapping logic now implemented inside the fitter,
+        # and prevents the "Selected is subset of Raw: True" behavior.
+        # We simply update the 'spots' metadata for the final result.
+        final_selected = spots
+        for i in range(len(final_selected)):
+            final_selected[i]['flux'] = float(final_flux[i])
+            final_selected[i]['xc_init'] = float(xc_final[i])
+            final_selected[i]['yc_init'] = float(yc_final[i])
+        
+        t_postproc = time.time()
+        print(f"PHASE_TIMING bundle={bid} postproc={t_postproc - t_finalfit:.2f}s total={t_postproc - t_entry:.2f}s", flush=True)
+
+        # Keep the cross-process payload minimal to avoid multiprocessing
+        # pipe/pickling overhead.
+        return bid, {
+
+            'psf_coeffs': np.array(pc),
+            'trace_coeffs': np.array(tc),
+            'continuum_coeffs': np.array(cc),
+            'wdeg': wdeg,
+            # The actual width tc was built at (max(trace_wdeg_x,
+            # trace_wdeg_y), not the shared-default trace_wdeg convenience
+            # value above) -- write_python_psf indexes tc with this, and
+            # the shorter axis's unused trailing columns are exact zeros,
+            # so using the wider of the two here is required for correct
+            # reconstruction, not just for the wider axis's own sake.
+            # Meaningless (ignored by write_python_psf) when
+            # trace_per_fiber_deg is set instead.
+            'trace_wdeg': None if trace_per_fiber_deg is not None else trace_wdeg_shared_abs,
+            # Stage 1 of the full per-fiber redesign (see docs/python-port/porting-notes.md):
+            # tells write_python_psf to use the per-fiber (not
+            # broadcast-across-fibers) write-back path.
+            'trace_per_fiber_deg': trace_per_fiber_deg,
+            'zero_spot_fibers': zero_spot_fibers,
+            'explicitly_broken_fibers': sorted(explicitly_broken),
+            'masked_amp_fibers': sorted(masked_amp_fibers),
+            'chi2': float(chi2),
+            's_fiber': np.array([s['fiber'] for s in final_selected]),
+            's_wave': np.array([s['wave'] for s in final_selected]),
+            's_flux': np.array([s['flux'] for s in final_selected])
+        }
+    except Exception as e:
+        import traceback
+        err_msg = traceback.format_exc()
+        # JAX/XLA's OOM exception (jaxlib.xla_extension.XlaRuntimeError)
+        # always includes this token in its message -- distinguishing it
+        # from a genuine bug lets fit_ccd_native retry just these bundles
+        # at a lower packing instead of dropping them silently.
+        is_oom = "RESOURCE_EXHAUSTED" in err_msg
+        print(f"FAILED Bundle {bid} on {backend.upper()} {gpu_id}:\n{err_msg}", flush=True)
+        return bid, {"error": str(e), "traceback": err_msg, "is_oom": is_oom}
+
+
+def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
+                     first_bundle=0, last_bundle=19, n_gpus=4, backend="gpu",
+                     broken_fibers=None, sn_threshold=3.0, h_size_y=5, force_spots_path=None, max_number_of_lines=100,
+                     workers_per_gpu=None, cpu_workers=None, gpu_worker_threads=None, legendre_deg_wave=None, fit_continuum=None, double_precision=False,
+                     trace_legendre_deg_wave=None, trace_legendre_deg_wave_x=None, trace_legendre_deg_wave_y=None,
+                     trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=None, trace_prior_ndead_threshold=None,
+                     line_search='grid', debug_spots=False, masked_amp_ndead_threshold=8000, footprint_margin=7, bundle_pool=None, bundle_log_path=None):
+    """Fit a full CCD (a configurable bundle range, default all 20) using a multiprocessing pool of fit_bundle_task workers, then merge the results into the output PSF file.
+
+    For backend="gpu", multiple worker processes are packed onto each physical
+    GPU (workers_per_gpu) since a single bundle fit doesn't saturate an A100.
+    Bundles are dynamically queued (`Pool.starmap`) so the pool size need not
+    equal the bundle count. A bundle that fails with a GPU OOM
+    (RESOURCE_EXHAUSTED) is automatically retried in a follow-up batch at
+    halved packing (up to 2 retry rounds); non-OOM failures are reported but
+    never retried.
+
+    Args:
+        arc_file (str): path to the preprocessed arc image FITS file.
+        in_psf_file (str): path to the input (shifted) PSF FITS file.
+        out_psf_file (str): path to write the merged output PSF FITS file to
+            (skipped if no bundle produced a usable result).
+        lamp_lines_file (str): path to the lamp line list.
+        first_bundle, last_bundle (int): inclusive bundle-index range to fit
+            (0-19 for a full CCD).
+        n_gpus (int): number of GPUs to spread bundles across on the current
+            node (backend="gpu" only).
+        backend (str): "gpu" or "cpu".
+        broken_fibers (str or None): comma-separated fiber IDs to exclude.
+        sn_threshold (float): S/N threshold for spot selection.
+        h_size_y (int): PSF stamp half-size in Y.
+        force_spots_path (str or None): fixed spot list path, bypassing spot
+            selection.
+        max_number_of_lines (int): cap on lines kept per bundle.
+        workers_per_gpu (int or None): concurrent bundle-fit workers packed
+            onto each GPU; default (None) auto-selects 5, or 3 for z-band when
+            trace_per_fiber_deg is active (its larger per-fiber design matrix
+            is prone to GPU OOM at 5 -- see docs/python-port/porting-notes.md).
+        cpu_workers (int or None): concurrent worker processes for
+            backend="cpu"; defaults to n_gpus.
+        gpu_worker_threads (int or None): diagnostic thread cap forced on each
+            GPU-backend worker's host-side computation; unconstrained if None
+            (not load-bearing for a normal run).
+        legendre_deg_wave (int or None): PSF-shape wavelength Legendre degree;
+            auto-detected from the input image's CAMERA header if None (3 for
+            z-band, 1 otherwise, matching real C++ production).
+        fit_continuum (bool or None): fit a per-bundle continuum background;
+            auto (on for z-band) if None.
+        double_precision (bool): force full float64 for the joint-fit
+            Jacobian.
+        trace_legendre_deg_wave (int or None): convenience override setting
+            both trace_legendre_deg_wave_x and _y at once.
+        trace_legendre_deg_wave_x, trace_legendre_deg_wave_y (int or None):
+            per-axis trace-position wavelength degree; auto per axis if None
+            (X defaults to legendre_deg_wave's value, Y to 2 for b/r or
+            legendre_deg_wave's value for z).
+        trace_per_fiber_deg (int or None): block-diagonal-by-fiber trace basis
+            degree (default 6, the production default since 2026-08-05); <=0
+            or None falls back to the old shared trace_legendre_deg_wave_x/y
+            basis.
+        trace_prior_deg (int or None): degree at/above which per-fiber trace
+            coefficients are pulled toward the bundle's cross-fiber consensus
+            (default 1); negative disables the prior while keeping per-fiber
+            trace on.
+        trace_prior_weight, trace_prior_ndead_threshold (float/int or None):
+            trace-prior penalty weight and its ndead activation threshold.
+        line_search (str): final joint fit's step-size search mode -- 'grid'
+            (default), 'brent', or 'cpp'.
+        debug_spots (bool): write per-pass spot-selection debug dump files.
+        masked_amp_ndead_threshold (int): ndead threshold for masked/dead-amp
+            fiber detection.
+
+    Returns:
+        dict[int, str]: `failed_bundles`, mapping each bundle id that did not
+        succeed (after OOM retries) to its error message. Empty if every
+        bundle in range succeeded.
+
+    Status: ACTIVE (production default path). The line_search='brent'/'cpp'
+    values it accepts and forwards to PSF_Fitter.fit() are themselves
+    EXPERIMENTAL/DIAGNOSTIC -- see fitter.py's PSF_Fitter.fit().
+    """
+    t_start = time.time()
+
+    # Strip Cray Shasta/PALS launcher rank-identity env vars (PALS_RANKID,
+    # PALS_LOCAL_RANKID, PALS_APID, etc.) before spawning any worker.
+    # `run_gpu()` in desispec already strips PMI_* for the same reason (see
+    # its own comment) -- that stripping is real and does work (confirmed
+    # 2026-09-14: a spawned worker's own /proc/<pid>/environ shows zero
+    # PMI_*-prefixed vars) but is not sufficient on its own, because this
+    # system's actual live MPI bootstrap identity mechanism is Cray's PALS
+    # launcher (SLURM_MPI_TYPE=cray_shasta), which uses PALS_*-prefixed vars,
+    # not the legacy generic PMI_* ones -- PALS_* was never in the strip
+    # list and passes straight through unchanged into every spawned worker.
+    # Confirmed directly (2026-09-14 MPI/run_gpu() cpuset+environment audit,
+    # docs/python-port/porting-notes.md) as the actual root cause of the
+    # reproducible ~180s-after-pool-launch Cray MPICH PMI bootstrap-barrier
+    # crash in desispec.scripts.specex.run_gpu() under real multi-rank MPI: a
+    # worker child inspected mid-run had libmpi_gnu.so/libpmi.so/libpals.so
+    # AND mpi4py's own compiled extension loaded in its address space (with
+    # /dev/shm/shared_memory.PMI.<jobid>.<step> and the PALS apinfo file both
+    # mapped) despite fit_bundle_task() itself never touching MPI -- and its
+    # /proc/<pid>/environ still carried PALS_RANKID=0, PALS_LOCAL_RANKID=0,
+    # PALS_APID=<the real job's id>, inherited unchanged from the MPI rank
+    # that spawned it. multiprocessing's 'spawn' context re-imports the
+    # calling script's __main__ module in the child to reconstruct the
+    # target callable; if that script (as any real MPI driver script, and
+    # this investigation's own test driver, do) imports mpi4py at module
+    # level, mpi4py auto-calls MPI_Init() at import time by default -- so
+    # EVERY spawned worker ends up independently (re-)initializing MPI,
+    # each one claiming to be "rank 0 of application <apid>" via the
+    # inherited PALS_* identity, colliding with the real rank 0 and with
+    # each other over the same PMI shared-memory rendezvous segment. This
+    # is a load-independent identity collision, not a CPU-scheduling
+    # effect -- explains why a pure worker-concurrency/thread-count
+    # reduction (tested first, see the confined-cpuset branch just below in
+    # this function) did NOT change the crash's timing at all (182.1s vs
+    # 181.7s across two otherwise-identical real 4-rank MPI runs, one with
+    # 20 unthrottled workers and one with 16 throttled-to-1-thread workers
+    # -- both still failed inside 1s of each other). Stripping PALS_* here
+    # (in addition to run_gpu()'s existing PMI_* strip) removes the
+    # identity a spawned worker could otherwise claim, so even if mpi4py
+    # still auto-initializes in a worker for the reason above, it can no
+    # longer masquerade as the real rank 0 or corrupt its bootstrap state.
+    for _var in list(os.environ):
+        if _var.startswith("PALS_"):
+            del os.environ[_var]
+
+    all_bundles = range(first_bundle, last_bundle + 1)
+    bundle_results = {}
+
+    # trace_per_fiber_deg<=0 means "off" (fall back to the shared trace
+    # basis); trace_prior_deg<0 means "on but with the cross-fiber prior
+    # disabled" -- both CLI-level escape hatches from the 2026-08-05
+    # promoted defaults (6 / 1), see --trace-per-fiber-deg/--trace-prior-deg
+    # help text.
+    if trace_per_fiber_deg is not None and trace_per_fiber_deg <= 0:
+        trace_per_fiber_deg = None
+    if trace_prior_deg is not None and trace_prior_deg < 0:
+        trace_prior_deg = None
+
+    if legendre_deg_wave is None or fit_continuum is None or trace_legendre_deg_wave_x is None or trace_legendre_deg_wave_y is None or workers_per_gpu is None:
+        import fitsio
+        cam = fitsio.read_header(arc_file, ext=0)['CAMERA'].strip().lower()
+        band = cam[0]
+        if workers_per_gpu is None:
+            # z-band's larger per-fiber design matrix (~350 params/bundle)
+            # combined with its higher spot density hits GPU
+            # RESOURCE_EXHAUSTED at 5 workers/GPU specifically -- see
+            # docs/python-port/porting-notes.md's 2026-08-05 OOM investigation. 3/GPU fully
+            # avoids it (validated OOM-free across all 10 z-band cases in
+            # the definitive 30-CCD campaign) at a modest packing cost.
+            workers_per_gpu = 3 if (band == 'z' and trace_per_fiber_deg is not None) else 5
+        if legendre_deg_wave is None:
+            legendre_deg_wave = 3 if band == 'z' else 1
+        if fit_continuum is None:
+            fit_continuum = (band == 'z')
+        if trace_legendre_deg_wave_x is None:
+            trace_legendre_deg_wave_x = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else legendre_deg_wave
+        if trace_legendre_deg_wave_y is None:
+            # b/r default: 2, not 1 -- validated against the real C++ engine
+            # (run_specex(), now working locally -- see docs/python-port/porting-notes.md)
+            # across 6 bundles on both flagged exposures (r2@20250109,
+            # r2@20241208): mean yrms 0.2182px -> 0.0686px (68% cut, into
+            # normal-case territory). z-band kept coupled to its own wdeg
+            # (3) -- not part of this validation.
+            trace_legendre_deg_wave_y = trace_legendre_deg_wave if trace_legendre_deg_wave is not None else (2 if band != 'z' else legendre_deg_wave)
+
+    print(f"--- SPECE-X Multi-Process CCD Fit ({backend.upper()}) ---")
+    print(f"  Arc: {arc_file}")
+    print(f"  In PSF: {in_psf_file}")
+    print(f"  Out PSF: {out_psf_file}")
+    print(f"  legendre-deg-wave: {legendre_deg_wave}  trace-legendre-deg-wave: x={trace_legendre_deg_wave_x} y={trace_legendre_deg_wave_y}  fit-continuum: {fit_continuum}")
+    if trace_per_fiber_deg is not None:
+        print(f"  trace-per-fiber-deg: {trace_per_fiber_deg}  trace-prior-deg: {trace_prior_deg}  workers-per-gpu: {workers_per_gpu}")
+    if broken_fibers:
+        print(f"  Broken Fibers: {broken_fibers}")
+
+    available_cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+
+    if backend == "gpu":
+        packing = workers_per_gpu  # bundle-fit workers packed onto each GPU
+        # Normally unset -- GPU-backend workers' host-side NumPy/BLAS calls
+        # (the selection/housekeeping phase, ~70% of a bundle's wall time,
+        # see docs/python-port/porting-notes.md) default to unconstrained thread counts,
+        # unlike --backend cpu workers which always get a computed budget
+        # below. --gpu-worker-threads lets this be forced explicitly, to
+        # test whether that default threading is (a) load-bearing for
+        # per-worker speed or (b) pure oversubscription noise that's
+        # crowding out any concurrent CPU-backend work -- see the 2026-08-09
+        # profiling session in docs/python-port/porting-notes.md.
+        gpu_thread_cap = gpu_worker_threads
+        if gpu_thread_cap is not None:
+            print(f"  GPU-worker thread cap: {gpu_thread_cap} threads/worker (forced via --gpu-worker-threads)", flush=True)
+        elif available_cores < _CONFINED_CPUSET_CORE_THRESHOLD:
+            # available_cores (os.sched_getaffinity(0), computed above) is
+            # the CALLING process's own real cpuset, not the node's raw CPU
+            # count. On a normal standalone full-node run this is 128 and
+            # this branch never fires (n_gpus*workers_per_gpu, usually 20,
+            # is already far below the threshold below). But when
+            # fit_ccd_native() runs inside an MPI rank that SLURM has bound
+            # to a narrow cpuset slice (e.g. one quarter of a node under
+            # `srun -n4`), spawned 'spawn'-context workers inherit that SAME
+            # narrow slice -- confirmed 2026-09-14 as the proximate cause of
+            # a real Cray MPICH PMI bootstrap-barrier crash in
+            # desispec.scripts.specex.run_gpu() under real multi-rank MPI
+            # (~180s after the worker pool launched, every time, matching
+            # the error's own "timeout=180 secs"): with the un-throttled
+            # default (20 workers, each host-side phase unconstrained), the
+            # confined slice ran at sustained ~70-90% utilization for the
+            # crash's entire ~180s window while the OTHER ranks' own slices
+            # sat almost idle -- node-wide load stayed moderate (loadavg
+            # ~20-23 of 128) throughout, so this would NOT show up in a
+            # node-wide load check, only a per-slice one. See
+            # docs/python-port/porting-notes.md, 2026-09-14 MPI/run_gpu()
+            # cpuset audit, for the full continuous CPU-monitor trace.
+            # Fix: when confined, cap total concurrent workers to at most
+            # half the slice (real headroom, not just "fits on paper") and
+            # cap each worker to a single thread, so the pool can never
+            # crowd out whatever the MPI rank itself (or its runtime's own
+            # internal progress/heartbeat machinery) needs to run promptly
+            # on that same slice.
+            _budget = max(n_gpus, available_cores // 2)
+            packing = max(1, _budget // n_gpus)
+            gpu_thread_cap = 1
+            print(f"  Confined cpuset detected ({available_cores} cores available via "
+                  f"os.sched_getaffinity, < {_CONFINED_CPUSET_CORE_THRESHOLD}): reducing from "
+                  f"{n_gpus * workers_per_gpu} to {n_gpus * packing} GPU workers "
+                  f"({packing}/GPU), capping to {gpu_thread_cap} thread/worker", flush=True)
+    else:
+        packing = cpu_workers or n_gpus  # concurrent CPU-backend worker processes
+
+    def _cpu_threads_for(n_workers_this):
+        # See fit_bundle_task's thread-limiting comment for why this exists
+        # at all: without it, every CPU worker independently claims all
+        # available cores, and N concurrent workers thrash each other.
+        # Scaling to (real core count / worker count) keeps the pool's
+        # aggregate thread demand within the node's actual budget. Floor
+        # of 1 thread/worker (an oversubscribed-but-not-zero fallback) if
+        # there happen to be more workers than cores. Recomputed per batch
+        # (not just once up front) so an OOM-retry batch, which runs with
+        # fewer workers, correctly gets a bigger per-worker thread budget.
+        """Compute this batch's per-worker OS-thread budget for backend="cpu" (available_cores // n_workers_this, floor 1), so N concurrent CPU workers collectively stay within the node's real core count instead of each independently claiming every thread. Returns gpu_thread_cap unchanged for backend="gpu" (see fit_ccd_native's gpu_worker_threads).
+
+        Args:
+            n_workers_this (int): number of workers in the batch about to launch.
+
+        Returns:
+            int or None: threads to allocate per worker (backend="cpu"), or the
+            (possibly None) gpu_thread_cap value (backend="gpu").
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        fit_ccd_native.
+        """
+        if backend == "gpu":
+            return gpu_thread_cap
+        t = max(1, available_cores // n_workers_this)
+        print(f"  CPU thread budget: {available_cores} cores / {n_workers_this} workers = {t} threads/worker", flush=True)
+        return t
+
+    def _run_batch(bundle_ids, n_workers_this, cpu_threads_this, pool=None):
+        """Launch one batch of fit_bundle_task calls (spawn context) for the given bundle ids and wait for all of them to complete.
+
+        Args:
+            bundle_ids (list[int]): bundle indices to fit in this batch.
+            n_workers_this (int): pool size for this batch (only used to size
+                a freshly-created pool when `pool` is None).
+            cpu_threads_this (int or None): per-worker thread budget, from
+                _cpu_threads_for.
+            pool (multiprocessing.pool.Pool or None): a caller-owned,
+                already-spawned pool to reuse (e.g. a persistent worker's
+                long-lived bundle pool -- see testing/run_night.py's
+                --worker-mode persistent) instead of paying spawn+JAX-import
+                cost for a fresh one. Caller retains ownership (never closed
+                here). None (default): create-and-tear-down a fresh pool
+                sized n_workers_this, exactly as before this parameter
+                existed -- unchanged behavior for every other call site.
+
+        Returns:
+            list[tuple[int, dict]]: one `(bid, result)` pair per bundle, in the
+            same format fit_bundle_task returns.
+
+        Status: ACTIVE (production default path) -- internal helper closure of
+        fit_ccd_native.
+        """
+        tasks = []
+        for i, bid in enumerate(bundle_ids):
+            gpu_id = i % n_gpus
+            # Use 2s stagger to prevent JIT compilation contention on CPU
+            stagger_s = i * 2.0 if backend == "cpu" else 0.0
+            tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold, footprint_margin, bundle_log_path))
+        if pool is not None:
+            return pool.starmap(fit_bundle_task, tasks)
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(processes=n_workers_this) as fresh_pool:
+            return fresh_pool.starmap(fit_bundle_task, tasks)
+
+    # Bundles are independent tasks (Pool.starmap queues them dynamically),
+    # so a bundle that fails with a GPU OOM can simply be resubmitted in a
+    # smaller follow-up batch at reduced packing -- no need to restart the
+    # whole CCD. Non-OOM failures are NOT retried (retrying a real bug just
+    # wastes GPU time and reproduces the same failure); only OOM gets this
+    # treatment. Capped at 2 retry rounds, halving packing each time (floor
+    # of 1), so a bundle that's simply too large to ever fit still fails
+    # fast rather than looping.
+    pending = list(all_bundles)
+    failed_bundles = {}
+    attempt = 0
+    max_oom_retries = 2
+    while pending:
+        n_workers_this = min(len(pending), n_gpus * packing) if backend == "gpu" else min(len(pending), packing)
+        cpu_threads_this = _cpu_threads_for(n_workers_this)
+        label = "initial" if attempt == 0 else f"OOM-retry {attempt}"
+        print(f"Launching {len(pending)} bundles across {n_workers_this} workers ({label}, packing={packing})...", flush=True)
+        # bundle_pool only covers the common case (attempt 0, full packing);
+        # a rare OOM retry runs at reduced packing, which a fixed-size
+        # persistent pool can't safely emulate (see _run_batch's docstring),
+        # so retries always fall back to a fresh right-sized pool.
+        chunk_results = _run_batch(pending, n_workers_this, cpu_threads_this, pool=(bundle_pool if attempt == 0 else None))
+
+        oom_bids = []
+        pending = []
+        for bid, res in chunk_results:
+            if "error" in res:
+                if res.get("is_oom"):
+                    oom_bids.append(bid)
+                else:
+                    print(f"WARNING: Bundle {bid} failed: {res['error']}")
+                    failed_bundles[bid] = res["error"]
+            else:
+                bundle_results[bid] = res
+
+        if not oom_bids:
+            break
+        if attempt >= max_oom_retries or packing <= 1:
+            for bid in oom_bids:
+                print(f"WARNING: Bundle {bid} failed: GPU OOM persisted after {attempt} retry round(s) down to packing={packing}")
+                failed_bundles[bid] = "GPU OOM persisted after retries"
+            break
+
+        packing = max(1, packing // 2)
+        print(f"OOM RETRY: {len(oom_bids)} bundle(s) {sorted(oom_bids)} hit GPU OOM (RESOURCE_EXHAUSTED); retrying at packing={packing}", flush=True)
+        pending = oom_bids
+        attempt += 1
+
+    print(f"Total CCD Fit Time: {time.time() - t_start:.2f}s")
+
+    # Merge: C++'s desi_compute_psf --mpi fits each bundle independently
+    # and merge_psf() (desispec/scripts/specex.py) does a straight
+    # per-fiber copy of each bundle's XTRACE/YTRACE/PSF coefficients into
+    # the shared output arrays -- no cross-bundle smoothing or refit.
+    # write_python_psf already does this per-bundle slice-copy correctly;
+    # a prior "Phase 2: Global Wavelength Refinement" here fabricated a
+    # smoothed CCD-wide re-fit (with hardcoded, non-z-band wavelengths and
+    # unexplained scale factors) that overwrote every bundle's real fitted
+    # trace_coeffs and wrote a bogus WAVECORR table. That table's real-world
+    # counterpart (WAVE/DWAVE/DWAVE_ERR as 'EXTOFF') comes from desispec's
+    # trace_shifts.py, a separate downstream pipeline stage that runs after
+    # desi_compute_psf on sky/arc reference lines -- desi_compute_psf itself
+    # never produces it, so there is nothing to replicate here.
+    if bundle_results and out_psf_file:
+        from .io import write_python_psf  # lazy -- see this file's top-of-file note
+        write_python_psf(out_psf_file, bundle_results, in_psf_file)
+
+    n_total = len(all_bundles)
+    if failed_bundles:
+        print(f"SPECEX_RESULT: FAILED {len(failed_bundles)}/{n_total} bundles: {sorted(failed_bundles)}", flush=True)
+    else:
+        print(f"SPECEX_RESULT: OK {n_total}/{n_total} bundles", flush=True)
+    return failed_bundles
+
+
+# ---------------------------------------------------------------------------
+# Multi-camera persistent-worker driver: the reusable core behind
+# run_night.py's --worker-mode persistent (this repo's own CLI) AND
+# desispec's run_gpu() (or any other caller, in-process, that wants to fit
+# many cameras across the GPUs on a node without paying a fresh
+# process-launch + JAX-import cost per camera). Moved here from
+# testing/run_night.py 2026-09-14 specifically so it's importable as public
+# API -- run_night.py previously had its own private copy of all of this,
+# which meant desispec's run_gpu() could only get feature parity by
+# reimplementing it a second time (and did, badly: a fresh, non-pool-reused
+# fit_ccd_native() call per camera, ~20-45min for a 30-camera night vs.
+# run_night.py's own validated ~8min persistent-mode number for the same
+# night -- see docs/python-port/porting-notes.md, 2026-09-14). Both
+# run_night.py and desispec's run_gpu() now call fit_cameras_persistent()
+# below; run_night.py keeps its own CLI-specific concerns (argparse,
+# --dry-run framing, its own outdir/log-naming convention, multi-node
+# fan-out) as a thin wrapper around it.
+
+CameraTask = collections.namedtuple(
+    "CameraTask",
+    ["name", "arc_file", "in_psf_file", "out_psf_file", "log_path", "broken_fibers"],
+)
+CameraTask.__new__.__defaults__ = (None, None)  # log_path, broken_fibers optional
+
+FitResult = collections.namedtuple(
+    "FitResult", ["name", "dt", "rc", "n_bundle_fail", "err_tail", "gpu_id"]
+)
+
+# Per-band worker-packing defaults, moved here verbatim from run_night.py
+# (was DEFAULT_WORKERS_PER_GPU/COLD_CACHE_WORKERS_PER_GPU/
+# COLD_CACHE_ENTRY_THRESHOLD there) -- see run_night.py's own former
+# docstring for the full cold-cache-GPU-OOM story
+# (docs/python-port/porting-notes.md, 2026-09-10): JIT compilation needs
+# more transient GPU memory than warm execution, and z-band's per-bundle
+# footprint is already the closest to the edge of the three bands even when
+# warm, so only z is reduced below while its JAX compilation cache looks
+# unpopulated.
+DEFAULT_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 5}
+COLD_CACHE_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 3}
+# One full warm night populates ~80,000 cache entries; this threshold just
+# needs to distinguish "basically empty" from "has real history" --
+# deliberately not trying to predict exactly which shapes THIS run needs.
+COLD_CACHE_ENTRY_THRESHOLD = 2000
+
+
+def _resolve_jax_cache_dir():
+    """Mirrors fit_bundle_task's own JAX_COMPILATION_CACHE_DIR resolution
+    (this file, ~line 329) so callers can check the same directory a worker
+    will actually use without importing jax themselves."""
+    default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
+    return os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
+
+
+def _cache_is_cold(threshold=COLD_CACHE_ENTRY_THRESHOLD):
+    """True if the JAX compilation cache this run will use looks
+    unpopulated -- a plain, uncached check (one os.listdir) each call.
+
+    Callers with a "mid-run" of their own (a persistent worker processing
+    many cameras) should call this ONCE and reuse the result, not call it
+    fresh per camera -- see _gpu_persistent_worker's own comment for why a
+    per-camera re-check is actively wrong (sibling workers' unrelated
+    progress makes the shared directory look "warm" long before any given
+    worker's own upcoming cameras have had their specific shapes
+    compiled)."""
+    try:
+        return len(os.listdir(_resolve_jax_cache_dir())) < threshold
+    except OSError:
+        return True  # doesn't exist yet -- definitely cold
+
+
+def _workers_per_gpu_for(band, wpg_override, cold=None):
+    """The one place workers-per-gpu is resolved from -- explicit
+    per-band override always wins; otherwise picks the cold- or warm-cache
+    default per band. See COLD_CACHE_WORKERS_PER_GPU above for why this
+    distinction exists.
+
+    `cold`: pass an already-decided coldness snapshot (persistent-worker
+    mode does this) or leave None to check fresh right now."""
+    wpg_override = wpg_override or {}
+    if band in wpg_override:
+        return wpg_override[band]
+    if cold is None:
+        cold = _cache_is_cold()
+    profile = COLD_CACHE_WORKERS_PER_GPU if cold else DEFAULT_WORKERS_PER_GPU
+    return profile[band]
+
+
+def _tail_error(log_path, n=6):
+    """Last few non-blank lines of a camera's log, for surfacing *why* a
+    failure happened without a bare, contextless rc=1."""
+    try:
+        with open(log_path) as f:
+            lines = [l.rstrip() for l in f if l.strip()]
+        return lines[-n:]
+    except OSError:
+        return []
+
+
+def _full_node_cpu_set():
+    """The full set of CPUs this node's cgroup allows the CURRENT process
+    to use (its real ceiling), for widening a single MPI rank's own
+    per-rank-confined sched_setaffinity mask back out. Reads
+    /sys/fs/cgroup/cpuset.cpus.effective (cgroup v2; Perlmutter's real
+    layout, confirmed 2026-09-15 -- a 4-rank `srun` confines each rank's
+    OWN sched affinity to a disjoint ~32-core slice via task-level
+    affinity, but the CGROUP's own effective cpuset is the full node,
+    0-127 for every rank -- i.e. the confinement fit_ccd_native's
+    _CONFINED_CPUSET_CORE_THRESHOLD logic detects is a soft, per-process
+    scheduling hint, not a hard cgroup boundary, so a process is free to
+    widen its OWN mask back to the cgroup's real ceiling). Falls back to
+    os.cpu_count() if that file isn't present (non-Linux, cgroup v1, or no
+    cgroup at all)."""
+    try:
+        with open("/sys/fs/cgroup/cpuset.cpus.effective") as f:
+            text = f.read().strip()
+        cpus = set()
+        for part in text.split(","):
+            if "-" in part:
+                lo, hi = part.split("-")
+                cpus.update(range(int(lo), int(hi) + 1))
+            elif part:
+                cpus.add(int(part))
+        if cpus:
+            return cpus
+    except OSError:
+        pass
+    return set(range(os.cpu_count() or 1))
+
+
+def _default_lamp_lines_file():
+    """Same resolution main()'s own CLI --lamp-lines default uses (relative
+    to this module's own file location) -- works for a dev checkout AND an
+    installed package, without needing SPECEXDATA set. Callers that already
+    know a different path (or want SPECEXDATA/importlib.resources
+    resolution, as desispec's run_gpu() does) can override via
+    fit_cameras_persistent's lamp_lines_file= kwarg."""
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "specex", "data", "specex_linelist_desi.txt")
+
+
+def _fit_one_camera_task(task, wpg, footprint_margin, bundle_pool=None, **fit_kwargs):
+    """Fit one camera (a CameraTask) by calling fit_ccd_native() directly,
+    the persistent-worker path's actual payload. Defaults for the fit
+    itself mirror main()'s own CLI defaults exactly (trace_per_fiber_deg=6,
+    trace_prior_deg=1, trace_prior_weight=1e5, trace_prior_ndead_threshold=500,
+    masked_amp_ndead_threshold=8000, max_number_of_lines=200 -- main()'s
+    --max-lines default, not fit_ccd_native's own function-signature default
+    of 100) unless overridden via fit_kwargs, so a persistent-worker run is
+    bit-for-bit equivalent to the plain CLI path, not just "close enough".
+    Import of specex.specex is deferred inside fit_ccd_native's own module
+    (this module), already loaded by the time this runs in-process -- no
+    separate deferred import needed here since this function IS specex.py.
+
+    If task.log_path is set, stdout/stderr are redirected at the OS
+    file-descriptor level (not just sys.stdout) so fit_ccd_native's own
+    internal spawn-context bundle-worker pool -- separate processes that
+    inherit fds at spawn time -- also lands in the log file. If
+    task.log_path is None, output goes to this process's normal
+    stdout/stderr (the desispec/library-caller case, which typically wants
+    the fit's own logging.getLogger()-based output un-redirected).
+
+    Returns a FitResult with gpu_id left None (caller fills it in).
+    """
+    missing = [p for p in (task.arc_file, task.in_psf_file) if not os.path.exists(p)]
+    if missing:
+        if task.log_path:
+            with open(task.log_path, "w") as f:
+                f.write(f"SKIPPED: missing input file(s): {missing}\n")
+        return FitResult(task.name, 0.0, "SKIPPED", 0, [f"missing input file(s): {missing}"], None)
+
+    fit_args = dict(
+        arc_file=task.arc_file, in_psf_file=task.in_psf_file, out_psf_file=task.out_psf_file,
+        lamp_lines_file=_default_lamp_lines_file(), n_gpus=1, backend="gpu",
+        broken_fibers=task.broken_fibers, sn_threshold=3.0,
+        max_number_of_lines=200, h_size_y=5, workers_per_gpu=wpg,
+        trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=1e5,
+        trace_prior_ndead_threshold=500, masked_amp_ndead_threshold=8000,
+        footprint_margin=footprint_margin, bundle_pool=bundle_pool,
+        bundle_log_path=(task.log_path if bundle_pool is not None else None),
+    )
+    fit_args.update(fit_kwargs)
+
+    t0 = time.time()
+    rc = 0
+    n_bundle_fail = 0
+    old_out = old_err = None
+    if task.log_path:
+        old_out, old_err = os.dup(1), os.dup(2)
+        log_f = open(task.log_path, "w")
+        os.dup2(log_f.fileno(), 1)
+        os.dup2(log_f.fileno(), 2)
+    try:
+        failed_bundles = fit_ccd_native(**fit_args)
+        n_bundle_fail = len(failed_bundles)
+        if failed_bundles:
+            rc = 1
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        rc = 1
+    finally:
+        if task.log_path:
+            sys.stdout.flush(); sys.stderr.flush()
+            os.dup2(old_out, 1); os.dup2(old_err, 2)
+            os.close(old_out); os.close(old_err)
+            log_f.close()
+    dt = time.time() - t0
+    err_tail = _tail_error(task.log_path) if (rc not in (0,) and task.log_path) else []
+    return FitResult(task.name, dt, rc, n_bundle_fail, err_tail, None)
+
+
+def _gpu_persistent_worker(gpu_id, work_q, results_q, wpg_override, footprint_margin, pool_reuse, fit_kwargs):
+    """Process target for fit_cameras_persistent(): one long-lived process
+    per GPU that imports jax ONCE (paying the interpreter-startup +
+    module-import cost a single time for the whole batch of cameras) then
+    pulls CameraTasks off the shared queue until it sees the None sentinel.
+    See docs/python-port/porting-notes.md, 2026-09-02/09-10, for the
+    measured ~7-10s per-camera launch-overhead saving and the pool-reuse
+    (~6.7%) / cold-cache-workers-per-gpu (~11.5%) timing wins this
+    machinery is responsible for -- unchanged behavior from run_night.py's
+    former private copy, just promoted to a public, importable function.
+
+    CUDA_VISIBLE_DEVICES/XLA_PYTHON_CLIENT_PREALLOCATE/
+    XLA_PYTHON_CLIENT_MEM_FRACTION are set before any `import jax` in this
+    process (jax latches its visible-device set at first import) --
+    XLA_PYTHON_CLIENT_MEM_FRACTION is capped low here because this
+    persistent process's own JAX usage isn't limited to the per-camera
+    bundle-worker child pool (which fit_bundle_task already isolates with
+    its own explicit env overrides) -- fit_ccd_native's post-pool
+    merge/write_python_psf() step runs real jax.numpy ops directly in THIS
+    process, on THIS same physical GPU."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
+
+    is_cold = _cache_is_cold()
+    ctx = mp.get_context('spawn')
+    pool = None
+    pool_size = None
+    warned_cold = False
+    try:
+        while True:
+            item = work_q.get()
+            if item is None:
+                return
+            task = item
+            band = task.name[0]
+            reduced = (band not in (wpg_override or {}) and is_cold
+                       and COLD_CACHE_WORKERS_PER_GPU[band] != DEFAULT_WORKERS_PER_GPU[band])
+            if reduced and not warned_cold:
+                print(f"  gpu{gpu_id}: cold JAX cache detected (<{COLD_CACHE_ENTRY_THRESHOLD} entries at worker "
+                      f"startup) -- using conservative workers-per-gpu ({COLD_CACHE_WORKERS_PER_GPU[band]} vs "
+                      f"the usual {DEFAULT_WORKERS_PER_GPU[band]}) for {band}-band for this whole run", flush=True)
+                warned_cold = True
+            wpg = _workers_per_gpu_for(band, wpg_override, cold=is_cold)
+            if not pool_reuse:
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+                pool = ctx.Pool(processes=wpg)
+                pool_size = wpg
+            elif pool is None or pool_size != wpg:
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+                pool = ctx.Pool(processes=wpg)
+                pool_size = wpg
+            result = _fit_one_camera_task(task, wpg, footprint_margin, bundle_pool=pool, **fit_kwargs)
+            results_q.put(result._replace(gpu_id=gpu_id))
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
+
+
+def detect_gpus_per_node(default=4):
+    """Number of GPUs visible on the current node, via `nvidia-smi -L` --
+    falls back to `default` if nvidia-smi isn't available/fails (e.g. a
+    login node, or a container without it). Moved here from run_night.py
+    2026-09-14 alongside fit_cameras_persistent() so any caller resolving
+    its own `n_gpus` (e.g. desispec's run_gpu()) can share the exact same
+    detection logic instead of reimplementing it."""
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=15)
+        n = len([l for l in out.stdout.splitlines() if l.strip()])
+        return n if n > 0 else default
+    except Exception:
+        return default
+
+
+def fit_cameras_persistent(tasks, n_gpus, workers_per_gpu=None, footprint_margin=None,
+                            pool_reuse=True, dry_run=False, comm=None, on_result=None, **fit_kwargs):
+    """Fit many cameras (CameraTask objects) across n_gpus GPUs on the
+    current node, reusing one long-lived worker process (and, within it,
+    one multiprocessing.Pool of bundle-fit workers) per GPU across the
+    whole batch -- the reusable core behind run_night.py's
+    --worker-mode persistent and desispec's run_gpu(). See the module
+    comment above this function for why this was promoted out of
+    run_night.py.
+
+    Args:
+        tasks (list[CameraTask]): cameras to fit.
+        n_gpus (int): number of GPUs to spread cameras across on this node.
+        workers_per_gpu (dict or None): {"b": int, "r": int, "z": int}
+            override; any band not present falls back to the cold/warm-cache
+            default (see DEFAULT_WORKERS_PER_GPU/COLD_CACHE_WORKERS_PER_GPU).
+        footprint_margin (int or None): forwarded to fit_ccd_native.
+        pool_reuse (bool): reuse one bundle-worker Pool per GPU across
+            cameras (default) vs. a fresh Pool per camera (A/B-testing knob
+            only, matches pre-2026-09 behavior).
+        dry_run (bool): print what would run, in task order, without
+            actually fitting anything; returns a FitResult per task with
+            rc=0, dt=0.0 immediately (no processes spawned).
+        comm: an mpi4py communicator, or None (default). When given, only
+            rank 0 does any real work -- fit_ccd_native's own internal
+            multiprocessing.Pool already spreads a single camera across
+            every GPU on the node, so there is nothing useful for other
+            ranks to do (same rationale/precedent as desispec's run_gpu()).
+            Non-zero ranks return an empty list immediately WITHOUT calling
+            comm.Barrier() -- callers that need every rank synchronized
+            after this call (e.g. before touching a shared filesystem path)
+            must add their own comm.Barrier() after calling this, exactly
+            as desispec's run_gpu() callers already do today. This function
+            also strips the Cray MPICH/PALS bootstrap env vars (PALS_*,
+            PMI_*) from os.environ before spawning any worker process --
+              see docs/python-port/porting-notes.md, 2026-09-14, "MPI/run_gpu()
+              cpuset audit": an MPI-launched rank's PALS_*/PMI_* identity,
+              inherited unchanged by multiprocessing 'spawn' children, makes
+              every spawned child try to bootstrap MPI as if it were that
+              same rank, corrupting the real rank's PMI rendezvous.
+            Safe to call with comm=None (the non-MPI, standalone-script
+            case) -- no env vars are touched and every "rank" is rank 0.
+        on_result (callable or None): if given, called as on_result(result)
+            for each FitResult as soon as it's available (streaming), in
+            addition to it being included in the returned list -- lets a
+            caller (e.g. run_night.py) print progress lines without this
+            function needing to know anything about their format.
+        **fit_kwargs: forwarded to fit_ccd_native for every camera,
+            overriding this function's own production defaults (see
+            _fit_one_camera_task) -- e.g. legendre_deg_wave=, fit_continuum=.
+
+    Returns:
+        list[FitResult]: one per task, in COMPLETION order (not task order)
+            for real runs; in task order for dry_run. Empty list on a
+            non-zero MPI rank.
+    """
+    if comm is not None and comm.rank != 0:
+        return []
+
+    _orig_affinity = None
+    if comm is not None:
+        # See the comm= docstring above -- strip Cray MPICH/PALS bootstrap
+        # identity before spawning any multiprocessing worker.
+        for _var in list(os.environ):
+            if _var.startswith("PALS_") or _var.startswith("PMI_"):
+                del os.environ[_var]
+
+        # Widen THIS rank's own confined sched affinity back to the full
+        # node before spawning the GPU worker pool -- confirmed 2026-09-15
+        # (docs/python-port/porting-notes.md, same date): under a real
+        # multi-rank `srun` (e.g. desi_proc's own -n4/-n20 allocation),
+        # each rank's OWN sched affinity is confined to a disjoint slice
+        # of the node's cores (e.g. 32 of 128), and multiprocessing.spawn
+        # children inherit their parent's CURRENT affinity at spawn time
+        # -- so every bundle-fit worker this rank spawns was silently
+        # confined to that same slice too, which then tripped
+        # fit_ccd_native's own _CONFINED_CPUSET_CORE_THRESHOLD safety
+        # throttle (fewer GPU workers/GPU, 1 thread/worker) EVEN THOUGH
+        # this rank is the only one doing any real work in this phase --
+        # every other rank already returned above and is idle at its
+        # caller's own comm.Barrier(), so there is no real contention to
+        # protect against. Measured impact: a real 30-camera desispec
+        # run_gpu() MPI test took 1792.5s confined vs. run_night.py's own
+        # unconfined 498.7s for the identical 30 cameras -- confirmed the
+        # confinement (not the fix itself) was the cause. Only the sched
+        # mask is confined, not the underlying cgroup (cpuset.cpus.effective
+        # is the full node on this system, see _full_node_cpu_set), so
+        # this is a legitimate widen, not a container escape. Restored
+        # in the `finally` below so any LATER pipeline phase in the same
+        # process (desi_proc runs several MPI-parallel steps per exposure)
+        # gets its originally-assigned confinement back, in case a later
+        # phase's own concurrency model actually depends on it.
+        try:
+            _orig_affinity = os.sched_getaffinity(0)
+            full_set = _full_node_cpu_set()
+            if len(full_set) > len(_orig_affinity):
+                os.sched_setaffinity(0, full_set)
+                print(f"  Widened this rank's own cpuset from {len(_orig_affinity)} to "
+                      f"{len(full_set)} cores (was confined by MPI's per-rank affinity "
+                      f"under a multi-rank job) before spawning GPU workers", flush=True)
+        except (AttributeError, OSError):
+            pass  # sched_setaffinity unavailable on this platform -- harmless, just skip
+
+    try:
+        if dry_run:
+            results = []
+            for task in tasks:
+                fm = footprint_margin if footprint_margin is not None else 7
+                print(f"  [DRY RUN] (persistent) {task.name}: fit_ccd_native(arc={task.arc_file}, "
+                      f"in_psf={task.in_psf_file}, out_psf={task.out_psf_file}, footprint_margin={fm}) [in-process]")
+                result = FitResult(task.name, 0.0, 0, 0, [], None)
+                if on_result is not None:
+                    on_result(result)
+                results.append(result)
+            return results
+
+        ctx = mp.get_context("spawn")
+        work_q, results_q = ctx.Queue(), ctx.Queue()
+        for task in tasks:
+            work_q.put(task)
+        for _ in range(n_gpus):
+            work_q.put(None)
+
+        workers = [ctx.Process(target=_gpu_persistent_worker,
+                                args=(g, work_q, results_q, workers_per_gpu, footprint_margin, pool_reuse, fit_kwargs))
+                   for g in range(n_gpus)]
+        [w.start() for w in workers]
+
+        # A caught Python exception inside _fit_one_camera_task still reports
+        # normally via results_q (rc=1). But a hard crash (segfault, CUDA
+        # driver abort) kills the worker process without ever putting a result
+        # -- polling with a timeout, rather than a plain blocking get() for
+        # exactly len(tasks) results, means that loses only the one in-flight
+        # camera instead of hanging this whole batch forever.
+        import queue as _queue
+        results = []
+        n_done = 0
+        seen = set()
+        while n_done < len(tasks):
+            try:
+                result = results_q.get(timeout=10)
+            except _queue.Empty:
+                if not any(w.is_alive() for w in workers):
+                    missing = len(tasks) - n_done
+                    print(f"WARNING: all persistent workers exited but {missing} camera(s) never reported a result "
+                          f"(worker crash) -- treating as failed and stopping collection.", flush=True)
+                    break
+                continue
+            seen.add(result.name)
+            n_done += 1
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
+
+        for task in tasks:
+            if task.name not in seen:
+                result = FitResult(task.name, 0.0, 1, 0, ["worker crashed before reporting a result"], None)
+                results.append(result)
+                if on_result is not None:
+                    on_result(result)
+
+        [w.join() for w in workers]
+        return results
+    finally:
+        # Restore this rank's originally-assigned affinity (see the widen
+        # comment above) so any later MPI-parallel pipeline phase in this
+        # same process isn't left permanently wider than SLURM intended.
+        if _orig_affinity is not None:
+            try:
+                os.sched_setaffinity(0, _orig_affinity)
+            except OSError:
+                pass
+
+
+def main():
+    """CLI entry point (`python -m specex.specex`): parse arguments, apply backend isolation/fail-fast checks, call fit_ccd_native, and set the process exit code.
+
+    Fails fast with an actionable RuntimeError if --backend gpu (the default)
+    is requested but no GPU-capable JAX platform is available, rather than
+    either JAX's own opaque error or a silent, much-slower CPU fallback (see
+    docs/python-port/how-to-run.md Section 0). For --backend cpu, applies the same CUDA
+    isolation to this master process that fit_bundle_task applies to its
+    workers, so the master's own post-pool JAX usage (write_python_psf) can't
+    touch a GPU a concurrent GPU-backend job is using.
+
+    Returns:
+        None. Calls `sys.exit(1)` if any bundle failed (after OOM retries);
+        otherwise returns normally (implicit exit code 0).
+
+    Status: ACTIVE (production default path).
+    """
+    import argparse
+    parser = argparse.ArgumentParser(description="Specex Python/JAX PSF Fitter")
+    parser.add_argument("-a", "--arc", "--input-image", type=str, required=True, help="Input preproc arc image")
+    parser.add_argument("--in-psf", "--input-psf", type=str, required=True, help="Input (shifted) PSF file")
+    parser.add_argument("--out-psf", "--output-psf", type=str, required=True, help="Output PSF file")
+    parser.add_argument("--lamp-lines", type=str, help="Lamp lines file")
+    parser.add_argument("--first-bundle", type=int, default=0)
+    parser.add_argument("--last-bundle", type=int, default=19)
+    parser.add_argument("--first-fiber", type=int, help="First fiber to fit")
+    parser.add_argument("--last-fiber", type=int, help="Last fiber to fit")
+    parser.add_argument("--legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's PSF-shape wavelength basis (default: auto, matching real C++ production -- 3 for z-band, 1 otherwise, detected from the input image's CAMERA header).")
+    parser.add_argument("--trace-legendre-deg-wave", type=int, default=None, help="Legendre degree for the joint fit's trace-position wavelength basis, both axes at once (independent of --legendre-deg-wave's PSF-shape degree). Overridden per-axis by --trace-legendre-deg-wave-x/-y if either is also given. Default: auto per axis -- see those flags' help.")
+    parser.add_argument("--trace-legendre-deg-wave-x", type=int, default=None, help="Legendre degree for the trace-position X basis only (default: auto -- same as --legendre-deg-wave, i.e. unchanged from the pre-decoupling behavior; X was found not to need the extra curvature Y does -- see docs/python-port/porting-notes.md's r2@20250109 investigation)")
+    parser.add_argument("--trace-legendre-deg-wave-y", type=int, default=None, help="Legendre degree for the trace-position Y basis only (default: auto -- 2 for b/r bands, same as --legendre-deg-wave for z-band; validated against the real C++ engine -- see docs/python-port/porting-notes.md's r2@20250109 investigation)")
+    parser.add_argument("--trace-per-fiber-deg", type=int, default=6, help="Replaces the shared trace basis with a block-diagonal-by-fiber one at this wavelength degree (6 matches the input PSF's own native trace degree, and C++'s per-fiber parameter count), paired with an ndead-gated cross-fiber trace-coefficient prior (see --trace-prior-* below). DEFAULT AS OF 2026-08-05: on at degree 6 -- validated on a definitive 30-CCD isolated-cache campaign (docs/python-port/porting-notes.md), 30/30 cases improved on both xrms (-37.5%% mean) and yrms (-60.7%% mean) vs the old shared-basis default, for a ~9%% timing cost. Pass 0 to fall back to the old shared trace_legendre_deg_wave_x/y basis.")
+    parser.add_argument("--trace-prior-deg", type=int, default=1, help="Legendre degree at/above which --trace-per-fiber-deg's per-fiber coefficients are pulled toward the bundle's cross-fiber consensus (C++'s trace prior, specex_psf_fitter.cc, ported and ndead-gated -- see docs/python-port/porting-notes.md). Only active when --trace-per-fiber-deg is on. Default 1 (each fiber's own physical position, degree 0, stays fully independent; only higher-order shape terms are regularized). Pass a negative value to disable the prior entirely while keeping per-fiber trace on.")
+    parser.add_argument("--trace-prior-weight", type=float, default=1e5, help="Trace-prior penalty weight (C++'s own hardcoded value, 1e8, was found to measurably harm healthy bundles when applied blanket-style -- see docs/python-port/porting-notes.md's weight sweep). Only matters for fibers flagged by --trace-prior-ndead-threshold.")
+    parser.add_argument("--trace-prior-ndead-threshold", type=int, default=500, help="A fiber's C++-style dead-pixel count (ndead) above this triggers the trace prior for that fiber only; fibers below it are completely unaffected (bit-identical to no-prior). 500 comfortably separates normal fibers (ndead ~20-120) from the known bad cases (ndead ~2300-17500).")
+    parser.add_argument("--masked-amp-ndead-threshold", type=int, default=8000, help="A fiber's ndead above this, PLUS a contiguous run of >=3 such fibers, marks it as overlapping a masked/dead CCD amp (no real data at all, not the milder single-bad-column case --trace-prior-ndead-threshold handles) -- the fiber is excluded from the fit entirely, its input starting-guess PSF is propagated unchanged, and its STATUS is set to -1, matching real C++'s own observed behavior. FIRST-PASS HEURISTIC: calibrated against one real case (r8@20211028/00106399's amp-A mask, see docs/python-port/porting-notes.md's 2026-08-14 writeup) -- treat as tunable, not load-bearing precision.")
+    parser.add_argument("--footprint-margin", type=int, default=7, help="Pixels each bundle's pixel footprint extends past its own fiber_min/fiber_max trace center on each side, before the fit ever sees the data (get_bundle_footprint, fitter.py). Matches C++'s own ComputeWeigthImage margin (specex_psf_fitter.cc:1043-1058, 'half distance between center of ext. fibers of adjacent bundles') -- default 7 root-causes and closes the bundle-boundary trace divergence (docs/python-port/porting-notes.md, 2026-09-01): a zero-margin footprint was silently discarding real boundary-fiber pixel data. Pass 0 to reproduce the old zero-margin behavior; any positive value is accepted.")
+    parser.add_argument("--fit-continuum", action=argparse.BooleanOptionalAction, default=None, help="Fit a per-bundle continuum background (default: auto, matching real C++ production -- on for z-band, off otherwise)")
+    parser.add_argument("--gpu", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--workers-per-gpu", type=int, default=None, help="Concurrent bundle-fit worker processes packed onto each GPU. Default: auto -- 5, except 3 for z-band when --trace-per-fiber-deg is active (its larger per-fiber design matrix hits GPU RESOURCE_EXHAUSTED at 5/GPU on z-band specifically -- see docs/python-port/porting-notes.md's OOM investigation). Pass explicitly to override.")
+    parser.add_argument("--cpu-workers", type=int, help="Concurrent worker processes for --backend cpu (default: --gpu count)")
+    parser.add_argument("--gpu-worker-threads", type=int, default=None, help="Force an OMP/BLAS/XLA thread cap on each --backend gpu worker's host-side (CPU) computation, mirroring --backend cpu's own auto-computed budget. Default: unconstrained (each worker's BLAS calls may claim all visible threads). Diagnostic flag for probing whether GPU-worker host threading is load-bearing or pure oversubscription -- see docs/python-port/porting-notes.md.")
+    parser.add_argument("--backend", type=str, default="gpu", choices=["cpu", "gpu"])
+    parser.add_argument("--broken-fibers", type=str, help="Comma-separated list of broken fibers")
+    parser.add_argument("--sn-threshold", type=float, default=3.0, help="S/N threshold for spot selection")
+    parser.add_argument("--max-lines", type=int, default=200, help="Maximum number of lines to keep per bundle")
+    parser.add_argument("--h-size-y", type=int, default=5, help="Override PSF stamp half-size in Y")
+    parser.add_argument("--force-spots", type=str, help="Path to a file containing spots to fit (fiber,wave,xc,yc)")
+    parser.add_argument("--double-precision", action="store_true", help="Force full float64 precision for the joint-fit Jacobian (default: mixed float32/float64 -- see docs/python-port/porting-notes.md; validated equivalent accuracy, ~71%% less GPU memory/worker)")
+    parser.add_argument("--line-search", type=str, default="grid", choices=["grid", "brent", "cpp"], help="EXPERIMENTAL: the final joint fit's per-iteration step-size search. 'grid' (default): the long-standing coarse 3-point [0.2,0.5,1.0] search. 'brent': a continuous but NOT C++-faithful search, kept for reference. 'cpp': a faithful replica of C++'s actual algorithm (mode-dependent skip logic + a direct Numerical Recipes brent() port, see specex_psf_fitter.cc/specex_brent.cc). Both 'brent' and 'cpp' tested negative (no xrms/yrms change on 2 hard + 2 normal bundles) -- see docs/python-port/porting-notes.md.")
+    parser.add_argument("--debug-spots", action="store_true", help="Write per-pass spot-selection debug dump files (.pyrawspots.txt, .pyspots_pass*.txt, .pyrawspots_final.txt, .pyspots.txt, .refined_centroids_debug.txt), the direct Python analog of C++'s --debug-spots. Off by default -- adds I/O overhead (one set of files per bundle worker) with no effect on the fitted output.")
+
+    args = parser.parse_args()
+    
+    if not args.lamp_lines:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        args.lamp_lines = os.path.join(base, "specex/data/specex_linelist_desi.txt")
+
+    os.environ["JAX_PLATFORM_NAME"] = args.backend  # deprecated/ineffective on this JAX version, see below
+
+    if args.backend == "gpu":
+        # Fail fast with an actionable message instead of either (a) JAX's
+        # own opaque "Unknown backend: 'gpu' requested... Platforms present
+        # are: cpu" RuntimeError, which gives no hint at the actual cause, or
+        # (b) silently falling back to CPU and running ~10x slower with no
+        # indication anything is wrong. --gpu is the default and this is a
+        # perf-critical batch pipeline, so a silent fallback would be worse
+        # than a loud failure -- see docs/python-port/how-to-run.md Section 0 for the real
+        # fix (confirmed root cause once: an invalid pip extra name, e.g.
+        # "jax[cuda13_pip]", is not a hard error -- pip only *warns* and
+        # silently installs a CPU-only jaxlib).
+        import jax
+        if not any(d.platform == "gpu" for d in jax.devices()):
+            raise RuntimeError(
+                "--backend gpu (the default) was requested, but no GPU-capable JAX "
+                "platform is available -- jax.devices() found only "
+                f"{sorted(set(d.platform for d in jax.devices()))}. This almost always means "
+                "jaxlib was installed without CUDA support (see docs/python-port/how-to-run.md Section 0). "
+                "Reinstall with `pip install --upgrade \"jax[cuda13]\"` and confirm "
+                "`python -c \"import jax; print(jax.devices())\"` reports a CudaDevice, "
+                "or pass --backend cpu to run on CPU deliberately."
+            )
+
+    if args.backend != "gpu":
+        # STRICT ISOLATION for the main process itself, mirroring
+        # fit_bundle_task's per-worker isolation above. Without this, the
+        # main process's own post-pool JAX usage (write_python_psf ->
+        # legendre_pol_jnp, io.py) has no backend restriction at all and
+        # defaults to JAX's normal CUDA-first device selection regardless
+        # of --backend cpu (the JAX_PLATFORM_NAME line above doesn't help --
+        # it's the deprecated singular name; only JAX_PLATFORMS, plural, is
+        # consulted, and even that needs to be set via jax.config, not
+        # os.environ, once jax is already imported -- see the matching
+        # comment in fit_bundle_task). Harmless when no other GPU job is
+        # running (CUDA init just succeeds or falls back cleanly), but under
+        # real concurrent CPU+GPU production use this touches CUDA while
+        # concurrent GPU-backend jobs have already exhausted GPU memory --
+        # confirmed directly to crash with CUDA_ERROR_OUT_OF_MEMORY on all
+        # visible devices (see docs/python-port/porting-notes.md), and the prime suspect for
+        # an earlier session's CPU+GPU hybrid deadlock (same code path, a
+        # hang instead of a crash is plausible under different CUDA-driver
+        # contention timing).
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        os.environ["JAX_SKIP_CUDA_CONSTRAINTS_CHECK"] = "1"
+        import jax
+        jax.config.update("jax_platforms", "cpu")
+
+    failed_bundles = fit_ccd_native(
+        arc_file=args.arc,
+        in_psf_file=args.in_psf,
+        out_psf_file=args.out_psf,
+        lamp_lines_file=args.lamp_lines,
+        first_bundle=args.first_bundle,
+        last_bundle=args.last_bundle,
+        n_gpus=args.gpu,
+        backend=args.backend,
+        broken_fibers=args.broken_fibers,
+        sn_threshold=args.sn_threshold,
+        max_number_of_lines=args.max_lines,
+        h_size_y=args.h_size_y,
+        force_spots_path=args.force_spots,
+        workers_per_gpu=args.workers_per_gpu,
+        cpu_workers=args.cpu_workers,
+        gpu_worker_threads=args.gpu_worker_threads,
+        legendre_deg_wave=args.legendre_deg_wave,
+        trace_legendre_deg_wave=args.trace_legendre_deg_wave,
+        trace_legendre_deg_wave_x=args.trace_legendre_deg_wave_x,
+        trace_legendre_deg_wave_y=args.trace_legendre_deg_wave_y,
+        trace_per_fiber_deg=args.trace_per_fiber_deg,
+        trace_prior_deg=args.trace_prior_deg,
+        trace_prior_weight=args.trace_prior_weight,
+        trace_prior_ndead_threshold=args.trace_prior_ndead_threshold,
+        masked_amp_ndead_threshold=args.masked_amp_ndead_threshold,
+        fit_continuum=args.fit_continuum,
+        double_precision=args.double_precision,
+        line_search=args.line_search,
+        debug_spots=args.debug_spots,
+        footprint_margin=args.footprint_margin
+    )
+
+    if failed_bundles:
+        # Previously this always exited 0 even when bundles were silently
+        # dropped from the output -- rc==0 alone was never sufficient to
+        # confirm a real success (see docs/python-port/porting-notes.md's OOM investigation).
+        # A non-zero exit here lets callers (run_night.py, desi_proc) tell
+        # a genuine failure apart from success without grepping logs.
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+def __getattr__(name):
+    """Module-level lazy attribute resolution (PEP 562) -- only for names this
+    file re-exports but never calls itself. `get_bundle_spots` (fitter.py) is
+    a testing-tool-only spot-selection helper (`testing/full_analysis.py`,
+    `testing/validate_all_modes.py` import it as `from specex.specex import
+    get_bundle_spots`) with no call site in this file's own control flow, so
+    it can't be made lazy the same way as fit_bundle_task/fit_ccd_native's
+    function-local imports above -- there's no enclosing function body to put
+    it in. This keeps `from specex.specex import get_bundle_spots` working
+    unchanged (still needs JAX, same as always -- fitter.py itself does) while
+    `import specex.specex` alone still doesn't.
+
+    Status: ACTIVE (production default path) -- the mechanism, not a fallback
+    for a real error; only fires for names not already found as normal module
+    attributes, i.e. exactly the deliberately-deferred ones.
+    """
+    if name == "get_bundle_spots":
+        from .fitter import get_bundle_spots
+        return get_bundle_spots
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -188,11 +188,20 @@ PYBIND11_MODULE(_libspecex, m) {
     py::class_ <spx::PSF, spx::PSF::pshr> (m, "PSF", R"(PSF base class)");
     
     py::class_ <spx::GaussHermitePSF, spx::GaussHermitePSF::pshr> (m,
-					         "GaussHermitePSF", R"(
+					         "CppGaussHermitePSF", R"(
         Class for storing and processing PSF in specex.
         )")
-        .def(py::init ())
-        .def("Degree", &spx::GaussHermitePSF::Degree);
+        .def(py::init<int>(), py::arg("deg")=0)
+        .def("Degree", &spx::GaussHermitePSF::Degree)
+        .def("pix_value", [](spx::GaussHermitePSF &self, double xc, double yc, double xpix, double ypix, const std::vector<double> &params){
+            return self.PixValue(xc, yc, xpix, ypix, params, nullptr, nullptr);
+        })
+        .def("pix_value_with_derivatives", [](spx::GaussHermitePSF &self, double xc, double yc, double xpix, double ypix, const std::vector<double> &params){
+            std::vector<double> pos_der(2);
+            std::vector<double> param_der(self.LocalNAllPar());
+            double val = self.PixValue(xc, yc, xpix, ypix, params, &pos_der, &param_der);
+            return std::make_tuple(val, pos_der, param_der);
+        });
     
     py::class_ <spx::PyOptions, spx::PyOptions::pshr > (m, "PyOptions", R"(
         Class for storing and processing input options to specex.
@@ -314,5 +323,18 @@ PYBIND11_MODULE(_libspecex, m) {
 	}
 	);
     
+    // Low-level classes for verification
+    py::class_<spx::Legendre1DPol, std::shared_ptr<spx::Legendre1DPol>>(m, "CppLegendre1DPol")
+        .def(py::init<int, double, double>(), py::arg("deg")=0, py::arg("xmin")=0, py::arg("xmax")=0)
+        .def_readwrite("coeff", &spx::Legendre1DPol::coeff)
+        .def("value", &spx::Legendre1DPol::Value);
+
+    py::class_<spx::SparseLegendre2DPol, std::shared_ptr<spx::SparseLegendre2DPol>>(m, "CppSparseLegendre2DPol")
+        .def(py::init<int, double, double, int, double, double>(), 
+             py::arg("xdeg")=0, py::arg("xmin")=0, py::arg("xmax")=0,
+             py::arg("ydeg")=0, py::arg("ymin")=0, py::arg("ymax")=0)
+        .def_readwrite("coeff", &spx::SparseLegendre2DPol::coeff)
+        .def("add", &spx::SparseLegendre2DPol::Add)
+        .def("value", &spx::SparseLegendre2DPol::Value);
 
 }
