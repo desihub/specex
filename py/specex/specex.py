@@ -1171,6 +1171,37 @@ def _tail_error(log_path, n=6):
         return []
 
 
+def _full_node_cpu_set():
+    """The full set of CPUs this node's cgroup allows the CURRENT process
+    to use (its real ceiling), for widening a single MPI rank's own
+    per-rank-confined sched_setaffinity mask back out. Reads
+    /sys/fs/cgroup/cpuset.cpus.effective (cgroup v2; Perlmutter's real
+    layout, confirmed 2026-09-15 -- a 4-rank `srun` confines each rank's
+    OWN sched affinity to a disjoint ~32-core slice via task-level
+    affinity, but the CGROUP's own effective cpuset is the full node,
+    0-127 for every rank -- i.e. the confinement fit_ccd_native's
+    _CONFINED_CPUSET_CORE_THRESHOLD logic detects is a soft, per-process
+    scheduling hint, not a hard cgroup boundary, so a process is free to
+    widen its OWN mask back to the cgroup's real ceiling). Falls back to
+    os.cpu_count() if that file isn't present (non-Linux, cgroup v1, or no
+    cgroup at all)."""
+    try:
+        with open("/sys/fs/cgroup/cpuset.cpus.effective") as f:
+            text = f.read().strip()
+        cpus = set()
+        for part in text.split(","):
+            if "-" in part:
+                lo, hi = part.split("-")
+                cpus.update(range(int(lo), int(hi) + 1))
+            elif part:
+                cpus.add(int(part))
+        if cpus:
+            return cpus
+    except OSError:
+        pass
+    return set(range(os.cpu_count() or 1))
+
+
 def _default_lamp_lines_file():
     """Same resolution main()'s own CLI --lamp-lines default uses (relative
     to this module's own file location) -- works for a dev checkout AND an
@@ -1392,6 +1423,7 @@ def fit_cameras_persistent(tasks, n_gpus, workers_per_gpu=None, footprint_margin
     if comm is not None and comm.rank != 0:
         return []
 
+    _orig_affinity = None
     if comm is not None:
         # See the comm= docstring above -- strip Cray MPICH/PALS bootstrap
         # identity before spawning any multiprocessing worker.
@@ -1399,65 +1431,111 @@ def fit_cameras_persistent(tasks, n_gpus, workers_per_gpu=None, footprint_margin
             if _var.startswith("PALS_") or _var.startswith("PMI_"):
                 del os.environ[_var]
 
-    if dry_run:
-        results = []
-        for task in tasks:
-            fm = footprint_margin if footprint_margin is not None else 7
-            print(f"  [DRY RUN] (persistent) {task.name}: fit_ccd_native(arc={task.arc_file}, "
-                  f"in_psf={task.in_psf_file}, out_psf={task.out_psf_file}, footprint_margin={fm}) [in-process]")
-            result = FitResult(task.name, 0.0, 0, 0, [], None)
-            if on_result is not None:
-                on_result(result)
-            results.append(result)
-        return results
-
-    ctx = mp.get_context("spawn")
-    work_q, results_q = ctx.Queue(), ctx.Queue()
-    for task in tasks:
-        work_q.put(task)
-    for _ in range(n_gpus):
-        work_q.put(None)
-
-    workers = [ctx.Process(target=_gpu_persistent_worker,
-                            args=(g, work_q, results_q, workers_per_gpu, footprint_margin, pool_reuse, fit_kwargs))
-               for g in range(n_gpus)]
-    [w.start() for w in workers]
-
-    # A caught Python exception inside _fit_one_camera_task still reports
-    # normally via results_q (rc=1). But a hard crash (segfault, CUDA
-    # driver abort) kills the worker process without ever putting a result
-    # -- polling with a timeout, rather than a plain blocking get() for
-    # exactly len(tasks) results, means that loses only the one in-flight
-    # camera instead of hanging this whole batch forever.
-    import queue as _queue
-    results = []
-    n_done = 0
-    seen = set()
-    while n_done < len(tasks):
+        # Widen THIS rank's own confined sched affinity back to the full
+        # node before spawning the GPU worker pool -- confirmed 2026-09-15
+        # (docs/python-port/porting-notes.md, same date): under a real
+        # multi-rank `srun` (e.g. desi_proc's own -n4/-n20 allocation),
+        # each rank's OWN sched affinity is confined to a disjoint slice
+        # of the node's cores (e.g. 32 of 128), and multiprocessing.spawn
+        # children inherit their parent's CURRENT affinity at spawn time
+        # -- so every bundle-fit worker this rank spawns was silently
+        # confined to that same slice too, which then tripped
+        # fit_ccd_native's own _CONFINED_CPUSET_CORE_THRESHOLD safety
+        # throttle (fewer GPU workers/GPU, 1 thread/worker) EVEN THOUGH
+        # this rank is the only one doing any real work in this phase --
+        # every other rank already returned above and is idle at its
+        # caller's own comm.Barrier(), so there is no real contention to
+        # protect against. Measured impact: a real 30-camera desispec
+        # run_gpu() MPI test took 1792.5s confined vs. run_night.py's own
+        # unconfined 498.7s for the identical 30 cameras -- confirmed the
+        # confinement (not the fix itself) was the cause. Only the sched
+        # mask is confined, not the underlying cgroup (cpuset.cpus.effective
+        # is the full node on this system, see _full_node_cpu_set), so
+        # this is a legitimate widen, not a container escape. Restored
+        # in the `finally` below so any LATER pipeline phase in the same
+        # process (desi_proc runs several MPI-parallel steps per exposure)
+        # gets its originally-assigned confinement back, in case a later
+        # phase's own concurrency model actually depends on it.
         try:
-            result = results_q.get(timeout=10)
-        except _queue.Empty:
-            if not any(w.is_alive() for w in workers):
-                missing = len(tasks) - n_done
-                print(f"WARNING: all persistent workers exited but {missing} camera(s) never reported a result "
-                      f"(worker crash) -- treating as failed and stopping collection.", flush=True)
-                break
-            continue
-        seen.add(result.name)
-        n_done += 1
-        results.append(result)
-        if on_result is not None:
-            on_result(result)
+            _orig_affinity = os.sched_getaffinity(0)
+            full_set = _full_node_cpu_set()
+            if len(full_set) > len(_orig_affinity):
+                os.sched_setaffinity(0, full_set)
+                print(f"  Widened this rank's own cpuset from {len(_orig_affinity)} to "
+                      f"{len(full_set)} cores (was confined by MPI's per-rank affinity "
+                      f"under a multi-rank job) before spawning GPU workers", flush=True)
+        except (AttributeError, OSError):
+            pass  # sched_setaffinity unavailable on this platform -- harmless, just skip
 
-    for task in tasks:
-        if task.name not in seen:
-            result = FitResult(task.name, 0.0, 1, 0, ["worker crashed before reporting a result"], None)
+    try:
+        if dry_run:
+            results = []
+            for task in tasks:
+                fm = footprint_margin if footprint_margin is not None else 7
+                print(f"  [DRY RUN] (persistent) {task.name}: fit_ccd_native(arc={task.arc_file}, "
+                      f"in_psf={task.in_psf_file}, out_psf={task.out_psf_file}, footprint_margin={fm}) [in-process]")
+                result = FitResult(task.name, 0.0, 0, 0, [], None)
+                if on_result is not None:
+                    on_result(result)
+                results.append(result)
+            return results
+
+        ctx = mp.get_context("spawn")
+        work_q, results_q = ctx.Queue(), ctx.Queue()
+        for task in tasks:
+            work_q.put(task)
+        for _ in range(n_gpus):
+            work_q.put(None)
+
+        workers = [ctx.Process(target=_gpu_persistent_worker,
+                                args=(g, work_q, results_q, workers_per_gpu, footprint_margin, pool_reuse, fit_kwargs))
+                   for g in range(n_gpus)]
+        [w.start() for w in workers]
+
+        # A caught Python exception inside _fit_one_camera_task still reports
+        # normally via results_q (rc=1). But a hard crash (segfault, CUDA
+        # driver abort) kills the worker process without ever putting a result
+        # -- polling with a timeout, rather than a plain blocking get() for
+        # exactly len(tasks) results, means that loses only the one in-flight
+        # camera instead of hanging this whole batch forever.
+        import queue as _queue
+        results = []
+        n_done = 0
+        seen = set()
+        while n_done < len(tasks):
+            try:
+                result = results_q.get(timeout=10)
+            except _queue.Empty:
+                if not any(w.is_alive() for w in workers):
+                    missing = len(tasks) - n_done
+                    print(f"WARNING: all persistent workers exited but {missing} camera(s) never reported a result "
+                          f"(worker crash) -- treating as failed and stopping collection.", flush=True)
+                    break
+                continue
+            seen.add(result.name)
+            n_done += 1
             results.append(result)
             if on_result is not None:
                 on_result(result)
 
-    [w.join() for w in workers]
-    return results
+        for task in tasks:
+            if task.name not in seen:
+                result = FitResult(task.name, 0.0, 1, 0, ["worker crashed before reporting a result"], None)
+                results.append(result)
+                if on_result is not None:
+                    on_result(result)
+
+        [w.join() for w in workers]
+        return results
+    finally:
+        # Restore this rank's originally-assigned affinity (see the widen
+        # comment above) so any later MPI-parallel pipeline phase in this
+        # same process isn't left permanently wider than SLURM intended.
+        if _orig_affinity is not None:
+            try:
+                os.sched_setaffinity(0, _orig_affinity)
+            except OSError:
+                pass
 
 
 def main():
