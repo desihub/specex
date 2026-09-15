@@ -30,7 +30,7 @@ python testing/run_night.py --night 20260401 --expid 00344649 \
 
 `--worker-mode persistent` (the default since 2026-09-13) is the fastest, most heavily-validated config: **~483-503s/night** (1 node/4 GPUs, warm cache) vs. C++'s **~592-648s** -- see Section 2.3 for the full breakdown, including the older `--worker-mode subprocess` alternative. Swap `--backend cpp` for the real production C++/MPI driver, or `--backend cpp-direct` for a `desi_proc`-free C++ baseline (Section 2.3 explains the difference between the three backends).
 
-JAX caches compiled GPU code under `~/.cache/specex/jax_compilation_cache` by default -- the *first* run under any given jaxlib version pays a real one-time compile cost (~25 min/night cold vs. the ~8 min above once warm); set `JAX_COMPILATION_CACHE_DIR` to point it elsewhere, e.g. `$SCRATCH`, if `$HOME`'s inode quota is a concern.
+JAX caches compiled GPU code under `~/.cache/specex/jax_compilation_cache` by default -- the *first* run under any given jaxlib version pays a real one-time compile cost (~25 min/night cold vs. the ~8 min above once warm). **Strongly recommended: set `JAX_COMPILATION_CACHE_DIR` to somewhere off `$HOME` (e.g. `$SCRATCH/jax_compilation_cache`) before your first run, not reactively after hitting a quota problem** -- this cache grows unboundedly (it's never pruned automatically) and has twice caused real `$HOME` inode-quota exhaustion in practice: 630K+ files on 2026-09-04 (a ~15-20% timing regression before it was root-caused), and 478,842 files found again on 2026-09-15, ~6x the ~80,000 one full warm night alone adds. If you do leave it on `$HOME`, check its size periodically (`find ~/.cache/specex/jax_compilation_cache -type f | wc -l`) and prune or relocate it well before it becomes a problem. See the "Open item" note in Section 0 below about a possible future shared cache, which would sidestep this per-user growth entirely -- not yet built.
 
 **Where the output goes** (no `--out-psf` above -- this mode writes one `fit-psf-<cam>-<expid>.fits` + `.log` per camera, resolved automatically, printed at the end as `output: <dir>/`): 1. `--outdir <path>`, if given, wins outright. 2. Else, if `$DESI_SPECTRO_REDUX` is set, `$DESI_SPECTRO_REDUX/$SPECPROD/exposures/<night>/<expid>/` (`$SPECPROD` defaults to `$USER`) -- matches `desi_proc`'s/`--backend cpp`'s own layout, so both backends land in the same place. 3. Otherwise, `$SCRATCH/specex/run_night_<night>_<expid>/`. Refuses to resolve inside the real production redux tree, explicit `--outdir` or not. Full logic: `resolve_python_run_dir()`, `testing/run_night.py:119-141`.
 
@@ -177,7 +177,12 @@ python -c "import jax; print(jax.__version__); print(jax.devices())"
     `$HOME`) so new users don't pay the cold-start time cost above at all
     -- not yet set up, see `porting-notes.md` 2026-09-10 for the "normal
     shapes" footprint this would need to cover (the cold start is now safe
-    either way per the OOM fix above, this is purely about speed). If a
+    either way per the OOM fix above, this is purely about speed). This
+    would also sidestep the per-user unbounded-growth problem described
+    just above (Quick Start, `JAX_COMPILATION_CACHE_DIR`) -- a single
+    well-curated shared cache converges once every real shape has been
+    seen, rather than growing forever as each user's own `$HOME` copy
+    reaccumulates from scratch. If a
     shared, multi-writer cache is stood up: JAX's own cross-process file
     lock protecting concurrent cache writes only activates when
     `jax_compilation_cache_max_size` is set to something other than its
