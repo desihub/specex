@@ -1,8 +1,22 @@
 import os
 import sys
 import time
+import collections
 import numpy as np
 import multiprocessing as mp
+
+# Below this many cores visible to the CURRENT process (os.sched_getaffinity,
+# not the node's raw CPU count), fit_ccd_native() treats itself as running
+# inside a confined cpuset (e.g. one MPI rank's slice of a shared node under
+# `srun -n4`) rather than a standalone full node, and throttles backend="gpu"
+# worker concurrency/threading accordingly. 64 is half of Perlmutter's
+# 128-core GPU nodes -- comfortably above any real confined-rank slice size
+# (32 cores, observed 2026-09-14 under a 4-rank `srun`) and comfortably below
+# the 128 cores a normal unconfined run sees, so it can't accidentally fire
+# for the validated standalone production path. See fit_ccd_native's own
+# comment at its use site for the full story (docs/python-port/porting-notes.md,
+# 2026-09-14 MPI/run_gpu() cpuset audit).
+_CONFINED_CPUSET_CORE_THRESHOLD = 64
 
 # NOTE: deliberately no top-level `from .io import ...`/`from .fitter import
 # ...` here (both pull in JAX transitively -- .fitter -> .psf -> jax at
@@ -141,7 +155,11 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
             fiber trace basis at this degree instead of the shared
             trace_wdeg_x/y basis.
         cpu_threads_per_worker (int or None): per-process thread cap
-            (OMP_NUM_THREADS etc.) applied only for backend="cpu".
+            (OMP_NUM_THREADS etc.); applies to both backends as of
+            2026-09-14 (previously backend="cpu" only -- see the thread-
+            count-limiting comment in this function body for why
+            backend="gpu" needs it too under a cpuset-confined caller,
+            e.g. an MPI rank).
         line_search (str): final joint fit's per-iteration step-size search
             mode -- 'grid' (default/production), 'brent', or 'cpp'.
         trace_prior_deg (int or None): degree at/above which per-fiber trace
@@ -254,28 +272,51 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         # noise into a fatal crash instead. Set via jax.config below, not
         # os.environ here -- see the jax_compilation_cache_dir note below for
         # why an os.environ write in this function body is already too late.
-        #
-        # Thread-count limiting -- must also happen before any JAX import.
-        # Without this, JAX's CPU/XLA backend (and whatever BLAS it
-        # delegates to) defaults to claiming *all* available hardware
-        # threads per process. With N concurrent CPU workers each
-        # independently trying to grab every thread, the result is severe
-        # intra-node oversubscription/thrashing among the workers
-        # themselves -- confirmed directly as the root cause of a real
-        # Perlmutter hybrid-allocation pilot going ~3x below its own
-        # achievable per-worker throughput while also slowing a concurrent
-        # GPU job by 1.56x (see docs/python-port/porting-notes.md, 2026-07-21). Scale each
-        # worker's thread budget to roughly (available cores / worker
-        # count) so N workers collectively stay within the node's real
-        # core count instead of each claiming all of them.
-        if cpu_threads_per_worker is not None:
-            n_threads_str = str(max(1, int(cpu_threads_per_worker)))
-            for _env_key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-                os.environ[_env_key] = n_threads_str
-            os.environ["XLA_FLAGS"] = (
-                os.environ.get("XLA_FLAGS", "")
-                + f" --xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={n_threads_str}"
-            ).strip()
+    # Thread-count limiting -- must also happen before any JAX import, and
+    # (as of 2026-09-14) applies to BOTH backends, not just backend="cpu".
+    # Without this, JAX's CPU/XLA backend (and whatever BLAS it delegates
+    # to) defaults to claiming *all* available hardware threads per
+    # process. With N concurrent workers each independently trying to grab
+    # every thread, the result is severe intra-node oversubscription/
+    # thrashing among the workers themselves -- confirmed directly as the
+    # root cause of a real Perlmutter hybrid-allocation pilot going ~3x
+    # below its own achievable per-worker throughput while also slowing a
+    # concurrent GPU job by 1.56x (see docs/python-port/porting-notes.md,
+    # 2026-07-21). Scale each worker's thread budget to roughly (available
+    # cores / worker count) so N workers collectively stay within the
+    # node's real core count instead of each claiming all of them.
+    #
+    # Originally gated `backend != "gpu"` only, on the (correct, for a
+    # bare-node run) assumption that GPU-backend workers' host-side
+    # NumPy/BLAS calls aren't worth throttling since the GPU is the
+    # bottleneck. That assumption breaks down when fit_ccd_native() is
+    # itself called from inside an MPI rank that SLURM has confined to a
+    # narrow cpuset slice (e.g. one quarter of a node's cores under
+    # `srun -n4`): multiprocessing's 'spawn' children inherit the calling
+    # process's cpuset, so ALL of a camera's ~20 GPU-backend workers end up
+    # crammed onto that SAME narrow slice as the MPI rank itself, each
+    # running fully CPU-bound during spot selection (~70% of a bundle's
+    # wall time) with no thread cap at all -- confirmed 2026-09-14 as the
+    # proximate cause of a real ~180s-after-pool-launch Cray MPICH PMI
+    # bootstrap-barrier crash (`desispec.scripts.specex.run_gpu()` under
+    # real multi-rank MPI): the rank's own cpuset slice runs at sustained
+    # ~70-90% utilization for the crash's entire ~180s window while the
+    # OTHER ranks' slices sit almost idle, i.e. node-wide load stays
+    # moderate (loadavg ~20-23/128) even as the one slice hosting both the
+    # MPI rank and its worker pool is saturated -- see
+    # docs/python-port/porting-notes.md, 2026-09-14 MPI/run_gpu() cpuset
+    # audit. fit_ccd_native() now derives a real thread-and-concurrency
+    # budget from os.sched_getaffinity(0) for backend="gpu" too (see its
+    # `available_cores` / gpu_thread_cap wiring) instead of leaving this
+    # permanently unconstrained.
+    if cpu_threads_per_worker is not None:
+        n_threads_str = str(max(1, int(cpu_threads_per_worker)))
+        for _env_key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            os.environ[_env_key] = n_threads_str
+        os.environ["XLA_FLAGS"] = (
+            os.environ.get("XLA_FLAGS", "")
+            + f" --xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={n_threads_str}"
+        ).strip()
     os.environ["JAX_PLATFORM_NAME"] = backend
     # Persistent JAX/XLA compilation cache (analogous to CuPy's .cubin disk
     # cache) -- this driver spawns a fresh process per bundle, so without
@@ -743,6 +784,51 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     EXPERIMENTAL/DIAGNOSTIC -- see fitter.py's PSF_Fitter.fit().
     """
     t_start = time.time()
+
+    # Strip Cray Shasta/PALS launcher rank-identity env vars (PALS_RANKID,
+    # PALS_LOCAL_RANKID, PALS_APID, etc.) before spawning any worker.
+    # `run_gpu()` in desispec already strips PMI_* for the same reason (see
+    # its own comment) -- that stripping is real and does work (confirmed
+    # 2026-09-14: a spawned worker's own /proc/<pid>/environ shows zero
+    # PMI_*-prefixed vars) but is not sufficient on its own, because this
+    # system's actual live MPI bootstrap identity mechanism is Cray's PALS
+    # launcher (SLURM_MPI_TYPE=cray_shasta), which uses PALS_*-prefixed vars,
+    # not the legacy generic PMI_* ones -- PALS_* was never in the strip
+    # list and passes straight through unchanged into every spawned worker.
+    # Confirmed directly (2026-09-14 MPI/run_gpu() cpuset+environment audit,
+    # docs/python-port/porting-notes.md) as the actual root cause of the
+    # reproducible ~180s-after-pool-launch Cray MPICH PMI bootstrap-barrier
+    # crash in desispec.scripts.specex.run_gpu() under real multi-rank MPI: a
+    # worker child inspected mid-run had libmpi_gnu.so/libpmi.so/libpals.so
+    # AND mpi4py's own compiled extension loaded in its address space (with
+    # /dev/shm/shared_memory.PMI.<jobid>.<step> and the PALS apinfo file both
+    # mapped) despite fit_bundle_task() itself never touching MPI -- and its
+    # /proc/<pid>/environ still carried PALS_RANKID=0, PALS_LOCAL_RANKID=0,
+    # PALS_APID=<the real job's id>, inherited unchanged from the MPI rank
+    # that spawned it. multiprocessing's 'spawn' context re-imports the
+    # calling script's __main__ module in the child to reconstruct the
+    # target callable; if that script (as any real MPI driver script, and
+    # this investigation's own test driver, do) imports mpi4py at module
+    # level, mpi4py auto-calls MPI_Init() at import time by default -- so
+    # EVERY spawned worker ends up independently (re-)initializing MPI,
+    # each one claiming to be "rank 0 of application <apid>" via the
+    # inherited PALS_* identity, colliding with the real rank 0 and with
+    # each other over the same PMI shared-memory rendezvous segment. This
+    # is a load-independent identity collision, not a CPU-scheduling
+    # effect -- explains why a pure worker-concurrency/thread-count
+    # reduction (tested first, see the confined-cpuset branch just below in
+    # this function) did NOT change the crash's timing at all (182.1s vs
+    # 181.7s across two otherwise-identical real 4-rank MPI runs, one with
+    # 20 unthrottled workers and one with 16 throttled-to-1-thread workers
+    # -- both still failed inside 1s of each other). Stripping PALS_* here
+    # (in addition to run_gpu()'s existing PMI_* strip) removes the
+    # identity a spawned worker could otherwise claim, so even if mpi4py
+    # still auto-initializes in a worker for the reason above, it can no
+    # longer masquerade as the real rank 0 or corrupt its bootstrap state.
+    for _var in list(os.environ):
+        if _var.startswith("PALS_"):
+            del os.environ[_var]
+
     all_bundles = range(first_bundle, last_bundle + 1)
     bundle_results = {}
 
@@ -809,6 +895,41 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         gpu_thread_cap = gpu_worker_threads
         if gpu_thread_cap is not None:
             print(f"  GPU-worker thread cap: {gpu_thread_cap} threads/worker (forced via --gpu-worker-threads)", flush=True)
+        elif available_cores < _CONFINED_CPUSET_CORE_THRESHOLD:
+            # available_cores (os.sched_getaffinity(0), computed above) is
+            # the CALLING process's own real cpuset, not the node's raw CPU
+            # count. On a normal standalone full-node run this is 128 and
+            # this branch never fires (n_gpus*workers_per_gpu, usually 20,
+            # is already far below the threshold below). But when
+            # fit_ccd_native() runs inside an MPI rank that SLURM has bound
+            # to a narrow cpuset slice (e.g. one quarter of a node under
+            # `srun -n4`), spawned 'spawn'-context workers inherit that SAME
+            # narrow slice -- confirmed 2026-09-14 as the proximate cause of
+            # a real Cray MPICH PMI bootstrap-barrier crash in
+            # desispec.scripts.specex.run_gpu() under real multi-rank MPI
+            # (~180s after the worker pool launched, every time, matching
+            # the error's own "timeout=180 secs"): with the un-throttled
+            # default (20 workers, each host-side phase unconstrained), the
+            # confined slice ran at sustained ~70-90% utilization for the
+            # crash's entire ~180s window while the OTHER ranks' own slices
+            # sat almost idle -- node-wide load stayed moderate (loadavg
+            # ~20-23 of 128) throughout, so this would NOT show up in a
+            # node-wide load check, only a per-slice one. See
+            # docs/python-port/porting-notes.md, 2026-09-14 MPI/run_gpu()
+            # cpuset audit, for the full continuous CPU-monitor trace.
+            # Fix: when confined, cap total concurrent workers to at most
+            # half the slice (real headroom, not just "fits on paper") and
+            # cap each worker to a single thread, so the pool can never
+            # crowd out whatever the MPI rank itself (or its runtime's own
+            # internal progress/heartbeat machinery) needs to run promptly
+            # on that same slice.
+            _budget = max(n_gpus, available_cores // 2)
+            packing = max(1, _budget // n_gpus)
+            gpu_thread_cap = 1
+            print(f"  Confined cpuset detected ({available_cores} cores available via "
+                  f"os.sched_getaffinity, < {_CONFINED_CPUSET_CORE_THRESHOLD}): reducing from "
+                  f"{n_gpus * workers_per_gpu} to {n_gpus * packing} GPU workers "
+                  f"({packing}/GPU), capping to {gpu_thread_cap} thread/worker", flush=True)
     else:
         packing = cpu_workers or n_gpus  # concurrent CPU-backend worker processes
 
@@ -950,6 +1071,394 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
     else:
         print(f"SPECEX_RESULT: OK {n_total}/{n_total} bundles", flush=True)
     return failed_bundles
+
+
+# ---------------------------------------------------------------------------
+# Multi-camera persistent-worker driver: the reusable core behind
+# run_night.py's --worker-mode persistent (this repo's own CLI) AND
+# desispec's run_gpu() (or any other caller, in-process, that wants to fit
+# many cameras across the GPUs on a node without paying a fresh
+# process-launch + JAX-import cost per camera). Moved here from
+# testing/run_night.py 2026-09-14 specifically so it's importable as public
+# API -- run_night.py previously had its own private copy of all of this,
+# which meant desispec's run_gpu() could only get feature parity by
+# reimplementing it a second time (and did, badly: a fresh, non-pool-reused
+# fit_ccd_native() call per camera, ~20-45min for a 30-camera night vs.
+# run_night.py's own validated ~8min persistent-mode number for the same
+# night -- see docs/python-port/porting-notes.md, 2026-09-14). Both
+# run_night.py and desispec's run_gpu() now call fit_cameras_persistent()
+# below; run_night.py keeps its own CLI-specific concerns (argparse,
+# --dry-run framing, its own outdir/log-naming convention, multi-node
+# fan-out) as a thin wrapper around it.
+
+CameraTask = collections.namedtuple(
+    "CameraTask",
+    ["name", "arc_file", "in_psf_file", "out_psf_file", "log_path", "broken_fibers"],
+)
+CameraTask.__new__.__defaults__ = (None, None)  # log_path, broken_fibers optional
+
+FitResult = collections.namedtuple(
+    "FitResult", ["name", "dt", "rc", "n_bundle_fail", "err_tail", "gpu_id"]
+)
+
+# Per-band worker-packing defaults, moved here verbatim from run_night.py
+# (was DEFAULT_WORKERS_PER_GPU/COLD_CACHE_WORKERS_PER_GPU/
+# COLD_CACHE_ENTRY_THRESHOLD there) -- see run_night.py's own former
+# docstring for the full cold-cache-GPU-OOM story
+# (docs/python-port/porting-notes.md, 2026-09-10): JIT compilation needs
+# more transient GPU memory than warm execution, and z-band's per-bundle
+# footprint is already the closest to the edge of the three bands even when
+# warm, so only z is reduced below while its JAX compilation cache looks
+# unpopulated.
+DEFAULT_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 5}
+COLD_CACHE_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 3}
+# One full warm night populates ~80,000 cache entries; this threshold just
+# needs to distinguish "basically empty" from "has real history" --
+# deliberately not trying to predict exactly which shapes THIS run needs.
+COLD_CACHE_ENTRY_THRESHOLD = 2000
+
+
+def _resolve_jax_cache_dir():
+    """Mirrors fit_bundle_task's own JAX_COMPILATION_CACHE_DIR resolution
+    (this file, ~line 329) so callers can check the same directory a worker
+    will actually use without importing jax themselves."""
+    default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
+    return os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
+
+
+def _cache_is_cold(threshold=COLD_CACHE_ENTRY_THRESHOLD):
+    """True if the JAX compilation cache this run will use looks
+    unpopulated -- a plain, uncached check (one os.listdir) each call.
+
+    Callers with a "mid-run" of their own (a persistent worker processing
+    many cameras) should call this ONCE and reuse the result, not call it
+    fresh per camera -- see _gpu_persistent_worker's own comment for why a
+    per-camera re-check is actively wrong (sibling workers' unrelated
+    progress makes the shared directory look "warm" long before any given
+    worker's own upcoming cameras have had their specific shapes
+    compiled)."""
+    try:
+        return len(os.listdir(_resolve_jax_cache_dir())) < threshold
+    except OSError:
+        return True  # doesn't exist yet -- definitely cold
+
+
+def _workers_per_gpu_for(band, wpg_override, cold=None):
+    """The one place workers-per-gpu is resolved from -- explicit
+    per-band override always wins; otherwise picks the cold- or warm-cache
+    default per band. See COLD_CACHE_WORKERS_PER_GPU above for why this
+    distinction exists.
+
+    `cold`: pass an already-decided coldness snapshot (persistent-worker
+    mode does this) or leave None to check fresh right now."""
+    wpg_override = wpg_override or {}
+    if band in wpg_override:
+        return wpg_override[band]
+    if cold is None:
+        cold = _cache_is_cold()
+    profile = COLD_CACHE_WORKERS_PER_GPU if cold else DEFAULT_WORKERS_PER_GPU
+    return profile[band]
+
+
+def _tail_error(log_path, n=6):
+    """Last few non-blank lines of a camera's log, for surfacing *why* a
+    failure happened without a bare, contextless rc=1."""
+    try:
+        with open(log_path) as f:
+            lines = [l.rstrip() for l in f if l.strip()]
+        return lines[-n:]
+    except OSError:
+        return []
+
+
+def _default_lamp_lines_file():
+    """Same resolution main()'s own CLI --lamp-lines default uses (relative
+    to this module's own file location) -- works for a dev checkout AND an
+    installed package, without needing SPECEXDATA set. Callers that already
+    know a different path (or want SPECEXDATA/importlib.resources
+    resolution, as desispec's run_gpu() does) can override via
+    fit_cameras_persistent's lamp_lines_file= kwarg."""
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "specex", "data", "specex_linelist_desi.txt")
+
+
+def _fit_one_camera_task(task, wpg, footprint_margin, bundle_pool=None, **fit_kwargs):
+    """Fit one camera (a CameraTask) by calling fit_ccd_native() directly,
+    the persistent-worker path's actual payload. Defaults for the fit
+    itself mirror main()'s own CLI defaults exactly (trace_per_fiber_deg=6,
+    trace_prior_deg=1, trace_prior_weight=1e5, trace_prior_ndead_threshold=500,
+    masked_amp_ndead_threshold=8000, max_number_of_lines=200 -- main()'s
+    --max-lines default, not fit_ccd_native's own function-signature default
+    of 100) unless overridden via fit_kwargs, so a persistent-worker run is
+    bit-for-bit equivalent to the plain CLI path, not just "close enough".
+    Import of specex.specex is deferred inside fit_ccd_native's own module
+    (this module), already loaded by the time this runs in-process -- no
+    separate deferred import needed here since this function IS specex.py.
+
+    If task.log_path is set, stdout/stderr are redirected at the OS
+    file-descriptor level (not just sys.stdout) so fit_ccd_native's own
+    internal spawn-context bundle-worker pool -- separate processes that
+    inherit fds at spawn time -- also lands in the log file. If
+    task.log_path is None, output goes to this process's normal
+    stdout/stderr (the desispec/library-caller case, which typically wants
+    the fit's own logging.getLogger()-based output un-redirected).
+
+    Returns a FitResult with gpu_id left None (caller fills it in).
+    """
+    missing = [p for p in (task.arc_file, task.in_psf_file) if not os.path.exists(p)]
+    if missing:
+        if task.log_path:
+            with open(task.log_path, "w") as f:
+                f.write(f"SKIPPED: missing input file(s): {missing}\n")
+        return FitResult(task.name, 0.0, "SKIPPED", 0, [f"missing input file(s): {missing}"], None)
+
+    fit_args = dict(
+        arc_file=task.arc_file, in_psf_file=task.in_psf_file, out_psf_file=task.out_psf_file,
+        lamp_lines_file=_default_lamp_lines_file(), n_gpus=1, backend="gpu",
+        broken_fibers=task.broken_fibers, sn_threshold=3.0,
+        max_number_of_lines=200, h_size_y=5, workers_per_gpu=wpg,
+        trace_per_fiber_deg=6, trace_prior_deg=1, trace_prior_weight=1e5,
+        trace_prior_ndead_threshold=500, masked_amp_ndead_threshold=8000,
+        footprint_margin=footprint_margin, bundle_pool=bundle_pool,
+        bundle_log_path=(task.log_path if bundle_pool is not None else None),
+    )
+    fit_args.update(fit_kwargs)
+
+    t0 = time.time()
+    rc = 0
+    n_bundle_fail = 0
+    old_out = old_err = None
+    if task.log_path:
+        old_out, old_err = os.dup(1), os.dup(2)
+        log_f = open(task.log_path, "w")
+        os.dup2(log_f.fileno(), 1)
+        os.dup2(log_f.fileno(), 2)
+    try:
+        failed_bundles = fit_ccd_native(**fit_args)
+        n_bundle_fail = len(failed_bundles)
+        if failed_bundles:
+            rc = 1
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        rc = 1
+    finally:
+        if task.log_path:
+            sys.stdout.flush(); sys.stderr.flush()
+            os.dup2(old_out, 1); os.dup2(old_err, 2)
+            os.close(old_out); os.close(old_err)
+            log_f.close()
+    dt = time.time() - t0
+    err_tail = _tail_error(task.log_path) if (rc not in (0,) and task.log_path) else []
+    return FitResult(task.name, dt, rc, n_bundle_fail, err_tail, None)
+
+
+def _gpu_persistent_worker(gpu_id, work_q, results_q, wpg_override, footprint_margin, pool_reuse, fit_kwargs):
+    """Process target for fit_cameras_persistent(): one long-lived process
+    per GPU that imports jax ONCE (paying the interpreter-startup +
+    module-import cost a single time for the whole batch of cameras) then
+    pulls CameraTasks off the shared queue until it sees the None sentinel.
+    See docs/python-port/porting-notes.md, 2026-09-02/09-10, for the
+    measured ~7-10s per-camera launch-overhead saving and the pool-reuse
+    (~6.7%) / cold-cache-workers-per-gpu (~11.5%) timing wins this
+    machinery is responsible for -- unchanged behavior from run_night.py's
+    former private copy, just promoted to a public, importable function.
+
+    CUDA_VISIBLE_DEVICES/XLA_PYTHON_CLIENT_PREALLOCATE/
+    XLA_PYTHON_CLIENT_MEM_FRACTION are set before any `import jax` in this
+    process (jax latches its visible-device set at first import) --
+    XLA_PYTHON_CLIENT_MEM_FRACTION is capped low here because this
+    persistent process's own JAX usage isn't limited to the per-camera
+    bundle-worker child pool (which fit_bundle_task already isolates with
+    its own explicit env overrides) -- fit_ccd_native's post-pool
+    merge/write_python_psf() step runs real jax.numpy ops directly in THIS
+    process, on THIS same physical GPU."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.05"
+
+    is_cold = _cache_is_cold()
+    ctx = mp.get_context('spawn')
+    pool = None
+    pool_size = None
+    warned_cold = False
+    try:
+        while True:
+            item = work_q.get()
+            if item is None:
+                return
+            task = item
+            band = task.name[0]
+            reduced = (band not in (wpg_override or {}) and is_cold
+                       and COLD_CACHE_WORKERS_PER_GPU[band] != DEFAULT_WORKERS_PER_GPU[band])
+            if reduced and not warned_cold:
+                print(f"  gpu{gpu_id}: cold JAX cache detected (<{COLD_CACHE_ENTRY_THRESHOLD} entries at worker "
+                      f"startup) -- using conservative workers-per-gpu ({COLD_CACHE_WORKERS_PER_GPU[band]} vs "
+                      f"the usual {DEFAULT_WORKERS_PER_GPU[band]}) for {band}-band for this whole run", flush=True)
+                warned_cold = True
+            wpg = _workers_per_gpu_for(band, wpg_override, cold=is_cold)
+            if not pool_reuse:
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+                pool = ctx.Pool(processes=wpg)
+                pool_size = wpg
+            elif pool is None or pool_size != wpg:
+                if pool is not None:
+                    pool.close()
+                    pool.join()
+                pool = ctx.Pool(processes=wpg)
+                pool_size = wpg
+            result = _fit_one_camera_task(task, wpg, footprint_margin, bundle_pool=pool, **fit_kwargs)
+            results_q.put(result._replace(gpu_id=gpu_id))
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
+
+
+def detect_gpus_per_node(default=4):
+    """Number of GPUs visible on the current node, via `nvidia-smi -L` --
+    falls back to `default` if nvidia-smi isn't available/fails (e.g. a
+    login node, or a container without it). Moved here from run_night.py
+    2026-09-14 alongside fit_cameras_persistent() so any caller resolving
+    its own `n_gpus` (e.g. desispec's run_gpu()) can share the exact same
+    detection logic instead of reimplementing it."""
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=15)
+        n = len([l for l in out.stdout.splitlines() if l.strip()])
+        return n if n > 0 else default
+    except Exception:
+        return default
+
+
+def fit_cameras_persistent(tasks, n_gpus, workers_per_gpu=None, footprint_margin=None,
+                            pool_reuse=True, dry_run=False, comm=None, on_result=None, **fit_kwargs):
+    """Fit many cameras (CameraTask objects) across n_gpus GPUs on the
+    current node, reusing one long-lived worker process (and, within it,
+    one multiprocessing.Pool of bundle-fit workers) per GPU across the
+    whole batch -- the reusable core behind run_night.py's
+    --worker-mode persistent and desispec's run_gpu(). See the module
+    comment above this function for why this was promoted out of
+    run_night.py.
+
+    Args:
+        tasks (list[CameraTask]): cameras to fit.
+        n_gpus (int): number of GPUs to spread cameras across on this node.
+        workers_per_gpu (dict or None): {"b": int, "r": int, "z": int}
+            override; any band not present falls back to the cold/warm-cache
+            default (see DEFAULT_WORKERS_PER_GPU/COLD_CACHE_WORKERS_PER_GPU).
+        footprint_margin (int or None): forwarded to fit_ccd_native.
+        pool_reuse (bool): reuse one bundle-worker Pool per GPU across
+            cameras (default) vs. a fresh Pool per camera (A/B-testing knob
+            only, matches pre-2026-09 behavior).
+        dry_run (bool): print what would run, in task order, without
+            actually fitting anything; returns a FitResult per task with
+            rc=0, dt=0.0 immediately (no processes spawned).
+        comm: an mpi4py communicator, or None (default). When given, only
+            rank 0 does any real work -- fit_ccd_native's own internal
+            multiprocessing.Pool already spreads a single camera across
+            every GPU on the node, so there is nothing useful for other
+            ranks to do (same rationale/precedent as desispec's run_gpu()).
+            Non-zero ranks return an empty list immediately WITHOUT calling
+            comm.Barrier() -- callers that need every rank synchronized
+            after this call (e.g. before touching a shared filesystem path)
+            must add their own comm.Barrier() after calling this, exactly
+            as desispec's run_gpu() callers already do today. This function
+            also strips the Cray MPICH/PALS bootstrap env vars (PALS_*,
+            PMI_*) from os.environ before spawning any worker process --
+              see docs/python-port/porting-notes.md, 2026-09-14, "MPI/run_gpu()
+              cpuset audit": an MPI-launched rank's PALS_*/PMI_* identity,
+              inherited unchanged by multiprocessing 'spawn' children, makes
+              every spawned child try to bootstrap MPI as if it were that
+              same rank, corrupting the real rank's PMI rendezvous.
+            Safe to call with comm=None (the non-MPI, standalone-script
+            case) -- no env vars are touched and every "rank" is rank 0.
+        on_result (callable or None): if given, called as on_result(result)
+            for each FitResult as soon as it's available (streaming), in
+            addition to it being included in the returned list -- lets a
+            caller (e.g. run_night.py) print progress lines without this
+            function needing to know anything about their format.
+        **fit_kwargs: forwarded to fit_ccd_native for every camera,
+            overriding this function's own production defaults (see
+            _fit_one_camera_task) -- e.g. legendre_deg_wave=, fit_continuum=.
+
+    Returns:
+        list[FitResult]: one per task, in COMPLETION order (not task order)
+            for real runs; in task order for dry_run. Empty list on a
+            non-zero MPI rank.
+    """
+    if comm is not None and comm.rank != 0:
+        return []
+
+    if comm is not None:
+        # See the comm= docstring above -- strip Cray MPICH/PALS bootstrap
+        # identity before spawning any multiprocessing worker.
+        for _var in list(os.environ):
+            if _var.startswith("PALS_") or _var.startswith("PMI_"):
+                del os.environ[_var]
+
+    if dry_run:
+        results = []
+        for task in tasks:
+            fm = footprint_margin if footprint_margin is not None else 7
+            print(f"  [DRY RUN] (persistent) {task.name}: fit_ccd_native(arc={task.arc_file}, "
+                  f"in_psf={task.in_psf_file}, out_psf={task.out_psf_file}, footprint_margin={fm}) [in-process]")
+            result = FitResult(task.name, 0.0, 0, 0, [], None)
+            if on_result is not None:
+                on_result(result)
+            results.append(result)
+        return results
+
+    ctx = mp.get_context("spawn")
+    work_q, results_q = ctx.Queue(), ctx.Queue()
+    for task in tasks:
+        work_q.put(task)
+    for _ in range(n_gpus):
+        work_q.put(None)
+
+    workers = [ctx.Process(target=_gpu_persistent_worker,
+                            args=(g, work_q, results_q, workers_per_gpu, footprint_margin, pool_reuse, fit_kwargs))
+               for g in range(n_gpus)]
+    [w.start() for w in workers]
+
+    # A caught Python exception inside _fit_one_camera_task still reports
+    # normally via results_q (rc=1). But a hard crash (segfault, CUDA
+    # driver abort) kills the worker process without ever putting a result
+    # -- polling with a timeout, rather than a plain blocking get() for
+    # exactly len(tasks) results, means that loses only the one in-flight
+    # camera instead of hanging this whole batch forever.
+    import queue as _queue
+    results = []
+    n_done = 0
+    seen = set()
+    while n_done < len(tasks):
+        try:
+            result = results_q.get(timeout=10)
+        except _queue.Empty:
+            if not any(w.is_alive() for w in workers):
+                missing = len(tasks) - n_done
+                print(f"WARNING: all persistent workers exited but {missing} camera(s) never reported a result "
+                      f"(worker crash) -- treating as failed and stopping collection.", flush=True)
+                break
+            continue
+        seen.add(result.name)
+        n_done += 1
+        results.append(result)
+        if on_result is not None:
+            on_result(result)
+
+    for task in tasks:
+        if task.name not in seen:
+            result = FitResult(task.name, 0.0, 1, 0, ["worker crashed before reporting a result"], None)
+            results.append(result)
+            if on_result is not None:
+                on_result(result)
+
+    [w.join() for w in workers]
+    return results
+
 
 def main():
     """CLI entry point (`python -m specex.specex`): parse arguments, apply backend isolation/fail-fast checks, call fit_ccd_native, and set the process exit code.
