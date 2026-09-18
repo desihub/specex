@@ -1,8 +1,12 @@
 # specex Change Log
 
-## 0.10.2 (unreleased)
+## 0.10.3 (unreleased)
 
 * No changes yet.
+
+## 0.10.2 (2026-09-17)
+
+* Propagate status for failed bundles (PR [#91](https://github.com/desihub/specex/pull/91)).
 
 ## 0.10.1 (2026-04-10)
 
