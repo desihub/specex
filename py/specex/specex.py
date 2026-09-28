@@ -327,9 +327,12 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
     # on a warm cache in isolated single-bundle testing, with the previously
     # documented "final joint fit is slower in Python than C++" finding
     # reversing once warm (Python becomes ~3.2x faster on that phase).
-    # Respects an operator-set JAX_COMPILATION_CACHE_DIR if present.
-    default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
-    cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
+    # Respects JAX_COMPILATION_CACHE_DIR / SPECEX_JAX_CACHE_DIR if present
+    # -- see _resolve_jax_cache_dir()'s own docstring (below in this file)
+    # for the precedence and why SPECEX_JAX_CACHE_DIR exists as a separate,
+    # specex-only env var rather than just using JAX's native one for a
+    # shared cache location.
+    cache_dir = _resolve_jax_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
     # Mixed precision (float32 Jacobian in the joint-fit accumulate step,
     # float64 everywhere else) is the default -- see docs/python-port/porting-notes.md
@@ -1119,11 +1122,31 @@ COLD_CACHE_ENTRY_THRESHOLD = 2000
 
 
 def _resolve_jax_cache_dir():
-    """Mirrors fit_bundle_task's own JAX_COMPILATION_CACHE_DIR resolution
-    (this file, ~line 329) so callers can check the same directory a worker
-    will actually use without importing jax themselves."""
+    """The one place the JAX persistent-compilation-cache directory is
+    resolved from -- used both by fit_bundle_task (to actually configure
+    jax) and by callers like _cache_is_cold() that need to check the same
+    directory without importing jax themselves. Precedence:
+
+    1. JAX_COMPILATION_CACHE_DIR, if the operator has set it themselves --
+       this is JAX's own native env var (every JAX config option gets one
+       automatically, by uppercasing its name -- confirmed in jax/_src/
+       config.py's string_or_object_state(): `os.getenv(name.upper(), ...)`),
+       so an individual explicitly overriding their own run should win.
+    2. SPECEX_JAX_CACHE_DIR, else -- specex's OWN env var, not a JAX-native
+       one, specifically so a shared, environment-wide default can be set
+       (e.g. in a sourced DESI environment script) WITHOUT also silently
+       redirecting every other JAX-based tool sharing that same environment
+       (gpu_specter, etc.) into specex's cache directory -- those tools
+       don't know to look for SPECEX_JAX_CACHE_DIR, only specex's own code
+       does. Setting the native JAX_COMPILATION_CACHE_DIR at the shared-
+       environment level would NOT have this property, since anything in
+       that environment importing jax would pick it up automatically.
+    3. ~/.cache/specex/jax_compilation_cache, else -- today's existing
+       per-user fallback, unchanged.
+    """
     default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
-    return os.environ.get("JAX_COMPILATION_CACHE_DIR", default_cache_dir)
+    return os.environ.get("JAX_COMPILATION_CACHE_DIR",
+                           os.environ.get("SPECEX_JAX_CACHE_DIR", default_cache_dir))
 
 
 def _cache_is_cold(threshold=COLD_CACHE_ENTRY_THRESHOLD):
