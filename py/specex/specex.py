@@ -355,6 +355,28 @@ def fit_bundle_task(bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines
         jax.config.update("jax_compilation_cache_dir", cache_dir)
         jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
         jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+        # Explicitly disable JAX's automatic secondary XLA caches (default:
+        # 'xla_gpu_per_fusion_autotune_cache_dir', on by default whenever the
+        # persistent compilation cache above is enabled at all -- see
+        # jax/_src/compiler.py's get_compile_options() and jax/_src/config.py's
+        # persistent_cache_enable_xla_caches). Found 2026-09-28 testing a
+        # read-only shared cache directory: unlike the main persistent
+        # compilation cache (whose own reads/writes are wrapped in
+        # try/except and degrade to a warnings.warn() on failure -- verified
+        # directly in jax/_src/compiler.py's _cache_write()), this
+        # autotune-cache subsystem has NO such fallback -- a failed write
+        # (e.g. PermissionError on a read-only cache dir) raises a bare
+        # jax.errors.JaxRuntimeError: PERMISSION_DENIED straight out of the
+        # XLA compile call, crashing the whole bundle fit (reproduced: 12-18
+        # of 20 bundles failed on multiple cameras testing SPECEX_JAX_CACHE_DIR
+        # pointed at a chmod-read-only directory). This is a real risk for
+        # ANY run, not just a read-only-cache one -- any transient
+        # permission/quota/NFS-locking hiccup on the cache directory could
+        # crash bundles under the old default. Disabling this secondary
+        # cache leaves the main persistent-compilation-cache hit rate (the
+        # dominant, already-validated ~43% warm-vs-cold win, see
+        # docs/python-port/porting-notes.md) completely unaffected.
+        jax.config.update("jax_persistent_cache_enable_xla_caches", "")
         if backend != "gpu":
             jax.config.update("jax_platforms", "cpu")
         # Lazy, deliberately not at this module's top level (see the note
