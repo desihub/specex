@@ -18,6 +18,12 @@ import multiprocessing as mp
 # 2026-09-14 MPI/run_gpu() cpuset audit).
 _CONFINED_CPUSET_CORE_THRESHOLD = 64
 
+# Set by _resolve_jax_cache_dir() the first time it falls back to the
+# default $HOME cache location in this process, so the warning prints once
+# per process (it's called from inside every spawned bundle-fit worker,
+# not just the main process) rather than once per bundle/camera.
+_warned_default_jax_cache_dir = False
+
 # NOTE: deliberately no top-level `from .io import ...`/`from .fitter import
 # ...` here (both pull in JAX transitively -- .fitter -> .psf -> jax at
 # class-definition time). `run_specex()` below (the C++-wrapper path) has no
@@ -1164,11 +1170,28 @@ def _resolve_jax_cache_dir():
        environment level would NOT have this property, since anything in
        that environment importing jax would pick it up automatically.
     3. ~/.cache/specex/jax_compilation_cache, else -- today's existing
-       per-user fallback, unchanged.
+       per-user fallback, unchanged. Warns (once per process -- this is
+       called from inside every spawned bundle-fit worker, not just the
+       main process, so without the guard the same process would print it
+       again on every subsequent bundle/camera it handles) since this
+       fallback lands on $HOME, which has twice caused real inode-quota
+       incidents from an unpruned cache (2026-09-04, 2026-09-15) -- see
+       docs/python-port/porting-notes.md and how-to-run.md's Quick Start.
     """
     default_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "specex", "jax_compilation_cache")
-    return os.environ.get("JAX_COMPILATION_CACHE_DIR",
-                           os.environ.get("SPECEX_JAX_CACHE_DIR", default_cache_dir))
+    cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR",
+                                os.environ.get("SPECEX_JAX_CACHE_DIR"))
+    if cache_dir is None:
+        global _warned_default_jax_cache_dir
+        if not _warned_default_jax_cache_dir:
+            _warned_default_jax_cache_dir = True
+            print(f"WARNING: neither JAX_COMPILATION_CACHE_DIR nor SPECEX_JAX_CACHE_DIR is "
+                  f"set -- falling back to {default_cache_dir} on $HOME. This has twice caused "
+                  f"real $HOME inode-quota incidents in production (an unpruned cache grows "
+                  f"unboundedly). Set SPECEX_JAX_CACHE_DIR to somewhere off $HOME (e.g. "
+                  f"$SCRATCH/.specex_jax_cache) before your first run.", flush=True)
+        cache_dir = default_cache_dir
+    return cache_dir
 
 
 def _cache_is_cold(threshold=COLD_CACHE_ENTRY_THRESHOLD):
