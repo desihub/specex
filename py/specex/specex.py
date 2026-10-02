@@ -997,8 +997,12 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
 
         Args:
             bundle_ids (list[int]): bundle indices to fit in this batch.
-            n_workers_this (int): pool size for this batch (only used to size
-                a freshly-created pool when `pool` is None).
+            n_workers_this (int): the desired concurrency for this batch.
+                When `pool` is None, sizes a freshly-created pool. When
+                `pool` is given (e.g. a reused, possibly larger, persistent
+                pool), bounds ACTUAL concurrency instead by dispatching in
+                sequential chunks of this size -- see the chunking note
+                below for why this matters.
             cpu_threads_this (int or None): per-worker thread budget, from
                 _cpu_threads_for.
             pool (multiprocessing.pool.Pool or None): a caller-owned,
@@ -1006,9 +1010,17 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
                 long-lived bundle pool -- see testing/run_night.py's
                 --worker-mode persistent) instead of paying spawn+JAX-import
                 cost for a fresh one. Caller retains ownership (never closed
-                here). None (default): create-and-tear-down a fresh pool
-                sized n_workers_this, exactly as before this parameter
-                existed -- unchanged behavior for every other call site.
+                here). Dispatched in sequential chunks of n_workers_this
+                rather than one bulk `pool.starmap` call -- a bulk call
+                would let up to `pool.size` tasks run concurrently
+                regardless of n_workers_this (Pool.starmap only ever bounds
+                concurrency by min(task_count, pool.size)), which silently
+                defeated an OOM-retry's reduced-packing intent whenever the
+                reused pool was bigger than the requested retry packing
+                (see docs/python-port/porting-notes.md "OOM-retry pool reuse", 2026-10-01).
+                None (default): create-and-tear-down a fresh pool sized
+                n_workers_this, exactly as before this parameter existed --
+                unchanged behavior for every other call site.
 
         Returns:
             list[tuple[int, dict]]: one `(bid, result)` pair per bundle, in the
@@ -1024,7 +1036,10 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
             stagger_s = i * 2.0 if backend == "cpu" else 0.0
             tasks.append((bid, gpu_id, arc_file, in_psf_file, out_psf_file, lamp_lines_file, backend, broken_fibers, sn_threshold, h_size_y, stagger_s, force_spots_path, max_number_of_lines, None, legendre_deg_wave, fit_continuum, double_precision, None, trace_legendre_deg_wave_x, trace_legendre_deg_wave_y, trace_per_fiber_deg, cpu_threads_this, line_search, trace_prior_deg, trace_prior_weight, trace_prior_ndead_threshold, debug_spots, masked_amp_ndead_threshold, footprint_margin, bundle_log_path))
         if pool is not None:
-            return pool.starmap(fit_bundle_task, tasks)
+            results = []
+            for i in range(0, len(tasks), n_workers_this):
+                results.extend(pool.starmap(fit_bundle_task, tasks[i:i + n_workers_this]))
+            return results
         ctx = mp.get_context('spawn')
         with ctx.Pool(processes=n_workers_this) as fresh_pool:
             return fresh_pool.starmap(fit_bundle_task, tasks)
@@ -1046,11 +1061,27 @@ def fit_ccd_native(arc_file, in_psf_file, out_psf_file, lamp_lines_file,
         cpu_threads_this = _cpu_threads_for(n_workers_this)
         label = "initial" if attempt == 0 else f"OOM-retry {attempt}"
         print(f"Launching {len(pending)} bundles across {n_workers_this} workers ({label}, packing={packing})...", flush=True)
-        # bundle_pool only covers the common case (attempt 0, full packing);
-        # a rare OOM retry runs at reduced packing, which a fixed-size
-        # persistent pool can't safely emulate (see _run_batch's docstring),
-        # so retries always fall back to a fresh right-sized pool.
-        chunk_results = _run_batch(pending, n_workers_this, cpu_threads_this, pool=(bundle_pool if attempt == 0 else None))
+        # Always reuse bundle_pool when the caller gave us one (persistent
+        # worker mode), retry attempts included -- _run_batch's chunked
+        # dispatch (see its docstring) correctly bounds concurrency to
+        # n_workers_this even when the persistent pool itself is bigger, so
+        # there's no need for a second, competing pool here any more.
+        # Spawning one used to leave the ORIGINAL pool's workers alive,
+        # idle, and still holding their last task's GPU memory (Python's
+        # Pool doesn't tear a worker down just because its task returned an
+        # error dict) -- a brand-new pool's processes then had to initialize
+        # a fresh CUDA context on a GPU already starved by that stranded
+        # memory, which surfaced as "no supported devices found for
+        # platform CUDA" rather than a clean RESOURCE_EXHAUSTED (found
+        # investigating the spot-dimension-bucketing OOM-retry failures,
+        # 2026-10-01 -- see docs/python-port/porting-notes.md). When no
+        # persistent pool was supplied at all (e.g. --worker-mode
+        # subprocess, or a bare one-off fit_ccd_native call), there's
+        # nothing to compete with either way -- _run_batch's own
+        # with-block-managed fresh pool is torn down (its processes
+        # terminated, GPU memory released) before the next attempt's pool
+        # is created, so that path was never affected by this bug.
+        chunk_results = _run_batch(pending, n_workers_this, cpu_threads_this, pool=bundle_pool)
 
         oom_bids = []
         pending = []
@@ -1148,6 +1179,82 @@ COLD_CACHE_WORKERS_PER_GPU = {"b": 12, "r": 8, "z": 3}
 # deliberately not trying to predict exactly which shapes THIS run needs.
 COLD_CACHE_ENTRY_THRESHOLD = 2000
 
+# The reference card DEFAULT_WORKERS_PER_GPU/COLD_CACHE_WORKERS_PER_GPU were
+# tuned against -- a 40GB A100 (Perlmutter's own), measured peaking at
+# ~37.4GB/GPU at these exact values (2026-10-01, docs/python-port/porting-notes.md
+# "workers-per-gpu auto-tuning"), i.e. already tuned close to that card's own
+# ceiling with little headroom to spare.
+_REFERENCE_GPU_MEM_GB = 40.0
+# How much of the proportional memory-based increase to actually apply when
+# scaling workers-per-gpu up for a bigger card, found by direct experiment
+# on an 80GB A100 (2026-10-01): a full linear 2x (b=24, r=16, z=10) measurably
+# OOM'd -- 10/30 cameras lost bundles, z-band hit hardest (its own default is
+# already the lowest of the three bands, i.e. the most memory-constrained per
+# worker even at baseline) -- while the 80GB card's own peak memory under the
+# unscaled defaults (~37GB/GPU, same as the 40GB reference) confirmed per-
+# worker footprint doesn't shrink just because more memory exists, so a
+# naive "more memory = proportionally more workers" assumption doesn't hold.
+# 0.8 was chosen as a deliberately-conservative starting point (not derived
+# from a clean binary search) -- it lands on a 2x-memory card (80GB) at 1.8x
+# workers, i.e. the exact "a little under double" figure asked for -- and
+# still needs its own direct validation per band/card, not assumed safe by
+# construction. Revisit if a real OOM shows up at this setting too.
+_WORKERS_PER_GPU_SCALING_CONSERVATISM = 0.8
+
+def _detect_gpu_memory_gb(default=_REFERENCE_GPU_MEM_GB):
+    """Total memory of GPU 0 on this node, in GB, via `nvidia-smi
+    --query-gpu=memory.total` -- falls back to `default` (the 40GB
+    reference card) if nvidia-smi isn't available/fails, or if the node's
+    GPUs are heterogeneous (only GPU 0 is checked; mixed-GPU nodes aren't
+    handled specially). GiB-vs-GB: nvidia-smi reports MiB; divided by 1024
+    here (binary GiB, which is what "40GB"/"80GB" conventionally means for
+    A100 SKUs), not 1000.
+
+    Status: ACTIVE (production default path when SPECEX_AUTO_WORKERS_PER_GPU
+    is set) -- see _auto_scaled_workers_per_gpu.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                              capture_output=True, text=True, timeout=15)
+        mib = float(out.stdout.splitlines()[0].strip())
+        return mib / 1024.0
+    except Exception:
+        return default
+
+def _auto_scaled_workers_per_gpu(mem_gb, reference=DEFAULT_WORKERS_PER_GPU,
+                                  reference_mem_gb=_REFERENCE_GPU_MEM_GB,
+                                  conservatism=_WORKERS_PER_GPU_SCALING_CONSERVATISM):
+    """Scale the 40GB-reference per-band worker-packing table to a
+    differently-sized card, applying only `conservatism` (default 0.8) of
+    the proportional memory ratio -- see _WORKERS_PER_GPU_SCALING_CONSERVATISM
+    for why a full linear scale-up isn't safe. Works in both directions: a
+    smaller card (e.g. a 12GB consumer GPU) scales DOWN by the same formula,
+    though the reference point this project has for that direction so far
+    is pure manual tuning (`homer`'s RTX 3060, docs/python-port/porting-notes.md
+    2026-07-25) rather than this formula -- not yet cross-checked against it.
+
+    Args:
+        mem_gb (float): this node's detected (or assumed) GPU memory, GB.
+        reference (dict): the {"b","r","z"} table to scale from.
+        reference_mem_gb (float): the card size `reference` was tuned for.
+        conservatism (float): fraction of the proportional (mem_gb/reference_mem_gb)
+            increase to actually apply -- 0 keeps `reference` unchanged
+            regardless of mem_gb, 1 would scale fully linearly (the
+            already-falsified assumption).
+
+    Returns:
+        dict: {"b": int, "r": int, "z": int}, each >= 1.
+
+    Status: EXPERIMENTAL (gated behind SPECEX_AUTO_WORKERS_PER_GPU -- off by
+    default, since this formula's only direct validation so far is a single
+    80GB-card data point, not a swept/confirmed-safe curve). See
+    docs/python-port/porting-notes.md "workers-per-gpu auto-tuning", 2026-10-01.
+    """
+    raw_scale = mem_gb / reference_mem_gb
+    effective_scale = 1.0 + (raw_scale - 1.0) * conservatism
+    return {band: max(1, int(n * effective_scale)) for band, n in reference.items()}
+
 
 def _resolve_jax_cache_dir():
     """The one place the JAX persistent-compilation-cache directory is
@@ -1211,11 +1318,15 @@ def _cache_is_cold(threshold=COLD_CACHE_ENTRY_THRESHOLD):
         return True  # doesn't exist yet -- definitely cold
 
 
+_detected_gpu_mem_gb = None  # lazy, process-wide cache -- see _workers_per_gpu_for
+
 def _workers_per_gpu_for(band, wpg_override, cold=None):
     """The one place workers-per-gpu is resolved from -- explicit
     per-band override always wins; otherwise picks the cold- or warm-cache
-    default per band. See COLD_CACHE_WORKERS_PER_GPU above for why this
-    distinction exists.
+    default per band, auto-scaled for this node's actual GPU memory if
+    SPECEX_AUTO_WORKERS_PER_GPU is set (see _auto_scaled_workers_per_gpu --
+    EXPERIMENTAL, off by default). See COLD_CACHE_WORKERS_PER_GPU above for
+    why the cold/warm distinction exists.
 
     `cold`: pass an already-decided coldness snapshot (persistent-worker
     mode does this) or leave None to check fresh right now."""
@@ -1225,6 +1336,11 @@ def _workers_per_gpu_for(band, wpg_override, cold=None):
     if cold is None:
         cold = _cache_is_cold()
     profile = COLD_CACHE_WORKERS_PER_GPU if cold else DEFAULT_WORKERS_PER_GPU
+    if os.environ.get("SPECEX_AUTO_WORKERS_PER_GPU"):
+        global _detected_gpu_mem_gb
+        if _detected_gpu_mem_gb is None:
+            _detected_gpu_mem_gb = _detect_gpu_memory_gb()
+        profile = _auto_scaled_workers_per_gpu(_detected_gpu_mem_gb, reference=profile)
     return profile[band]
 
 
@@ -1388,14 +1504,21 @@ def _gpu_persistent_worker(gpu_id, work_q, results_q, wpg_override, footprint_ma
                 return
             task = item
             band = task.name[0]
-            reduced = (band not in (wpg_override or {}) and is_cold
-                       and COLD_CACHE_WORKERS_PER_GPU[band] != DEFAULT_WORKERS_PER_GPU[band])
-            if reduced and not warned_cold:
-                print(f"  gpu{gpu_id}: cold JAX cache detected (<{COLD_CACHE_ENTRY_THRESHOLD} entries at worker "
-                      f"startup) -- using conservative workers-per-gpu ({COLD_CACHE_WORKERS_PER_GPU[band]} vs "
-                      f"the usual {DEFAULT_WORKERS_PER_GPU[band]}) for {band}-band for this whole run", flush=True)
-                warned_cold = True
             wpg = _workers_per_gpu_for(band, wpg_override, cold=is_cold)
+            wpg_warm = _workers_per_gpu_for(band, wpg_override, cold=False)
+            reduced = band not in (wpg_override or {}) and is_cold and wpg != wpg_warm
+            if reduced and not warned_cold:
+                # wpg/wpg_warm (not the raw COLD_CACHE_WORKERS_PER_GPU/
+                # DEFAULT_WORKERS_PER_GPU tables) so this message reflects
+                # what's actually running when SPECEX_AUTO_WORKERS_PER_GPU
+                # has rescaled both -- printing the unscaled static values
+                # here was a real, if cosmetic, bug (2026-10-01): the pool
+                # itself was always sized correctly from wpg, only this
+                # diagnostic text was stale.
+                print(f"  gpu{gpu_id}: cold JAX cache detected (<{COLD_CACHE_ENTRY_THRESHOLD} entries at worker "
+                      f"startup) -- using conservative workers-per-gpu ({wpg} vs "
+                      f"the usual {wpg_warm}) for {band}-band for this whole run", flush=True)
+                warned_cold = True
             if not pool_reuse:
                 if pool is not None:
                     pool.close()
