@@ -38,6 +38,10 @@ void specex::allocate_spots_of_bundle(vector<specex::Spot_p>& spots, const strin
   int nlines=0;
   string line;
   while (std::getline(is, line)) {
+    // skip empty lines or comments
+    size_t first = line.find_first_not_of(" \t\r\n");
+    if (first == string::npos || line[first] == '#') continue;
+
     std::istringstream iss(line);
     if( !( iss >> ion >> wave >> score >> intensity) ) continue;
     

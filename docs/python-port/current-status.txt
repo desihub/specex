@@ -1,0 +1,251 @@
+SPECEX C++ -> PYTHON/JAX PORT: CURRENT STATUS
+Written 2026-07-21, condensed to a bottom-line-only snapshot 2026-09-09.
+
+This file answers ONE question -- "where does this project stand right now"
+-- in as few words as that allows. It is not a history: full chronological
+investigation trails, ruled-out hypotheses, and exact numbers at every stage
+live in porting-notes.md (append-only, grep by topic/date). Algorithmic
+differences between the two pipelines: python-vs-cpp-diff.txt. Known
+non-standard-input/divergence modes: edge-cases.md. If something below
+seems to need more explanation, it's in one of those three, not here.
+
+===============================================================================
+1. BOTTOM LINE
+===============================================================================
+Cumulative over 20 independent full-night/expid campaigns (30 cameras each,
+two non-overlapping 10-night sets, 2026-08-11/12 and 2026-09-02/05):
+
+  - Correctness vs. C++: mean xrms=0.0120px, mean yrms=0.0129px (range xrms
+    0.0112-0.0140px, yrms 0.0111-0.0167px).
+  - Timing: with --worker-mode persistent (the fastest validated
+    configuration -- the CLI default since 2026-09-13, see how-to-run.md
+    section 2.3), 502.5s warm / 591.2s cold mean per 30-camera night vs.
+    C++'s 648.3s -- Python ~18-23% faster. The older --worker-mode
+    subprocess path (no longer the default) is slower than C++ (~674s).
+  - PSF-shape (sigma_y) agreement: mean 0.46%, band-dependent (b=0.78%,
+    r=0.45%, z=0.14%) -- consistent with the general pattern that b-band
+    correctness trails r/z everywhere it's been measured, because b-band's
+    calibration lines are intrinsically fainter/lower-QE, so fewer clear
+    the S/N selection threshold and each bundle's fit is less constrained
+    -- a property of the input data, not a Python-specific issue.
+
+Current production defaults: --trace-per-fiber-deg 6 (per-fiber trace
+basis) with an ndead-gated cross-fiber consensus prior (--trace-prior-deg
+1), --footprint-margin 7 (matches C++'s own boundary-fiber window), mixed
+float32/float64 precision, grid line search.
+
+===============================================================================
+2. STILL OPEN
+===============================================================================
+- Residual trace-position disagreement: even with every known difference
+  accounted for, Python and C++ land on slightly different (both locally
+  reasonable) trace solutions on some bundles -- attributed to two
+  independently-implemented least-squares solvers converging to different
+  local optima, correlated with how far a bundle's trace has drifted from
+  its calibration starting guess. Not a discovered bug; every concrete
+  candidate mechanism tested has been ruled out. Full detail:
+  python-vs-cpp-diff.txt section 1.1.
+- A small number of individually-named fibers/bundles with severe local
+  data problems (severe ndead, fiber-crossing geometry, or otherwise
+  genuinely hard real data) don't fully recover even with the trace-
+  consensus prior active -- data-quality floors, not fitting bugs. Named
+  cases: python-vs-cpp-diff.txt section 1.3, edge-cases.md.
+- Air-vs-vacuum wavelength convention: both pipelines show an identical
+  ~0.5A mean offset vs. the line list's reference wavelengths (confirmed:
+  a labeling-convention mismatch, not a fitting error -- scoring against
+  vacuum-converted references cuts residual scatter ~3.4x). A genuine
+  re-fit using vacuum line-list labels is NOT yet safe to ship as-is: the
+  input PSF template's own initial guesses are still air-convention, so
+  swapping only the line list can start some candidates from a bad initial
+  guess and occasionally break either pipeline's numerics outright. Two-
+  part fix, neither implemented: (1) rebuild the input PSF template under
+  the vacuum convention before switching the line list, (2) add a
+  divergence guard so a runaway fit fails gracefully instead of hitting a
+  raw allocator/solver crash.
+- sigma_y's b-band residual (0.78%) runs noticeably higher than r/z
+  (0.14-0.45%) -- leading hypothesis is a weak blue-edge calibration
+  signal, not investigated further.
+- Two distinct CCD-edge PSF-*shape* effects, tested 2026-09-13 (numbers
+  below are the corrected values, after fixing an input-file mixup caught
+  and resolved the same day -- see porting-notes.md), likely two distinct
+  causes:
+  (a) True-slit-edge (fiber 0/499): real on real data (all 30 cameras,
+  Python 1.7-2.4x worse than interior in every band) but much smaller
+  against noiseless arcsim ground truth (Python ratio 0.93x/1.59x/1.27x,
+  b/r/z) -- supports a real-data/SNR cause, not a Python structural bug.
+  (b) Wavelength-domain edges (worse near the edges of each band's own
+  coverage, both ends not just red): does NOT disappear in the noiseless
+  sim -- confirmed with corrected input too, clean U-shape every band
+  (e.g. r-band: 0.081%/0.073% at the two edges vs 0.032% mid-band).
+  Survives with zero noise, so probably NOT SNR-driven. Tested the
+  leading hypothesis directly (raising the wavelength Legendre degree
+  from b/r's default of 1 to 3): only a mild effect once redone with the
+  correct input file -- absolute residual up ~15-50%, edge:interior ratio
+  actually narrows slightly (b 1.30x->1.24x, r 1.47x->1.23x) rather than
+  the ~10-30x blowup first reported (that number is retracted). Degree
+  isn't the fix, and the U-shape persists at both degrees, but this rules
+  out "under-parametrized" much more weakly than first thought.
+  **2026-09-09: tested whether this is even Python-specific -- it isn't.**
+  C++'s own arcsim fit (confirmed-correct input) shows the identical
+  edges-worse-than-middle pattern against the same truth, and is worse
+  at it than Python in b/r (edge:mid ratio b=1.95x/r=4.04x for C++ vs.
+  1.77x/2.29x for Python; z is the one band where Python's *relative*
+  jump is bigger, but its absolute edge residual still beats C++'s
+  there too). Reframes this from "possible Python bug" to "shared
+  structural property of the wavelength-Legendre approach both
+  pipelines use" -- consistent with edge-of-domain variance inflation,
+  a standard property of global polynomial regression, independent of
+  SNR or candidate-line count. Exact mechanism (basis edge-variance vs.
+  candidate-line spacing vs. something else) still unconfirmed.
+  **Sparse-candidate-line-sampling hypothesis now retired**: checked
+  spacing/regularity, not just count, in b-band's own red-edge bin --
+  it's the *densest and most evenly-spaced* bin in the whole band (mean
+  spacing 17.7A vs. 47.9-82.7A elsewhere, most regular CV), yet still
+  one of the worst-residual bins. Directly contradicts under-constrained
+  sampling as the cause. Combined with the C++-shares-it finding, the
+  only hypothesis still standing (not proven) is a structural property
+  of fitting a global Legendre polynomial basis in wavelength -- edge-
+  of-domain predictive-variance inflation, a known property of that
+  kind of regression independent of local data density. Both effects
+  small in absolute terms, neither a correctness blocker. Full data:
+  porting-notes.md, 2026-09-13 and 2026-09-09 (degree-sweep correction,
+  C++-shares-it finding, sparse-sampling retirement).
+- (Resolved 2026-09-13, same day found) What looked like a C++ run-to-run
+  reproducibility issue (~0.1-0.2% sigma_y differences between two
+  "identical" arcsim refits) was a wrong-input-file bug on this session's
+  own part -- the arcsim directory has two different preproc realizations
+  per camera and the fresh refit used the wrong one. Confirmed C++ is
+  bit-for-bit reproducible once the correct input is used. Redone
+  correctly: Python closer to truth 65% overall (b=35%, r=80%, z=80%),
+  closely matching the original claim. Resolved, no longer open.
+- Julien Guy's separable-B-spline-PSF proposal was scoped (rough effort
+  estimate only) but deliberately not pursued, per Stephen's direction to
+  prioritize production-readiness over new modeling work right now.
+
+===============================================================================
+3. RECENT MAJOR MILESTONES (dates only -- full writeups in porting-notes.md)
+===============================================================================
+- 2026-08-05: Per-fiber-independent trace fitting + ndead-gated cross-fiber
+  consensus prior + a selection-stage bug fix promoted to defaults -- the
+  single biggest correctness lever in this project's history.
+- 2026-09-01: Bundle-boundary trace divergence root-caused (Python's pixel
+  footprint was zero-margin vs. C++'s 7px) and fixed (--footprint-margin);
+  validated against genuine ground truth for the first time, zero
+  exceptions across 9 simulated + 19 real production cases.
+- 2026-09-02: Persistent-worker mode + bundle-pool reuse + workers-per-gpu
+  retuning -- Python's speed vs. C++ went from +14% slower to -18.4%
+  faster; zero correctness effect.
+- 2026-09-04: Root-caused a ~15-20% timing regression to NERSC $HOME disk
+  quota exhaustion (not JAX cache size); fixed, confirmed by a clean A/B.
+- 2026-09-05: A second, independent 10-night set reproduced every figure
+  above almost exactly, bringing the cumulative validated sample to 20
+  nights.
+- 2026-09-06: Audited Julien Guy's cosmic-ray/masked-pixel question -- no
+  C++/Python asymmetry found; corrected a real doc error (run_specex() is
+  the actual production C++ codepath, not a legacy helper).
+- 2026-09-09: Repo docs reorganized (this file and its siblings moved to
+  docs/python-port/); this file condensed from an 18-section chronological
+  rebuild to the bottom-line-only snapshot above -- that history is
+  porting-notes.md's job, not this file's.
+- 2026-09-13: True-slit-edge PSF-shape effect confirmed real in all 3
+  bands (1.7-2.4x worse than interior); Stephen's 4000-5000A bad-range
+  hypothesis not supported (degradation instead tracks the red edge of
+  each band's coverage) -- see "still open" above and porting-notes.md.
+  Also: the GPU-native Python path was confirmed to run unmodified under
+  Stephen's new shared DESI+JAX environment (`desi_environment.sh
+  26.9`, renamed from `test-26.9` once it graduated) -- see how-to-run.md
+  Section 0. The C++-wrapper path needs
+  its compiled extension rebuilt for that environment's Python 3.14; not
+  done yet. Investigated how desispec calls specex today and wrote a
+  phased GPU-integration plan (desispec-integration-plan.md). Briefly
+  renamed `run_specex` -> `run_specex_cpp` at Stephen's direction (so
+  anything still doing `from specex.specex import run_specex` would fail
+  loudly instead of silently using the C++-only path), then reverted the
+  same day to keep local C++-comparison testing (`--backend cpp`/
+  `cpp-direct`) working against the current, unpatched `../desispec`
+  checkout during this branch's ongoing test/validation phase --
+  **redone 2026-09-11, see below, now that this branch's validation
+  is finished and it's been pushed.** Added the edge/
+  wavelength findings to the "GPU Warm-Up Ledger" artifact and trimmed
+  its older narrative sections. Tested the wavelength-edge hypothesis
+  directly (raising b/r's Legendre wavelength degree from 1) -- initially
+  looked much worse, not better; **retracted and redone 2026-09-09** once
+  a same-day input-file bug (see C++-reproducibility entry, same date)
+  was found to also have affected this test -- corrected result is a
+  much milder, inconclusive effect, not the dramatic degradation first
+  reported; root cause still open (see "still open" above).
+- 2026-09-10: Full validation of the shared `26.9` environment for
+  `run_night.py --worker-mode persistent` (not just the single-bundle path
+  checked the day before) -- warm, it matches `specex_env`'s validated
+  baseline almost exactly (466.9-487.8s vs. 483-503s). Along the way, found
+  and fixed a real bug: on a genuinely COLD JAX compilation cache (first
+  run under a new jaxlib version, or a fresh `JAX_COMPILATION_CACHE_DIR`),
+  z-band's persistent-worker default of 5 workers/GPU could hit real GPU
+  `RESOURCE_EXHAUSTED` bundle failures -- JIT compilation needs more
+  transient GPU memory than warm execution, and concurrent cold-compiling
+  workers can exceed it. `testing/run_night.py` now auto-detects a cold
+  cache (a simple total-file-count heuristic on the cache directory,
+  snapshotted once per persistent worker at startup, not re-checked
+  per-camera -- an initial per-camera-recheck version had a real bug where
+  sibling workers' own progress made the check falsely report "warm" for a
+  camera whose own specific shapes were never actually compiled) and drops
+  z-band to 3 workers/GPU until warm. Validated clean: 0 bundle failures
+  across two independent fresh-cache runs at 1043.8s(buggy)/1135.4s(fixed)
+  vs. naive packing=5's 1509.2s-with-luck or outright failures otherwise --
+  the fix is also faster on average, not just safer, since it isn't
+  burning time on doomed OOM retries. Also confirmed (via the JAX source,
+  not just testing): the persistent compilation cache's own cross-process
+  file-lock only activates when `jax_compilation_cache_max_size` is set to
+  something other than its default (-1, unbounded) -- relevant if/when a
+  shared multi-user cache is stood up for production. Full data:
+  porting-notes.md, 2026-09-10 (several entries).
+- 2026-09-11: Branch pushed for review. Redid item 5's rename
+  (`run_specex` -> `run_specex_cpp`, `py/specex/specex.py` and every real
+  call site/doc reference) now that this branch's own test/validation
+  phase is finished -- deferred, not abandoned, per the 2026-09-13 entry
+  above. `../desispec`'s unpatched `from specex.specex import run_specex`
+  failed loudly (`ImportError`) instead of silently running the old
+  C++-only path, forcing the real desispec integration
+  (desispec-integration-plan.md) to make an explicit choice.
+- 2026-09-13: **Reverted the rename again**, back to `run_specex`, at
+  direct request -- to let it keep running as normal rather than staying
+  a live trip wire. Third round-trip on this rename now (2026-09-13
+  renamed/reverted; 2026-09-11 redone; 2026-09-13 reverted again); still
+  the intended mechanism for the real desispec integration whenever that
+  actually happens, just not active right now. `run_specex` is the live
+  name as of this entry.
+- 2026-09-13 (continued): **Found and fixed a real backward-compatibility
+  gap**, while drafting a PR description for Stephen (target: desispec's
+  `daily` branch) that needed to honestly answer "would merging this break
+  desispec." It would have: `specex.py`'s top-level `.io`/`.fitter` imports
+  pulled in JAX transitively (`.fitter` -> `.psf`, `.io` -> `.math`), so
+  `from specex.specex import run_specex` -- exactly what
+  `desispec.scripts.specex` does today -- silently required `jax`/`jaxlib`
+  to be installed, something `main`'s own `specex.py` has never needed.
+  Fixed by making every JAX-touching import lazy/local (`specex.py`,
+  `io.py`, `math.py` -- `psf.py`/`fitter.py` themselves untouched, no
+  behavior change to the GPU-native path). Verified for real, not just
+  reasoned about: monkeypatched `import jax`/`jax.*` to raise, confirmed
+  `run_specex` and the C++-wrapper `io.py` functions still import cleanly;
+  separately, with JAX present, full pytest suite green and a real
+  single-bundle GPU-native fit still runs end-to-end correctly. Full
+  writeup: porting-notes.md, 2026-09-13 (continued).
+- 2026-09-13 (continued): **`--worker-mode persistent` promoted to the
+  default** for `run_night.py --backend python` (was `subprocess`) --
+  it's faster than C++ where `subprocess` alone isn't, and this week gave
+  it its most rigorous testing yet (two environments, cold/warm cache,
+  a real bug found and fixed in it, see above). Caught and fixed a real
+  bug the flip would otherwise have introduced: the multi-node dispatch
+  path only forwarded `--worker-mode persistent` to spawned node-worker
+  subprocesses conditionally, so an explicit `--worker-mode subprocess`
+  would have been silently lost for any multi-node run once persistent
+  became the default -- now always forwarded explicitly. `how-to-run.md`
+  updated throughout (Quick Start, Section 2.3's mode description/table,
+  the multi-node/LPT caveat now explicitly says to pass
+  `--worker-mode subprocess` for that untested combination). Full
+  writeup: porting-notes.md, 2026-09-13 (continued, same session).
+
+===============================================================================
+For everything else -- full evidence trails, every ruled-out hypothesis, and
+exact numbers at each stage of every investigation above: porting-notes.md.
+===============================================================================

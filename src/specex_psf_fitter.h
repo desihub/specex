@@ -6,6 +6,7 @@
 #include <map>
 
 #include <specex_unbls.h>
+#include <fstream>
 
 #include "specex_psf.h"
 #include "specex_spot.h"
@@ -112,6 +113,7 @@ class PSF_Fitter {
   bool sparse_pol;
   bool direct_simultaneous_fit;
   bool write_tmp_results;
+  bool debug_spots;
   int trace_prior_deg;
   
   double chi2_precision;
@@ -165,6 +167,7 @@ class PSF_Fitter {
     sparse_pol(true),
     direct_simultaneous_fit(false),
     write_tmp_results(false),
+    debug_spots(false),
     trace_prior_deg(0),
     fatal(true),
     parallelized(true),        
@@ -197,7 +200,7 @@ class PSF_Fitter {
   bool FitEverything(std::vector<Spot_p>& spots, bool init_psf=false);
   
   void compare_spots_chi2_and_mask(std::vector<specex::Spot_p>& spots, const double& nsig=4.);
-  std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0, double chi2_nsig=4);
+  std::vector<specex::Spot_p> select_spots(std::vector<specex::Spot_p>& input_spots, double minimum_signal_to_noise, double min_wave_dist=0, double chi2_nsig=4, const std::string& output_filename="");
   
 
 };

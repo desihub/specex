@@ -61,7 +61,8 @@ namespace specex {
     bool fit_continuum;
     bool use_variance_model;
     bool fit_individual_spots_position;
-    
+    bool debug_spots;
+
     bool half_size_x_def; 
     bool half_size_y_def; 
     bool gauss_hermite_deg_def; 
@@ -120,7 +121,8 @@ namespace specex {
       fit_continuum = false;
       use_variance_model = false;
       fit_individual_spots_position = false;
-      
+      debug_spots = false;
+
       half_size_x_def = true;
       half_size_y_def = true;
       gauss_hermite_deg_def = true; 

@@ -1,0 +1,282 @@
+===============================================================================
+PYTHON vs C++ SPECEX: ALGORITHMIC DIFFERENCES -- CURRENT STATE
+===============================================================================
+Branch: python-gpu-port. Describes what is true TODAY only -- legacy
+findings, superseded numbers, and investigation trails are deliberately
+left out; this is meant to be a quick read, kept current as new campaigns
+land (last: 2026-09-09). For the full story of how each item below was
+found and tested, see porting-notes.md (git-tracked, append-only, the
+authoritative detailed record) and current-status.txt (the even-shorter
+bottom line).
+
+Every item below was found by directly reading both C++
+(src/specex_psf_fitter.cc and neighbors) and Python (py/specex/fitter.py)
+source, then testing the effect empirically, not just reasoning about it.
+
+===============================================================================
+EXECUTIVE SUMMARY
+===============================================================================
+**Correctness**, current shipped defaults, cumulative over 20 independent
+full-night/expid campaigns (30 cameras each, two non-overlapping 10-night
+sets sampled a month apart, 2026-08-11/12 and 2026-09-02/05): **mean
+xrms=0.0120px, mean yrms=0.0129px** vs. C++, per-night range xrms
+0.0112-0.0140px / yrms 0.0111-0.0167px. This reflects two real architectural
+fixes: per-fiber-independent trace fitting + a selective cross-fiber
+regularization prior + a selection-stage bug fix (2026-08-05), and the
+bundle-boundary footprint-margin fix (2026-09-01, see section 2) that cut
+whole-CCD mean xrms/yrms roughly in half again on top of that. What remains
+is a short list of individually-named, root-caused hard cases (section 1.3),
+not a vague "some bundles are just hard" spread. sigma_y (PSF-shape)
+agreement, checked separately (b4/r2/z8, boundary/interior fibers, 3
+wavelengths): mean \|py/cpp-1\|=0.458%, band-dependent (b=0.776%,
+r=0.454%, z=0.144% -- the b-band residual is real but small and not yet
+explained).
+
+**Timing**, same 20-night sample, 1 node/4 A100 GPUs (Python) vs. 1 CPU node
+(C++), both real production configurations: Python with
+`--worker-mode persistent` (the fastest validated configuration, see
+how-to-run.md section 2.3) runs **502.5s warm / 591.2s cold** mean per
+30-camera night vs. C++'s **648.3s** mean -- **Python ~18-23% faster**,
+consistent across both 10-night halves. Python's older, still-default
+`--worker-mode subprocess` path is slower than C++ (~674s on the original
+10-night set) -- the speed advantage is specifically a `persistent`-mode
+result, not free with any invocation. See section 5 for the timing-only
+breakdown and section 2 for what changed to get here.
+
+Everything still genuinely different between the two pipelines is in section
+1. Section 2 is what used to be different and is now matched/resolved --
+kept here only as a one-line index into porting-notes.md, not restated.
+Section 3 is C++ machinery confirmed dead/unused in real production on
+either side, listed once so nobody re-investigates it. Section 5 is the
+timing-only summary referenced above.
+
+===============================================================================
+1. CURRENTLY LIVE DIFFERENCES
+===============================================================================
+
+1.1 Residual trace-position disagreement (the open question)
+-------------------------------------------------------------------------------
+Even with every difference below accounted for, Python and C++ still land on
+slightly different (both individually reasonable) answers for where a
+fiber's trace sits on some bundles. Best explanation: two independently-
+implemented least-squares solvers converging to different local optima in a
+slightly degenerate parameter space, correlated with how far a bundle's
+trace has drifted from its calibration starting guess -- not a discoverable
+bug (some of what used to look like "hard to converge" turned out to be
+genuine data-quality issues on specific fibers instead, see 1.3). The one
+item here that isn't fixed, matched, or isolated to a named cause --
+everything else was tested as a candidate explanation and ruled out.
+
+1.2 Extra-spot selection: Python selects more spots than C++
+-------------------------------------------------------------------------------
+Consistently ~3% more in z-band, 15-25% more in some r-band cases.
+Root-caused to a handful of specific wavelength lines whose per-spot flux
+comes out 1-70% brighter in Python than C++ across many fibers at once --
+not random noise (full line list: porting-notes.md). Interacts with C++'s
+selection algorithm, which aggregates S/N per-wavelength-bin across ALL
+fibers in a bundle, so one marginal line's selection status can flip for
+many fibers simultaneously. The deeper per-line flux discrepancy was never
+fully chased down, but the practical effect is benign: the extra spots
+consistently help or are neutral to fit quality everywhere checked. Not
+planned to be "fixed" -- no evidence it should be.
+
+1.3 Per-fiber-independent trace fitting has no cross-fiber sharing, so a
+    fiber with poor/asymmetric local data support does worse under it than
+    under a shared basis would
+-------------------------------------------------------------------------------
+This is the flip side of section 2's biggest architectural win: fully
+independent per-fiber trace parameters (now the default) mean a fiber with
+bad local data has nothing to borrow stability from. (The generic-looking
+form of this -- bundle-boundary fibers running worse than interior ones --
+turned out to be its own separate, now-fixed footprint-margin issue; see
+section 2, not here.) What remains is a small number of individual fibers,
+out of ~15,000 fit per 30-camera night, with severe local data problems
+that don't fully recover even with the ndead-gated trace-consensus prior:
+        - z5@20220408 bundle 6, fiber 163: ndead=11829 (an order of
+          magnitude above its neighbors), xrms ~0.43-0.53px -- a genuine
+          data floor, not something reweighting fixes.
+        - z6@20250628 bundle 10, fiber 260: NOT ndead-flagged, yet still
+          ~9x worse under per-fiber trace than baseline -- root cause not
+          found, open, low priority.
+        - z7@20250822/00307725, fiber 251 (known fiber-trace-overlap
+          case): xrms=1.68px, yrms=3.35px -- reproduces essentially
+          identically in C++ and Python, a genuine geometry issue in the
+          data itself, not a pipeline bug.
+
+1.4 ndead diagnostic formula mismatch
+-------------------------------------------------------------------------------
+Python's `compute_fiber_ndead` doesn't numerically match C++'s own logged
+ndead value for the same fiber (e.g. 17501 vs C++'s 11829 on one case,
+14616 vs 2289 on another). Cause: Python's count runs on the weight array
+AFTER `apply_dead_column_mask` has already widened the zeroed region, C++'s
+own diagnostic runs on the raw input weight before any broadening. Doesn't
+change which fibers get flagged by the `--trace-prior-ndead-threshold 500`
+gate in practice (both formulas put the same fibers well above threshold).
+Open, low priority -- a numeric-only mismatch between the two
+implementations' internal diagnostics, no observed behavioral effect.
+
+1.5 Broken-fiber exclusion breadth
+-------------------------------------------------------------------------------
+C++ excludes a `--broken-fibers`-listed fiber from ~15 separate code paths
+(candidate generation, weight-image construction, trace-consistency checks,
+chi2 accumulation); Python only excludes it at candidate-generation time.
+No effect observed on any real broken-fiber case tested so far (~10+ cases
+across many campaigns), but not exhaustively proven safe on a pathological
+case not yet sampled.
+
+1.6 Dead-column pixel handling: two different mechanisms
+-------------------------------------------------------------------------------
+C++ excludes individual already-selected spots outright if their own 5x5
+pixel neighborhood is mostly dead (final-fit stage only); Python instead
+broadens a coarser weight mask along each fiber's whole trace. A faithful
+C++-matching option exists (`SPECEX_MATCH_CPP_DEAD_COLUMN`) but changes
+nothing on every case tested -- the fibers bad enough to matter are already
+excluded upstream via the broken-fiber list before this would apply.
+
+1.7 Spot-list staging for trace/sigma fit stages
+-------------------------------------------------------------------------------
+C++ fits its trace and sigma (GHSIGX/GHSIGY) stages against a stricter
+candidate list (SNR>=5, min wavelength separation 4A) than its final
+shape+flux stage (SNR>=3, no separation minimum); Python's real fit uses one
+(the loose) list throughout, including trace-fitting. Tested matching C++
+exactly: a clear, uniform REGRESSION -- Python's own strict-selected list
+differs enough in composition from C++'s that fitting trace on the smaller
+set amplifies the pre-existing selection mismatch rather than reducing it.
+Current behavior (one loose list throughout) is deliberately kept, not a gap.
+
+1.8 Regularization: Python's linear solves add a small ridge term C++'s do
+    not
+-------------------------------------------------------------------------------
+`1e-8 * I` added to the normalized Hessian before every Newton solve; C++'s
+`cholesky_solve` is unregularized. No effect on any healthy bundle tested
+(matrices aren't ill-conditioned enough on real data for this to matter) --
+and a real robustness advantage on the rare near-singular bundle where
+C++'s solver has hard-failed in the past while Python's ridge-regularized
+solve pushes through cleanly.
+
+1.9 Line search: C++ uses a bounded Brent search; Python's production
+    default uses a fixed 3-point step grid
+-------------------------------------------------------------------------------
+A faithful line-by-line C++ Brent port exists and is available
+(`--line-search cpp`) -- tested identical to 4 decimals vs the grid default
+on every case tried. Kept as an opt-in, not needed for correctness.
+
+1.10 Convergence tolerances
+-------------------------------------------------------------------------------
+Not identical (Python's `chi2_precision`=0.01 vs C++'s looser 0.1;
+Python's `'trace'` mode runs a fixed 3 iterations by default vs C++'s
+adaptive up-to-5 pass loop, except when `--trace-per-fiber-deg` is set, which
+is now itself convergence-based). Both differences point toward Python doing
+somewhat MORE refinement, not less, so they don't explain 1.1. Swept
+`chi2_precision` to C++'s value directly on two known-hard bundles: identical
+to 4 decimals. Open in principle, ruled out in practice as a driver of 1.1.
+
+1.11 Mixed precision: float32 Jacobian by default vs. C++'s always-float64
+-------------------------------------------------------------------------------
+Tested with `--double-precision` forced on the hardest known bundle:
+xrms/yrms identical to 4 decimals. Not a source of the residual gap.
+
+===============================================================================
+2. RESOLVED / NOW MATCHED (one-line index -- full story in porting-notes.md)
+===============================================================================
+- Trace model degrees of freedom: Python's default is now per-fiber-
+  independent trace fitting (`--trace-per-fiber-deg 6`) plus an ndead-gated
+  cross-fiber consensus prior (`--trace-prior-*`), matching C++'s own
+  parametrization instead of the old ~35-40x-fewer-DOF shared basis. The
+  single biggest lever found in this project; landed 2026-08-05.
+- Wavelength-domain candidate filter: Python now rejects line-list entries
+  outside a fiber's own fitted trace domain before candidate generation,
+  matching a real C++ check it was missing -- fixes a bundle-wide regression
+  from an out-of-band arc line reaching selection. Landed 2026-08-05.
+- Joint trace+shape solve degeneracy: Python's fit now alternates
+  trace -> sigma -> shape exactly like C++'s `FitEverything` (trace frozen
+  after its own stage), removing a real degeneracy the old joint solve could
+  hit that C++ structurally cannot.
+- Signal-dependent (Poisson) weight correction: Python was applying a
+  correction C++'s own code can never execute (gated behind a flag never set
+  true in real production) -- removed, a genuine bug fix.
+- Footprint envelope margin: Python's per-bundle pixel footprint was
+  zero-margin, silently discarding real boundary-fiber pixel data C++'s
+  `ComputeWeigthImage` deliberately includes (a 7px margin into the
+  neighboring bundle's territory) -- the actual cause of the bundle-
+  boundary trace weakness this file used to list under 1.3(a). Fixed
+  2026-09-01 (`--footprint-margin`, default 7, now matches C++); validated
+  against genuine ground truth on 9 simulated + 19 real production cases,
+  zero exceptions, cutting whole-CCD mean xrms/yrms roughly in half again
+  on top of the 2026-08-05 trace-fitting fix.
+- Cosmic-ray / masked-pixel exclusion: confirmed identical on both sides by
+  construction -- `read_preproc()`/`read_preproc_cpp()` both zero IVAR at
+  every nonzero MASK bit before either fitter runs, via the same shared
+  `io.py` code both backends call. Audited 2026-09-06 for Julien Guy;
+  confirmed empirically across 6 real cosmic-ray-hit cases with no excess
+  divergence and no C++/Python asymmetry.
+- Dead/near-dead fiber write-back convention: Python's FITS writer now
+  matches C++'s literal all-zero XTRACE/YTRACE row for fibers with <2
+  surviving spots.
+- `force_positive_flux` staging: C++ only clamps flux non-negative from the
+  sigma stage onward; Python's mode-conditional match is available and
+  tested identical (the clamp never actually binds during the early stages
+  on real data either way).
+
+===============================================================================
+3. CONFIRMED INERT ON BOTH SIDES / DEAD CODE (no live difference, no action)
+===============================================================================
+PSF tail fitting (`--fit-psf-tails`), the GHNSIG/"in_core" tail-only
+mechanism, `increase_weight_of_side_bands`, `--variance-model`, the
+per-pixel READNOISE extension (both sides use the preproc file's own IVAR,
+which already has read noise baked in), the GAIN header (always 1.0, real
+gains already applied upstream), C++'s `trace_prior_deg`-gated GH-degree
+reduction (wrapped in `if(false && ...)`, cannot execute) -- all confirmed
+either off/unused in real production on both sides or genuinely dead code in
+C++. Listed once so nobody re-investigates them.
+
+===============================================================================
+4. MEASUREMENT-METHODOLOGY CAVEAT: wavelength-residual-vs-line-list ("wrms")
+===============================================================================
+Old wrms numbers (~0.5-0.6 Angstrom) that show up in older reports are NOT a
+measure of either pipeline's real wavelength accuracy -- the FITS writer
+re-fits (not just re-parametrizes) a fiber's trace polynomial if its native
+wavelength domain doesn't match the CCD-wide shared domain in the file
+header, and that re-fit doesn't reproduce the original fitted trace exactly.
+This write-time artifact accounts for the large majority of that number, on
+both pipelines' own self-comparison, not just the cross-pipeline one. Use
+xrms/yrms (direct trace-vs-trace file comparison) for anything that matters
+-- it never touches this artifact.
+
+===============================================================================
+5. TIMING (current defaults, cumulative 20-night sample)
+===============================================================================
+Not an algorithmic difference (nothing here affects the fitted numbers --
+see section 2's footprint-margin/pool-reuse entries for confirmation that
+none of these levers touch correctness), but tracked here since it's the
+other half of "how do the two pipelines currently compare." One node, 4
+A100 GPUs (Python) vs. one CPU node, ~100 MPI ranks (C++); both real
+production configurations (`--worker-mode persistent` for Python, see
+how-to-run.md section 2.3).
+
+  Configuration                          10-night mean   vs. C++ (592.3s)
+  --------------------------------------  --------------  -----------------
+  C++ (production MPI, single node)       592.3s          --
+  Python, --worker-mode subprocess        673.8s          +13.8% (slower)
+  Python, --worker-mode persistent,
+    naive split                           579.5s          -2.2%
+  + bundle-pool reuse                      514.0s          -13.2%
+  + workers-per-gpu 12/8/5 (current
+    persistent-mode default)               483.3s          -18.4%
+
+A second, independent 10-night set (2026-09-05) reproduced this: Python
+`persistent` mean 502.5s warm / 591.2s cold vs. C++ mean 648.3s (~18-23%
+faster warm). Correctness held constant to 4 decimal places across every
+row of the table above -- these are pure process-scheduling changes
+(persistent workers, pool reuse, worker-count retuning), not numerics.
+`--worker-mode` still defaults to the older, slower `subprocess` mode in
+the CLI; pass `--worker-mode persistent` explicitly to get the numbers
+above. Before trusting any timing number on this project, confirm the
+NERSC `$HOME` filesystem isn't at its disk quota -- a full quota produces
+silent per-bundle failures at `rc=0` and inflated wall time, not an
+obvious error (porting-notes.md, 2026-09-04).
+
+===============================================================================
+For exact numbers at each stage of this investigation, every ruled-out
+hypothesis, and how each item above was actually found: porting-notes.md.
+===============================================================================

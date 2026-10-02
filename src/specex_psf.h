@@ -204,7 +204,7 @@ public :
     
     //! half size of the PSF in pixels in ccd
     int hSizeX, hSizeY; 
-    
+    std::string output_psf_filename;
     double gain; // for Poisson noise, with gain in e/ADU
     double readout_noise; // rms value
     double psf_error; // fraction, like 0.01, accounts for flat and psf relative error
